@@ -188,14 +188,14 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// request whose resolved targets have no rate rather than serving it and
 	// billing 0. Covers the routes boot validation cannot see (UI-write
 	// models, fallback-appended targets). Same table used to settle below.
-	if h.gov != nil {
-		if dec := governance.PricingGuard(table, pricedTargets(chain)); !dec.Allowed {
-			h.audit(p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, false, traceID)
-			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
-			tracing.SetStatus(span, false, "pricing missing")
-			writeErr(w, dec.Status, dec.Reason)
-			return
-		}
+	// NOT gated on h.gov: on_missing "block" is a pricing setting, and a
+	// deployment with governance off would otherwise serve unpriced traffic free.
+	if dec := governance.PricingGuard(table, pricedTargets(chain)); !dec.Allowed {
+		h.audit(p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, false, traceID)
+		h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
+		tracing.SetStatus(span, false, "pricing missing")
+		writeErr(w, dec.Status, dec.Reason)
+		return
 	}
 	if h.gov != nil {
 		dec := h.gov.PreCheck(p.Team, p.KeyID, keyPolicyOf(p), estimateTokens(raw))
