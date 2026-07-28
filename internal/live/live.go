@@ -12,6 +12,8 @@ package live
 import (
 	"encoding/json"
 	"fmt"
+	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -340,6 +342,9 @@ func BuildState(cfg *config.Config) (*State, map[string]string, error) {
 	}
 
 	tbl := pricingFromConfig(cfg)
+	if err := validatePricingCoverage(cfg, tbl); err != nil {
+		return nil, nil, err
+	}
 	st := NewState(provs, cfg.Models, tbl, identities)
 	// Keep the source configs for the secret-free admin view (copy so the
 	// published State is independent of the caller's cfg).
@@ -353,6 +358,94 @@ func BuildState(cfg *config.Config) (*State, map[string]string, error) {
 	}
 	st.fallbackFamily = cfg.FallbackFamilyEnabled()
 	return st, identities, nil
+}
+
+// UnpricedTargets returns every (provider, upstream-model) pair a configured
+// model routes to that has no rate in the table, sorted for stable output.
+// Exported so `inferplane pricing check` reports exactly what boot validation
+// would reject — one predicate, no drift.
+func UnpricedTargets(cfg *config.Config, tbl *pricing.Table) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, mc := range cfg.Models {
+		for _, t := range mc.Targets {
+			if tbl.HasRate(t.Provider, t.Model) {
+				continue
+			}
+			pair := t.Provider + "/" + t.Model
+			if !seen[pair] {
+				seen[pair] = true
+				out = append(out, pair)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// validatePricingCoverage is the money guard for unpriced routes (ADR-030): a
+// configured route with no rate silently billed 0 µUSD, with nothing but a
+// boolean in the audit record to show for it.
+//
+// Strictness follows the operator's own `pricing.on_missing` declaration rather
+// than overriding it:
+//
+//   - `block` — refuse to boot. The operator said unpriced traffic must never
+//     be served, so serving it (even at 0) violates that. Runtime enforcement
+//     in the governance pre-check covers the routes this can't see: models
+//     added through UI-write, and hot-reloaded generations.
+//   - `allow` (default) — log the unpriced routes loudly and continue. This is
+//     a legitimate posture: a self-hosted vLLM deployment may genuinely have no
+//     meaningful per-token price. Silence was the bug, not permissiveness.
+//
+// Either way `inferplane pricing check` reports the same list for CI, so a
+// newly-added model surfaces at deploy time instead of in next month's
+// chargeback.
+//
+// The overrides cross-check is unconditional: a key naming a provider or model
+// that does not exist is a typo, never a policy, and at runtime it is
+// indistinguishable from a missing rate — it made that provider free forever.
+func validatePricingCoverage(cfg *config.Config, tbl *pricing.Table) error {
+	for provider, models := range cfg.Pricing.Overrides {
+		if _, ok := cfg.Providers[provider]; !ok {
+			return fmt.Errorf("live: pricing.overrides names unknown provider %q (a typo here silently prices that provider's traffic at 0)", provider)
+		}
+		for model := range models {
+			if !routesTo(cfg, provider, model) {
+				return fmt.Errorf("live: pricing.overrides[%q] names model %q, which no configured model routes to (check the upstream id, including any global./us./apac. prefix)", provider, model)
+			}
+		}
+	}
+	unpriced := UnpricedTargets(cfg, tbl)
+	if len(unpriced) == 0 {
+		return nil
+	}
+	if tbl.OnMissing() == pricing.OnMissingBlock {
+		return fmt.Errorf("live: pricing.on_missing is \"block\" but %d configured route(s) have no rate: %s — declare them under pricing.overrides (input_per_mtok + output_per_mtok; cache rates derive automatically) or set on_missing to \"allow\"",
+			len(unpriced), strings.Join(unpriced, ", "))
+	}
+	log.Printf("inferplane: WARNING %d configured route(s) have no pricing rate and will be billed 0 uUSD: %s — declare them under pricing.overrides, or set pricing.on_missing to \"block\" to refuse them",
+		len(unpriced), strings.Join(unpriced, ", "))
+	return nil
+}
+
+// routesTo reports whether any configured model routes to this exact
+// (provider, upstream) pair. Matching is exact on purpose: an override keyed
+// to a region-prefixed id is a deliberate per-prefix rate and must correspond
+// to a real target, while the unprefixed base id is matched via the same
+// prefix-stripping rule the rate lookup uses.
+func routesTo(cfg *config.Config, provider, model string) bool {
+	for _, mc := range cfg.Models {
+		for _, t := range mc.Targets {
+			if t.Provider != provider {
+				continue
+			}
+			if t.Model == model || strings.HasSuffix(t.Model, "."+model) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // pricingFromConfig mirrors the gateway's pricing assembly (kept here so the
@@ -371,5 +464,5 @@ func pricingFromConfig(cfg *config.Config) *pricing.Table {
 			}
 		}
 	}
-	return pricing.FromConfig(cfg.Pricing.OnMissing, overrides)
+	return pricing.FromConfigVersioned(cfg.Pricing.OnMissing, cfg.Pricing.Version, overrides)
 }

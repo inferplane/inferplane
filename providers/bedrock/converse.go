@@ -234,7 +234,8 @@ func (p *provider) completeConverse(ctx context.Context, req *providers.ProxyReq
 		Type: "message", Role: "assistant", Model: req.Model,
 		Content:    content,
 		StopReason: &stop,
-		Usage:      &schema.Usage{InputTokens: &in, OutputTokens: &out},
+		Usage: usageWithCache(in, out,
+			cresp.CacheReadTokens, cresp.CacheWrite5m, cresp.CacheWrite1h, cresp.CacheWriteTotal),
 	}
 	rawBody, _ := json.Marshal(resp)
 	return &providers.ProxyResponse{StatusCode: 200, RawBody: rawBody, Parsed: resp}, nil
@@ -275,6 +276,7 @@ func (p *provider) streamConverse(ctx context.Context, req *providers.ProxyReque
 		var stopReason string
 		stopReasonSet := false
 		var usageIn, usageOut int64
+		var usageCacheRead, usageWrite5m, usageWrite1h, usageWriteTotal int64
 		usageSet := false
 
 		finish := func() {
@@ -297,9 +299,9 @@ func (p *provider) streamConverse(ctx context.Context, req *providers.ProxyReque
 					return
 				}
 			}
-			in, out := usageIn, usageOut
 			delta, _ := json.Marshal(map[string]any{"stop_reason": stopReason, "stop_sequence": nil})
-			if !emit(&schema.ChatChunk{Type: "message_delta", Delta: delta, Usage: &schema.Usage{InputTokens: &in, OutputTokens: &out}}) {
+			u := usageWithCache(usageIn, usageOut, usageCacheRead, usageWrite5m, usageWrite1h, usageWriteTotal)
+			if !emit(&schema.ChatChunk{Type: "message_delta", Delta: delta, Usage: u}) {
 				return
 			}
 			emit(&schema.ChatChunk{Type: "message_stop"})
@@ -365,6 +367,8 @@ func (p *provider) streamConverse(ctx context.Context, req *providers.ProxyReque
 				}
 			case eventUsage:
 				usageIn, usageOut = e.InputTokens, e.OutputTokens
+				usageCacheRead, usageWriteTotal = e.CacheReadTokens, e.CacheWriteTotal
+				usageWrite5m, usageWrite1h = e.CacheWrite5m, e.CacheWrite1h
 				usageSet = true
 				if stopReasonSet {
 					finish()
@@ -381,4 +385,34 @@ func (p *provider) streamConverse(ctx context.Context, req *providers.ProxyReque
 		// same safe default already used for the no-Metadata case.
 		finish()
 	}, nil
+}
+
+// usageWithCache builds a schema.Usage carrying Bedrock's prompt-cache counts
+// alongside input/output. Zero counts are left nil so the emitted JSON stays
+// byte-identical to the pre-cache shape for responses without caching.
+//
+// Bedrock reports a per-TTL breakdown (CacheDetails) and an untiered total; the
+// breakdown wins when present, matching how schema.Usage.CacheWriteTiers
+// resolves the same ambiguity on the Anthropic wire. Never both, or every cache
+// write would be double-counted.
+func usageWithCache(in, out, cacheRead, write5m, write1h, writeTotal int64) *schema.Usage {
+	u := &schema.Usage{InputTokens: &in, OutputTokens: &out}
+	if cacheRead != 0 {
+		u.CacheReadInputTokens = &cacheRead
+	}
+	if write5m != 0 || write1h != 0 {
+		cc := &schema.CacheCreation{}
+		if write5m != 0 {
+			cc.Ephemeral5mInputTokens = &write5m
+		}
+		if write1h != 0 {
+			cc.Ephemeral1hInputTokens = &write1h
+		}
+		u.CacheCreation = cc
+		return u
+	}
+	if writeTotal != 0 {
+		u.CacheCreationInputTokens = &writeTotal
+	}
+	return u
 }

@@ -20,7 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Model-level fallback** (ADR-029): a hardcoded client requesting a not-yet-configured model (e.g. a new Claude release) is now served a configured model instead of 404ing, via config `model_fallbacks` or — with no config at all — a default same-family heuristic (`claude-opus-5` → the highest configured `claude-opus-*` version below it). A configured model whose upstream rejects it as unknown (404, or Bedrock `ValidationException`) also crosses to its fallback model within the existing priority-fallback chain. Substitution is fail-closed on RBAC (a key allowed only the requested name is denied, never silently downgraded) and advertised via `x-inferplane-model-fallback`.
 
 ### Fixed
+- **Cost settlement was wrong in five independent ways, producing 0 µUSD on real traffic** (ADR-030). Streaming requests billed **output tokens only** — input and prompt-cache counts arrive on `message_start`, which the settlement path never read (measured: 5 µUSD where 52 was correct, a 10.4x under-bill, and Claude Code traffic is effectively all streaming). Cache writes always billed at the cheaper 5-minute tier, leaving the 1-hour tier (2x input) unreachable. A config declaring only `input_per_mtok`/`output_per_mtok` billed **all cache tokens at zero** — cache rates are now derived from the input rate (0.1x / 1.25x / 2x, verified against both Anthropic's and Bedrock's published tables). Bedrock cross-region prefixes (`global.`/`us.`/`apac.`) missed the rate table entirely, and Bedrock Converse dropped cache tokens while InvokeModel kept them. The OpenAI-compatible ingress billed cached prompt tokens at the full input rate (over-billing). A stream that broke mid-flight billed nothing for tokens already delivered.
+- `pricing.on_missing: "block"` was dead config — it behaved identically to `allow`, so unpriced traffic an operator believed was refused was served free. It is now enforced at boot and at runtime, and an unrecognized value is a load error instead of silently meaning `allow`.
 - A non-admin OIDC identity issuing a key via `POST /admin/keys` could set `owner` to any value, letting a teammate attribute a key to someone else; the server now always overrides `owner` to the caller's own verified subject.
+
+### Changed
+- **BREAKING (only when `pricing.on_missing` is `"block"`):** the gateway now refuses to boot if any configured route has no pricing rate, naming the routes. With the default `allow` it logs them loudly and continues. Migration: declare the missing rates under `pricing.overrides` (two numbers per model — cache rates derive), or set `on_missing` to `"allow"`.
+- `pricing.version` labels the rate table and lands in every audit record's `cost.pricing_version`, which was previously the hardcoded string `"bundled"` even for fully-overridden tables — a disputed invoice can now be pinned to the rates that produced it.
 
 ## [0.2.0] - 2026-06-14
 
@@ -76,7 +82,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **모델 단위 폴백** (ADR-029): 아직 설정되지 않은 모델(예: 새로 나온 Claude 버전)을 하드코딩된 클라이언트가 요청해도 404 대신 설정된 다른 모델로 서빙합니다 — config `model_fallbacks`로 명시하거나, 아무 설정 없이도 기본 동일 패밀리 휴리스틱(`claude-opus-5` → 그 아래로 설정된 가장 높은 `claude-opus-*` 버전)이 적용됩니다. 설정된 모델이라도 업스트림이 미등록으로 거부(404, 또는 Bedrock `ValidationException`)하면 기존 우선순위 폴백 체인 내에서 폴백 모델로 전환됩니다. 치환은 RBAC에 대해 fail-closed(요청한 이름만 허용된 키는 거부되며 절대 조용히 다운그레이드되지 않음)이며 `x-inferplane-model-fallback`으로 알립니다.
 
 ### 수정됨
+- **비용 정산이 서로 독립적인 5가지 이유로 틀려 실트래픽에서 0 µUSD가 나오던 문제** (ADR-030). 스트리밍 요청이 **output 토큰만** 과금 — input·프롬프트 캐시 카운트는 `message_start`에 실리는데 정산부가 한 번도 읽지 않았습니다(실측: 52가 정답인데 5 µUSD, 10.4배 저과금. Claude Code 트래픽은 거의 전부 스트리밍). 캐시 쓰기가 항상 싼 5분 티어로 과금되어 1시간 티어(input의 2배)가 도달 불가능. `input_per_mtok`/`output_per_mtok`만 선언한 config는 **모든 캐시 토큰이 0원** — 이제 캐시 요율을 input에서 파생합니다(0.1×/1.25×/2×, Anthropic·Bedrock 공개 표 양쪽에서 검증). Bedrock 리전 프리픽스(`global.`/`us.`/`apac.`)가 요율표를 완전히 빗나갔고, Bedrock Converse는 캐시 토큰을 누락(InvokeModel은 보존). OpenAI 호환 인그레스는 캐시된 프롬프트 토큰을 풀 요율로 과금(과과금). 중간에 끊긴 스트림은 이미 전달된 토큰을 과금하지 않았습니다.
+- `pricing.on_missing: "block"`이 죽은 설정이던 문제 — `allow`와 동일하게 동작해서, 오퍼레이터가 거부된다고 믿은 미과금 트래픽이 무료로 서빙됐습니다. 이제 부팅 시점과 런타임 모두에서 집행되며, 인식할 수 없는 값은 조용히 `allow`가 되는 대신 로드 에러입니다.
 - `POST /admin/keys`로 키를 발급하는 비관리자 OIDC 신원이 `owner`를 임의 값으로 지정할 수 있어 팀원이 키를 남의 이름으로 귀속시킬 수 있던 문제 — 서버가 항상 `owner`를 호출자 본인의 검증된 subject로 덮어씀.
+
+### 변경됨
+- **브레이킹 (`pricing.on_missing`이 `"block"`인 경우에만):** 요율이 없는 라우트가 하나라도 있으면 게이트웨이가 부팅을 거부하고 해당 라우트를 나열합니다. 기본값 `allow`에서는 크게 로그만 남기고 계속합니다. 마이그레이션: 누락된 요율을 `pricing.overrides`에 선언(모델당 숫자 2개 — 캐시는 파생)하거나 `on_missing`을 `"allow"`로 설정하세요.
+- `pricing.version`이 요율표에 이름을 붙이고 모든 감사 레코드의 `cost.pricing_version`에 실립니다. 이전에는 전부 override된 표에서도 `"bundled"` 하드코딩이었습니다 — 이제 분쟁이 생긴 청구를 그 금액을 만든 요율에 고정할 수 있습니다.
 
 ## [0.2.0] - 2026-06-14
 

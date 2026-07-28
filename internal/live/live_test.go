@@ -281,3 +281,100 @@ func TestFallbackForFamilyIgnoresNonVersionedNames(t *testing.T) {
 		t.Fatalf("FallbackFor = %q, want \"\" (non-versioned name is never a family candidate)", got)
 	}
 }
+
+// ADR-030 money guard: strictness follows the operator's pricing.on_missing.
+// With "block" an unpriced route must refuse to boot; with the default "allow"
+// it must warn and continue (a self-hosted model may genuinely have no price).
+func TestBuildState_unpricedRouteBlocksOnlyWhenOnMissingBlock(t *testing.T) {
+	base := func(onMissing string) *config.Config {
+		return &config.Config{
+			Providers: map[string]config.ProviderConfig{
+				"up": {Type: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "sk-x"},
+			},
+			Models: map[string]config.ModelConfig{
+				"m": {Targets: []config.Target{{Provider: "up", Model: "m"}}},
+			},
+			Pricing: config.PricingConfig{OnMissing: onMissing},
+		}
+	}
+
+	if _, _, err := BuildState(base("block")); err == nil {
+		t.Error(`on_missing "block" with an unpriced route must refuse to boot`)
+	} else if !strings.Contains(err.Error(), "up/m") {
+		t.Errorf("error must name the unpriced route, got: %v", err)
+	}
+
+	if _, _, err := BuildState(base("")); err != nil {
+		t.Errorf(`default on_missing "allow" must boot (warn only), got: %v`, err)
+	}
+}
+
+// A priced route boots under either posture.
+func TestBuildState_pricedRouteBootsUnderBlock(t *testing.T) {
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{"up": {Type: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "sk-x"}},
+		Models: map[string]config.ModelConfig{
+			"m": {Targets: []config.Target{{Provider: "up", Model: "m"}}},
+		},
+		Pricing: config.PricingConfig{
+			OnMissing: "block",
+			Overrides: map[string]map[string]config.RateConfig{
+				"up": {"m": {InputPerMTok: 1, OutputPerMTok: 2}},
+			},
+		},
+	}
+	if _, _, err := BuildState(cfg); err != nil {
+		t.Fatalf("priced route must boot under block: %v", err)
+	}
+}
+
+// A pricing override naming a provider or model that does not exist is a typo,
+// never a policy — at runtime it is indistinguishable from a missing rate and
+// made that provider free forever. Rejected regardless of on_missing.
+func TestBuildState_rejectsPricingOverrideTypos(t *testing.T) {
+	cases := map[string]config.PricingConfig{
+		"unknown provider": {Overrides: map[string]map[string]config.RateConfig{
+			"typo-provider": {"m": {InputPerMTok: 1}},
+		}},
+		"model no route uses": {Overrides: map[string]map[string]config.RateConfig{
+			"up": {"not-routed": {InputPerMTok: 1}},
+		}},
+	}
+	for name, pc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := &config.Config{
+				Providers: map[string]config.ProviderConfig{"up": {Type: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "sk-x"}},
+				Models: map[string]config.ModelConfig{
+					"m": {Targets: []config.Target{{Provider: "up", Model: "m"}}},
+				},
+				Pricing: pc,
+			}
+			if _, _, err := BuildState(cfg); err == nil {
+				t.Error("expected a load error for a pricing.overrides typo")
+			}
+		})
+	}
+}
+
+// A rate declared on the unprefixed upstream id must satisfy a route that uses
+// a Bedrock cross-region prefix — the deployed-demo shape (ADR-030).
+func TestUnpricedTargets_regionPrefixedRouteSatisfiedByBaseRate(t *testing.T) {
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{"bed": {Type: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "sk-x"}},
+		Models: map[string]config.ModelConfig{
+			"claude-opus-5": {Targets: []config.Target{{Provider: "bed", Model: "global.anthropic.claude-opus-5"}}},
+		},
+		Pricing: config.PricingConfig{
+			Overrides: map[string]map[string]config.RateConfig{
+				"bed": {"anthropic.claude-opus-5": {InputPerMTok: 5, OutputPerMTok: 25}},
+			},
+		},
+	}
+	if _, _, err := BuildState(cfg); err != nil {
+		t.Fatalf("base rate must cover the global.-prefixed route: %v", err)
+	}
+	tbl := pricingFromConfig(cfg)
+	if got := UnpricedTargets(cfg, tbl); len(got) != 0 {
+		t.Errorf("UnpricedTargets = %v, want empty", got)
+	}
+}

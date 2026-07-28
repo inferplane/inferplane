@@ -293,10 +293,26 @@ type RateConfig struct {
 }
 
 // PricingConfig configures cost computation: on_missing policy (allow|block)
-// and per-(provider,model) rate overrides.
+// and per-(provider,model) rate overrides. Version labels the rate table so a
+// chargeback dispute can be pinned to the rates that priced it — it lands in
+// every audit record's cost.pricing_version (ADR-030; the field used to be the
+// hardcoded string "bundled" even for fully-overridden tables).
 type PricingConfig struct {
 	OnMissing string                           `json:"on_missing"` // allow|block
+	Version   string                           `json:"version"`    // free-form label, e.g. "2026-07-bedrock"; default "unversioned"
 	Overrides map[string]map[string]RateConfig `json:"overrides"`  // provider → model → rate
+}
+
+// validatePricing rejects an unrecognized on_missing value. Before this, a typo
+// like "blcok" — or "BLOCK" — silently fell back to allow, so an operator who
+// believed unpriced traffic was refused was in fact serving it free (ADR-030).
+func validatePricing(p PricingConfig) error {
+	switch p.OnMissing {
+	case "", "allow", "block":
+		return nil
+	default:
+		return fmt.Errorf("config: pricing.on_missing must be \"allow\" or \"block\", got %q", p.OnMissing)
+	}
 }
 
 // PluginConfig enables a request-transform filter plugin (the spec's filter
@@ -498,6 +514,9 @@ func LoadRaw(path string) (*Config, error) {
 		cfg.Server.AdminAuth.Tokens = append(cfg.Server.AdminAuth.Tokens, tok)
 	}
 	if err := validateOIDC(&cfg.Server.AdminAuth); err != nil {
+		return nil, err
+	}
+	if err := validatePricing(cfg.Pricing); err != nil {
 		return nil, err
 	}
 	if err := validateOTel(cfg.OTel); err != nil {

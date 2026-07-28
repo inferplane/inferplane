@@ -231,6 +231,19 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	table := st.Pricing()
 	// Governance pre-check (rate/quota/budget) BEFORE the upstream call. A block
 	// is recorded as a started record carrying the deny status.
+	// Pricing guard (ADR-030): with pricing.on_missing "block", refuse a
+	// request whose resolved targets have no rate rather than serving it and
+	// billing 0. Covers the routes boot validation cannot see (UI-write
+	// models, fallback-appended targets). Same table used to settle below.
+	if h.gov != nil {
+		if dec := governance.PricingGuard(table, pricedTargets(chain)); !dec.Allowed {
+			h.audit(p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, false, traceID)
+			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
+			tracing.SetStatus(span, false, "pricing missing")
+			writeErr(w, dec.Status, govErrType(dec.Status), dec.Reason)
+			return
+		}
+	}
 	if h.gov != nil {
 		dec := h.gov.PreCheck(p.Team, p.KeyID, keyPolicyOf(p), estimateTokens(raw))
 		if !dec.Allowed {
@@ -461,7 +474,12 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 			log.Printf("anthropicapi: stream interrupted (model=%s upstream=%s provider=%s): %v", model, upstream, providerName, err)
 			writeStreamErrorEvent(w)
 			flusher.Flush()
-			h.auditCompletedPartial(p, model, upstream, usage, tracing.TraceID(req.Context()))
+			// Tokens already delivered to the client are real infrastructure
+			// cost — bill them (ADR-030). Before this, a stream that broke
+			// mid-flight skipped settle() entirely and everything already
+			// streamed was free, with no pricing_missing flag to show it.
+			partialCost := h.settle(p, providerName, model, upstream, lastUsage, table)
+			h.auditCompletedPartial(p, model, upstream, usage, partialCost, tracing.TraceID(req.Context()))
 			recordSpanResponse(req, prov.Name(), upstream, usage, true) // committed (partial)
 			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 200, time.Since(start).Seconds(), ttft)
 			return false
@@ -632,7 +650,7 @@ func (h *MessagesHandler) auditCompleted(id string, p keystore.Principal, model,
 
 // auditCompletedPartial records a stream that broke mid-flight: status 200 was
 // already sent to the client, but the response is partial.
-func (h *MessagesHandler) auditCompletedPartial(p keystore.Principal, model, upstream string, usage *audit.UsageRef, traceID string) {
+func (h *MessagesHandler) auditCompletedPartial(p keystore.Principal, model, upstream string, usage *audit.UsageRef, cost *audit.CostRef, traceID string) {
 	if h.aud == nil {
 		return
 	}
@@ -645,6 +663,7 @@ func (h *MessagesHandler) auditCompletedPartial(p keystore.Principal, model, ups
 		Request:       audit.RequestRef{Ingress: "anthropic", ModelRequested: model, ModelResolved: upstream},
 		Outcome:       &audit.OutcomeRef{Status: 200, Partial: true},
 		Usage:         usage,
+		Cost:          cost,
 	}
 	if traceID != "" {
 		rec.TraceID = &traceID
@@ -703,4 +722,15 @@ func writeErr(w http.ResponseWriter, status int, errType, msg string) {
 // generic string; the real error goes to the server log only (see caller).
 func writeStreamErrorEvent(w http.ResponseWriter) {
 	io.WriteString(w, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"upstream stream interrupted\"}}\n\n")
+}
+
+// pricedTargets projects the resolved chain onto the (provider, upstream) pairs
+// the request could be billed against — the same key pricing.CostUSDMicros
+// uses — so the pricing guard checks exactly what settlement will look up.
+func pricedTargets(chain []router.ChainTarget) []governance.PricedTarget {
+	out := make([]governance.PricedTarget, 0, len(chain))
+	for _, ct := range chain {
+		out = append(out, governance.PricedTarget{Provider: ct.ProviderName, Upstream: ct.Upstream})
+	}
+	return out
 }

@@ -93,6 +93,18 @@ type ConverseResponse struct {
 	StopReason   string
 	InputTokens  int64
 	OutputTokens int64
+	// Prompt-cache counts. Bedrock reports these SEPARATELY from InputTokens,
+	// so dropping them billed every cache read and write at zero on the
+	// Converse path while the InvokeModel passthrough (which forwards
+	// Anthropic's own body) billed them correctly — the same model costing
+	// different amounts depending on the API mode (ADR-030). CacheWrite5m /
+	// CacheWrite1h come from TokenUsage.CacheDetails, which Bedrock already
+	// splits by TTL; CacheWriteTotal is the untiered fallback for responses
+	// that omit the breakdown.
+	CacheReadTokens int64
+	CacheWrite5m    int64
+	CacheWrite1h    int64
+	CacheWriteTotal int64
 }
 
 // Discriminators for ConverseStreamEvent.Kind.
@@ -116,6 +128,11 @@ type ConverseStreamEvent struct {
 	StopReason   string
 	InputTokens  int64
 	OutputTokens int64
+	// Prompt-cache counts on an eventUsage event; see ConverseResponse.
+	CacheReadTokens int64
+	CacheWrite5m    int64
+	CacheWrite1h    int64
+	CacheWriteTotal int64
 }
 
 // awsClient is the only type in this package that touches aws-sdk-go-v2. Every
@@ -210,6 +227,9 @@ func (c *awsClient) Converse(ctx context.Context, modelID string, req ConverseRe
 	if out.Usage != nil {
 		resp.InputTokens = int64(aws.ToInt32(out.Usage.InputTokens))
 		resp.OutputTokens = int64(aws.ToInt32(out.Usage.OutputTokens))
+		resp.CacheReadTokens = int64(aws.ToInt32(out.Usage.CacheReadInputTokens))
+		resp.CacheWriteTotal = int64(aws.ToInt32(out.Usage.CacheWriteInputTokens))
+		resp.CacheWrite5m, resp.CacheWrite1h = cacheWriteTiers(out.Usage.CacheDetails)
 	}
 	return resp, nil
 }
@@ -260,10 +280,15 @@ func (c *awsClient) ConverseStream(ctx context.Context, modelID string, req Conv
 				}
 			case *brtypes.ConverseStreamOutputMemberMetadata:
 				if u := e.Value.Usage; u != nil {
+					w5, w1h := cacheWriteTiers(u.CacheDetails)
 					ev := ConverseStreamEvent{
-						Kind:         eventUsage,
-						InputTokens:  int64(aws.ToInt32(u.InputTokens)),
-						OutputTokens: int64(aws.ToInt32(u.OutputTokens)),
+						Kind:            eventUsage,
+						InputTokens:     int64(aws.ToInt32(u.InputTokens)),
+						OutputTokens:    int64(aws.ToInt32(u.OutputTokens)),
+						CacheReadTokens: int64(aws.ToInt32(u.CacheReadInputTokens)),
+						CacheWriteTotal: int64(aws.ToInt32(u.CacheWriteInputTokens)),
+						CacheWrite5m:    w5,
+						CacheWrite1h:    w1h,
 					}
 					if !yield(ev, nil) {
 						return
@@ -550,3 +575,20 @@ var (
 	_ invoker   = (*awsClient)(nil)
 	_ converser = (*awsClient)(nil)
 )
+
+// cacheWriteTiers splits Bedrock's per-TTL cache-write breakdown into the two
+// tiers the pricing table bills separately (1h costs 2x the input rate against
+// 5m's 1.25x). Bedrock hands us the split directly — more than the Anthropic
+// wire does — so there is no reason to collapse it. An unrecognized TTL is
+// attributed to the cheaper 5m tier so a new TTL can never over-bill.
+func cacheWriteTiers(details []brtypes.CacheDetail) (write5m, write1h int64) {
+	for _, d := range details {
+		n := int64(aws.ToInt32(d.InputTokens))
+		if d.Ttl == brtypes.CacheTTLOneHour {
+			write1h += n
+			continue
+		}
+		write5m += n
+	}
+	return write5m, write1h
+}

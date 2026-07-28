@@ -398,3 +398,69 @@ func TestGovernorUsageOf(t *testing.T) {
 		t.Fatalf("unlimited dimensions must be nil, got %+v", u2)
 	}
 }
+
+// ADR-030: with pricing.on_missing "block", a request whose resolved target has
+// no rate must be refused rather than served and billed 0. This is the runtime
+// half of the money guard — it covers the routes boot validation cannot see
+// (UI-write models, fallback-appended targets).
+func TestPricingGuard(t *testing.T) {
+	priced := map[pricing.Key]pricing.Rate{
+		{Provider: "p", Model: "m"}: {InputPerMTok: 1_000_000},
+	}
+	block := pricing.New(pricing.OnMissingBlock, priced)
+	allow := pricing.New(pricing.OnMissingAllow, priced)
+
+	t.Run("block denies an unpriced target", func(t *testing.T) {
+		dec := PricingGuard(block, []PricedTarget{{Provider: "p", Upstream: "unpriced"}})
+		if dec.Allowed {
+			t.Fatal("unpriced target must be denied under block")
+		}
+		if dec.Status != 402 {
+			t.Errorf("status = %d, want 402", dec.Status)
+		}
+		if dec.Code != audit.DenyPricingMissing {
+			t.Errorf("code = %q, want %q", dec.Code, audit.DenyPricingMissing)
+		}
+	})
+
+	t.Run("block allows a priced target", func(t *testing.T) {
+		if dec := PricingGuard(block, []PricedTarget{{Provider: "p", Upstream: "m"}}); !dec.Allowed {
+			t.Fatalf("priced target must be allowed: %+v", dec)
+		}
+	})
+
+	t.Run("any unpriced target in the chain denies", func(t *testing.T) {
+		// A fallback-appended target must not slip through just because the
+		// primary is priced — it is a target the request may actually be billed
+		// against.
+		dec := PricingGuard(block, []PricedTarget{
+			{Provider: "p", Upstream: "m"},
+			{Provider: "p", Upstream: "unpriced-fallback"},
+		})
+		if dec.Allowed {
+			t.Fatal("an unpriced fallback target must deny")
+		}
+	})
+
+	t.Run("allow never denies", func(t *testing.T) {
+		if dec := PricingGuard(allow, []PricedTarget{{Provider: "p", Upstream: "unpriced"}}); !dec.Allowed {
+			t.Fatal(`on_missing "allow" must not deny — the operator opted into 0-cost reporting`)
+		}
+	})
+
+	t.Run("nil table allows", func(t *testing.T) {
+		if dec := PricingGuard(nil, []PricedTarget{{Provider: "p", Upstream: "x"}}); !dec.Allowed {
+			t.Fatal("unconfigured pricing must not refuse every request")
+		}
+	})
+
+	t.Run("region-prefixed target satisfied by base rate", func(t *testing.T) {
+		bed := pricing.New(pricing.OnMissingBlock, map[pricing.Key]pricing.Rate{
+			{Provider: "bed", Model: "anthropic.claude-opus-5"}: {InputPerMTok: 5_000_000},
+		})
+		dec := PricingGuard(bed, []PricedTarget{{Provider: "bed", Upstream: "global.anthropic.claude-opus-5"}})
+		if !dec.Allowed {
+			t.Fatalf("base rate must cover the global.-prefixed target: %+v", dec)
+		}
+	})
+}

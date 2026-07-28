@@ -5,7 +5,7 @@ Public, importable packages with no dependency on `internal/`. Safe for external
 consumers and providers to import.
 
 ## Key Packages
-- `schema/` — the canonical message schema (Anthropic-superset). `blocks.go` (ContentBlock with `*string` streaming fields + `CacheControl`), `message.go`, `request.go`, `response.go`, `chunk.go`, `extra.go` (unknown-field preservation, case-collision rejection, semantic equality), `model_info.go`, `sse.go` (`WriteAnthropicSSE`), `roundtrip_test.go` (golden fixtures).
+- `schema/` — the canonical message schema (Anthropic-superset). `usage.go` (ADR-030) — `MergeUsage` FOLDS a usage frame into a running one (latest non-nil per field; Anthropic refines counts across frames rather than adding, so summing would double-bill) and `Usage.CacheWriteTiers` resolves cache-creation tokens into the 5m/1h tiers pricing bills separately (the TTL split wins over the flat total, NEVER summed). Both exist because the streaming settlement path used to overwrite instead of fold — dropping every input and cache count — and the TTL mapping was open-coded at six call sites that all dropped the 1h tier. `blocks.go` (ContentBlock with `*string` streaming fields + `CacheControl`), `message.go`, `request.go`, `response.go`, `chunk.go`, `extra.go` (unknown-field preservation, case-collision rejection, semantic equality), `model_info.go`, `sse.go` (`WriteAnthropicSSE`), `roundtrip_test.go` (golden fixtures).
 - `ulid/` — monotonic ULID (Crockford base32, crypto/rand, big-endian carry) for audit record IDs.
 
 ## Rules

@@ -46,10 +46,20 @@ type Table struct {
 }
 
 func New(onMissing OnMissing, rates map[Key]Rate) *Table {
+	return NewVersioned(onMissing, rates, "bundled")
+}
+
+// NewVersioned is New with an explicit rate-table label, surfaced in every
+// audit record's cost.pricing_version. New() keeps the historical "bundled"
+// default so tests and the zero-config path are unchanged.
+func NewVersioned(onMissing OnMissing, rates map[Key]Rate, version string) *Table {
 	if rates == nil {
 		rates = map[Key]Rate{}
 	}
-	return &Table{onMissing: onMissing, rates: rates, Version: "bundled"}
+	if version == "" {
+		version = "unversioned"
+	}
+	return &Table{onMissing: onMissing, rates: rates, Version: version}
 }
 
 func (t *Table) OnMissing() OnMissing { return t.onMissing }

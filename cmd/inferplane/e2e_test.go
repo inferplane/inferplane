@@ -160,6 +160,16 @@ func withAnthropicProvider(upstreamURL string) func(cfg map[string]any, dir stri
 				"targets": []any{map[string]any{"provider": "up", "model": "claude-test"}},
 			},
 		}
+		// Every configured route needs a rate or the gateway refuses to boot
+		// (ADR-030 fail-closed money guard). Tests that assert specific costs
+		// override this block with their own figures.
+		cfg["pricing"] = map[string]any{
+			"overrides": map[string]any{
+				"up": map[string]any{
+					"claude-test": map[string]any{"input_per_mtok": 1.0, "output_per_mtok": 1.0},
+				},
+			},
+		}
 	}
 }
 

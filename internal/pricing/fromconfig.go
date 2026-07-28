@@ -36,6 +36,11 @@ const (
 // the input rate (see above). onMissing "block" selects OnMissingBlock;
 // anything else selects OnMissingAllow.
 func FromConfig(onMissing string, overrides map[string]map[string]ConfigRate) *Table {
+	return FromConfigVersioned(onMissing, "", overrides)
+}
+
+// FromConfigVersioned is FromConfig with an explicit rate-table label.
+func FromConfigVersioned(onMissing, version string, overrides map[string]map[string]ConfigRate) *Table {
 	rates := Bundled()
 	for provider, models := range overrides {
 		for model, cr := range models {
@@ -52,7 +57,7 @@ func FromConfig(onMissing string, overrides map[string]map[string]ConfigRate) *T
 	if onMissing == "block" {
 		om = OnMissingBlock
 	}
-	return New(om, rates)
+	return NewVersioned(om, rates, version)
 }
 
 func usdToMicros(usd float64) int64 {
