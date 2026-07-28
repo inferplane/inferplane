@@ -43,6 +43,7 @@ prompt-cache hits are never corrupted.
 
 ### Routing Layer (`internal/router`)
 - Resolves model → provider target, walks the priority fallback chain, and guards each provider with a circuit breaker (consecutive-failure → open → backoff → half-open). Failover is **pre-TTFT only**; a mid-stream failure is never retried.
+- **Model-level fallback (§4.5 extended, ADR-029/D5)** — an unrouted requested model (e.g. a hardcoded client on `claude-opus-5` before the operator adds it) substitutes for a configured `model_fallbacks` entry, or by default the highest configured version below it in the same name family, BEFORE the allow-list check (`Router.ResolveModel`). A *configured* model whose upstream rejects it as unknown (404, or Bedrock 400 `ValidationException`) also crosses to its fallback model within the existing chain (`ResolveChain` appends the fallback model's own targets); because that append happens after the ingress allow-list check already ran, every ingress handler re-checks those targets via `FilterModelAllowed` before ever dispatching to them. Either path is fail-closed on RBAC and sets `x-inferplane-model-fallback`.
 
 ### Persistence Layer (`internal/keystore`, `internal/audit`)
 - **Key store** -- SQLite (`modernc.org/sqlite`, cgo-free), Postgres-portable schema; keys SHA-256 hashed at rest behind a `Store` interface.

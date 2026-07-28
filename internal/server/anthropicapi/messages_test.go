@@ -311,6 +311,45 @@ func TestMessagesStreamingErrorTeesHeaders(t *testing.T) {
 	}
 }
 
+// midStreamErrProvider yields one good SSE event, then a mid-stream error —
+// the 200 is already committed by the time the error surfaces, so it must
+// appear as an SSE `error` event, not a silently truncated stream (H4 gate
+// finding, mirrors bedrockapi's midStreamErrProvider).
+type midStreamErrProvider struct{}
+
+func (midStreamErrProvider) Name() string               { return "midstream" }
+func (midStreamErrProvider) Models() []schema.ModelInfo { return nil }
+func (midStreamErrProvider) Complete(context.Context, *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+	return nil, errors.New("unused")
+}
+func (midStreamErrProvider) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
+	return func(yield func(*providers.StreamEvent, error) bool) {
+		if !yield(&providers.StreamEvent{Raw: []byte("event: message_start\ndata: {}\n\n")}, nil) {
+			return
+		}
+		yield(nil, errors.New("upstream broke"))
+	}, nil
+}
+
+func TestMessagesStreamingMidStreamErrorEmitsErrorEvent(t *testing.T) {
+	provs := map[string]providers.Provider{"p": midStreamErrProvider{}}
+	models := map[string]config.ModelConfig{"m": {Targets: []config.Target{{Provider: "p", Model: "m"}}}}
+	h := NewMessagesHandler(router.New(holderFor(provs, models)))
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"m","stream":true,"messages":[]}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, allowAll(req))
+	if rec.Code != 200 {
+		t.Fatalf("status already committed, expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: message_start") {
+		t.Fatalf("first event not teed before the break: %s", body)
+	}
+	if !strings.Contains(body, "event: error") || !strings.Contains(body, "upstream stream interrupted") {
+		t.Fatalf("mid-stream error not surfaced as an SSE error event: %s", body)
+	}
+}
+
 // failProvider always errors on Complete/Stream (transport-level), to drive the
 // pre-TTFT fallback to the next target in the chain.
 type failProvider struct{}
@@ -437,6 +476,136 @@ func govPricing() *pricing.Table {
 	return pricing.New(pricing.OnMissingAllow, map[pricing.Key]pricing.Rate{
 		{Provider: "p", Model: "claude-sonnet-4-6"}: {InputPerMTok: 1_000_000, OutputPerMTok: 1_000_000},
 	})
+}
+
+// D5: an unrouted "claude-opus-5" with "claude-opus-4-8" configured as its
+// model_fallbacks target substitutes BEFORE the allow-list check, serves
+// successfully, advertises the substitution, and audits the model actually
+// served — with no config edit and no client-visible 404.
+func TestMessagesModelFallbackUnroutedModel(t *testing.T) {
+	provs := map[string]providers.Provider{"a": mockprovider.New("claude-opus-4-8")}
+	models := map[string]config.ModelConfig{
+		"claude-opus-4-8": {Targets: []config.Target{{Provider: "a", Model: "claude-opus-4-8"}}},
+	}
+	var buf bytes.Buffer
+	w, _ := audit.NewWriter("i", filepath.Join(t.TempDir(), "a.wal"), []audit.Sink{audit.NewWriterSink("b", &buf, true)})
+	h := NewMessagesHandlerWithAudit(router.New(holderForWithFallbacks(provs, models, map[string]string{"claude-opus-5": "claude-opus-4-8"})), w)
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-opus-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, allowAll(req))
+	w.Close()
+	if rec.Code != 200 {
+		t.Fatalf("substituted model should serve 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Inferplane-Model-Fallback"); got != "claude-opus-4-8" {
+		t.Fatalf("x-inferplane-model-fallback = %q, want %q", got, "claude-opus-4-8")
+	}
+	if !strings.Contains(buf.String(), `"model_requested":"claude-opus-4-8"`) {
+		t.Fatalf("audit must attribute the served model, not the requested one: %s", buf.String())
+	}
+}
+
+// D5: a key allowed only the ORIGINALLY REQUESTED (unconfigured) model name
+// must NOT be silently downgraded to the fallback model — fail closed, same
+// as any other allow-list mismatch.
+func TestMessagesModelFallbackFailsClosedForRestrictedKey(t *testing.T) {
+	provs := map[string]providers.Provider{"a": mockprovider.New("claude-opus-4-8")}
+	models := map[string]config.ModelConfig{
+		"claude-opus-4-8": {Targets: []config.Target{{Provider: "a", Model: "claude-opus-4-8"}}},
+	}
+	h := NewMessagesHandler(router.New(holderForWithFallbacks(provs, models, map[string]string{"claude-opus-5": "claude-opus-4-8"})))
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-opus-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	ctx := principal.With(req.Context(), keystore.Principal{KeyID: "ik", Team: "t", AllowedModels: []string{"claude-opus-5"}})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req.WithContext(ctx))
+	if rec.Code != 403 {
+		t.Fatalf("a key allowed only the unconfigured name must be denied, not silently downgraded: got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// D5: a configured model whose upstream rejects it as unknown (404) crosses
+// to the model_fallbacks target — the RBAC re-check (FilterModelAllowed)
+// must let it through for an unrestricted key.
+func TestMessagesModelFallbackCrossesOnUpstream404(t *testing.T) {
+	provs := map[string]providers.Provider{
+		"bad":  statusProvider{code: 404, body: []byte(`{"type":"error","error":{"type":"not_found_error"}}`)},
+		"good": mockprovider.New("claude-opus-4-8"),
+	}
+	models := map[string]config.ModelConfig{
+		"claude-opus-5":   {Targets: []config.Target{{Provider: "bad", Model: "claude-opus-5"}}},
+		"claude-opus-4-8": {Targets: []config.Target{{Provider: "good", Model: "claude-opus-4-8"}}},
+	}
+	h := NewMessagesHandler(router.New(holderForWithFallbacks(provs, models, map[string]string{"claude-opus-5": "claude-opus-4-8"})))
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-opus-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, allowAll(req))
+	if rec.Code != 200 {
+		t.Fatalf("cross-model fallback on upstream 404 should yield 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"msg_mock"`) {
+		t.Fatalf("body missing fallback model's response: %s", rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Inferplane-Model-Fallback"); got != "claude-opus-4-8" {
+		t.Fatalf("x-inferplane-model-fallback = %q, want %q", got, "claude-opus-4-8")
+	}
+}
+
+// D5: an upstream 400 that is NOT a Bedrock ValidationException must stay a
+// client error, teed verbatim — it must never be replayed across a
+// model-level fallback boundary (narrow-on-purpose isModelNotFound).
+func TestMessagesModelFallbackDoesNotCrossOnPlain400(t *testing.T) {
+	provs := map[string]providers.Provider{
+		"bad":  statusProvider{code: 400, body: []byte(`{"type":"error","error":{"type":"invalid_request_error","message":"bad max_tokens"}}`)},
+		"good": mockprovider.New("claude-opus-4-8"),
+	}
+	models := map[string]config.ModelConfig{
+		"claude-opus-5":   {Targets: []config.Target{{Provider: "bad", Model: "claude-opus-5"}}},
+		"claude-opus-4-8": {Targets: []config.Target{{Provider: "good", Model: "claude-opus-4-8"}}},
+	}
+	h := NewMessagesHandler(router.New(holderForWithFallbacks(provs, models, map[string]string{"claude-opus-5": "claude-opus-4-8"})))
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-opus-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, allowAll(req))
+	if rec.Code != 400 {
+		t.Fatalf("a plain 400 must stay a client error, not fall back, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "bad max_tokens") {
+		t.Fatalf("400 body must be teed verbatim: %s", rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Inferplane-Model-Fallback"); got != "" {
+		t.Fatalf("no model-fallback header expected, got %q", got)
+	}
+}
+
+// Fills a pre-existing gap: no test asserted provider-level fallback on an
+// upstream 5xx specifically (only 429/transport error). Same model, no
+// model_fallbacks involved.
+func TestMessagesNonStreamingFallsBackOn5xx(t *testing.T) {
+	provs := map[string]providers.Provider{
+		"bad":  statusProvider{code: 503, body: []byte(`{"type":"error"}`)},
+		"good": mockprovider.New("claude-sonnet-4-6"),
+	}
+	models := map[string]config.ModelConfig{
+		"claude-sonnet-4-6": {Targets: []config.Target{
+			{Provider: "bad", Model: "m1"},
+			{Provider: "good", Model: "claude-sonnet-4-6"},
+		}},
+	}
+	h := NewMessagesHandler(router.New(holderFor(provs, models)))
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-6","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, allowAll(req))
+	if rec.Code != 200 {
+		t.Fatalf("fallback on upstream 503 should yield 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Inferplane-Fallback"); got != "good" {
+		t.Fatalf("x-inferplane-fallback header = %q, want %q", got, "good")
+	}
 }
 
 func TestMessagesGovernorQuotaBlocks429(t *testing.T) {
@@ -609,6 +778,36 @@ func holderFor(provs map[string]providers.Provider, models map[string]config.Mod
 	h := &live.Holder{}
 	h.Swap(live.NewState(provs, models, govPricing(), ids))
 	return h
+}
+
+// holderForWithFallbacks is holderFor plus model_fallbacks (D5), via
+// live.NewStateWithFallbacks.
+func holderForWithFallbacks(provs map[string]providers.Provider, models map[string]config.ModelConfig, fallbacks map[string]string) *live.Holder {
+	ids := make(map[string]string, len(provs))
+	for n := range provs {
+		ids[n] = n
+	}
+	h := &live.Holder{}
+	h.Swap(live.NewStateWithFallbacks(provs, models, govPricing(), ids, fallbacks, false))
+	return h
+}
+
+// statusProvider always answers Complete with a fixed status/body and no
+// error — for exercising the "successful response with a bad status" retry
+// path (serveComplete's !last 5xx/429/model-not-found check), as opposed to
+// failProvider's transport-error path.
+type statusProvider struct {
+	code int
+	body []byte
+}
+
+func (statusProvider) Name() string               { return "status" }
+func (statusProvider) Models() []schema.ModelInfo { return nil }
+func (p statusProvider) Complete(context.Context, *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+	return &providers.ProxyResponse{StatusCode: p.code, RawBody: p.body}, nil
+}
+func (statusProvider) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
+	return nil, nil
 }
 
 // Task 2: a request naming an ALIAS routes to the canonical target. Alias

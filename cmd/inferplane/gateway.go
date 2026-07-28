@@ -704,6 +704,14 @@ func (g *gateway) writeMutation(ctx context.Context, persist func(context.Contex
 		fmt.Fprintln(os.Stderr, "inferplane: rejected UI write (aliases):", err)
 		return configapi.ErrInvalidTopology
 	}
+	// A UI write only ever mutates providers/models, never model_fallbacks
+	// (file-config-only, D5) — but it can still delete/rename a model a
+	// fallback targets, so re-validate the file-declared map against the
+	// candidate model set, same guard LoadRaw runs on the file path.
+	if err := config.ValidateModelFallbacks(eff.Models, eff.ModelFallbacks); err != nil {
+		fmt.Fprintln(os.Stderr, "inferplane: rejected UI write (model_fallbacks):", err)
+		return configapi.ErrInvalidTopology
+	}
 	if err := config.ResolveProviders(eff); err != nil {
 		// Log the detail server-side; the client gets a fixed, sanitized 400 so a
 		// ref / build detail never leaks in the response (P4 M1).

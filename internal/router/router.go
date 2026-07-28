@@ -38,6 +38,25 @@ func (r *Router) Canonical(model string) string {
 	return st.Canonical(model)
 }
 
+// ResolveModel canonicalizes an alias, then — only when the result has no
+// route at all — substitutes the configured model_fallbacks/family-heuristic
+// target (live.State.FallbackFor). served == requested (substituted == false)
+// when nothing applies, including when the canonical name already has a
+// route: a configured model is never second-guessed here, only an unrouted
+// one. Call this in place of Canonical at ingress so RBAC/audit/metrics/
+// pricing downstream all key off the model actually served.
+func (r *Router) ResolveModel(requested string) (served string, substituted bool) {
+	st := r.live.Load()
+	canonical := st.Canonical(requested)
+	if _, ok := st.Route(canonical); ok {
+		return canonical, false
+	}
+	if fb := st.FallbackFor(canonical); fb != "" {
+		return fb, true
+	}
+	return canonical, false
+}
+
 // Allows reports whether p's allow-list permits the (already-canonicalized)
 // model. Ingress handlers canonicalize a REQUESTED alias before this check
 // (ADR-021 F6) so an alias-only allow-list can never bypass RBAC on the
@@ -69,32 +88,53 @@ type ChainTarget struct {
 	ProviderName string
 	Identity     string
 	Upstream     string
+	// Model is the canonical model this target serves (D5's model-level
+	// fallback). Equal to the model ResolveChain was called with for every
+	// target of that model's own chain; differs only on a target appended
+	// from a cross-model fallback (live.State.FallbackFor), which callers use
+	// to detect the boundary and re-check RBAC (FilterModelAllowed) before
+	// ever sending a request there.
+	Model string
 	// Region is the target provider's configured region label (D7, ADR-020),
 	// captured from the generation this was resolved on. Empty = unlabeled.
 	Region string
 }
 
 // ResolveChain returns every configured target for a model in priority order,
-// skipping providers whose circuit breaker is open. If ALL breakers are open
-// it returns the full chain anyway (better to try than hard-fail). Targets
-// pointing at an unknown provider are silently skipped.
+// skipping providers whose circuit breaker is open, and appends the targets
+// of the model's configured fallback (live.State.FallbackFor) — if any — after
+// them, so an upstream "model not found" can cross to a different model as
+// well as a different provider (§4.5 extended). If ALL breakers are open
+// across the WHOLE resulting chain it is returned anyway (better to try than
+// hard-fail). Targets pointing at an unknown provider are silently skipped.
+// Appended cross-model targets are NOT RBAC-checked here — the router has no
+// Principal in scope; callers MUST run FilterModelAllowed on the result.
 func (r *Router) ResolveChain(model string) ([]ChainTarget, *live.State, error) {
 	st := r.live.Load() // one snapshot for this whole call — no mixed generations
 	mc, ok := st.Route(model)
 	if !ok || len(mc.Targets) == 0 {
 		return nil, st, fmt.Errorf("router: no route for model %q", model)
 	}
-	var allowed, all []ChainTarget
-	for _, t := range mc.Targets {
-		p, ok := st.Provider(t.Provider)
-		if !ok {
-			continue // config drift: target points at unknown provider
+	models := []string{model}
+	if fb := st.FallbackFor(model); fb != "" {
+		if fbmc, ok := st.Route(fb); ok && len(fbmc.Targets) > 0 {
+			models = append(models, fb)
 		}
-		id, _ := st.Identity(t.Provider)
-		ct := ChainTarget{Provider: p, ProviderName: t.Provider, Identity: id, Upstream: t.Model, Region: st.Region(t.Provider)}
-		all = append(all, ct)
-		if r.brk.Allow(id) {
-			allowed = append(allowed, ct)
+	}
+	var allowed, all []ChainTarget
+	for _, m := range models {
+		rmc, _ := st.Route(m)
+		for _, t := range rmc.Targets {
+			p, ok := st.Provider(t.Provider)
+			if !ok {
+				continue // config drift: target points at unknown provider
+			}
+			id, _ := st.Identity(t.Provider)
+			ct := ChainTarget{Provider: p, ProviderName: t.Provider, Identity: id, Upstream: t.Model, Model: m, Region: st.Region(t.Provider)}
+			all = append(all, ct)
+			if r.brk.Allow(id) {
+				allowed = append(allowed, ct)
+			}
 		}
 	}
 	if len(all) == 0 {
@@ -104,6 +144,27 @@ func (r *Router) ResolveChain(model string) ([]ChainTarget, *live.State, error) 
 		return all, st, nil // all breakers open → try anyway
 	}
 	return allowed, st, nil
+}
+
+// FilterModelAllowed drops every target whose Model the caller is not
+// permitted to reach (per `allowed`, typically func(m) bool { return
+// router.Allows(p, m) }). ResolveChain appends cross-model fallback targets
+// AFTER the ingress allow-list check has already run against the originally
+// requested model, so those targets must be re-checked here or a key allowed
+// only model A would silently reach model B. Never empties the chain: the
+// primary model's targets were already allowed before ResolveChain ran.
+func FilterModelAllowed(chain []ChainTarget, allowed func(model string) bool) []ChainTarget {
+	if len(chain) == 0 {
+		return chain
+	}
+	primary := chain[0].Model
+	out := chain[:0:0]
+	for _, ct := range chain {
+		if ct.Model == primary || allowed(ct.Model) {
+			out = append(out, ct)
+		}
+	}
+	return out
 }
 
 // FilterRegions drops every target whose Region is not in allowed (D7,

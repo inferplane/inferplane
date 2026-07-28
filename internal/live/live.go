@@ -12,6 +12,8 @@ package live
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/inferplane/inferplane/internal/config"
@@ -45,6 +47,13 @@ type State struct {
 	// assembly layer can derive the secret-free /admin/config view from the
 	// live generation (set by BuildState; nil for NewState-only test states).
 	providerConfigs map[string]config.ProviderConfig
+	// fallbacks is the operator-declared model_fallbacks map (requested →
+	// served), set by BuildState. Nil for NewState-only test states — FallbackFor
+	// still works (falls through to the family heuristic, or "").
+	fallbacks map[string]string
+	// fallbackFamily enables the same-family default heuristic in FallbackFor
+	// (config.Config.ModelFallbackFamily; default true). Set by BuildState.
+	fallbackFamily bool
 }
 
 // Providers returns the provider instances by config name. The map is a copy;
@@ -97,6 +106,84 @@ func (s *State) Canonical(name string) string {
 		return canonical
 	}
 	return name
+}
+
+// FallbackFor returns the model to serve in place of an unrouted `model`, or
+// "" if there is none. An explicit config entry (model_fallbacks) wins; then,
+// if enabled, the same-family default: among configured models sharing
+// model's family (see familyOf), the highest version strictly below model's.
+// Callers only consult this after Route has already failed, so `model` is
+// never itself a routed name here.
+func (s *State) FallbackFor(model string) string {
+	if served, ok := s.fallbacks[model]; ok {
+		return served
+	}
+	if !s.fallbackFamily {
+		return ""
+	}
+	family, version, ok := familyOf(model)
+	if !ok {
+		return ""
+	}
+	best := ""
+	var bestVersion []int
+	for name := range s.models {
+		f, v, ok := familyOf(name)
+		if !ok || f != family || compareVersions(v, version) >= 0 {
+			continue
+		}
+		if best == "" || compareVersions(v, bestVersion) > 0 {
+			best, bestVersion = name, v
+		}
+	}
+	return best
+}
+
+// familyOf splits a model name into its family and numeric version, treating
+// the trailing run of all-numeric "-"-separated segments as the version
+// ("claude-opus-4-8" -> "claude-opus", [4, 8]). A name with no numeric tail
+// ("claude-sonnet-4-6-bedrock") has no version and ok is false — it is never a
+// family-fallback candidate; an operator wanting it reached that way lists it
+// explicitly in model_fallbacks.
+func familyOf(name string) (family string, version []int, ok bool) {
+	parts := strings.Split(name, "-")
+	i := len(parts)
+	for i > 0 {
+		if _, err := strconv.Atoi(parts[i-1]); err != nil {
+			break
+		}
+		i--
+	}
+	if i == len(parts) { // no numeric tail at all
+		return "", nil, false
+	}
+	version = make([]int, len(parts)-i)
+	for j, p := range parts[i:] {
+		n, _ := strconv.Atoi(p) // already validated above
+		version[j] = n
+	}
+	return strings.Join(parts[:i], "-"), version, true
+}
+
+// compareVersions compares two version-number slices lexicographically,
+// treating a missing trailing component as 0 (so [4] < [4, 8]).
+func compareVersions(a, b []int) int {
+	for i := 0; i < len(a) || i < len(b); i++ {
+		var x, y int
+		if i < len(a) {
+			x = a[i]
+		}
+		if i < len(b) {
+			y = b[i]
+		}
+		if x != y {
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }
 
 // Provider returns the built provider for a config name (read-only).
@@ -173,6 +260,20 @@ func NewState(provs map[string]providers.Provider, models map[string]config.Mode
 	return &State{providers: p, models: m, aliases: a, pricing: price, identities: ids}
 }
 
+// NewStateWithFallbacks is NewState plus model_fallbacks/the family heuristic
+// flag, for tests that build a State directly (e.g. with mock providers,
+// bypassing BuildState's real provider factory) but still need FallbackFor to
+// behave as it would under BuildState.
+func NewStateWithFallbacks(provs map[string]providers.Provider, models map[string]config.ModelConfig, price *pricing.Table, identities map[string]string, fallbacks map[string]string, family bool) *State {
+	st := NewState(provs, models, price, identities)
+	st.fallbacks = make(map[string]string, len(fallbacks))
+	for k, v := range fallbacks {
+		st.fallbacks[k] = v
+	}
+	st.fallbackFamily = family
+	return st
+}
+
 // identityOf is the breaker/topology identity of a provider: a re-added or
 // re-pointed provider (different type or base_url) gets a distinct identity, so
 // stale circuit-breaker state never leaks to it.
@@ -246,6 +347,11 @@ func BuildState(cfg *config.Config) (*State, map[string]string, error) {
 	for k, v := range cfg.Providers {
 		st.providerConfigs[k] = v
 	}
+	st.fallbacks = make(map[string]string, len(cfg.ModelFallbacks))
+	for k, v := range cfg.ModelFallbacks {
+		st.fallbacks[k] = v
+	}
+	st.fallbackFamily = cfg.FallbackFamilyEnabled()
 	return st, identities, nil
 }
 

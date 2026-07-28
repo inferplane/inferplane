@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **`inferplane login` / `token` / `logout`** (ADR-028): OIDC login for humans — trades an IdP session for an automatically-renewing, short-lived gateway virtual key instead of a hand-copied, never-expiring one. New opt-in data-plane endpoints `GET /v1/auth/config`, `POST /v1/auth/key`, `DELETE /v1/auth/key`; a second, distinct OIDC client from the admin console's; no IdP refresh token is ever cached on disk. CI/service-account provisioning (`inferplane keys create`, declarative `virtual_keys`) is unchanged.
+- **Model-level fallback** (ADR-029): a hardcoded client requesting a not-yet-configured model (e.g. a new Claude release) is now served a configured model instead of 404ing, via config `model_fallbacks` or — with no config at all — a default same-family heuristic (`claude-opus-5` → the highest configured `claude-opus-*` version below it). A configured model whose upstream rejects it as unknown (404, or Bedrock `ValidationException`) also crosses to its fallback model within the existing priority-fallback chain. Substitution is fail-closed on RBAC (a key allowed only the requested name is denied, never silently downgraded) and advertised via `x-inferplane-model-fallback`.
 
 ### Fixed
 - A non-admin OIDC identity issuing a key via `POST /admin/keys` could set `owner` to any value, letting a teammate attribute a key to someone else; the server now always overrides `owner` to the caller's own verified subject.
@@ -72,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 추가됨
 - **`inferplane login` / `token` / `logout`** (ADR-028): 사람을 위한 OIDC 로그인 — 손으로 복사한 만료 없는 키 대신, IdP 세션을 자동 갱신되는 단기 가상 키로 교환. 신규 옵트인 데이터 플레인 엔드포인트 `GET /v1/auth/config`, `POST /v1/auth/key`, `DELETE /v1/auth/key`; 관리 콘솔과 별개의 OIDC 클라이언트; IdP refresh token은 절대 디스크에 캐시하지 않음. CI/서비스 계정 발급(`inferplane keys create`, 선언적 `virtual_keys`)은 그대로.
+- **모델 단위 폴백** (ADR-029): 아직 설정되지 않은 모델(예: 새로 나온 Claude 버전)을 하드코딩된 클라이언트가 요청해도 404 대신 설정된 다른 모델로 서빙합니다 — config `model_fallbacks`로 명시하거나, 아무 설정 없이도 기본 동일 패밀리 휴리스틱(`claude-opus-5` → 그 아래로 설정된 가장 높은 `claude-opus-*` 버전)이 적용됩니다. 설정된 모델이라도 업스트림이 미등록으로 거부(404, 또는 Bedrock `ValidationException`)하면 기존 우선순위 폴백 체인 내에서 폴백 모델로 전환됩니다. 치환은 RBAC에 대해 fail-closed(요청한 이름만 허용된 키는 거부되며 절대 조용히 다운그레이드되지 않음)이며 `x-inferplane-model-fallback`으로 알립니다.
 
 ### 수정됨
 - `POST /admin/keys`로 키를 발급하는 비관리자 OIDC 신원이 `owner`를 임의 값으로 지정할 수 있어 팀원이 키를 남의 이름으로 귀속시킬 수 있던 문제 — 서버가 항상 `owner`를 호출자 본인의 검증된 subject로 덮어씀.

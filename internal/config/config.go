@@ -337,6 +337,23 @@ type Config struct {
 	BudgetAlerts        *BudgetAlertsConfig        `json:"budget_alerts,omitempty"`
 	ProviderHealthCheck *ProviderHealthCheckConfig `json:"provider_health_check,omitempty"`
 	VirtualKeys         []VirtualKeyConfig         `json:"virtual_keys,omitempty"`
+	// ModelFallbacks maps a requested (possibly unconfigured) model name to a
+	// configured model name/alias to serve in its place — e.g.
+	// {"claude-opus-5": "claude-opus-4-8"} keeps a hardcoded client version
+	// working before the operator adds the new model. One hop only, same
+	// posture as model aliases: a target must not itself be a map key.
+	ModelFallbacks map[string]string `json:"model_fallbacks,omitempty"`
+	// ModelFallbackFamily enables the default same-family fallback heuristic
+	// (an unconfigured "claude-opus-5" falls back to the highest configured
+	// "claude-opus-*" version below it) for models with no explicit entry in
+	// ModelFallbacks. Nil (absent) means enabled; explicit false disables it.
+	ModelFallbackFamily *bool `json:"model_fallback_family,omitempty"`
+}
+
+// FallbackFamilyEnabled reports whether the family fallback heuristic is on
+// (default: yes).
+func (c *Config) FallbackFamilyEnabled() bool {
+	return c.ModelFallbackFamily == nil || *c.ModelFallbackFamily
 }
 
 // BudgetAlertsConfig enables webhook budget alerts (D5b, ADR-017): a team's
@@ -504,6 +521,9 @@ func LoadRaw(path string) (*Config, error) {
 	if err := validateModelAliases(cfg.Models); err != nil {
 		return nil, err
 	}
+	if err := validateModelFallbacks(cfg.Models, cfg.ModelFallbacks); err != nil {
+		return nil, err
+	}
 	if err := validateVirtualKeys(cfg.VirtualKeys); err != nil {
 		return nil, err
 	}
@@ -530,6 +550,35 @@ func validateModelAliases(models map[string]ModelConfig) error {
 				return fmt.Errorf("config: model alias %q declared by both %q and %q", alias, prev, model)
 			}
 			seen[alias] = model
+		}
+	}
+	return nil
+}
+
+// ValidateModelFallbacks is the shared guard for both the file-config path
+// (LoadRaw) and the providerstore UI-write path, mirroring
+// ValidateModelAliases's role for model aliases.
+func ValidateModelFallbacks(models map[string]ModelConfig, fallbacks map[string]string) error {
+	return validateModelFallbacks(models, fallbacks)
+}
+
+func validateModelFallbacks(models map[string]ModelConfig, fallbacks map[string]string) error {
+	known := make(map[string]bool, len(models))
+	for name, mc := range models {
+		known[name] = true
+		for _, alias := range mc.Aliases {
+			known[alias] = true
+		}
+	}
+	for requested, served := range fallbacks {
+		if served == requested {
+			return fmt.Errorf("config: model_fallbacks %q maps to itself", requested)
+		}
+		if !known[served] {
+			return fmt.Errorf("config: model_fallbacks %q targets unconfigured model %q", requested, served)
+		}
+		if _, chained := fallbacks[served]; chained {
+			return fmt.Errorf("config: model_fallbacks %q targets %q, which is itself a fallback key (one hop only)", requested, served)
 		}
 	}
 	return nil

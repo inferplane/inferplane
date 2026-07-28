@@ -8,9 +8,11 @@
 package openaiapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -132,7 +134,13 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeErr(w, 400, "invalid_request_error", "malformed JSON")
 		return
 	}
-	model := h.r.Canonical(canonical.Model)
+	model, modelSubstituted := h.r.ResolveModel(canonical.Model)
+	if modelSubstituted {
+		// Unconfigured/unrouted model substituted for a configured one
+		// (model_fallbacks or the same-family default, D5) BEFORE the
+		// allow-list check — advertise it to the client.
+		w.Header().Set("x-inferplane-model-fallback", model)
+	}
 	// Tracing (ADR-011): join the client trace, start ONE server span across the
 	// request, end once via defer; no-op when off.
 	tctx := tracing.Extract(req.Context(), req.Header)
@@ -179,6 +187,11 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeErr(w, 404, "not_found_error", "unknown model: "+model+h.availableModelsErrorSuffix(p))
 		return
 	}
+	// ResolveChain may have appended a cross-model fallback's targets (D5)
+	// AFTER the allow-list check above already ran against `model` alone —
+	// re-check those targets' model or a key allowed only `model` would
+	// silently reach the fallback model.
+	chain = router.FilterModelAllowed(chain, func(m string) bool { return h.r.Allows(p, m) })
 	// Team-record fresh lookup (D6/D7, ADR-016 pattern): one call reused below
 	// both for the region filter and the guardrail override.
 	var teamRec keystore.TeamRecord
@@ -226,34 +239,45 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		upHeaders := req.Header.Clone()
 		tracing.Inject(req.Context(), upHeaders)
 		pr := &providers.ProxyRequest{
-			Model: model, Upstream: ct.Upstream, Parsed: canonical,
+			Model: ct.Model, Upstream: ct.Upstream, Parsed: canonical,
 			RawBody: raw, Headers: upHeaders, Stream: stream,
 			IngressProtocol:  "openai",
 			GuardrailID:      teamRec.GuardrailID,
 			GuardrailVersion: teamRec.GuardrailVersion,
 		}
 		last := i == len(chain)-1
+		// crossModelNext: the next target (if any) serves a different model
+		// than this one — a D5 model-level fallback boundary, not just a
+		// different provider for the same model.
+		crossModelNext := !last && chain[i+1].Model != ct.Model
 		if i > 0 {
 			w.Header().Set("x-inferplane-fallback", ct.ProviderName)
+			if ct.Model != model {
+				w.Header().Set("x-inferplane-model-fallback", ct.Model)
+			}
 		}
 		var retriable bool
 		if stream {
-			retriable = h.serveStream(w, req, ct.Provider, pr, p, model, ct.ProviderName, ct.Identity, ct.Upstream, last, start, table)
+			retriable = h.serveStream(w, req, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		} else {
-			retriable = h.serveComplete(w, req, ct.Provider, pr, p, model, ct.ProviderName, ct.Identity, ct.Upstream, last, start, table)
+			retriable = h.serveComplete(w, req, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		}
 		if !retriable {
 			return
 		}
 		h.r.RecordResult(ct.ProviderName, ct.Identity, false)
-		h.metrics.ObserveFallback(model, ct.ProviderName, chain[i+1].ProviderName, "upstream_error")
+		reason := "upstream_error"
+		if crossModelNext {
+			reason = "model_not_found"
+		}
+		h.metrics.ObserveFallback(ct.Model, ct.ProviderName, chain[i+1].ProviderName, reason)
 	}
 }
 
 // serveComplete proxies one non-streaming target. It returns retriable=true on a
 // pre-TTFT failure (transport error or upstream 5xx/429) when a next target
 // exists (!last); otherwise it writes the response/error and returns false.
-func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last bool, start time.Time, table *pricing.Table) (retriable bool) {
+func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last {
@@ -278,8 +302,8 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 502, time.Since(start).Seconds(), 0)
 		return false
 	}
-	if !last && (resp.StatusCode >= 500 || resp.StatusCode == 429) {
-		return true // upstream 5xx/429 → fall back
+	if !last && (resp.StatusCode >= 500 || resp.StatusCode == 429 || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
+		return true // upstream 5xx/429, or a cross-model "model not found" → fall back
 	}
 	if resp.StatusCode < 400 {
 		h.r.RecordResult(providerName, identity, true)
@@ -324,7 +348,7 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 // serveStream proxies one streaming target. Fallback is PRE-TTFT ONLY: Stream()
 // erroring before any event with a next target available (!last) returns
 // retriable=true. Once the first event is rendered the response is committed.
-func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last bool, start time.Time, table *pricing.Table) (retriable bool) {
+func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last {
@@ -369,8 +393,17 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 	var ttft float64
 	for ev, err := range seq {
 		if err != nil {
-			// upstream broke mid-stream; client sees a truncated stream.
+			// upstream broke mid-stream: the 200 is already committed, so the
+			// failure surfaces as an SSE error event + terminal [DONE] rather
+			// than a silently truncated stream (mirrors anthropicapi's
+			// writeStreamErrorEvent / bedrockapi's exception-frame path). The
+			// error detail is logged server-side only, never echoed to the
+			// client (an AWS SDK error string can carry an account id/ARN).
+			log.Printf("openaiapi: stream interrupted (model=%s upstream=%s provider=%s): %v", model, upstream, providerName, err)
+			writeStreamErrorEvent(w)
+			flusher.Flush()
 			h.auditCompletedPartial(p, model, upstream, usage, tracing.TraceID(req.Context()))
+			recordSpanResponse(req, prov.Name(), upstream, usage, true) // committed (partial)
 			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 200, time.Since(start).Seconds(), ttft)
 			return false
 		}
@@ -414,6 +447,19 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 	recordSpanResponse(req, prov.Name(), upstream, usage, true)
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 200, time.Since(start).Seconds(), ttft)
 	return false
+}
+
+// isModelNotFound reports whether an upstream response looks like a "model
+// not found" rejection rather than an unrelated client error — a plain 404,
+// or a 400 whose body names a Bedrock ValidationException (Bedrock returns
+// 400, not 404, for a model not enabled/available in that region).
+// Deliberately narrow: only these are ever retried across a D5 model-level
+// fallback boundary; any other 4xx stays a client error, teed verbatim.
+func isModelNotFound(statusCode int, body []byte) bool {
+	if statusCode == 404 {
+		return true
+	}
+	return statusCode == 400 && bytes.Contains(body, []byte("ValidationException"))
 }
 
 // govErrType maps a governance deny status to the OpenAI error `type`.
@@ -596,4 +642,15 @@ func writeErr(w http.ResponseWriter, status int, errType, msg string) {
 			"code":    nil,
 		},
 	})
+}
+
+// writeStreamErrorEvent emits an OpenAI-shaped SSE error event on a stream
+// whose 200 status is already committed (mid-stream upstream failure),
+// followed by the terminal [DONE] marker so the client's stream parser sees a
+// clean end rather than a silent truncation — mirrors anthropicapi's
+// writeStreamErrorEvent. The message is fixed/generic; the real error goes to
+// the server log only (see caller).
+func writeStreamErrorEvent(w http.ResponseWriter) {
+	io.WriteString(w, "data: {\"error\":{\"message\":\"upstream stream interrupted\",\"type\":\"api_error\",\"code\":null}}\n\n")
+	io.WriteString(w, "data: [DONE]\n\n")
 }

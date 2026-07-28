@@ -25,6 +25,18 @@ func newTestRouter(provs map[string]providers.Provider, models map[string]config
 	return New(h), h
 }
 
+// newTestRouterWithFallbacks is newTestRouter plus model_fallbacks/the family
+// heuristic flag (D5), via live.NewStateWithFallbacks.
+func newTestRouterWithFallbacks(provs map[string]providers.Provider, models map[string]config.ModelConfig, fallbacks map[string]string, family bool) *Router {
+	ids := make(map[string]string, len(provs))
+	for name := range provs {
+		ids[name] = name
+	}
+	h := &live.Holder{}
+	h.Swap(live.NewStateWithFallbacks(provs, models, nil, ids, fallbacks, family))
+	return New(h)
+}
+
 func TestResolveModel(t *testing.T) {
 	provs := map[string]providers.Provider{"anthropic-direct": mockprovider.New("claude-sonnet-4-6")}
 	models := map[string]config.ModelConfig{
@@ -336,5 +348,104 @@ func TestFilterRegions(t *testing.T) {
 	// Restricted to a region nothing matches → empty chain (caller 403s).
 	if got := FilterRegions(chain, []string{"apac"}); len(got) != 0 {
 		t.Fatalf("apac-restricted: got %+v, want empty", got)
+	}
+}
+
+// D5: ResolveModel substitutes an unrouted model for its configured
+// fallback, and leaves an already-routed model untouched even when a
+// fallback entry also names it as a KEY (ResolveChain succeeding for the
+// canonical name takes priority — a configured model is never second-guessed).
+func TestRouterResolveModelSubstitutesUnroutedModel(t *testing.T) {
+	provs := map[string]providers.Provider{"a": mockprovider.New("claude-opus-4-8")}
+	models := map[string]config.ModelConfig{
+		"claude-opus-4-8": {Targets: []config.Target{{Provider: "a", Model: "claude-opus-4-8"}}},
+	}
+	r := newTestRouterWithFallbacks(provs, models, map[string]string{"claude-opus-5": "claude-opus-4-8"}, false)
+
+	served, substituted := r.ResolveModel("claude-opus-5")
+	if !substituted || served != "claude-opus-4-8" {
+		t.Fatalf("ResolveModel(claude-opus-5) = (%q, %v), want (claude-opus-4-8, true)", served, substituted)
+	}
+	served, substituted = r.ResolveModel("claude-opus-4-8")
+	if substituted || served != "claude-opus-4-8" {
+		t.Fatalf("ResolveModel(claude-opus-4-8) = (%q, %v), want (claude-opus-4-8, false) — a routed model is never substituted", served, substituted)
+	}
+}
+
+// D5: ResolveModel canonicalizes an alias BEFORE checking for a fallback, so
+// an aliased-but-routed model is never mistaken for unrouted.
+func TestRouterResolveModelCanonicalizesBeforeFallback(t *testing.T) {
+	provs := map[string]providers.Provider{"a": mockprovider.New("claude-sonnet-4-6")}
+	models := map[string]config.ModelConfig{
+		"claude-sonnet-4-6": {
+			Aliases: []string{"apac.anthropic.claude-sonnet-4-6"},
+			Targets: []config.Target{{Provider: "a", Model: "claude-sonnet-4-6"}},
+		},
+	}
+	r := newTestRouterWithFallbacks(provs, models, nil, false)
+	served, substituted := r.ResolveModel("apac.anthropic.claude-sonnet-4-6")
+	if substituted || served != "claude-sonnet-4-6" {
+		t.Fatalf("ResolveModel(alias) = (%q, %v), want (claude-sonnet-4-6, false)", served, substituted)
+	}
+}
+
+// D5: ResolveChain appends the fallback model's targets, tagged with THEIR
+// OWN Model (not the requested one), and still filters out an open breaker
+// among them.
+func TestResolveChainAppendsFallbackModelTargets(t *testing.T) {
+	provs := map[string]providers.Provider{
+		"a": mockprovider.New("claude-opus-5"),   // primary model's only target
+		"b": mockprovider.New("claude-opus-4-8"), // fallback model's only target
+	}
+	models := map[string]config.ModelConfig{
+		"claude-opus-5":   {Targets: []config.Target{{Provider: "a", Model: "u1"}}},
+		"claude-opus-4-8": {Targets: []config.Target{{Provider: "b", Model: "u2"}}},
+	}
+	r := newTestRouterWithFallbacks(provs, models, map[string]string{"claude-opus-5": "claude-opus-4-8"}, false)
+
+	chain, _, err := r.ResolveChain("claude-opus-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chain) != 2 {
+		t.Fatalf("chain = %+v, want 2 targets (primary + fallback model)", chain)
+	}
+	if chain[0].Model != "claude-opus-5" || chain[1].Model != "claude-opus-4-8" {
+		t.Fatalf("chain models = [%q, %q], want [claude-opus-5, claude-opus-4-8]", chain[0].Model, chain[1].Model)
+	}
+
+	// Trip the fallback model's only provider breaker — it must be skipped
+	// like any other open breaker, leaving only the primary target.
+	for i := 0; i < 5; i++ {
+		r.RecordResult("b", "b", false)
+	}
+	chain, _, err = r.ResolveChain("claude-opus-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chain) != 1 || chain[0].ProviderName != "a" {
+		t.Fatalf("chain with fallback breaker open = %+v, want only the primary target", chain)
+	}
+}
+
+// D5/RBAC: FilterModelAllowed must never empty the chain (the primary
+// model's targets were already allow-listed by the caller before
+// ResolveChain ran) but must drop a cross-model fallback target the caller's
+// allow func rejects — closing the gap where a key allowed only model A would
+// otherwise silently reach fallback model B.
+func TestFilterModelAllowed(t *testing.T) {
+	chain := []ChainTarget{
+		{ProviderName: "a", Model: "claude-opus-5"},
+		{ProviderName: "b", Model: "claude-opus-4-8"},
+	}
+	// Allow only the primary model.
+	got := FilterModelAllowed(chain, func(m string) bool { return m == "claude-opus-5" })
+	if len(got) != 1 || got[0].ProviderName != "a" {
+		t.Fatalf("FilterModelAllowed = %+v, want only the primary-model target", got)
+	}
+	// Allow both — nothing dropped.
+	got = FilterModelAllowed(chain, func(m string) bool { return true })
+	if len(got) != 2 {
+		t.Fatalf("FilterModelAllowed = %+v, want both targets kept", got)
 	}
 }

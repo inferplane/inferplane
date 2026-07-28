@@ -195,3 +195,89 @@ func TestBuildStateAliases(t *testing.T) {
 		t.Fatal("Route must resolve the canonical name")
 	}
 }
+
+// familyConfig has two configured opus versions and one sonnet, so the
+// family heuristic has a real choice to make.
+func familyConfig() *config.Config {
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"anthropic-direct": {Type: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "sk-x"},
+		},
+		Models: map[string]config.ModelConfig{
+			"claude-opus-4-6":           {Targets: []config.Target{{Provider: "anthropic-direct", Model: "claude-opus-4-6"}}},
+			"claude-opus-4-8":           {Targets: []config.Target{{Provider: "anthropic-direct", Model: "claude-opus-4-8"}}},
+			"claude-sonnet-4-6":         {Targets: []config.Target{{Provider: "anthropic-direct", Model: "claude-sonnet-4-6"}}},
+			"claude-sonnet-4-6-bedrock": {Targets: []config.Target{{Provider: "anthropic-direct", Model: "claude-sonnet-4-6-bedrock"}}},
+		},
+	}
+	cfg.Pricing.OnMissing = "allow"
+	return cfg
+}
+
+// D5: FallbackFor's explicit model_fallbacks entry wins over the family
+// heuristic, even when a family candidate also exists.
+func TestFallbackForExplicitWinsOverFamily(t *testing.T) {
+	cfg := familyConfig()
+	cfg.ModelFallbacks = map[string]string{"claude-opus-5": "claude-sonnet-4-6"}
+	st, _, err := BuildState(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.FallbackFor("claude-opus-5"); got != "claude-sonnet-4-6" {
+		t.Fatalf("FallbackFor = %q, want explicit target %q", got, "claude-sonnet-4-6")
+	}
+}
+
+// D5: with no explicit entry, FallbackFor picks the highest configured
+// version strictly below the requested one, within the same family.
+func TestFallbackForFamilyPicksHighestBelow(t *testing.T) {
+	cfg := familyConfig()
+	st, _, err := BuildState(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.FallbackFor("claude-opus-5"); got != "claude-opus-4-8" {
+		t.Fatalf("FallbackFor = %q, want %q", got, "claude-opus-4-8")
+	}
+}
+
+// D5: no configured version below the requested one in the family -> "".
+func TestFallbackForFamilyNoCandidateBelow(t *testing.T) {
+	cfg := familyConfig()
+	st, _, err := BuildState(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.FallbackFor("claude-opus-3"); got != "" {
+		t.Fatalf("FallbackFor = %q, want \"\" (no version below 3 configured)", got)
+	}
+}
+
+// D5: an explicit false ModelFallbackFamily disables the heuristic entirely.
+func TestFallbackForFamilyDisabled(t *testing.T) {
+	cfg := familyConfig()
+	off := false
+	cfg.ModelFallbackFamily = &off
+	st, _, err := BuildState(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.FallbackFor("claude-opus-5"); got != "" {
+		t.Fatalf("FallbackFor = %q, want \"\" (family heuristic disabled)", got)
+	}
+}
+
+// D5: a name with no numeric version tail is never a family candidate — an
+// operator wanting it reached via fallback must list it explicitly.
+func TestFallbackForFamilyIgnoresNonVersionedNames(t *testing.T) {
+	cfg := familyConfig()
+	st, _, err := BuildState(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// "claude-sonnet-4-6-bedrock" has no numeric tail, so a hypothetical
+	// unrouted "claude-sonnet-4-8-bedrock" must not match it by family.
+	if got := st.FallbackFor("claude-sonnet-4-8-bedrock"); got != "" {
+		t.Fatalf("FallbackFor = %q, want \"\" (non-versioned name is never a family candidate)", got)
+	}
+}

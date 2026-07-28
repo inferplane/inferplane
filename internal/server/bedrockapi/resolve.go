@@ -20,6 +20,16 @@ func resolveModel(r *router.Router, holder *live.Holder, urlID string) (string, 
 	}
 
 	st := holder.Load()
+	// D5 model-level fallback: an unrouted canonical name (e.g. a hardcoded
+	// client requesting a not-yet-configured "anthropic.claude-opus-5-v1:0")
+	// substitutes for its configured model_fallbacks/family-default target,
+	// same as the Anthropic/OpenAI ingresses (router.ResolveModel).
+	if fb := st.FallbackFor(canonical); fb != "" {
+		if _, ok := st.Route(fb); ok {
+			return fb, true
+		}
+	}
+
 	models := st.Models()
 	names := make([]string, 0, len(models))
 	for name := range models {

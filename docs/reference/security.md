@@ -22,6 +22,7 @@ are non-negotiable invariants (see CLAUDE.md → Security mandates).
 | CLI login (loopback PKCE) | `cmd/inferplane/login.go`, `internal/server/authapi/` | ADR-028: `inferplane login` runs Authorization Code + PKCE against a DISTINCT OIDC `client_id`/`Verifier` from the console's (never share — the console's is a secretless public client); every gateway/issuer URL validated https-or-loopback, discovered endpoints same-origin-or-subdomain of the issuer; issuer/client_id TOFU-pinned into the credential file, silent change refused without `--reset`. No IdP refresh token is ever cached (`credentials.go`) — a stored refresh token would be a stronger, gateway-unrevocable credential than the `ik_` key it protects. `POST /v1/auth/key` decides `expires_at`/`owner` server-side only, rate-limited per subject |
 | Config view | `internal/server/configapi/` | secret-free topology projection (ADR-005): view type cannot hold a secret; auth string from ref name / IAM mode only, never the resolved key |
 | RBAC | `internal/keystore/keystore.go` | `Principal.Allows()` (team + allowed models) |
+| Cross-model fallback RBAC re-check | `internal/router/router.go` (`FilterModelAllowed`) | ADR-029/D5: `ResolveChain` appends a model_fallbacks target's provider chain AFTER the ingress allow-list check already ran against the originally requested model — every ingress handler re-checks those appended targets' model with `FilterModelAllowed` before ever sending a request there, or a key allowed only model A would silently reach fallback model B. A key allowed only the unconfigured requested name is denied outright (fail-closed), never silently downgraded to a configured fallback |
 | Key hashing | `internal/keystore/sqlite.go` | SHA-256 at rest; plaintext shown once (or, for a declaratively-bootstrapped key, ADR-023, referenced via `virtual_keys[].key_ref` — never inline, same §7 posture as a provider's `api_key_ref`) |
 | TLS validation | `internal/server/tls.go` | rejects half-specified cert/key pairs |
 | Secret refs | `internal/config/config.go` | `env:`/`file:`/`secret:` only; inline `api_key` rejected |
@@ -31,6 +32,7 @@ are non-negotiable invariants (see CLAUDE.md → Security mandates).
 - The gateway never forwards the client key upstream and never exposes its upstream keys to clients (§5.2).
 - `/metrics` is unauthenticated but carries no secret or `key_id` and bounds label cardinality.
 - Pre-resolution 403/404 paths use a sentinel model label so attacker-supplied model strings can't explode Prometheus series.
+- ADR-029 model-level fallback fails closed on RBAC: a key allowed only the requested (unconfigured) model name is 403'd, never silently served by its fallback model; a cross-model fallback target appended after the allow-list check is re-checked via `FilterModelAllowed`.
 
 ### 4. Code Pointers
 - `internal/server/auth.go` — virtual-key auth, empty-key bypass guard
@@ -39,7 +41,7 @@ are non-negotiable invariants (see CLAUDE.md → Security mandates).
 
 ### 5. Cross-references
 - Related modules: `internal/keystore`, `internal/audit`, `internal/metrics`
-- Related ADRs: docs/decisions/ADR-004-oidc-admin-authz.md, docs/decisions/ADR-026-console-sso-login.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md
+- Related ADRs: docs/decisions/ADR-004-oidc-admin-authz.md, docs/decisions/ADR-026-console-sso-login.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md
 - Related runbooks: docs/runbooks/ ; docs/runbooks/cli-login.md ; policy in `SECURITY.md`
 
 <a id="korean"></a>
@@ -61,6 +63,7 @@ are non-negotiable invariants (see CLAUDE.md → Security mandates).
 | CLI 로그인 (loopback PKCE) | `cmd/inferplane/login.go`, `internal/server/authapi/` | ADR-028: `inferplane login`은 콘솔과 별개의 OIDC `client_id`/`Verifier`로 Authorization Code + PKCE 수행(콘솔의 secretless public client와 절대 공유 금지); 모든 게이트웨이/issuer URL은 https-or-loopback 검증, 발견된 엔드포인트는 issuer와 same-origin-or-subdomain; issuer/client_id는 크리덴셜 파일에 TOFU 고정, `--reset` 없이 조용한 변경 거부. IdP refresh token은 절대 캐시하지 않음(`credentials.go`) — refresh token은 보호 대상 `ik_` 키보다 더 강력하고 게이트웨이가 취소할 수 없는 자격증명이기 때문. `POST /v1/auth/key`는 `expires_at`/`owner`를 서버에서만 결정, subject별 rate limit |
 | Config 뷰 | `internal/server/configapi/` | 시크릿 무노출 토폴로지 투영 (ADR-005): 뷰 타입이 시크릿을 담을 수 없음; auth 문자열은 ref 이름/IAM 모드만, 해석된 키 절대 금지 |
 | RBAC | `internal/keystore/keystore.go` | `Principal.Allows()` (팀 + 허용 모델) |
+| 크로스-모델 폴백 RBAC 재검증 | `internal/router/router.go` (`FilterModelAllowed`) | ADR-029/D5: `ResolveChain`은 이미 원래 요청 모델에 대해 allow-list 검사가 끝난 뒤에 model_fallbacks 타깃의 프로바이더 체인을 추가함 — 모든 인그레스 핸들러는 그 요청을 실제로 보내기 전에 `FilterModelAllowed`로 추가된 타깃의 모델을 재검증함. 그렇지 않으면 모델 A만 허용된 키가 폴백 모델 B에 조용히 도달할 수 있음. 미설정 요청 이름만 허용된 키는 (fail-closed) 즉시 거부되며, 설정된 폴백 모델로 조용히 다운그레이드되지 않음 |
 | 키 해싱 | `internal/keystore/sqlite.go` | 저장 시 SHA-256; 평문은 1회만 표시(또는 선언적 부트스트랩 키의 경우, ADR-023, `virtual_keys[].key_ref`로 참조 — 인라인 금지, provider의 `api_key_ref`와 동일한 §7 원칙) |
 | TLS 검증 | `internal/server/tls.go` | 반쪽만 지정된 cert/key 쌍 거부 |
 | 시크릿 ref | `internal/config/config.go` | `env:`/`file:`/`secret:`만; 인라인 `api_key` 거부 |
@@ -70,6 +73,7 @@ are non-negotiable invariants (see CLAUDE.md → Security mandates).
 - 게이트웨이는 클라이언트 키를 상위로 전달하지 않고, 상위 키를 클라이언트에 노출하지 않음(§5.2).
 - `/metrics`는 무인증이지만 시크릿·`key_id`를 담지 않으며 레이블 카디널리티를 제한.
 - 사전 해석 403/404 경로는 센티넬 model 레이블을 사용해 공격자 입력 model 문자열이 Prometheus 시리즈를 폭증시키지 못하게 함.
+- ADR-029 모델 단위 폴백은 RBAC에 대해 fail-closed: 미설정 요청 모델 이름만 허용된 키는 403이며 폴백 모델로 조용히 서빙되지 않음; allow-list 검사 이후 추가된 크로스-모델 폴백 타깃은 `FilterModelAllowed`로 재검증.
 
 ### 4. 코드 포인터
 - `internal/server/auth.go` — 가상 키 인증, 빈 키 우회 가드
@@ -78,5 +82,5 @@ are non-negotiable invariants (see CLAUDE.md → Security mandates).
 
 ### 5. 상호 참조
 - 관련 모듈: `internal/keystore`, `internal/audit`, `internal/metrics`
-- 관련 ADR: docs/decisions/ADR-004-oidc-admin-authz.md, docs/decisions/ADR-026-console-sso-login.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md
+- 관련 ADR: docs/decisions/ADR-004-oidc-admin-authz.md, docs/decisions/ADR-026-console-sso-login.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md
 - 관련 런북: docs/runbooks/ ; docs/runbooks/cli-login.md ; 정책은 `SECURITY.md`

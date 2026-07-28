@@ -1304,3 +1304,53 @@ func TestConfigMarshalNeverLeaksVirtualKeyPlaintext(t *testing.T) {
 		t.Fatal("marshaling the loaded config must never emit a virtual key's resolved plaintext")
 	}
 }
+
+// D5: ValidateModelFallbacks accepts a fallback targeting a configured model
+// name, or an alias of one, and rejects a self-mapping, a target that isn't
+// configured at all, and a chained (two-hop) fallback.
+func TestValidateModelFallbacks(t *testing.T) {
+	models := map[string]ModelConfig{
+		"claude-opus-4-8":   {Aliases: []string{"opus-legacy"}},
+		"claude-sonnet-4-6": {},
+	}
+	cases := []struct {
+		name      string
+		fallbacks map[string]string
+		wantErr   bool
+	}{
+		{"target is a configured model name", map[string]string{"claude-opus-5": "claude-opus-4-8"}, false},
+		{"target is a configured model alias", map[string]string{"claude-opus-5": "opus-legacy"}, false},
+		{"self-mapping rejected", map[string]string{"claude-opus-5": "claude-opus-5"}, true},
+		{"unconfigured target rejected", map[string]string{"claude-opus-5": "claude-opus-9000"}, true},
+		{"chained (two-hop) fallback rejected", map[string]string{
+			"claude-opus-5":   "claude-opus-4-9",
+			"claude-opus-4-9": "claude-opus-4-8",
+		}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := ValidateModelFallbacks(models, c.fallbacks)
+			if c.wantErr && err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !c.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// D5: LoadRaw runs validateModelFallbacks — a file config with an
+// unconfigured fallback target must fail to load, same posture as an
+// unresolvable model alias.
+func TestLoadRawRejectsInvalidModelFallback(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "bad.json")
+	os.WriteFile(f, []byte(`{
+		"models": {"claude-opus-4-8": {"targets": [{"provider": "p", "model": "m"}]}},
+		"model_fallbacks": {"claude-opus-5": "claude-opus-9000"}
+	}`), 0o600)
+	if _, err := LoadRaw(f); err == nil {
+		t.Fatal("model_fallbacks targeting an unconfigured model must be rejected")
+	}
+}

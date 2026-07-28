@@ -2,6 +2,7 @@
 package bedrockapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -115,6 +116,11 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeErr(w, http.StatusNotFound, "model not found")
 		return
 	}
+	// ResolveChain may have appended a cross-model fallback's targets (D5)
+	// AFTER the allow-list check above already ran against `model` alone —
+	// re-check those targets' model or a key allowed only `model` would
+	// silently reach the fallback model.
+	chain = router.FilterModelAllowed(chain, func(m string) bool { return h.r.Allows(p, m) })
 	filtered := make([]router.ChainTarget, 0, len(chain))
 	for _, ct := range chain {
 		if servesBedrockIngress(ct.Provider.Name()) {
@@ -192,31 +198,55 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		upHeaders := req.Header.Clone()
 		tracing.Inject(req.Context(), upHeaders)
 		pr := &providers.ProxyRequest{
-			Model: model, Upstream: ct.Upstream, Parsed: &parsed,
+			Model: ct.Model, Upstream: ct.Upstream, Parsed: &parsed,
 			RawBody: raw, Headers: upHeaders, Stream: h.streaming,
 			IngressProtocol:  "bedrock",
 			GuardrailID:      teamRec.GuardrailID,
 			GuardrailVersion: teamRec.GuardrailVersion,
 		}
 		last := i == len(chain)-1
+		// crossModelNext: the next target (if any) serves a different model
+		// than this one — a D5 model-level fallback boundary, not just a
+		// different provider for the same model.
+		crossModelNext := !last && chain[i+1].Model != ct.Model
 		if i > 0 {
 			w.Header().Set("x-inferplane-fallback", ct.ProviderName)
+			if ct.Model != model {
+				w.Header().Set("x-inferplane-model-fallback", ct.Model)
+			}
 		}
 		var retriable bool
 		if h.streaming {
-			retriable = h.serveStream(w, req, ct.Provider, pr, p, model, ct.ProviderName, ct.Identity, ct.Upstream, last, start, table)
+			retriable = h.serveStream(w, req, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		} else {
-			retriable = h.serveComplete(w, req, ct.Provider, pr, p, model, ct.ProviderName, ct.Identity, ct.Upstream, last, start, table)
+			retriable = h.serveComplete(w, req, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		}
 		if !retriable {
 			return
 		}
 		h.r.RecordResult(ct.ProviderName, ct.Identity, false)
-		h.metrics.ObserveFallback(model, ct.ProviderName, chain[i+1].ProviderName, "upstream_error")
+		reason := "upstream_error"
+		if crossModelNext {
+			reason = "model_not_found"
+		}
+		h.metrics.ObserveFallback(ct.Model, ct.ProviderName, chain[i+1].ProviderName, reason)
 	}
 }
 
-func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last bool, start time.Time, table *pricing.Table) (retriable bool) {
+// isModelNotFound reports whether an upstream response looks like a "model
+// not found" rejection rather than an unrelated client error — a plain 404,
+// or a 400 whose body names a Bedrock ValidationException (Bedrock's actual
+// shape for a model not enabled/available in that region). Deliberately
+// narrow: only these are ever retried across a D5 model-level fallback
+// boundary; any other 4xx stays a client error.
+func isModelNotFound(statusCode int, body []byte) bool {
+	if statusCode == http.StatusNotFound {
+		return true
+	}
+	return statusCode == http.StatusBadRequest && bytes.Contains(body, []byte("ValidationException"))
+}
+
+func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last {
@@ -246,7 +276,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusBadGateway, time.Since(start).Seconds(), 0)
 		return false
 	}
-	if !last && (resp.StatusCode >= http.StatusInternalServerError || resp.StatusCode == http.StatusTooManyRequests) {
+	if !last && (resp.StatusCode >= http.StatusInternalServerError || resp.StatusCode == http.StatusTooManyRequests || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
 		return true
 	}
 	if resp.Headers != nil {
@@ -293,7 +323,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 	return false
 }
 
-func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last bool, start time.Time, table *pricing.Table) (retriable bool) {
+func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last {

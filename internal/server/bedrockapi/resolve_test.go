@@ -67,6 +67,34 @@ func TestResolveModelReverseScanDeterministic(t *testing.T) {
 	}
 }
 
+// holderForWithFallbacks is holderFor plus model_fallbacks (D5).
+func holderForWithFallbacks(provs map[string]providers.Provider, models map[string]config.ModelConfig, fallbacks map[string]string) *live.Holder {
+	ids := make(map[string]string, len(provs))
+	for n := range provs {
+		ids[n] = n
+	}
+	h := &live.Holder{}
+	h.Swap(live.NewStateWithFallbacks(provs, models, pricing.New(pricing.OnMissingAllow, nil), ids, fallbacks, false))
+	return h
+}
+
+// D5: an unrouted canonical name (no route, and no upstream-id match either)
+// substitutes for its configured model_fallbacks target, same as the
+// Anthropic/OpenAI ingresses (router.ResolveModel) — before ever falling
+// through to the raw-upstream-id reverse scan.
+func TestResolveModelFallsBackToConfiguredFallback(t *testing.T) {
+	provs := map[string]providers.Provider{"p": mockprovider.New("claude-opus-4-8")}
+	models := map[string]config.ModelConfig{
+		"claude-opus-4-8": {Targets: []config.Target{{Provider: "p", Model: "anthropic.claude-opus-4-8-v1:0"}}},
+	}
+	h := holderForWithFallbacks(provs, models, map[string]string{"claude-opus-5": "claude-opus-4-8"})
+	r := router.New(h)
+	got, ok := resolveModel(r, h, "claude-opus-5")
+	if !ok || got != "claude-opus-4-8" {
+		t.Fatalf("fallback resolution failed: %q %v, want claude-opus-4-8", got, ok)
+	}
+}
+
 func TestResolveModelUnknown(t *testing.T) {
 	provs := map[string]providers.Provider{"p": mockprovider.New("claude-x")}
 	models := map[string]config.ModelConfig{

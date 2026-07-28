@@ -40,6 +40,7 @@ contract is in [docs/api-reference.md](../api-reference.md).
 - `count_tokens` must always return 200 — a non-200 crashes Claude Code (aliases are canonicalized here too, ADR-021).
 - Verbatim body forwarding on protocol match; canonical conversion only on mismatch. Model **aliases** (config `models.<name>.aliases`, ADR-021) are normalized to the canonical name BEFORE RBAC/routing/audit/metrics; on the anthropic verbatim path the only body change is a cache-safe top-level `model` rewrite (nested `cache_control` preserved, HTML escaping off).
 - Errors are returned in the ingress protocol's own error shape; the unknown/disallowed-model messages append the allow-filtered available-model list (ADR-021).
+- **Model-level fallback (ADR-029, D5).** `model_fallbacks` (config, requested → served model, one hop) plus a default same-family heuristic (`model_fallback_family`, default on: an unrouted `claude-opus-5` falls back to the highest configured `claude-opus-*` version below it) substitutes a served model for an unconfigured requested one BEFORE the allow-list check — a key allowed only the requested name is denied, never silently downgraded. A configured model whose upstream 404s (or Bedrock 400s `ValidationException`) also crosses to the fallback model within the existing priority-fallback loop; the ingress re-checks RBAC on that cross-model target (`router.FilterModelAllowed`) since it was appended after the original allow-list check. Either path sets `x-inferplane-model-fallback: <served model>` on the response (independent of the existing per-provider `x-inferplane-fallback: <provider>`).
 
 ### 4. Code Pointers
 - `internal/server/anthropicapi/messages.go` — Messages handler, streaming tee, cardinality-safe labels
@@ -48,7 +49,7 @@ contract is in [docs/api-reference.md](../api-reference.md).
 
 ### 5. Cross-references
 - Related modules: `internal/router`, `internal/governance`, `internal/alert`, `internal/bodystore`, `providers/`
-- Related ADRs: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md
+- Related ADRs: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md
 - Related runbooks: docs/runbooks/, docs/runbooks/cli-login.md
 
 <a id="korean"></a>
@@ -88,6 +89,7 @@ HTTP 표면입니다. 두 인그레스(Anthropic Messages, OpenAI Chat Completio
 - `count_tokens`는 항상 200 반환 — 비-200은 Claude Code를 크래시시킴 (여기서도 alias를 canonical로 정규화, ADR-021).
 - 프로토콜 일치 시 본문 verbatim 전달, 불일치 시에만 canonical 변환. 모델 **alias**(config `models.<name>.aliases`, ADR-021)는 RBAC/라우팅/감사/메트릭 이전에 canonical로 정규화; anthropic verbatim 경로의 유일한 본문 변경은 캐시 안전 top-level `model` 재작성(nested `cache_control` 보존, HTML 이스케이프 off).
 - 오류는 인그레스 프로토콜 고유의 오류 형태로 반환; 미등록/미허용 모델 메시지는 allow-필터된 사용 가능 모델 목록을 덧붙임 (ADR-021).
+- **모델 단위 폴백 (ADR-029, D5).** `model_fallbacks`(config, 요청 모델 → 서빙 모델, 1홉)와 기본 동일 패밀리 휴리스틱(`model_fallback_family`, 기본 켜짐: 미설정 `claude-opus-5`는 그 아래로 설정된 가장 높은 `claude-opus-*` 버전으로 폴백)은 allow-list 검사 **이전에** 미설정 요청 모델을 서빙 모델로 치환 — 요청한 이름만 허용된 키는 거부되며, 절대 조용히 다운그레이드되지 않음. 설정된 모델이라도 업스트림이 404(또는 Bedrock 400 `ValidationException`)를 반환하면 기존 우선순위 폴백 루프 내에서 폴백 모델로 전환; 이 크로스-모델 타깃은 원래 allow-list 검사 이후에 추가되었으므로 인그레스가 RBAC를 재검증(`router.FilterModelAllowed`)함. 두 경로 모두 응답에 `x-inferplane-model-fallback: <서빙 모델>`을 설정(기존 프로바이더 단위 `x-inferplane-fallback: <provider>`와 독립적).
 
 ### 4. 코드 포인터
 - `internal/server/anthropicapi/messages.go` — Messages 핸들러, 스트리밍 tee, 카디널리티 안전 레이블
@@ -96,5 +98,5 @@ HTTP 표면입니다. 두 인그레스(Anthropic Messages, OpenAI Chat Completio
 
 ### 5. 상호 참조
 - 관련 모듈: `internal/router`, `internal/governance`, `internal/alert`, `internal/bodystore`, `providers/`
-- 관련 ADR: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md
+- 관련 ADR: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md
 - 관련 런북: docs/runbooks/, docs/runbooks/cli-login.md

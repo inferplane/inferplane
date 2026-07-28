@@ -83,6 +83,23 @@ func (upstreamErrProvider) Stream(context.Context, *providers.ProxyRequest) (ite
 	return nil, errors.New("unused")
 }
 
+// statusProvider always answers Complete with a fixed status/body and no
+// error — for the D5 cross-model-fallback-on-404 test below. Name() is
+// "mock" so it passes the servesBedrockIngress filter (test-only allowance).
+type statusProvider struct {
+	code int
+	body []byte
+}
+
+func (statusProvider) Name() string               { return "mock" }
+func (statusProvider) Models() []schema.ModelInfo { return nil }
+func (p statusProvider) Complete(context.Context, *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+	return &providers.ProxyResponse{StatusCode: p.code, RawBody: p.body}, nil
+}
+func (statusProvider) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
+	return nil, nil
+}
+
 func invokeReq(modelID, body string) *http.Request {
 	req := httptest.NewRequest("POST", "/model/"+modelID+"/invoke", strings.NewReader(body))
 	req.SetPathValue("modelId", modelID)
@@ -204,6 +221,34 @@ func TestInvokeNonBedrockTargetFiltered404(t *testing.T) {
 	handler.ServeHTTP(rec, allowAll(invokeReq("claude-x", `{"messages":[]}`)))
 	if rec.Code != 404 {
 		t.Fatalf("non-bedrock-only model must 404 on the bedrock ingress, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// D5: a configured model whose upstream rejects it as unknown (404) crosses
+// to the model_fallbacks target, mirroring anthropicapi's
+// TestMessagesModelFallbackCrossesOnUpstream404 — the pre-existing gap
+// (nothing exercised bedrockapi's fallback loop) closes with the same test.
+func TestInvokeModelFallbackCrossesOnUpstream404(t *testing.T) {
+	provs := map[string]providers.Provider{
+		"bad":  statusProvider{code: 404, body: []byte(`{"message":"model not found"}`)},
+		"good": &captureProvider{},
+	}
+	models := map[string]config.ModelConfig{
+		"claude-x":          {Targets: []config.Target{{Provider: "bad", Model: "claude-x-up"}}},
+		"claude-x-fallback": {Targets: []config.Target{{Provider: "good", Model: "claude-x-fallback-up"}}},
+	}
+	h := holderForWithFallbacks(provs, models, map[string]string{"claude-x": "claude-x-fallback"})
+	handler := NewInvokeHandler(router.New(h), h, false)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, allowAll(invokeReq("claude-x", `{"messages":[{"role":"user","content":"hi"}]}`)))
+	if rec.Code != 200 {
+		t.Fatalf("cross-model fallback on upstream 404 should yield 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"msg_capture"`) {
+		t.Fatalf("body missing fallback model's response: %s", rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Inferplane-Model-Fallback"); got != "claude-x-fallback" {
+		t.Fatalf("x-inferplane-model-fallback = %q, want %q", got, "claude-x-fallback")
 	}
 }
 
