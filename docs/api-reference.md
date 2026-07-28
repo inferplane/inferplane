@@ -95,6 +95,7 @@ inferplane keys   create --team <t> --models <csv> --store <path>
 inferplane keys   list   --store <path>
 inferplane keys   revoke --id <key_id> --store <path>
 inferplane audit  verify --file <path>
+inferplane pricing check --config <path>                                  # ADR-030, CI guard: exit 1 if any route has no rate
 inferplane login  --gateway <url> [--team <t>] [--id-token-command <cmd>]  # ADR-028
 inferplane token  [--export] [--raw]                                      # ADR-028, meant to run as apiKeyHelper
 inferplane logout                                                         # ADR-028

@@ -23,7 +23,7 @@ Architecture overview: [docs/architecture.md](docs/architecture.md).
 ## Project Structure
 
 ```
-cmd/inferplane/    - Binary entrypoint: serve / keys / audit / report / login / token / logout subcommands
+cmd/inferplane/    - Binary entrypoint: serve / keys / audit / report / pricing / login / token / logout subcommands
 internal/          - Private packages (gateway internals)
   server/          - HTTP data plane + admin plane, ingress handlers
   router/          - Model→provider resolution, fallback chain, circuit breaker
@@ -81,6 +81,9 @@ go run ./cmd/inferplane serve --config examples/config.json
 go run ./cmd/inferplane keys create --team demo --models '*' --store keys.db
 go run ./cmd/inferplane audit verify --file audit.jsonl
 go run ./cmd/inferplane report --file audit.jsonl --by team,model
+
+# Verify every configured model has a pricing rate (ADR-030 CI guard; exit 1 if not)
+INFERPLANE_ADMIN_TOKEN=lint go run ./cmd/inferplane pricing check --config examples/config.json
 
 # Harness tests (hooks/structure)
 bash tests/run-all.sh

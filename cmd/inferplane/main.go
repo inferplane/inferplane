@@ -46,6 +46,8 @@ func main() {
 		os.Exit(bodiesCmd(os.Args[2:]))
 	case "report":
 		os.Exit(reportCmd(os.Args[2:]))
+	case "pricing":
+		os.Exit(pricingCmd(os.Args[2:]))
 	case "login":
 		if err := loginCmd(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -74,6 +76,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  inferplane audit verify --file <path>")
 	fmt.Fprintln(os.Stderr, "  inferplane bodies rewrap-key --store <path> --old-key-env <VAR>|--old-key-file <path> --new-key-env <VAR>|--new-key-file <path>")
 	fmt.Fprintln(os.Stderr, "  inferplane report --file <path> [--since <RFC3339>] [--until <RFC3339>] [--by team|team,model]")
+	fmt.Fprintln(os.Stderr, "  inferplane pricing check --config <path>")
 	fmt.Fprintln(os.Stderr, "  inferplane login --gateway <url> [--team <t>] [--issuer <url> --client-id <id>] [--id-token-command <cmd>]")
 	fmt.Fprintln(os.Stderr, "  inferplane token [--export] [--raw]")
 	fmt.Fprintln(os.Stderr, "  inferplane logout")

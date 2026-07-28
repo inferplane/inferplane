@@ -466,3 +466,9 @@ func pricingFromConfig(cfg *config.Config) *pricing.Table {
 	}
 	return pricing.FromConfigVersioned(cfg.Pricing.OnMissing, cfg.Pricing.Version, overrides)
 }
+
+// PricingTableFor builds the rate table this config would run with, without
+// constructing providers. Exported so `inferplane pricing check` reports against
+// exactly the table BuildState validates — including the derived cache rates and
+// the Bedrock region-prefix fallback — rather than reimplementing the assembly.
+func PricingTableFor(cfg *config.Config) *pricing.Table { return pricingFromConfig(cfg) }
