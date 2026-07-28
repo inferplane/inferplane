@@ -394,9 +394,18 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 			return partialFinish()
 		}
 		flusher.Flush()
+		// FOLD every usage-bearing frame rather than overwriting (ADR-030) —
+		// the InvokeModel passthrough preserves Anthropic's frame vocabulary,
+		// so input and cache counts ride message_start's nested message.usage
+		// while message_delta commonly carries output alone.
+		if ev.Chunk.Message != nil && ev.Chunk.Message.Usage != nil {
+			lastUsage = schema.MergeUsage(lastUsage, ev.Chunk.Message.Usage)
+		}
 		if ev.Chunk.Usage != nil {
-			usage = usageRef(ev.Chunk.Usage)
-			lastUsage = ev.Chunk.Usage
+			lastUsage = schema.MergeUsage(lastUsage, ev.Chunk.Usage)
+		}
+		if lastUsage != nil {
+			usage = usageRef(lastUsage)
 		}
 	}
 
@@ -413,15 +422,20 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	return false
 }
 
+// settle runs the Governor's post-call settlement. Cache writes are TTL-tiered
+// via schema.Usage.CacheWriteTiers (ADR-030) — 1h writes cost 2x the input rate
+// against 5m's 1.25x, so collapsing them under-bills.
 func (h *InvokeHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table) *audit.CostRef {
 	if h.gov == nil || u == nil {
 		return nil
 	}
+	write5m, write1h := u.CacheWriteTiers()
 	pu := pricing.Usage{
 		Input:        deref(u.InputTokens),
 		Output:       deref(u.OutputTokens),
 		CacheRead:    deref(u.CacheReadInputTokens),
-		CacheWrite5m: deref(u.CacheCreationInputTokens),
+		CacheWrite5m: write5m,
+		CacheWrite1h: write1h,
 	}
 	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table)
 	return &audit.CostRef{
@@ -445,14 +459,18 @@ func estimateTokens(raw []byte) int64 {
 	return n
 }
 
+// observeTokens mirrors settle()'s mapping, including the cache-write TTL split
+// (ADR-030), so the metrics and the billed amount can't disagree.
 func (h *InvokeHandler) observeTokens(model, provider, team string, u *schema.Usage) {
 	if u == nil {
 		return
 	}
+	write5m, write1h := u.CacheWriteTiers()
 	h.metrics.ObserveTokenUsage("input", model, provider, team, deref(u.InputTokens))
 	h.metrics.ObserveTokenUsage("output", model, provider, team, deref(u.OutputTokens))
 	h.metrics.ObserveTokenUsage("cache_read", model, provider, team, deref(u.CacheReadInputTokens))
-	h.metrics.ObserveTokenUsage("cache_write_5m", model, provider, team, deref(u.CacheCreationInputTokens))
+	h.metrics.ObserveTokenUsage("cache_write_5m", model, provider, team, write5m)
+	h.metrics.ObserveTokenUsage("cache_write_1h", model, provider, team, write1h)
 }
 
 func copyUpstreamHeaders(dst http.Header, src http.Header) {

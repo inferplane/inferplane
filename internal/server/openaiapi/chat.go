@@ -424,9 +424,18 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 			}
 		}
 		flusher.Flush()
-		if ev.Chunk != nil && ev.Chunk.Usage != nil {
-			usage = usageRef(ev.Chunk.Usage)
-			lastUsage = ev.Chunk.Usage
+		// FOLD every usage-bearing frame rather than overwriting (ADR-030).
+		// The canonical stream keeps Anthropic's frame vocabulary, so the
+		// input and cache counts arrive on message_start (nested under
+		// message.usage) while message_delta commonly carries output alone.
+		if ev.Chunk != nil {
+			if ev.Chunk.Message != nil && ev.Chunk.Message.Usage != nil {
+				lastUsage = schema.MergeUsage(lastUsage, ev.Chunk.Message.Usage)
+			}
+			if ev.Chunk.Usage != nil {
+				lastUsage = schema.MergeUsage(lastUsage, ev.Chunk.Usage)
+			}
+			usage = usageRef(lastUsage)
 		}
 	}
 	if !openaiWire {
@@ -477,16 +486,19 @@ func govErrType(status int) string {
 // settle maps observed schema.Usage to pricing.Usage and runs the Governor's
 // post-call settlement (quota debit + cost + budget debit), returning the audit
 // CostRef. nil when governance is disabled or there is no usage. The cost key is
-// (providerName, upstream-model) to match the pricing table.
+// (providerName, upstream-model) to match the pricing table. Cache writes are
+// TTL-tiered via schema.Usage.CacheWriteTiers (ADR-030).
 func (h *ChatHandler) settle(p keystore.Principal, providerName, upstream string, u *schema.Usage, table *pricing.Table) *audit.CostRef {
 	if h.gov == nil || u == nil {
 		return nil
 	}
+	write5m, write1h := u.CacheWriteTiers()
 	pu := pricing.Usage{
 		Input:        deref(u.InputTokens),
 		Output:       deref(u.OutputTokens),
 		CacheRead:    deref(u.CacheReadInputTokens),
-		CacheWrite5m: deref(u.CacheCreationInputTokens),
+		CacheWrite5m: write5m,
+		CacheWrite1h: write1h,
 	}
 	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table)
 	return &audit.CostRef{
@@ -511,10 +523,12 @@ func (h *ChatHandler) observeTokens(model, provider, team string, u *schema.Usag
 	if u == nil {
 		return
 	}
+	write5m, write1h := u.CacheWriteTiers()
 	h.metrics.ObserveTokenUsage("input", model, provider, team, deref(u.InputTokens))
 	h.metrics.ObserveTokenUsage("output", model, provider, team, deref(u.OutputTokens))
 	h.metrics.ObserveTokenUsage("cache_read", model, provider, team, deref(u.CacheReadInputTokens))
-	h.metrics.ObserveTokenUsage("cache_write_5m", model, provider, team, deref(u.CacheCreationInputTokens))
+	h.metrics.ObserveTokenUsage("cache_write_5m", model, provider, team, write5m)
+	h.metrics.ObserveTokenUsage("cache_write_1h", model, provider, team, write1h)
 }
 
 // estimateTokens is the conservative input-token estimate fed to the governance

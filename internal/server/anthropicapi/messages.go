@@ -471,10 +471,20 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 		}
 		w.Write(ev.Raw) // tee original bytes verbatim
 		flusher.Flush()
-		// ev.Chunk.Usage on message_delta is the settlement observation point (M3/M5).
-		if ev.Chunk != nil && ev.Chunk.Usage != nil {
-			usage = usageRef(ev.Chunk.Usage)
-			lastUsage = ev.Chunk.Usage
+		// Settlement observation: FOLD every usage-bearing frame, never
+		// overwrite (ADR-030). Anthropic splits the counts across two frames —
+		// message_start carries input + cache_read + cache_creation nested
+		// under message.usage, while message_delta commonly carries
+		// output_tokens alone. Reading only the top-level usage of the last
+		// frame billed streaming requests for output tokens only.
+		if ev.Chunk != nil {
+			if ev.Chunk.Message != nil && ev.Chunk.Message.Usage != nil {
+				lastUsage = schema.MergeUsage(lastUsage, ev.Chunk.Message.Usage)
+			}
+			if ev.Chunk.Usage != nil {
+				lastUsage = schema.MergeUsage(lastUsage, ev.Chunk.Usage)
+			}
+			usage = usageRef(lastUsage)
 		}
 	}
 	cost := h.settle(p, providerName, model, upstream, lastUsage, table)
@@ -498,18 +508,21 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 // Governor's post-call settlement (quota debit + cost + budget debit), returning
 // the audit CostRef. nil when governance is disabled or there is no usage.
 //
-// M5 mapping notes: schema does not yet split cache_creation by TTL, so the
-// whole cache_creation_input_tokens total maps to CacheWrite5m as a
-// conservative default (the cheaper 5m tier); cache_read maps to CacheRead.
+// Cache writes are TTL-tiered (1h costs 2x the input rate, 5m costs 1.25x), so
+// the two tiers are resolved separately via schema.Usage.CacheWriteTiers rather
+// than collapsed into the cheaper one (ADR-030 — the collapse under-billed 1h
+// writes by ~40%).
 func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table) *audit.CostRef {
 	if h.gov == nil || u == nil {
 		return nil
 	}
+	write5m, write1h := u.CacheWriteTiers()
 	pu := pricing.Usage{
 		Input:        deref(u.InputTokens),
 		Output:       deref(u.OutputTokens),
 		CacheRead:    deref(u.CacheReadInputTokens),
-		CacheWrite5m: deref(u.CacheCreationInputTokens),
+		CacheWrite5m: write5m,
+		CacheWrite1h: write1h,
 	}
 	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table)
 	return &audit.CostRef{
@@ -527,17 +540,20 @@ func keyPolicyOf(p keystore.Principal) governance.KeyPolicy {
 }
 
 // observeTokens records the per-type token usage counters for one settled
-// request. Mirrors the settle() mapping (cache_creation → cache_write_5m). The
-// provider arg is the CONFIG provider name (pricing/metrics key), matching the
-// request metric labels. No-op when usage is nil or metrics is nil.
+// request. Mirrors the settle() mapping, including the cache-write TTL split
+// (ADR-030) so the metrics and the billed amount can't disagree. The provider
+// arg is the CONFIG provider name (pricing/metrics key), matching the request
+// metric labels. No-op when usage is nil or metrics is nil.
 func (h *MessagesHandler) observeTokens(model, provider, team string, u *schema.Usage) {
 	if u == nil {
 		return
 	}
+	write5m, write1h := u.CacheWriteTiers()
 	h.metrics.ObserveTokenUsage("input", model, provider, team, deref(u.InputTokens))
 	h.metrics.ObserveTokenUsage("output", model, provider, team, deref(u.OutputTokens))
 	h.metrics.ObserveTokenUsage("cache_read", model, provider, team, deref(u.CacheReadInputTokens))
-	h.metrics.ObserveTokenUsage("cache_write_5m", model, provider, team, deref(u.CacheCreationInputTokens))
+	h.metrics.ObserveTokenUsage("cache_write_5m", model, provider, team, write5m)
+	h.metrics.ObserveTokenUsage("cache_write_1h", model, provider, team, write1h)
 }
 
 // copyUpstreamHeaders tees upstream response headers to the client, skipping

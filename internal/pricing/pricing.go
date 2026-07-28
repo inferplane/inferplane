@@ -5,7 +5,10 @@
 // cache read is billed separately.
 package pricing
 
-import "math/big"
+import (
+	"math/big"
+	"strings"
+)
 
 type Key struct {
 	Provider string
@@ -51,12 +54,60 @@ func New(onMissing OnMissing, rates map[Key]Rate) *Table {
 
 func (t *Table) OnMissing() OnMissing { return t.onMissing }
 
+// bedrockRegionPrefixes are Bedrock cross-region inference-profile prefixes.
+// `global.anthropic.claude-opus-5` and `us.anthropic.claude-opus-5` are the
+// same model reached through different routing, and AWS publishes no
+// cross-region price differential — so one rate row must cover all of them
+// rather than each prefix needing its own (ADR-030). Without this, a config
+// that priced `anthropic.claude-opus-5` billed every `global.`-prefixed
+// request at zero.
+//
+// This is deliberately the ONLY normalization: model VERSIONS are never
+// collapsed. Opus 4.6/4.7/4.8/5 all cost $5/$25 today, but that is a property
+// of the current table and not a guarantee — silently billing a new model at
+// an old model's rate is the same class of bug as billing it at zero.
+var bedrockRegionPrefixes = []string{"global.", "us.", "eu.", "apac.", "us-gov."}
+
+// normalizeModel strips a single leading Bedrock cross-region prefix, or
+// returns "" when there is none to strip.
+func normalizeModel(model string) string {
+	for _, p := range bedrockRegionPrefixes {
+		if strings.HasPrefix(model, p) {
+			return model[len(p):]
+		}
+	}
+	return ""
+}
+
+// HasRate reports whether a rate exists for this (provider, model), following
+// the same two-stage lookup CostUSDMicros uses. This is the single predicate
+// behind boot-time validation and `inferplane pricing check`, so neither can
+// drift from what actually gets billed.
+func (t *Table) HasRate(provider, model string) bool {
+	if _, ok := t.rates[Key{provider, model}]; ok {
+		return true
+	}
+	if base := normalizeModel(model); base != "" {
+		_, ok := t.rates[Key{provider, base}]
+		return ok
+	}
+	return false
+}
+
 // CostUSDMicros returns the request cost in µUSD and whether the (provider,
 // model) rate was missing. Cost sums each token class rounded independently
 // (round-half-even on the /1e6 division), computed once over the full token
-// totals — never per-chunk.
+// totals — never per-chunk. Lookup is exact-match first, then retried with a
+// Bedrock cross-region prefix stripped (see bedrockRegionPrefixes).
 func (t *Table) CostUSDMicros(provider, model string, u Usage) (cost int64, missing bool) {
 	r, ok := t.rates[Key{provider, model}]
+	if !ok {
+		// Exact match wins, so a per-prefix special rate stays declarable;
+		// only fall back to the region-stripped id.
+		if base := normalizeModel(model); base != "" {
+			r, ok = t.rates[Key{provider, base}]
+		}
+	}
 	if !ok {
 		return 0, true
 	}
