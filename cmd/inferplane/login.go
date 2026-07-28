@@ -16,6 +16,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -425,7 +426,10 @@ func waitForCallback(ctx context.Context, ln net.Listener, wantState string) (st
 
 func writeCallbackPage(w http.ResponseWriter, title, msg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, "<!doctype html><html><body><h3>%s</h3><p>%s</p></body></html>", title, msg)
+	// msg can carry IdP-supplied query params (error/error_description) — escape
+	// both so a metacharacter in them can never become markup.
+	fmt.Fprintf(w, "<!doctype html><html><body><h3>%s</h3><p>%s</p></body></html>",
+		html.EscapeString(title), html.EscapeString(msg))
 }
 
 // openBrowser shells out to the platform opener. Failure is never fatal — the

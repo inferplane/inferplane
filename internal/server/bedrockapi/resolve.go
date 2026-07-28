@@ -13,10 +13,14 @@ func servesBedrockIngress(name string) bool {
 	return name == "bedrock" || name == "mock"
 }
 
-func resolveModel(r *router.Router, holder *live.Holder, urlID string) (string, bool) {
+// resolveModel returns the model to serve, whether that model SUBSTITUTES for
+// the requested one (D5 model-level fallback — the caller must then set
+// x-inferplane-model-fallback, same as the Anthropic/OpenAI ingresses do with
+// router.ResolveModel), and whether it resolved at all.
+func resolveModel(r *router.Router, holder *live.Holder, urlID string) (string, bool, bool) {
 	canonical := r.Canonical(urlID)
 	if _, _, err := r.ResolveChain(canonical); err == nil {
-		return canonical, true
+		return canonical, false, true
 	}
 
 	st := holder.Load()
@@ -26,7 +30,7 @@ func resolveModel(r *router.Router, holder *live.Holder, urlID string) (string, 
 	// same as the Anthropic/OpenAI ingresses (router.ResolveModel).
 	if fb := st.FallbackFor(canonical); fb != "" {
 		if _, ok := st.Route(fb); ok {
-			return fb, true
+			return fb, true, true
 		}
 	}
 
@@ -43,10 +47,11 @@ func resolveModel(r *router.Router, holder *live.Holder, urlID string) (string, 
 				continue
 			}
 			prov, ok := st.Provider(target.Provider)
+			// Not a substitution: urlID is this model's own upstream id.
 			if ok && servesBedrockIngress(prov.Name()) {
-				return name, true
+				return name, false, true
 			}
 		}
 	}
-	return "", false
+	return "", false, false
 }

@@ -599,3 +599,18 @@ func newFakeGatewayWithIssuer(t *testing.T, issuer, clientID string) *fakeGatewa
 	t.Cleanup(gw.srv.Close)
 	return gw
 }
+
+// The callback page renders IdP-supplied query params (error/error_description),
+// so both fields must be HTML-escaped — otherwise a metacharacter in an IdP
+// error message becomes markup in the developer's browser.
+func TestWriteCallbackPageEscapesHTML(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeCallbackPage(rec, "<b>t</b>", `access_denied: <script>alert(1)</script>`)
+	body := rec.Body.String()
+	if strings.Contains(body, "<script>") || strings.Contains(body, "<b>") {
+		t.Fatalf("callback page rendered raw markup: %s", body)
+	}
+	if !strings.Contains(body, "&lt;script&gt;") {
+		t.Fatalf("callback page did not escape the message: %s", body)
+	}
+}

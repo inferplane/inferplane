@@ -78,7 +78,10 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	_ = json.Unmarshal(raw, &parsed)
 
 	urlID := req.PathValue("modelId")
-	model, resolved := resolveModel(h.r, h.holder, urlID)
+	model, substituted, resolved := resolveModel(h.r, h.holder, urlID)
+	if substituted {
+		w.Header().Set("x-inferplane-model-fallback", model)
+	}
 
 	tctx := tracing.Extract(req.Context(), req.Header)
 	tctx, span := tracing.Start(tctx, "invoke "+model)

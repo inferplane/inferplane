@@ -28,7 +28,10 @@ func TestResolveModelCanonicalName(t *testing.T) {
 	}
 	h := holderFor(provs, models)
 	r := router.New(h)
-	got, ok := resolveModel(r, h, "claude-x")
+	got, sub, ok := resolveModel(r, h, "claude-x")
+	if sub {
+		t.Fatalf("canonical name is not a substitution")
+	}
 	if !ok || got != "claude-x" {
 		t.Fatalf("canonical-name resolution failed: %q %v", got, ok)
 	}
@@ -43,7 +46,10 @@ func TestResolveModelReverseScanByUpstreamID(t *testing.T) {
 	}
 	h := holderFor(provs, models)
 	r := router.New(h)
-	got, ok := resolveModel(r, h, "global.anthropic.claude-x-v1:0")
+	got, sub, ok := resolveModel(r, h, "global.anthropic.claude-x-v1:0")
+	if sub {
+		t.Fatalf("upstream-id match is not a substitution")
+	}
 	if !ok || got != "claude-x" {
 		t.Fatalf("reverse scan failed: %q %v", got, ok)
 	}
@@ -60,7 +66,7 @@ func TestResolveModelReverseScanDeterministic(t *testing.T) {
 	h := holderFor(provs, models)
 	r := router.New(h)
 	for i := 0; i < 20; i++ {
-		got, ok := resolveModel(r, h, "shared.upstream.id-v1:0")
+		got, _, ok := resolveModel(r, h, "shared.upstream.id-v1:0")
 		if !ok || got != "a-model" {
 			t.Fatalf("iteration %d: want deterministic sorted-first winner \"a-model\", got %q %v", i, got, ok)
 		}
@@ -89,9 +95,9 @@ func TestResolveModelFallsBackToConfiguredFallback(t *testing.T) {
 	}
 	h := holderForWithFallbacks(provs, models, map[string]string{"claude-opus-5": "claude-opus-4-8"})
 	r := router.New(h)
-	got, ok := resolveModel(r, h, "claude-opus-5")
-	if !ok || got != "claude-opus-4-8" {
-		t.Fatalf("fallback resolution failed: %q %v, want claude-opus-4-8", got, ok)
+	got, sub, ok := resolveModel(r, h, "claude-opus-5")
+	if !ok || got != "claude-opus-4-8" || !sub {
+		t.Fatalf("fallback resolution failed: %q ok=%v substituted=%v, want claude-opus-4-8 substituted", got, ok, sub)
 	}
 }
 
@@ -102,7 +108,7 @@ func TestResolveModelUnknown(t *testing.T) {
 	}
 	h := holderFor(provs, models)
 	r := router.New(h)
-	if got, ok := resolveModel(r, h, "never-registered"); ok {
+	if got, _, ok := resolveModel(r, h, "never-registered"); ok {
 		t.Fatalf("unknown id must not resolve, got %q", got)
 	}
 }
