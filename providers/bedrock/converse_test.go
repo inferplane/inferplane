@@ -481,3 +481,76 @@ func TestStreamConverseToolUse(t *testing.T) {
 		t.Fatalf("expected the tool_use block's start/delta/delta/stop to share index 1: %s", s)
 	}
 }
+
+// ADR-030: Bedrock reports prompt-cache counts SEPARATELY from InputTokens.
+// Dropping them billed every cache read/write at zero on the Converse path
+// while the InvokeModel passthrough billed them correctly — the same model
+// costing different amounts depending on the API mode.
+func TestUsageWithCache(t *testing.T) {
+	t.Run("no cache keeps the pre-cache shape", func(t *testing.T) {
+		u := usageWithCache(10, 5, 0, 0, 0, 0)
+		if u.CacheReadInputTokens != nil || u.CacheCreation != nil || u.CacheCreationInputTokens != nil {
+			t.Fatalf("zero counts must stay nil so the JSON is unchanged: %+v", u)
+		}
+	})
+
+	t.Run("TTL breakdown maps to the split fields", func(t *testing.T) {
+		u := usageWithCache(10, 5, 40, 20, 4, 24)
+		if u.CacheReadInputTokens == nil || *u.CacheReadInputTokens != 40 {
+			t.Errorf("cache_read: %+v", u.CacheReadInputTokens)
+		}
+		if u.CacheCreation == nil {
+			t.Fatal("cache_creation split missing")
+		}
+		if got := u.CacheCreation.Ephemeral5mInputTokens; got == nil || *got != 20 {
+			t.Errorf("5m tier: %+v", got)
+		}
+		if got := u.CacheCreation.Ephemeral1hInputTokens; got == nil || *got != 4 {
+			t.Errorf("1h tier: %+v", got)
+		}
+		// The untiered total must NOT also be set, or the settlement path would
+		// see both shapes and could double-count.
+		if u.CacheCreationInputTokens != nil {
+			t.Errorf("flat total must be omitted when the split is present: %+v", u.CacheCreationInputTokens)
+		}
+	})
+
+	t.Run("untiered total is the fallback", func(t *testing.T) {
+		u := usageWithCache(10, 5, 0, 0, 0, 24)
+		if u.CacheCreation != nil {
+			t.Error("no split available, so cache_creation must stay nil")
+		}
+		if got := u.CacheCreationInputTokens; got == nil || *got != 24 {
+			t.Errorf("flat total: %+v", got)
+		}
+	})
+
+	// The resolved tiers must round-trip through the settlement helper the
+	// ingress handlers actually call.
+	t.Run("round-trips through CacheWriteTiers", func(t *testing.T) {
+		u := usageWithCache(10, 5, 40, 20, 4, 24)
+		w5, w1h := u.CacheWriteTiers()
+		if w5 != 20 || w1h != 4 {
+			t.Fatalf("CacheWriteTiers = (%d, %d), want (20, 4)", w5, w1h)
+		}
+	})
+}
+
+func TestCacheWriteTiers_splitsByTTL(t *testing.T) {
+	in5m, in1h := int32(20), int32(4)
+	w5, w1h := cacheWriteTiers([]brtypes.CacheDetail{
+		{InputTokens: &in5m, Ttl: brtypes.CacheTTLFiveMinutes},
+		{InputTokens: &in1h, Ttl: brtypes.CacheTTLOneHour},
+	})
+	if w5 != 20 || w1h != 4 {
+		t.Fatalf("got (%d, %d), want (20, 4)", w5, w1h)
+	}
+
+	// An unrecognized TTL lands on the cheaper tier so a new TTL can never
+	// over-bill.
+	unknown := int32(7)
+	w5, w1h = cacheWriteTiers([]brtypes.CacheDetail{{InputTokens: &unknown, Ttl: brtypes.CacheTTL("99h")}})
+	if w5 != 7 || w1h != 0 {
+		t.Fatalf("unknown TTL: got (%d, %d), want (7, 0)", w5, w1h)
+	}
+}

@@ -2,6 +2,7 @@
 package bedrockapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -77,7 +78,10 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	_ = json.Unmarshal(raw, &parsed)
 
 	urlID := req.PathValue("modelId")
-	model, resolved := resolveModel(h.r, h.holder, urlID)
+	model, substituted, resolved := resolveModel(h.r, h.holder, urlID)
+	if substituted {
+		w.Header().Set("x-inferplane-model-fallback", model)
+	}
 
 	tctx := tracing.Extract(req.Context(), req.Header)
 	tctx, span := tracing.Start(tctx, "invoke "+model)
@@ -115,6 +119,11 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeErr(w, http.StatusNotFound, "model not found")
 		return
 	}
+	// ResolveChain may have appended a cross-model fallback's targets (D5)
+	// AFTER the allow-list check above already ran against `model` alone —
+	// re-check those targets' model or a key allowed only `model` would
+	// silently reach the fallback model.
+	chain = router.FilterModelAllowed(chain, func(m string) bool { return h.r.Allows(p, m) })
 	filtered := make([]router.ChainTarget, 0, len(chain))
 	for _, ct := range chain {
 		if servesBedrockIngress(ct.Provider.Name()) {
@@ -175,6 +184,19 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	table := st.Pricing()
+	// Pricing guard (ADR-030): with pricing.on_missing "block", refuse a
+	// request whose resolved targets have no rate rather than serving it and
+	// billing 0. Covers the routes boot validation cannot see (UI-write
+	// models, fallback-appended targets). Same table used to settle below.
+	// NOT gated on h.gov: on_missing "block" is a pricing setting, and a
+	// deployment with governance off would otherwise serve unpriced traffic free.
+	if dec := governance.PricingGuard(table, pricedTargets(chain)); !dec.Allowed {
+		h.audit(p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, false, traceID)
+		h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
+		tracing.SetStatus(span, false, "pricing missing")
+		writeErr(w, dec.Status, dec.Reason)
+		return
+	}
 	if h.gov != nil {
 		dec := h.gov.PreCheck(p.Team, p.KeyID, keyPolicyOf(p), estimateTokens(raw))
 		if !dec.Allowed {
@@ -192,31 +214,55 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		upHeaders := req.Header.Clone()
 		tracing.Inject(req.Context(), upHeaders)
 		pr := &providers.ProxyRequest{
-			Model: model, Upstream: ct.Upstream, Parsed: &parsed,
+			Model: ct.Model, Upstream: ct.Upstream, Parsed: &parsed,
 			RawBody: raw, Headers: upHeaders, Stream: h.streaming,
 			IngressProtocol:  "bedrock",
 			GuardrailID:      teamRec.GuardrailID,
 			GuardrailVersion: teamRec.GuardrailVersion,
 		}
 		last := i == len(chain)-1
+		// crossModelNext: the next target (if any) serves a different model
+		// than this one — a D5 model-level fallback boundary, not just a
+		// different provider for the same model.
+		crossModelNext := !last && chain[i+1].Model != ct.Model
 		if i > 0 {
 			w.Header().Set("x-inferplane-fallback", ct.ProviderName)
+			if ct.Model != model {
+				w.Header().Set("x-inferplane-model-fallback", ct.Model)
+			}
 		}
 		var retriable bool
 		if h.streaming {
-			retriable = h.serveStream(w, req, ct.Provider, pr, p, model, ct.ProviderName, ct.Identity, ct.Upstream, last, start, table)
+			retriable = h.serveStream(w, req, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		} else {
-			retriable = h.serveComplete(w, req, ct.Provider, pr, p, model, ct.ProviderName, ct.Identity, ct.Upstream, last, start, table)
+			retriable = h.serveComplete(w, req, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		}
 		if !retriable {
 			return
 		}
 		h.r.RecordResult(ct.ProviderName, ct.Identity, false)
-		h.metrics.ObserveFallback(model, ct.ProviderName, chain[i+1].ProviderName, "upstream_error")
+		reason := "upstream_error"
+		if crossModelNext {
+			reason = "model_not_found"
+		}
+		h.metrics.ObserveFallback(ct.Model, ct.ProviderName, chain[i+1].ProviderName, reason)
 	}
 }
 
-func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last bool, start time.Time, table *pricing.Table) (retriable bool) {
+// isModelNotFound reports whether an upstream response looks like a "model
+// not found" rejection rather than an unrelated client error — a plain 404,
+// or a 400 whose body names a Bedrock ValidationException (Bedrock's actual
+// shape for a model not enabled/available in that region). Deliberately
+// narrow: only these are ever retried across a D5 model-level fallback
+// boundary; any other 4xx stays a client error.
+func isModelNotFound(statusCode int, body []byte) bool {
+	if statusCode == http.StatusNotFound {
+		return true
+	}
+	return statusCode == http.StatusBadRequest && bytes.Contains(body, []byte("ValidationException"))
+}
+
+func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last {
@@ -246,7 +292,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusBadGateway, time.Since(start).Seconds(), 0)
 		return false
 	}
-	if !last && (resp.StatusCode >= http.StatusInternalServerError || resp.StatusCode == http.StatusTooManyRequests) {
+	if !last && (resp.StatusCode >= http.StatusInternalServerError || resp.StatusCode == http.StatusTooManyRequests || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
 		return true
 	}
 	if resp.Headers != nil {
@@ -293,7 +339,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 	return false
 }
 
-func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last bool, start time.Time, table *pricing.Table) (retriable bool) {
+func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last {
@@ -341,7 +387,12 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		if writeExceptionFrame(w, enc, "internalServerException", "stream interrupted") == nil {
 			flusher.Flush()
 		}
-		h.auditCompletedPartial(p, model, upstream, usage, tracing.TraceID(req.Context()))
+		// Tokens already delivered to the client are real infrastructure
+		// cost — bill them (ADR-030). Before this, a stream that broke
+		// mid-flight skipped settle() entirely and everything already
+		// streamed was free, with no pricing_missing flag to show it.
+		partialCost := h.settle(p, providerName, model, upstream, lastUsage, table)
+		h.auditCompletedPartial(p, model, upstream, usage, partialCost, tracing.TraceID(req.Context()))
 		recordSpanResponse(req, prov.Name(), upstream, usage, true) // committed (partial)
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusOK, time.Since(start).Seconds(), ttft)
 		return false
@@ -364,9 +415,18 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 			return partialFinish()
 		}
 		flusher.Flush()
+		// FOLD every usage-bearing frame rather than overwriting (ADR-030) —
+		// the InvokeModel passthrough preserves Anthropic's frame vocabulary,
+		// so input and cache counts ride message_start's nested message.usage
+		// while message_delta commonly carries output alone.
+		if ev.Chunk.Message != nil && ev.Chunk.Message.Usage != nil {
+			lastUsage = schema.MergeUsage(lastUsage, ev.Chunk.Message.Usage)
+		}
 		if ev.Chunk.Usage != nil {
-			usage = usageRef(ev.Chunk.Usage)
-			lastUsage = ev.Chunk.Usage
+			lastUsage = schema.MergeUsage(lastUsage, ev.Chunk.Usage)
+		}
+		if lastUsage != nil {
+			usage = usageRef(lastUsage)
 		}
 	}
 
@@ -383,15 +443,20 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	return false
 }
 
+// settle runs the Governor's post-call settlement. Cache writes are TTL-tiered
+// via schema.Usage.CacheWriteTiers (ADR-030) — 1h writes cost 2x the input rate
+// against 5m's 1.25x, so collapsing them under-bills.
 func (h *InvokeHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table) *audit.CostRef {
 	if h.gov == nil || u == nil {
 		return nil
 	}
+	write5m, write1h := u.CacheWriteTiers()
 	pu := pricing.Usage{
 		Input:        deref(u.InputTokens),
 		Output:       deref(u.OutputTokens),
 		CacheRead:    deref(u.CacheReadInputTokens),
-		CacheWrite5m: deref(u.CacheCreationInputTokens),
+		CacheWrite5m: write5m,
+		CacheWrite1h: write1h,
 	}
 	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table)
 	return &audit.CostRef{
@@ -415,14 +480,18 @@ func estimateTokens(raw []byte) int64 {
 	return n
 }
 
+// observeTokens mirrors settle()'s mapping, including the cache-write TTL split
+// (ADR-030), so the metrics and the billed amount can't disagree.
 func (h *InvokeHandler) observeTokens(model, provider, team string, u *schema.Usage) {
 	if u == nil {
 		return
 	}
+	write5m, write1h := u.CacheWriteTiers()
 	h.metrics.ObserveTokenUsage("input", model, provider, team, deref(u.InputTokens))
 	h.metrics.ObserveTokenUsage("output", model, provider, team, deref(u.OutputTokens))
 	h.metrics.ObserveTokenUsage("cache_read", model, provider, team, deref(u.CacheReadInputTokens))
-	h.metrics.ObserveTokenUsage("cache_write_5m", model, provider, team, deref(u.CacheCreationInputTokens))
+	h.metrics.ObserveTokenUsage("cache_write_5m", model, provider, team, write5m)
+	h.metrics.ObserveTokenUsage("cache_write_1h", model, provider, team, write1h)
 }
 
 func copyUpstreamHeaders(dst http.Header, src http.Header) {
@@ -494,7 +563,7 @@ func (h *InvokeHandler) auditCompleted(id string, p keystore.Principal, model, u
 // auditCompletedPartial records a stream that broke mid-flight: status 200 was
 // already sent to the client, but the response is partial (mirrors
 // anthropicapi's helper of the same name).
-func (h *InvokeHandler) auditCompletedPartial(p keystore.Principal, model, upstream string, usage *audit.UsageRef, traceID string) {
+func (h *InvokeHandler) auditCompletedPartial(p keystore.Principal, model, upstream string, usage *audit.UsageRef, cost *audit.CostRef, traceID string) {
 	if h.aud == nil {
 		return
 	}
@@ -507,6 +576,7 @@ func (h *InvokeHandler) auditCompletedPartial(p keystore.Principal, model, upstr
 		Request:       audit.RequestRef{Ingress: "bedrock", ModelRequested: model, ModelResolved: upstream, Stream: h.streaming},
 		Outcome:       &audit.OutcomeRef{Status: 200, Partial: true},
 		Usage:         usage,
+		Cost:          cost,
 	}
 	if traceID != "" {
 		rec.TraceID = &traceID
@@ -647,4 +717,15 @@ func maskContent(content json.RawMessage, f filter.RequestFilter) (json.RawMessa
 	}
 	out, err := json.Marshal(blocks)
 	return out, total, err
+}
+
+// pricedTargets projects the resolved chain onto the (provider, upstream) pairs
+// the request could be billed against — the same key pricing.CostUSDMicros
+// uses — so the pricing guard checks exactly what settlement will look up.
+func pricedTargets(chain []router.ChainTarget) []governance.PricedTarget {
+	out := make([]governance.PricedTarget, 0, len(chain))
+	for _, ct := range chain {
+		out = append(out, governance.PricedTarget{Provider: ct.ProviderName, Upstream: ct.Upstream})
+	}
+	return out
 }

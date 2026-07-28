@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadResolvesSecretRef(t *testing.T) {
@@ -325,6 +326,77 @@ func TestOIDCConfigRejectsDuplicateGroupKeys(t *testing.T) {
 	  ]}`
 	if _, err := Load(writeOIDCConfig(t, block)); err == nil {
 		t.Fatal("duplicate group keys: want load error")
+	}
+}
+
+// ADR-028: `inferplane login` CLI. cli_login opts a data-plane endpoint into
+// trading a verified ID token for a short-lived gateway virtual key. Its
+// client_id must differ from the console's — the console's public client is
+// secretless and a shared client_id would let any local process complete a
+// code flow with the console's audience.
+
+func TestCLILoginConfigLoads(t *testing.T) {
+	block := `{"issuer": "https://idp.example.com", "client_id": "console-client",
+	  "cli_login": {"enabled": true, "client_id": "cli-client", "key_ttl": "1h"}}`
+	cfg, err := Load(writeOIDCConfig(t, block))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl := cfg.Server.AdminAuth.OIDC.CLILogin
+	if cl == nil || !cl.Enabled || cl.ClientID != "cli-client" || cl.KeyTTLDuration() != time.Hour {
+		t.Fatalf("cli_login: %+v", cl)
+	}
+}
+
+func TestCLILoginConfigAbsentIsNil(t *testing.T) {
+	cfg, err := Load(writeOIDCConfig(t, `{"issuer": "https://idp.example.com", "client_id": "x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.AdminAuth.OIDC.CLILogin != nil {
+		t.Fatal("cli_login must be nil when absent")
+	}
+}
+
+func TestCLILoginConfigDefaultsKeyTTL(t *testing.T) {
+	block := `{"issuer": "https://idp.example.com", "client_id": "console-client",
+	  "cli_login": {"enabled": true, "client_id": "cli-client"}}`
+	cfg, err := Load(writeOIDCConfig(t, block))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Server.AdminAuth.OIDC.CLILogin.KeyTTLDuration(); got != 8*time.Hour {
+		t.Fatalf("default key_ttl = %s, want 8h", got)
+	}
+}
+
+func TestCLILoginConfigRejectsMissingClientID(t *testing.T) {
+	block := `{"issuer": "https://idp.example.com", "client_id": "console-client",
+	  "cli_login": {"enabled": true}}`
+	if _, err := Load(writeOIDCConfig(t, block)); err == nil {
+		t.Fatal("cli_login without client_id: want load error")
+	}
+}
+
+func TestCLILoginConfigRejectsSameClientIDAsConsole(t *testing.T) {
+	block := `{"issuer": "https://idp.example.com", "client_id": "shared-client",
+	  "cli_login": {"enabled": true, "client_id": "shared-client"}}`
+	if _, err := Load(writeOIDCConfig(t, block)); err == nil {
+		t.Fatal("cli_login.client_id == oidc.client_id: want load error")
+	}
+}
+
+func TestCLILoginConfigRejectsOutOfRangeKeyTTL(t *testing.T) {
+	for name, ttl := range map[string]string{
+		"too short":  "1m",
+		"too long":   "48h",
+		"unparsable": "not-a-duration",
+	} {
+		block := `{"issuer": "https://idp.example.com", "client_id": "console-client",
+		  "cli_login": {"enabled": true, "client_id": "cli-client", "key_ttl": "` + ttl + `"}}`
+		if _, err := Load(writeOIDCConfig(t, block)); err == nil {
+			t.Fatalf("%s (%s): want load error", name, ttl)
+		}
 	}
 }
 
@@ -1230,5 +1302,55 @@ func TestConfigMarshalNeverLeaksVirtualKeyPlaintext(t *testing.T) {
 	}
 	if strings.Contains(string(out), "sk-declarative-key-0123456789") {
 		t.Fatal("marshaling the loaded config must never emit a virtual key's resolved plaintext")
+	}
+}
+
+// D5: ValidateModelFallbacks accepts a fallback targeting a configured model
+// name, or an alias of one, and rejects a self-mapping, a target that isn't
+// configured at all, and a chained (two-hop) fallback.
+func TestValidateModelFallbacks(t *testing.T) {
+	models := map[string]ModelConfig{
+		"claude-opus-4-8":   {Aliases: []string{"opus-legacy"}},
+		"claude-sonnet-4-6": {},
+	}
+	cases := []struct {
+		name      string
+		fallbacks map[string]string
+		wantErr   bool
+	}{
+		{"target is a configured model name", map[string]string{"claude-opus-5": "claude-opus-4-8"}, false},
+		{"target is a configured model alias", map[string]string{"claude-opus-5": "opus-legacy"}, false},
+		{"self-mapping rejected", map[string]string{"claude-opus-5": "claude-opus-5"}, true},
+		{"unconfigured target rejected", map[string]string{"claude-opus-5": "claude-opus-9000"}, true},
+		{"chained (two-hop) fallback rejected", map[string]string{
+			"claude-opus-5":   "claude-opus-4-9",
+			"claude-opus-4-9": "claude-opus-4-8",
+		}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := ValidateModelFallbacks(models, c.fallbacks)
+			if c.wantErr && err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !c.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// D5: LoadRaw runs validateModelFallbacks — a file config with an
+// unconfigured fallback target must fail to load, same posture as an
+// unresolvable model alias.
+func TestLoadRawRejectsInvalidModelFallback(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "bad.json")
+	os.WriteFile(f, []byte(`{
+		"models": {"claude-opus-4-8": {"targets": [{"provider": "p", "model": "m"}]}},
+		"model_fallbacks": {"claude-opus-5": "claude-opus-9000"}
+	}`), 0o600)
+	if _, err := LoadRaw(f); err == nil {
+		t.Fatal("model_fallbacks targeting an unconfigured model must be rejected")
 	}
 }

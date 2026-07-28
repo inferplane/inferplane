@@ -86,9 +86,19 @@ type oaiRequest struct {
 }
 
 type oaiUsage struct {
-	PromptTokens     *int64 `json:"prompt_tokens,omitempty"`
-	CompletionTokens *int64 `json:"completion_tokens,omitempty"`
-	TotalTokens      *int64 `json:"total_tokens,omitempty"`
+	PromptTokens        *int64                  `json:"prompt_tokens,omitempty"`
+	CompletionTokens    *int64                  `json:"completion_tokens,omitempty"`
+	TotalTokens         *int64                  `json:"total_tokens,omitempty"`
+	PromptTokensDetails *oaiPromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+}
+
+// oaiPromptTokensDetails carries the prompt-cache breakdown. OpenAI's
+// prompt_tokens INCLUDES cached_tokens, so mapping prompt_tokens straight to
+// InputTokens billed every cached prompt token at the full input rate instead
+// of the ~10x cheaper cache-read rate — over-billing, the opposite direction
+// from the streaming/Bedrock defects (ADR-030).
+type oaiPromptTokensDetails struct {
+	CachedTokens *int64 `json:"cached_tokens,omitempty"`
 }
 
 type oaiRespMessage struct {
@@ -461,11 +471,21 @@ func usageFromCanonical(u *schema.Usage) map[string]any {
 	if u.OutputTokens != nil {
 		completion = *u.OutputTokens
 	}
-	return map[string]any{
+	out := map[string]any{
 		"prompt_tokens":     prompt,
 		"completion_tokens": completion,
 		"total_tokens":      prompt + completion,
 	}
+	// Re-expose the cache split the way OpenAI does: prompt_tokens is the
+	// INCLUSIVE total, with the cached portion broken out underneath. We hold
+	// them separately (InputTokens excludes cache reads), so add them back.
+	if u.CacheReadInputTokens != nil && *u.CacheReadInputTokens != 0 {
+		cached := *u.CacheReadInputTokens
+		out["prompt_tokens"] = prompt + cached
+		out["total_tokens"] = prompt + cached + completion
+		out["prompt_tokens_details"] = map[string]any{"cached_tokens": cached}
+	}
+	return out
 }
 
 // ── OpenAI → canonical response (observation) ────────────────────────────────
@@ -514,10 +534,7 @@ func ResponseToCanonical(openaiBody []byte) (*schema.ChatResponse, error) {
 		resp.Content = []schema.ContentBlock{}
 	}
 	if in.Usage != nil {
-		resp.Usage = &schema.Usage{
-			InputTokens:  in.Usage.PromptTokens,
-			OutputTokens: in.Usage.CompletionTokens,
-		}
+		resp.Usage = usageFromOAI(in.Usage)
 	}
 	return resp, nil
 }
@@ -673,10 +690,7 @@ func ChunkToCanonical(openaiChunk []byte) (*schema.ChatChunk, error) {
 
 	var usage *schema.Usage
 	if in.Usage != nil {
-		usage = &schema.Usage{
-			InputTokens:  in.Usage.PromptTokens,
-			OutputTokens: in.Usage.CompletionTokens,
-		}
+		usage = usageFromOAI(in.Usage)
 	}
 
 	if len(in.Choices) > 0 {
@@ -697,4 +711,35 @@ func ChunkToCanonical(openaiChunk []byte) (*schema.ChatChunk, error) {
 		return &schema.ChatChunk{Type: "message_delta", Delta: json.RawMessage(`{}`), Usage: usage}, nil
 	}
 	return nil, nil
+}
+
+// usageFromOAI maps an OpenAI usage object to canonical usage, separating the
+// cached prompt tokens out of prompt_tokens.
+//
+// OpenAI's prompt_tokens is INCLUSIVE of cached_tokens, while canonical
+// InputTokens and CacheReadInputTokens are disjoint (that is what the pricing
+// table's separate rates assume). Subtracting is therefore required, not
+// cosmetic: without it every cached token was billed at the full input rate
+// (ADR-030). Clamped at zero in case an upstream reports a larger cached count
+// than prompt total.
+func usageFromOAI(u *oaiUsage) *schema.Usage {
+	if u == nil {
+		return nil
+	}
+	out := &schema.Usage{OutputTokens: u.CompletionTokens}
+	var cached int64
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens != nil {
+		cached = *u.PromptTokensDetails.CachedTokens
+	}
+	if u.PromptTokens != nil {
+		in := *u.PromptTokens - cached
+		if in < 0 {
+			in = 0
+		}
+		out.InputTokens = &in
+	}
+	if cached != 0 {
+		out.CacheReadInputTokens = &cached
+	}
+	return out
 }

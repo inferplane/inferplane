@@ -33,7 +33,7 @@ func TestDataMuxRoutesAndAuths(t *testing.T) {
 	holder := newHolder(provs, models)
 	r := router.New(holder)
 	store := stubStore{key: "dev-key", p: keystore.Principal{KeyID: "ik_abc", Team: "platform-eng", AllowedModels: []string{"*"}}}
-	mux := DataMux(r, holder, store, nil, nil, nil, nil, nil, nil)
+	mux := DataMux(r, holder, store, nil, nil, nil, nil, nil, nil, nil, adminauth.MappingConfig{}, nil, 0)
 
 	req := httptest.NewRequest("GET", "/v1/models", nil)
 	rec := httptest.NewRecorder()
@@ -64,7 +64,7 @@ func TestDataMuxRootRedirectsToAdminUI(t *testing.T) {
 	holder := newHolder(provs, models)
 	r := router.New(holder)
 	store := stubStore{key: "dev-key", p: keystore.Principal{KeyID: "ik_abc", Team: "platform-eng", AllowedModels: []string{"*"}}}
-	mux := DataMux(r, holder, store, nil, nil, nil, nil, nil, nil)
+	mux := DataMux(r, holder, store, nil, nil, nil, nil, nil, nil, nil, adminauth.MappingConfig{}, nil, 0)
 
 	req := httptest.NewRequest("GET", "/", nil) // no x-api-key
 	rec := httptest.NewRecorder()
@@ -93,7 +93,7 @@ func TestDataMuxModelsContentNegotiation(t *testing.T) {
 	holder := newHolder(provs, models)
 	r := router.New(holder)
 	store := stubStore{key: "dev-key", p: keystore.Principal{KeyID: "ik_abc", Team: "platform-eng", AllowedModels: []string{"*"}}}
-	mux := DataMux(r, holder, store, nil, nil, nil, nil, nil, nil)
+	mux := DataMux(r, holder, store, nil, nil, nil, nil, nil, nil, nil, adminauth.MappingConfig{}, nil, 0)
 
 	// OpenAI client (no anthropic-version header) → OpenAI {"object":"list"} shape.
 	reqO := httptest.NewRequest("GET", "/v1/models", nil)
@@ -123,7 +123,7 @@ func TestDataMuxChatCompletionsRoutes(t *testing.T) {
 	holder := newHolder(provs, models)
 	r := router.New(holder)
 	store := stubStore{key: "dev-key", p: keystore.Principal{KeyID: "ik_abc", Team: "platform-eng", AllowedModels: []string{"*"}}}
-	mux := DataMux(r, holder, store, nil, nil, nil, nil, nil, nil)
+	mux := DataMux(r, holder, store, nil, nil, nil, nil, nil, nil, nil, adminauth.MappingConfig{}, nil, 0)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions",
 		strings.NewReader(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}]}`))

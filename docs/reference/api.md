@@ -34,11 +34,13 @@ contract is in [docs/api-reference.md](../api-reference.md).
 | Logs + body API | `internal/server/analyticsapi/logs.go`, `internal/server/adminapi/bodies.go` | `GET /admin/logs` (**full-admin only**, D4/ADR-018) recent request events (id-keyset paginated, `body_ref` marks a captured body); `GET`/`DELETE /admin/bodies/{ref}` (**full-admin only**) fetch/erase a captured body — GET emits `body_accessed` (deduped 5m/viewer), DELETE emits `body_deleted`, both carry `record_ref` never `body_ref`; purged/erased/undecryptable → **410 tombstone**, never 500 |
 | Metrics endpoint | `internal/server/metricsapi.go` | unauthenticated Prometheus `/metrics` |
 | OpenAI conversion | `internal/openai/convert.go` | OpenAI ⇄ canonical request/response/chunk |
+| CLI login API | `internal/server/authapi/` | **Data-plane**, opt-in (`oidc.cli_login.enabled`, ADR-028): `GET /v1/auth/config` unauthenticated secret-free `{cli, issuer?, client_id?}`; `POST /v1/auth/key` (OIDC bearer, DISTINCT `client_id`/`Verifier` from the console's) mints a short-lived key — server decides `expires_at`/`owner`, never the client; per-subject mint rate limit; `DELETE /v1/auth/key` (ordinary `KeyAuth`) self-revoke, used by `inferplane logout`. `inferplane login`/`token` are the CLI counterpart |
 
 ### 3. Key Decisions
 - `count_tokens` must always return 200 — a non-200 crashes Claude Code (aliases are canonicalized here too, ADR-021).
 - Verbatim body forwarding on protocol match; canonical conversion only on mismatch. Model **aliases** (config `models.<name>.aliases`, ADR-021) are normalized to the canonical name BEFORE RBAC/routing/audit/metrics; on the anthropic verbatim path the only body change is a cache-safe top-level `model` rewrite (nested `cache_control` preserved, HTML escaping off).
 - Errors are returned in the ingress protocol's own error shape; the unknown/disallowed-model messages append the allow-filtered available-model list (ADR-021).
+- **Model-level fallback (ADR-029, D5).** `model_fallbacks` (config, requested → served model, one hop) plus a default same-family heuristic (`model_fallback_family`, default on: an unrouted `claude-opus-5` falls back to the highest configured `claude-opus-*` version below it) substitutes a served model for an unconfigured requested one BEFORE the allow-list check — a key allowed only the requested name is denied, never silently downgraded. A configured model whose upstream 404s (or Bedrock 400s `ValidationException`) also crosses to the fallback model within the existing priority-fallback loop; the ingress re-checks RBAC on that cross-model target (`router.FilterModelAllowed`) since it was appended after the original allow-list check. Either path sets `x-inferplane-model-fallback: <served model>` on the response (independent of the existing per-provider `x-inferplane-fallback: <provider>`).
 
 ### 4. Code Pointers
 - `internal/server/anthropicapi/messages.go` — Messages handler, streaming tee, cardinality-safe labels
@@ -47,8 +49,8 @@ contract is in [docs/api-reference.md](../api-reference.md).
 
 ### 5. Cross-references
 - Related modules: `internal/router`, `internal/governance`, `internal/alert`, `internal/bodystore`, `providers/`
-- Related ADRs: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md
-- Related runbooks: docs/runbooks/
+- Related ADRs: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md
+- Related runbooks: docs/runbooks/, docs/runbooks/cli-login.md
 
 <a id="korean"></a>
 ## 한국어
@@ -81,11 +83,13 @@ HTTP 표면입니다. 두 인그레스(Anthropic Messages, OpenAI Chat Completio
 | 로그 + 본문 API | `internal/server/analyticsapi/logs.go`, `internal/server/adminapi/bodies.go` | `GET /admin/logs` (**풀 어드민 전용**, D4/ADR-018) 최근 요청 이벤트(id keyset 페이지네이션, `body_ref`는 본문 저장 표시); `GET`/`DELETE /admin/bodies/{ref}` (**풀 어드민 전용**) 저장 본문 조회/삭제 — GET은 `body_accessed`(뷰어별 5분 dedupe), DELETE는 `body_deleted` 발행, 둘 다 `record_ref`만 가지며 `body_ref`는 절대 없음; purge/삭제/복호불가 → **410 톰스톤**, 500 아님 |
 | 메트릭 엔드포인트 | `internal/server/metricsapi.go` | 무인증 Prometheus `/metrics` |
 | OpenAI 변환 | `internal/openai/convert.go` | OpenAI ⇄ canonical 요청/응답/청크 |
+| CLI 로그인 API | `internal/server/authapi/` | **데이터 플레인**, 옵트인(`oidc.cli_login.enabled`, ADR-028): `GET /v1/auth/config` 무인증·시크릿 무노출 `{cli, issuer?, client_id?}`; `POST /v1/auth/key`(OIDC bearer, 콘솔과 별개의 `client_id`/`Verifier`)는 단기 키를 발급 — `expires_at`/`owner`는 서버가 결정, 클라이언트는 절대 지정 불가; subject별 발급 rate limit; `DELETE /v1/auth/key`(일반 `KeyAuth`)는 자기 취소, `inferplane logout`이 사용. `inferplane login`/`token`이 CLI 짝 |
 
 ### 3. 주요 결정
 - `count_tokens`는 항상 200 반환 — 비-200은 Claude Code를 크래시시킴 (여기서도 alias를 canonical로 정규화, ADR-021).
 - 프로토콜 일치 시 본문 verbatim 전달, 불일치 시에만 canonical 변환. 모델 **alias**(config `models.<name>.aliases`, ADR-021)는 RBAC/라우팅/감사/메트릭 이전에 canonical로 정규화; anthropic verbatim 경로의 유일한 본문 변경은 캐시 안전 top-level `model` 재작성(nested `cache_control` 보존, HTML 이스케이프 off).
 - 오류는 인그레스 프로토콜 고유의 오류 형태로 반환; 미등록/미허용 모델 메시지는 allow-필터된 사용 가능 모델 목록을 덧붙임 (ADR-021).
+- **모델 단위 폴백 (ADR-029, D5).** `model_fallbacks`(config, 요청 모델 → 서빙 모델, 1홉)와 기본 동일 패밀리 휴리스틱(`model_fallback_family`, 기본 켜짐: 미설정 `claude-opus-5`는 그 아래로 설정된 가장 높은 `claude-opus-*` 버전으로 폴백)은 allow-list 검사 **이전에** 미설정 요청 모델을 서빙 모델로 치환 — 요청한 이름만 허용된 키는 거부되며, 절대 조용히 다운그레이드되지 않음. 설정된 모델이라도 업스트림이 404(또는 Bedrock 400 `ValidationException`)를 반환하면 기존 우선순위 폴백 루프 내에서 폴백 모델로 전환; 이 크로스-모델 타깃은 원래 allow-list 검사 이후에 추가되었으므로 인그레스가 RBAC를 재검증(`router.FilterModelAllowed`)함. 두 경로 모두 응답에 `x-inferplane-model-fallback: <서빙 모델>`을 설정(기존 프로바이더 단위 `x-inferplane-fallback: <provider>`와 독립적).
 
 ### 4. 코드 포인터
 - `internal/server/anthropicapi/messages.go` — Messages 핸들러, 스트리밍 tee, 카디널리티 안전 레이블
@@ -94,5 +98,5 @@ HTTP 표면입니다. 두 인그레스(Anthropic Messages, OpenAI Chat Completio
 
 ### 5. 상호 참조
 - 관련 모듈: `internal/router`, `internal/governance`, `internal/alert`, `internal/bodystore`, `providers/`
-- 관련 ADR: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md
-- 관련 런북: docs/runbooks/
+- 관련 ADR: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md
+- 관련 런북: docs/runbooks/, docs/runbooks/cli-login.md

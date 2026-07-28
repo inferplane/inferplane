@@ -12,6 +12,7 @@ import (
 	"github.com/inferplane/inferplane/internal/filter"
 	"github.com/inferplane/inferplane/internal/governance"
 	"github.com/inferplane/inferplane/internal/keystore"
+	"github.com/inferplane/inferplane/internal/limiter"
 	"github.com/inferplane/inferplane/internal/live"
 	"github.com/inferplane/inferplane/internal/metrics"
 	"github.com/inferplane/inferplane/internal/principal"
@@ -21,6 +22,7 @@ import (
 	"github.com/inferplane/inferplane/internal/server/analyticsapi"
 	"github.com/inferplane/inferplane/internal/server/anthropicapi"
 	"github.com/inferplane/inferplane/internal/server/auditapi"
+	"github.com/inferplane/inferplane/internal/server/authapi"
 	"github.com/inferplane/inferplane/internal/server/bedrockapi"
 	"github.com/inferplane/inferplane/internal/server/configapi"
 	"github.com/inferplane/inferplane/internal/server/openaiapi"
@@ -50,7 +52,16 @@ type AuthConfigView struct {
 // teamPolicy is a fresh-per-request team-record lookup (D6/D7, ADR-016
 // posture — no caching); nil disables per-team overrides entirely. bodies is
 // the opt-in body-capture recorder (D4, ADR-018); nil disables it.
-func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *audit.Writer, gov *governance.Governor, m *metrics.Metrics, mask *filter.Masking, teamPolicy func(team string) (keystore.TeamRecord, bool), bodies *bodystore.Recorder) http.Handler {
+//
+// cliVerifier + cliMapping + cliConfig wire the opt-in CLI login endpoints
+// (ADR-028, `inferplane login`): GET /v1/auth/config (unauthenticated
+// discovery), POST /v1/auth/key (mints a short-lived virtual key from a
+// verified ID token — same OIDC-verify + groups→team middleware as the admin
+// plane, keyed to the CLI's own client_id so a console-audience token is
+// never accepted here), and DELETE /v1/auth/key (self-revoke, behind KeyAuth
+// like any other data-plane route). cliVerifier nil ⇒ none of the three are
+// mounted (404) — the feature is off unless oidc.cli_login is configured.
+func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *audit.Writer, gov *governance.Governor, m *metrics.Metrics, mask *filter.Masking, teamPolicy func(team string) (keystore.TeamRecord, bool), bodies *bodystore.Recorder, cliVerifier OIDCVerifier, cliMapping adminauth.MappingConfig, cliConfig func() authapi.ConfigView, cliKeyTTL time.Duration) http.Handler {
 	mux := http.NewServeMux()
 	msgs := anthropicapi.NewMessagesHandlerMetrics(r, aud, gov, m)
 	msgs.SetMasking(mask) // PII masking for configured teams (ADR-009); nil = off
@@ -87,6 +98,16 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	mux.Handle("GET /v1/models", negotiateModels(
 		anthropicapi.NewModelsHandler(r), openaiapi.NewModelsHandler(r)))
 	mux.Handle("GET /v1/usage", usageapi.NewHandler(gov))
+	var emit func(audit.Record)
+	if aud != nil {
+		emit = aud.Append
+	}
+	if cliVerifier != nil {
+		// Self-revoke (ADR-028 `inferplane logout`) authenticates with the
+		// virtual key itself — same posture as every other data-plane route,
+		// so it belongs on the INNER mux, behind KeyAuth.
+		mux.Handle("DELETE /v1/auth/key", authapi.RevokeHandler(store, emit))
+	}
 	// Unauthenticated convenience redirect: a browser hitting the bare data-plane
 	// root has no API key to offer and almost certainly means to reach the admin
 	// console, not the LLM API. Exact path only, ahead of KeyAuth (which would
@@ -96,6 +117,16 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	dataMux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/ui/", http.StatusFound)
 	})
+	if cliVerifier != nil {
+		// GET /v1/auth/config and POST /v1/auth/key authenticate with an IdP
+		// ID token, not a virtual key, so both are mounted AHEAD of KeyAuth —
+		// same reasoning as the /{$} redirect above, just OIDC instead of
+		// unauthenticated. cliDenied audits an authenticated-but-unmapped
+		// identity (403), mirroring adminDenialEmitter for the admin plane.
+		dataMux.Handle("GET /v1/auth/config", authapi.NewConfigHandler(cliConfig))
+		mintLimiter := limiter.NewMemory() // per-subject mint throttle (ADR-028 follow-up r1); instance-local, like every other in-memory governance store
+		dataMux.Handle("POST /v1/auth/key", AdminAuth(nil, cliVerifier, cliMapping, cliDenialEmitter(emit), authapi.MintHandler(store, cliKeyTTL, mintLimiter, emit)))
+	}
 	dataMux.Handle("/", KeyAuth(store, mux))
 	return dataMux
 }
@@ -296,6 +327,28 @@ func adminDenialEmitter(emit func(audit.Record)) func(r *http.Request, subject s
 			TS:            time.Now().UTC().Format(time.RFC3339Nano),
 			Principal:     audit.PrincipalRef{User: &subject, AuthMethod: &method},
 			Request:       audit.RequestRef{Ingress: "admin"},
+		})
+	}
+}
+
+// cliDenialEmitter is adminDenialEmitter's twin for the data-plane CLI-login
+// mint endpoint (ADR-028): an authenticated-but-unmapped identity hitting
+// POST /v1/auth/key is the same class of event, just on a different ingress —
+// tagging it "cli" instead of "admin" is the only difference, so an operator
+// reading the audit chain can tell which plane rejected the identity.
+func cliDenialEmitter(emit func(audit.Record)) func(r *http.Request, subject string) {
+	if emit == nil {
+		return nil
+	}
+	return func(_ *http.Request, subject string) {
+		method := "oidc"
+		emit(audit.Record{
+			SchemaVersion: 1,
+			Event:         "cli_denied",
+			ID:            ulid.New(),
+			TS:            time.Now().UTC().Format(time.RFC3339Nano),
+			Principal:     audit.PrincipalRef{User: &subject, AuthMethod: &method},
+			Request:       audit.RequestRef{Ingress: "cli"},
 		})
 	}
 }

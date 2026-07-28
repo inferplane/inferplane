@@ -12,6 +12,10 @@ package live
 import (
 	"encoding/json"
 	"fmt"
+	"log"
+	"sort"
+	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/inferplane/inferplane/internal/config"
@@ -45,6 +49,13 @@ type State struct {
 	// assembly layer can derive the secret-free /admin/config view from the
 	// live generation (set by BuildState; nil for NewState-only test states).
 	providerConfigs map[string]config.ProviderConfig
+	// fallbacks is the operator-declared model_fallbacks map (requested →
+	// served), set by BuildState. Nil for NewState-only test states — FallbackFor
+	// still works (falls through to the family heuristic, or "").
+	fallbacks map[string]string
+	// fallbackFamily enables the same-family default heuristic in FallbackFor
+	// (config.Config.ModelFallbackFamily; default true). Set by BuildState.
+	fallbackFamily bool
 }
 
 // Providers returns the provider instances by config name. The map is a copy;
@@ -97,6 +108,84 @@ func (s *State) Canonical(name string) string {
 		return canonical
 	}
 	return name
+}
+
+// FallbackFor returns the model to serve in place of an unrouted `model`, or
+// "" if there is none. An explicit config entry (model_fallbacks) wins; then,
+// if enabled, the same-family default: among configured models sharing
+// model's family (see familyOf), the highest version strictly below model's.
+// Callers only consult this after Route has already failed, so `model` is
+// never itself a routed name here.
+func (s *State) FallbackFor(model string) string {
+	if served, ok := s.fallbacks[model]; ok {
+		return served
+	}
+	if !s.fallbackFamily {
+		return ""
+	}
+	family, version, ok := familyOf(model)
+	if !ok {
+		return ""
+	}
+	best := ""
+	var bestVersion []int
+	for name := range s.models {
+		f, v, ok := familyOf(name)
+		if !ok || f != family || compareVersions(v, version) >= 0 {
+			continue
+		}
+		if best == "" || compareVersions(v, bestVersion) > 0 {
+			best, bestVersion = name, v
+		}
+	}
+	return best
+}
+
+// familyOf splits a model name into its family and numeric version, treating
+// the trailing run of all-numeric "-"-separated segments as the version
+// ("claude-opus-4-8" -> "claude-opus", [4, 8]). A name with no numeric tail
+// ("claude-sonnet-4-6-bedrock") has no version and ok is false — it is never a
+// family-fallback candidate; an operator wanting it reached that way lists it
+// explicitly in model_fallbacks.
+func familyOf(name string) (family string, version []int, ok bool) {
+	parts := strings.Split(name, "-")
+	i := len(parts)
+	for i > 0 {
+		if _, err := strconv.Atoi(parts[i-1]); err != nil {
+			break
+		}
+		i--
+	}
+	if i == len(parts) { // no numeric tail at all
+		return "", nil, false
+	}
+	version = make([]int, len(parts)-i)
+	for j, p := range parts[i:] {
+		n, _ := strconv.Atoi(p) // already validated above
+		version[j] = n
+	}
+	return strings.Join(parts[:i], "-"), version, true
+}
+
+// compareVersions compares two version-number slices lexicographically,
+// treating a missing trailing component as 0 (so [4] < [4, 8]).
+func compareVersions(a, b []int) int {
+	for i := 0; i < len(a) || i < len(b); i++ {
+		var x, y int
+		if i < len(a) {
+			x = a[i]
+		}
+		if i < len(b) {
+			y = b[i]
+		}
+		if x != y {
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }
 
 // Provider returns the built provider for a config name (read-only).
@@ -173,6 +262,20 @@ func NewState(provs map[string]providers.Provider, models map[string]config.Mode
 	return &State{providers: p, models: m, aliases: a, pricing: price, identities: ids}
 }
 
+// NewStateWithFallbacks is NewState plus model_fallbacks/the family heuristic
+// flag, for tests that build a State directly (e.g. with mock providers,
+// bypassing BuildState's real provider factory) but still need FallbackFor to
+// behave as it would under BuildState.
+func NewStateWithFallbacks(provs map[string]providers.Provider, models map[string]config.ModelConfig, price *pricing.Table, identities map[string]string, fallbacks map[string]string, family bool) *State {
+	st := NewState(provs, models, price, identities)
+	st.fallbacks = make(map[string]string, len(fallbacks))
+	for k, v := range fallbacks {
+		st.fallbacks[k] = v
+	}
+	st.fallbackFamily = family
+	return st
+}
+
 // identityOf is the breaker/topology identity of a provider: a re-added or
 // re-pointed provider (different type or base_url) gets a distinct identity, so
 // stale circuit-breaker state never leaks to it.
@@ -239,6 +342,9 @@ func BuildState(cfg *config.Config) (*State, map[string]string, error) {
 	}
 
 	tbl := pricingFromConfig(cfg)
+	if err := validatePricingCoverage(cfg, tbl); err != nil {
+		return nil, nil, err
+	}
 	st := NewState(provs, cfg.Models, tbl, identities)
 	// Keep the source configs for the secret-free admin view (copy so the
 	// published State is independent of the caller's cfg).
@@ -246,7 +352,100 @@ func BuildState(cfg *config.Config) (*State, map[string]string, error) {
 	for k, v := range cfg.Providers {
 		st.providerConfigs[k] = v
 	}
+	st.fallbacks = make(map[string]string, len(cfg.ModelFallbacks))
+	for k, v := range cfg.ModelFallbacks {
+		st.fallbacks[k] = v
+	}
+	st.fallbackFamily = cfg.FallbackFamilyEnabled()
 	return st, identities, nil
+}
+
+// UnpricedTargets returns every (provider, upstream-model) pair a configured
+// model routes to that has no rate in the table, sorted for stable output.
+// Exported so `inferplane pricing check` reports exactly what boot validation
+// would reject — one predicate, no drift.
+func UnpricedTargets(cfg *config.Config, tbl *pricing.Table) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, mc := range cfg.Models {
+		for _, t := range mc.Targets {
+			if tbl.HasRate(t.Provider, t.Model) {
+				continue
+			}
+			pair := t.Provider + "/" + t.Model
+			if !seen[pair] {
+				seen[pair] = true
+				out = append(out, pair)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// validatePricingCoverage is the money guard for unpriced routes (ADR-030): a
+// configured route with no rate silently billed 0 µUSD, with nothing but a
+// boolean in the audit record to show for it.
+//
+// Strictness follows the operator's own `pricing.on_missing` declaration rather
+// than overriding it:
+//
+//   - `block` — refuse to boot. The operator said unpriced traffic must never
+//     be served, so serving it (even at 0) violates that. Runtime enforcement
+//     in the governance pre-check covers the routes this can't see: models
+//     added through UI-write, and hot-reloaded generations.
+//   - `allow` (default) — log the unpriced routes loudly and continue. This is
+//     a legitimate posture: a self-hosted vLLM deployment may genuinely have no
+//     meaningful per-token price. Silence was the bug, not permissiveness.
+//
+// Either way `inferplane pricing check` reports the same list for CI, so a
+// newly-added model surfaces at deploy time instead of in next month's
+// chargeback.
+//
+// The overrides cross-check is unconditional: a key naming a provider or model
+// that does not exist is a typo, never a policy, and at runtime it is
+// indistinguishable from a missing rate — it made that provider free forever.
+func validatePricingCoverage(cfg *config.Config, tbl *pricing.Table) error {
+	for provider, models := range cfg.Pricing.Overrides {
+		if _, ok := cfg.Providers[provider]; !ok {
+			return fmt.Errorf("live: pricing.overrides names unknown provider %q (a typo here silently prices that provider's traffic at 0)", provider)
+		}
+		for model := range models {
+			if !routesTo(cfg, provider, model) {
+				return fmt.Errorf("live: pricing.overrides[%q] names model %q, which no configured model routes to (check the upstream id, including any global./us./apac. prefix)", provider, model)
+			}
+		}
+	}
+	unpriced := UnpricedTargets(cfg, tbl)
+	if len(unpriced) == 0 {
+		return nil
+	}
+	if tbl.OnMissing() == pricing.OnMissingBlock {
+		return fmt.Errorf("live: pricing.on_missing is \"block\" but %d configured route(s) have no rate: %s — declare them under pricing.overrides (input_per_mtok + output_per_mtok; cache rates derive automatically) or set on_missing to \"allow\"",
+			len(unpriced), strings.Join(unpriced, ", "))
+	}
+	log.Printf("inferplane: WARNING %d configured route(s) have no pricing rate and will be billed 0 uUSD: %s — declare them under pricing.overrides, or set pricing.on_missing to \"block\" to refuse them",
+		len(unpriced), strings.Join(unpriced, ", "))
+	return nil
+}
+
+// routesTo reports whether any configured model routes to this exact
+// (provider, upstream) pair. Matching is exact on purpose: an override keyed
+// to a region-prefixed id is a deliberate per-prefix rate and must correspond
+// to a real target, while the unprefixed base id is matched via the same
+// prefix-stripping rule the rate lookup uses.
+func routesTo(cfg *config.Config, provider, model string) bool {
+	for _, mc := range cfg.Models {
+		for _, t := range mc.Targets {
+			if t.Provider != provider {
+				continue
+			}
+			if t.Model == model || strings.HasSuffix(t.Model, "."+model) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // pricingFromConfig mirrors the gateway's pricing assembly (kept here so the
@@ -265,5 +464,11 @@ func pricingFromConfig(cfg *config.Config) *pricing.Table {
 			}
 		}
 	}
-	return pricing.FromConfig(cfg.Pricing.OnMissing, overrides)
+	return pricing.FromConfigVersioned(cfg.Pricing.OnMissing, cfg.Pricing.Version, overrides)
 }
+
+// PricingTableFor builds the rate table this config would run with, without
+// constructing providers. Exported so `inferplane pricing check` reports against
+// exactly the table BuildState validates — including the derived cache rates and
+// the Bedrock region-prefix fallback — rather than reimplementing the assembly.
+func PricingTableFor(cfg *config.Config) *pricing.Table { return pricingFromConfig(cfg) }

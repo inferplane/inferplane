@@ -313,3 +313,45 @@ func max64(a, b int64) int64 {
 	}
 	return b
 }
+
+// PricingGuard denies a request whose resolved targets have no rate, when the
+// operator set pricing.on_missing to "block" (ADR-030).
+//
+// This is the runtime half of the money guard. Boot validation
+// (live.validatePricingCoverage) covers routes declared in the config file, but
+// cannot see two paths that reach the same failure: a model registered through
+// UI-write (ADR-008) and a target appended by a model-level fallback (ADR-029).
+// Both would otherwise serve traffic the gateway cannot price, billing 0 with
+// only a boolean in the audit record.
+//
+// It lives here rather than inside PreCheck because the resolved chain is not
+// known until after the router runs, and PreCheck deliberately takes no
+// topology. Callers invoke it alongside PreCheck, with the same table they will
+// settle against, so the check and the billing can never disagree.
+//
+// A nil table means pricing is unconfigured entirely — treated as "allow",
+// since refusing every request would be a worse failure than reporting zero.
+// Returns the zero (allowed) decision when the table permits missing rates.
+func PricingGuard(table *pricing.Table, targets []PricedTarget) GovDecision {
+	if table == nil || table.OnMissing() != pricing.OnMissingBlock {
+		return GovDecision{Allowed: true}
+	}
+	for _, t := range targets {
+		if !table.HasRate(t.Provider, t.Upstream) {
+			return GovDecision{
+				Status: 402,
+				Reason: "no pricing rate for " + t.Provider + "/" + t.Upstream,
+				Code:   audit.DenyPricingMissing,
+			}
+		}
+	}
+	return GovDecision{Allowed: true}
+}
+
+// PricedTarget is the (provider, upstream-model) pair a request may be billed
+// against — the same pair CostUSDMicros keys on. Declared here so the ingress
+// handlers need not expose their router types to governance.
+type PricedTarget struct {
+	Provider string
+	Upstream string
+}

@@ -115,3 +115,78 @@ func TestChunkFromCanonicalMessageStopFinish(t *testing.T) {
 		t.Fatalf("finish_reason: %v", ch["finish_reason"])
 	}
 }
+
+// ADR-030: OpenAI's prompt_tokens INCLUDES cached_tokens, while canonical
+// InputTokens and CacheReadInputTokens are disjoint (the pricing table bills
+// them at different rates). Without subtracting, every cached prompt token was
+// charged at the full input rate — roughly 10x the cache-read rate.
+func TestUsageFromOAI(t *testing.T) {
+	i := func(v int64) *int64 { return &v }
+
+	t.Run("nil usage", func(t *testing.T) {
+		if usageFromOAI(nil) != nil {
+			t.Fatal("nil in, nil out")
+		}
+	})
+
+	t.Run("no cache details leaves prompt tokens intact", func(t *testing.T) {
+		u := usageFromOAI(&oaiUsage{PromptTokens: i(100), CompletionTokens: i(10)})
+		if *u.InputTokens != 100 || *u.OutputTokens != 10 {
+			t.Fatalf("got in=%d out=%d, want 100/10", *u.InputTokens, *u.OutputTokens)
+		}
+		if u.CacheReadInputTokens != nil {
+			t.Errorf("cache_read must stay nil: %+v", u.CacheReadInputTokens)
+		}
+	})
+
+	t.Run("cached tokens are subtracted out of input", func(t *testing.T) {
+		u := usageFromOAI(&oaiUsage{
+			PromptTokens:        i(1000),
+			CompletionTokens:    i(10),
+			PromptTokensDetails: &oaiPromptTokensDetails{CachedTokens: i(900)},
+		})
+		if *u.InputTokens != 100 {
+			t.Errorf("input = %d, want 100 (1000 total - 900 cached); 1000 means cached tokens are billed at the full rate", *u.InputTokens)
+		}
+		if u.CacheReadInputTokens == nil || *u.CacheReadInputTokens != 900 {
+			t.Errorf("cache_read = %+v, want 900", u.CacheReadInputTokens)
+		}
+	})
+
+	t.Run("cached exceeding prompt clamps at zero", func(t *testing.T) {
+		u := usageFromOAI(&oaiUsage{
+			PromptTokens:        i(10),
+			PromptTokensDetails: &oaiPromptTokensDetails{CachedTokens: i(50)},
+		})
+		if *u.InputTokens != 0 {
+			t.Errorf("input = %d, want 0 (never negative)", *u.InputTokens)
+		}
+	})
+}
+
+// The client-facing shape must mirror OpenAI's: prompt_tokens inclusive, with
+// the cached portion broken out underneath.
+func TestUsageFromCanonical_reExposesCacheSplit(t *testing.T) {
+	i := func(v int64) *int64 { return &v }
+	got := usageFromCanonical(&schema.Usage{
+		InputTokens:          i(100),
+		OutputTokens:         i(10),
+		CacheReadInputTokens: i(900),
+	})
+	if got["prompt_tokens"] != int64(1000) {
+		t.Errorf("prompt_tokens = %v, want 1000 (inclusive of cached, as OpenAI reports it)", got["prompt_tokens"])
+	}
+	if got["total_tokens"] != int64(1010) {
+		t.Errorf("total_tokens = %v, want 1010", got["total_tokens"])
+	}
+	details, ok := got["prompt_tokens_details"].(map[string]any)
+	if !ok || details["cached_tokens"] != int64(900) {
+		t.Errorf("prompt_tokens_details = %v, want cached_tokens 900", got["prompt_tokens_details"])
+	}
+
+	// Without cache reads the payload must stay byte-identical to before.
+	plain := usageFromCanonical(&schema.Usage{InputTokens: i(100), OutputTokens: i(10)})
+	if _, present := plain["prompt_tokens_details"]; present {
+		t.Error("prompt_tokens_details must be omitted when there are no cache reads")
+	}
+}

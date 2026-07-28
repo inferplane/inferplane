@@ -65,7 +65,7 @@ func (h *CountTokensHandler) count(req *http.Request, raw []byte) int64 {
 		return estimateTokens(raw)
 	}
 
-	model, ok := resolveModel(h.r, h.holder, req.PathValue("modelId"))
+	model, _, ok := resolveModel(h.r, h.holder, req.PathValue("modelId"))
 	if !ok {
 		return estimateTokens(innerBody)
 	}

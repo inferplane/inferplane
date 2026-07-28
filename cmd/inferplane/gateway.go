@@ -34,6 +34,7 @@ import (
 	"github.com/inferplane/inferplane/internal/router"
 	"github.com/inferplane/inferplane/internal/server"
 	"github.com/inferplane/inferplane/internal/server/analyticsapi"
+	"github.com/inferplane/inferplane/internal/server/authapi"
 	"github.com/inferplane/inferplane/internal/server/configapi"
 	"github.com/inferplane/inferplane/internal/tracing"
 	"github.com/inferplane/inferplane/pkg/ulid"
@@ -478,7 +479,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 	if pstore != nil {
 		writer = g
 	}
-	g.dataSrv = &http.Server{Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec)}
+	g.dataSrv = &http.Server{Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg))}
 	// Capability map the console reads on bootstrap (spec §4.4). Phase 0a:
 	// analytics index not built yet; provider_store + guardrails reflect what
 	// this assembly already knows. Later phases flip the rest on as they land.
@@ -701,6 +702,14 @@ func (g *gateway) writeMutation(ctx context.Context, persist func(context.Contex
 	eff := providerstore.OverlayFrom(raw, provSlice, models)
 	if err := config.ValidateModelAliases(eff.Models); err != nil {
 		fmt.Fprintln(os.Stderr, "inferplane: rejected UI write (aliases):", err)
+		return configapi.ErrInvalidTopology
+	}
+	// A UI write only ever mutates providers/models, never model_fallbacks
+	// (file-config-only, D5) — but it can still delete/rename a model a
+	// fallback targets, so re-validate the file-declared map against the
+	// candidate model set, same guard LoadRaw runs on the file path.
+	if err := config.ValidateModelFallbacks(eff.Models, eff.ModelFallbacks); err != nil {
+		fmt.Fprintln(os.Stderr, "inferplane: rejected UI write (model_fallbacks):", err)
 		return configapi.ErrInvalidTopology
 	}
 	if err := config.ResolveProviders(eff); err != nil {
@@ -1056,6 +1065,52 @@ func oidcVerifier(cfg *config.Config) server.OIDCVerifier {
 		ClientID:    o.ClientID,
 		GroupsClaim: o.GroupsClaim,
 	})
+}
+
+// cliVerifier builds the data-plane CLI-login ID-token verifier (ADR-028), or
+// nil when oidc.cli_login is absent/disabled. It is a DISTINCT *adminauth.
+// Verifier from oidcVerifier's — keyed to cli_login.client_id, not the
+// console's client_id — because go-oidc's verifier checks aud∋client_id and
+// azp==client_id; a token minted for the console's public client would 401
+// against it, and reusing the console's client_id here would let a CLI
+// loopback flow complete a code exchange against that same secretless public
+// client (see the doc comment on config.CLILoginConfig). Same lazy-discovery,
+// no-boot-I/O posture as oidcVerifier.
+func cliVerifier(cfg *config.Config) server.OIDCVerifier {
+	o := cfg.Server.AdminAuth.OIDC
+	if o == nil || o.CLILogin == nil || !o.CLILogin.Enabled {
+		return nil
+	}
+	return adminauth.NewVerifier(adminauth.VerifierConfig{
+		Issuer:      o.Issuer,
+		ClientID:    o.CLILogin.ClientID,
+		GroupsClaim: o.GroupsClaim,
+	})
+}
+
+// cliAuthConfigView builds the secret-free /v1/auth/config payload closure
+// (ADR-028) that `inferplane login` reads to discover the CLI's issuer and
+// client_id. Only called when cliVerifier(cfg) is non-nil (server.DataMux
+// gates the mount on that), so CLI is always true here.
+func cliAuthConfigView(cfg *config.Config) func() authapi.ConfigView {
+	o := cfg.Server.AdminAuth.OIDC
+	return func() authapi.ConfigView {
+		if o == nil || o.CLILogin == nil || !o.CLILogin.Enabled {
+			return authapi.ConfigView{} // {cli:false}; DataMux doesn't mount the endpoint at all in this case, but stay safe if ever called directly
+		}
+		return authapi.ConfigView{CLI: true, Issuer: o.Issuer, ClientID: o.CLILogin.ClientID}
+	}
+}
+
+// cliKeyTTL reads oidc.cli_login.key_ttl (default 8h, validated to [15m,24h]
+// at config load) — the server, never the CLI, decides how long a CLI-minted
+// key lives (ADR-028; a client-supplied TTL would make "short-lived" false).
+func cliKeyTTL(cfg *config.Config) time.Duration {
+	o := cfg.Server.AdminAuth.OIDC
+	if o == nil {
+		return 8 * time.Hour
+	}
+	return o.CLILogin.KeyTTLDuration() // nil-receiver-safe: defaults to 8h
 }
 
 // authConfigView builds the secret-free /admin/auth/config payload closure

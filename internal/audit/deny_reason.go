@@ -16,6 +16,11 @@ const (
 	DenyTeamBudgetExceeded   DenyReason = "team_budget_exceeded"
 	DenyKeyBudgetExceeded    DenyReason = "key_budget_exceeded"
 	DenyRegionBlocked        DenyReason = "region_blocked"
+	// DenyPricingMissing: pricing.on_missing is "block" and the resolved
+	// (provider, upstream) has no rate, so serving the request would bill 0
+	// (ADR-030). Distinct from a budget denial — nothing was exceeded; the
+	// gateway simply cannot price the call.
+	DenyPricingMissing DenyReason = "pricing_missing"
 )
 
 // Ptr returns d as a plain string pointer.

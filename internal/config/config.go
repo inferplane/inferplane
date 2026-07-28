@@ -112,12 +112,41 @@ type AdminAuth struct {
 // / SSRF-by-config guard); client_id is the mandatory expected audience —
 // leaving it optional is the classic cross-app token-reuse hole.
 type OIDCConfig struct {
-	Issuer        string         `json:"issuer"`
-	ClientID      string         `json:"client_id"`
-	GroupsClaim   string         `json:"groups_claim,omitempty"` // default "groups"; top-level claim, no traversal
-	AdminGroups   []string       `json:"admin_groups,omitempty"`
-	GroupMappings []GroupMapping `json:"group_mappings,omitempty"`
-	LoginOrigins  []string       `json:"login_origins,omitempty"`
+	Issuer        string          `json:"issuer"`
+	ClientID      string          `json:"client_id"`
+	GroupsClaim   string          `json:"groups_claim,omitempty"` // default "groups"; top-level claim, no traversal
+	AdminGroups   []string        `json:"admin_groups,omitempty"`
+	GroupMappings []GroupMapping  `json:"group_mappings,omitempty"`
+	LoginOrigins  []string        `json:"login_origins,omitempty"`
+	CLILogin      *CLILoginConfig `json:"cli_login,omitempty"`
+}
+
+// CLILoginConfig opts in to `inferplane login` (ADR-028): a data-plane
+// endpoint that trades a verified ID token for a short-lived gateway virtual
+// key, so a developer never copies a long-lived ik_... key by hand. ClientID
+// MUST differ from OIDCConfig.ClientID — the console SPA's public client is
+// secretless and registering a CLI loopback redirect on it would let any
+// local process complete a code flow with the console's audience (P2 gate).
+// KeyTTL bounds how long the minted key lives; the CLI cannot request a
+// longer one — a client-supplied TTL would make "short-lived" a false claim.
+type CLILoginConfig struct {
+	Enabled  bool   `json:"enabled"`
+	ClientID string `json:"client_id"`
+	KeyTTL   string `json:"key_ttl,omitempty"` // duration string, default "8h", clamped [15m, 24h]
+}
+
+// KeyTTLDuration parses KeyTTL, defaulting to 8h when unset. validateOIDC
+// already normalizes and range-checks KeyTTL at load time; this parse is
+// cheap and kept independently correct rather than trusting that mutation.
+func (c *CLILoginConfig) KeyTTLDuration() time.Duration {
+	if c == nil || c.KeyTTL == "" {
+		return 8 * time.Hour
+	}
+	d, err := time.ParseDuration(c.KeyTTL)
+	if err != nil {
+		return 8 * time.Hour
+	}
+	return d
 }
 
 // GroupMapping maps one IdP group to gateway teams ("*" = explicit wildcard).
@@ -264,10 +293,26 @@ type RateConfig struct {
 }
 
 // PricingConfig configures cost computation: on_missing policy (allow|block)
-// and per-(provider,model) rate overrides.
+// and per-(provider,model) rate overrides. Version labels the rate table so a
+// chargeback dispute can be pinned to the rates that priced it — it lands in
+// every audit record's cost.pricing_version (ADR-030; the field used to be the
+// hardcoded string "bundled" even for fully-overridden tables).
 type PricingConfig struct {
 	OnMissing string                           `json:"on_missing"` // allow|block
+	Version   string                           `json:"version"`    // free-form label, e.g. "2026-07-bedrock"; default "unversioned"
 	Overrides map[string]map[string]RateConfig `json:"overrides"`  // provider → model → rate
+}
+
+// validatePricing rejects an unrecognized on_missing value. Before this, a typo
+// like "blcok" — or "BLOCK" — silently fell back to allow, so an operator who
+// believed unpriced traffic was refused was in fact serving it free (ADR-030).
+func validatePricing(p PricingConfig) error {
+	switch p.OnMissing {
+	case "", "allow", "block":
+		return nil
+	default:
+		return fmt.Errorf("config: pricing.on_missing must be \"allow\" or \"block\", got %q", p.OnMissing)
+	}
 }
 
 // PluginConfig enables a request-transform filter plugin (the spec's filter
@@ -308,6 +353,23 @@ type Config struct {
 	BudgetAlerts        *BudgetAlertsConfig        `json:"budget_alerts,omitempty"`
 	ProviderHealthCheck *ProviderHealthCheckConfig `json:"provider_health_check,omitempty"`
 	VirtualKeys         []VirtualKeyConfig         `json:"virtual_keys,omitempty"`
+	// ModelFallbacks maps a requested (possibly unconfigured) model name to a
+	// configured model name/alias to serve in its place — e.g.
+	// {"claude-opus-5": "claude-opus-4-8"} keeps a hardcoded client version
+	// working before the operator adds the new model. One hop only, same
+	// posture as model aliases: a target must not itself be a map key.
+	ModelFallbacks map[string]string `json:"model_fallbacks,omitempty"`
+	// ModelFallbackFamily enables the default same-family fallback heuristic
+	// (an unconfigured "claude-opus-5" falls back to the highest configured
+	// "claude-opus-*" version below it) for models with no explicit entry in
+	// ModelFallbacks. Nil (absent) means enabled; explicit false disables it.
+	ModelFallbackFamily *bool `json:"model_fallback_family,omitempty"`
+}
+
+// FallbackFamilyEnabled reports whether the family fallback heuristic is on
+// (default: yes).
+func (c *Config) FallbackFamilyEnabled() bool {
+	return c.ModelFallbackFamily == nil || *c.ModelFallbackFamily
 }
 
 // BudgetAlertsConfig enables webhook budget alerts (D5b, ADR-017): a team's
@@ -454,6 +516,9 @@ func LoadRaw(path string) (*Config, error) {
 	if err := validateOIDC(&cfg.Server.AdminAuth); err != nil {
 		return nil, err
 	}
+	if err := validatePricing(cfg.Pricing); err != nil {
+		return nil, err
+	}
 	if err := validateOTel(cfg.OTel); err != nil {
 		return nil, err
 	}
@@ -473,6 +538,9 @@ func LoadRaw(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := validateModelAliases(cfg.Models); err != nil {
+		return nil, err
+	}
+	if err := validateModelFallbacks(cfg.Models, cfg.ModelFallbacks); err != nil {
 		return nil, err
 	}
 	if err := validateVirtualKeys(cfg.VirtualKeys); err != nil {
@@ -501,6 +569,35 @@ func validateModelAliases(models map[string]ModelConfig) error {
 				return fmt.Errorf("config: model alias %q declared by both %q and %q", alias, prev, model)
 			}
 			seen[alias] = model
+		}
+	}
+	return nil
+}
+
+// ValidateModelFallbacks is the shared guard for both the file-config path
+// (LoadRaw) and the providerstore UI-write path, mirroring
+// ValidateModelAliases's role for model aliases.
+func ValidateModelFallbacks(models map[string]ModelConfig, fallbacks map[string]string) error {
+	return validateModelFallbacks(models, fallbacks)
+}
+
+func validateModelFallbacks(models map[string]ModelConfig, fallbacks map[string]string) error {
+	known := make(map[string]bool, len(models))
+	for name, mc := range models {
+		known[name] = true
+		for _, alias := range mc.Aliases {
+			known[alias] = true
+		}
+	}
+	for requested, served := range fallbacks {
+		if served == requested {
+			return fmt.Errorf("config: model_fallbacks %q maps to itself", requested)
+		}
+		if !known[served] {
+			return fmt.Errorf("config: model_fallbacks %q targets unconfigured model %q", requested, served)
+		}
+		if _, chained := fallbacks[served]; chained {
+			return fmt.Errorf("config: model_fallbacks %q targets %q, which is itself a fallback key (one hop only)", requested, served)
 		}
 	}
 	return nil
@@ -866,6 +963,24 @@ func validateOIDC(aa *AdminAuth) error {
 	}
 	if o.GroupsClaim == "" {
 		o.GroupsClaim = "groups"
+	}
+	if cl := o.CLILogin; cl != nil {
+		if cl.ClientID == "" {
+			return fmt.Errorf("config: oidc.cli_login.client_id is required")
+		}
+		if cl.ClientID == o.ClientID {
+			return fmt.Errorf("config: oidc.cli_login.client_id must differ from oidc.client_id — the console's public client must not accept a CLI loopback redirect")
+		}
+		if cl.KeyTTL == "" {
+			cl.KeyTTL = "8h"
+		}
+		ttl, err := time.ParseDuration(cl.KeyTTL)
+		if err != nil {
+			return fmt.Errorf("config: oidc.cli_login.key_ttl: %w", err)
+		}
+		if ttl < 15*time.Minute || ttl > 24*time.Hour {
+			return fmt.Errorf("config: oidc.cli_login.key_ttl must be between 15m and 24h, got %s", cl.KeyTTL)
+		}
 	}
 	seen := map[string]bool{}
 	for _, m := range o.GroupMappings {

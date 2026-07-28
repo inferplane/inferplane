@@ -214,6 +214,47 @@ func TestChatStreamingConvertsMockCanonicalToOpenAI(t *testing.T) {
 	}
 }
 
+// midStreamErrProvider yields one good chunk, then a mid-stream error — the
+// 200 is already committed by the time the error surfaces, so it must appear
+// as an OpenAI-shaped SSE error event followed by [DONE], not a silently
+// truncated stream (mirrors anthropicapi's/bedrockapi's midStreamErrProvider).
+type midStreamErrProvider struct{}
+
+func (midStreamErrProvider) Name() string               { return "midstream" }
+func (midStreamErrProvider) Models() []schema.ModelInfo { return nil }
+func (midStreamErrProvider) Complete(context.Context, *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+	return nil, errInjected
+}
+func (midStreamErrProvider) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
+	return func(yield func(*providers.StreamEvent, error) bool) {
+		chunk := &schema.ChatChunk{Type: "content_block_delta", Delta: []byte(`{"type":"text_delta","text":"hi"}`)}
+		if !yield(&providers.StreamEvent{Chunk: chunk}, nil) {
+			return
+		}
+		yield(nil, errInjected)
+	}, nil
+}
+
+func TestChatStreamingMidStreamErrorEmitsErrorEvent(t *testing.T) {
+	provs := map[string]providers.Provider{"p": midStreamErrProvider{}}
+	models := map[string]config.ModelConfig{"m": {Targets: []config.Target{{Provider: "p", Model: "m"}}}}
+	h := NewChatHandler(router.New(holderFor(provs, models)))
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"m","stream":true,"messages":[]}`))
+	ctx := principal.With(req.Context(), keystore.Principal{KeyID: "ik", Team: "t", AllowedModels: []string{"*"}})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req.WithContext(ctx))
+	if rec.Code != 200 {
+		t.Fatalf("status already committed, expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "upstream stream interrupted") {
+		t.Fatalf("mid-stream error not surfaced as an SSE error event: %s", body)
+	}
+	if !strings.Contains(body, "data: [DONE]") {
+		t.Fatalf("mid-stream error must still terminate with [DONE]: %s", body)
+	}
+}
+
 // failProvider always errors, to drive the pre-TTFT fallback to the next target.
 type failProvider struct{}
 
@@ -333,4 +374,58 @@ func holderFor(provs map[string]providers.Provider, models map[string]config.Mod
 	h := &live.Holder{}
 	h.Swap(live.NewState(provs, models, nil, ids))
 	return h
+}
+
+// holderForWithFallbacks is holderFor plus model_fallbacks (D5).
+func holderForWithFallbacks(provs map[string]providers.Provider, models map[string]config.ModelConfig, fallbacks map[string]string) *live.Holder {
+	ids := make(map[string]string, len(provs))
+	for n := range provs {
+		ids[n] = n
+	}
+	h := &live.Holder{}
+	h.Swap(live.NewStateWithFallbacks(provs, models, nil, ids, fallbacks, false))
+	return h
+}
+
+// statusProvider always answers Complete with a fixed status/body and no
+// error — for the D5 cross-model-fallback-on-404 test below, as opposed to
+// failProvider's transport-error path.
+type statusProvider struct {
+	code int
+	body []byte
+}
+
+func (statusProvider) Name() string               { return "status" }
+func (statusProvider) Models() []schema.ModelInfo { return nil }
+func (p statusProvider) Complete(context.Context, *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+	return &providers.ProxyResponse{StatusCode: p.code, RawBody: p.body}, nil
+}
+func (statusProvider) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
+	return nil, nil
+}
+
+// D5: a configured model whose upstream rejects it as unknown (404) crosses
+// to the model_fallbacks target, mirroring anthropicapi's
+// TestMessagesModelFallbackCrossesOnUpstream404.
+func TestChatModelFallbackCrossesOnUpstream404(t *testing.T) {
+	provs := map[string]providers.Provider{
+		"bad":  statusProvider{code: 404, body: []byte(`{"error":{"message":"model not found"}}`)},
+		"good": mockprovider.New("gpt-x-fallback"),
+	}
+	models := map[string]config.ModelConfig{
+		"gpt-x":          {Targets: []config.Target{{Provider: "bad", Model: "gpt-x"}}},
+		"gpt-x-fallback": {Targets: []config.Target{{Provider: "good", Model: "gpt-x-fallback"}}},
+	}
+	h := NewChatHandler(router.New(holderForWithFallbacks(provs, models, map[string]string{"gpt-x": "gpt-x-fallback"})))
+	req := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-x","messages":[{"role":"user","content":"hi"}]}`))
+	ctx := principal.With(req.Context(), keystore.Principal{AllowedModels: []string{"*"}})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req.WithContext(ctx))
+	if rec.Code != 200 {
+		t.Fatalf("cross-model fallback on upstream 404 should yield 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Inferplane-Model-Fallback"); got != "gpt-x-fallback" {
+		t.Fatalf("x-inferplane-model-fallback = %q, want %q", got, "gpt-x-fallback")
+	}
 }

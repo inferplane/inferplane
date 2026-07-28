@@ -267,6 +267,48 @@ func TestCreateKeyWithGovernanceOptions_roundTrip(t *testing.T) {
 	}
 }
 
+// TestCreateKey_nonAdminOIDCCannotSpoofOwner (ADR-028): a team-mapped, non-
+// admin OIDC identity can mint a key for its own team, but cannot attribute
+// it to a different person by setting owner in the body — a teammate could
+// otherwise mint a key and pin the spend/attribution on someone else. The
+// server overrides owner to the caller's own subject.
+func TestCreateKey_nonAdminOIDCCannotSpoofOwner(t *testing.T) {
+	h := NewKeysHandler(newTestStore(t), nil)
+	body := `{"team":"alpha","allowed_models":["*"],"owner":"bob"}`
+	req := httptest.NewRequest("POST", "/admin/keys", strings.NewReader(body))
+	req = req.WithContext(principal.WithAdmin(req.Context(), memberID)) // Subject: "u-alpha"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	var out map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &out)
+	if out["owner"] != "u-alpha" {
+		t.Fatalf("owner = %v, want caller's own subject %q (spoof not blocked)", out["owner"], "u-alpha")
+	}
+}
+
+// TestCreateKey_adminCanSetArbitraryOwner is the control: full-admin/break-
+// glass provisioning on behalf of someone else (e.g. bootstrap, service
+// accounts) is unaffected by the non-admin owner override above.
+func TestCreateKey_adminCanSetArbitraryOwner(t *testing.T) {
+	h := NewKeysHandler(newTestStore(t), nil)
+	body := `{"team":"platform-eng","allowed_models":["*"],"owner":"bob"}`
+	req := httptest.NewRequest("POST", "/admin/keys", strings.NewReader(body))
+	req = req.WithContext(principal.WithAdmin(req.Context(), adminID))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	var out map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &out)
+	if out["owner"] != "bob" {
+		t.Fatalf("owner = %v, want %q (admin owner override regressed)", out["owner"], "bob")
+	}
+}
+
 func TestCreateKeyWithGovernanceOptions_badExpiryIs400(t *testing.T) {
 	h := NewKeysHandler(newTestStore(t), nil)
 	req := httptest.NewRequest("POST", "/admin/keys", strings.NewReader(`{"team":"t","expires_at":"not-a-date"}`))

@@ -2,9 +2,11 @@
 package anthropicapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -117,7 +119,14 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeErr(w, 400, "invalid_request_error", "malformed JSON")
 		return
 	}
-	model := h.r.Canonical(parsed.Model)
+	model, modelSubstituted := h.r.ResolveModel(parsed.Model)
+	if modelSubstituted {
+		// Unconfigured/unrouted model substituted for a configured one
+		// (model_fallbacks or the same-family default, live.State.FallbackFor)
+		// BEFORE the allow-list check, so RBAC/audit/metrics/pricing below all
+		// key off the model actually served — advertise it to the client.
+		w.Header().Set("x-inferplane-model-fallback", model)
+	}
 	// Tracing (ADR-011): join the client's trace (W3C traceparent), start ONE
 	// server span owned across the whole request (incl. the fallback loop) and
 	// end it exactly once via defer; no-op when tracing is off. The provider
@@ -157,6 +166,11 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeErr(w, 404, "not_found_error", "unknown model: "+model+h.availableModelsErrorSuffix(p))
 		return
 	}
+	// ResolveChain may have appended a cross-model fallback's targets (an
+	// upstream "model not found" retry, D5) AFTER the allow-list check above
+	// already ran against `model` alone — re-check those targets' model here
+	// or a key allowed only `model` would silently reach the fallback model.
+	chain = router.FilterModelAllowed(chain, func(m string) bool { return h.r.Allows(p, m) })
 	// Team-record fresh lookup (D6/D7, ADR-016 pattern): one call reused below
 	// both for the region filter and the guardrail override — a team with no
 	// record is indistinguishable from a record with no overrides (zero value).
@@ -217,6 +231,19 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	table := st.Pricing()
 	// Governance pre-check (rate/quota/budget) BEFORE the upstream call. A block
 	// is recorded as a started record carrying the deny status.
+	// Pricing guard (ADR-030): with pricing.on_missing "block", refuse a
+	// request whose resolved targets have no rate rather than serving it and
+	// billing 0. Covers the routes boot validation cannot see (UI-write
+	// models, fallback-appended targets). Same table used to settle below.
+	// NOT gated on h.gov: on_missing "block" is a pricing setting, and a
+	// deployment with governance off would otherwise serve unpriced traffic free.
+	if dec := governance.PricingGuard(table, pricedTargets(chain)); !dec.Allowed {
+		h.audit(p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, false, traceID)
+		h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
+		tracing.SetStatus(span, false, "pricing missing")
+		writeErr(w, dec.Status, govErrType(dec.Status), dec.Reason)
+		return
+	}
 	if h.gov != nil {
 		dec := h.gov.PreCheck(p.Team, p.KeyID, keyPolicyOf(p), estimateTokens(raw))
 		if !dec.Allowed {
@@ -243,30 +270,55 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		upHeaders := req.Header.Clone()
 		tracing.Inject(req.Context(), upHeaders)
 		pr := &providers.ProxyRequest{
-			Model: model, Upstream: ct.Upstream, Parsed: &parsed,
+			Model: ct.Model, Upstream: ct.Upstream, Parsed: &parsed,
 			RawBody: raw, Headers: upHeaders, Stream: stream,
 			IngressProtocol:  "anthropic",
 			GuardrailID:      teamRec.GuardrailID,
 			GuardrailVersion: teamRec.GuardrailVersion,
 		}
 		last := i == len(chain)-1
+		// crossModelNext: the NEXT target (if any) serves a different model
+		// than this one — a D5 model-level fallback boundary, not just a
+		// different provider for the same model. Only across that boundary
+		// does an upstream "model not found" become retriable.
+		crossModelNext := !last && chain[i+1].Model != ct.Model
 		if i > 0 {
 			// We fell back to this target; advertise it to the client.
 			w.Header().Set("x-inferplane-fallback", ct.ProviderName)
+			if ct.Model != model {
+				w.Header().Set("x-inferplane-model-fallback", ct.Model)
+			}
 		}
 		var retriable bool
 		if stream {
-			retriable = h.serveStream(w, req, ct.Provider, pr, p, model, ct.ProviderName, ct.Identity, ct.Upstream, last, start, table)
+			retriable = h.serveStream(w, req, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		} else {
-			retriable = h.serveComplete(w, req, ct.Provider, pr, p, model, ct.ProviderName, ct.Identity, ct.Upstream, last, start, table)
+			retriable = h.serveComplete(w, req, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		}
 		if !retriable {
 			return // committed (success, or terminal error on the last target)
 		}
 		// Pre-TTFT failure with a next target available → record + fall back.
 		h.r.RecordResult(ct.ProviderName, ct.Identity, false)
-		h.metrics.ObserveFallback(model, ct.ProviderName, chain[i+1].ProviderName, "upstream_error")
+		reason := "upstream_error"
+		if crossModelNext {
+			reason = "model_not_found"
+		}
+		h.metrics.ObserveFallback(ct.Model, ct.ProviderName, chain[i+1].ProviderName, reason)
 	}
+}
+
+// isModelNotFound reports whether an upstream response looks like a
+// "model not found" rejection rather than an unrelated client error — a plain
+// 404, or a 400 whose body names a Bedrock ValidationException (Bedrock
+// returns 400, not 404, for a model not enabled/available in that region).
+// Deliberately narrow: only these are ever retried across a D5 model-level
+// fallback boundary; any other 4xx stays a client error, teed verbatim.
+func isModelNotFound(statusCode int, body []byte) bool {
+	if statusCode == 404 {
+		return true
+	}
+	return statusCode == 400 && bytes.Contains(body, []byte("ValidationException"))
 }
 
 // govErrType maps a governance deny status to the Anthropic error `type`.
@@ -282,10 +334,11 @@ func govErrType(status int) string {
 }
 
 // serveComplete proxies one non-streaming target. It returns retriable=true
-// when the call failed pre-TTFT (transport error, or an upstream 5xx/429) AND a
-// next target exists (!last) — the caller then falls back. Otherwise it writes
-// the response/error to the client and returns false (committed).
-func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last bool, start time.Time, table *pricing.Table) (retriable bool) {
+// when the call failed pre-TTFT (transport error, an upstream 5xx/429, or —
+// only when crossModelNext — a "model not found" response, D5) AND a next
+// target exists (!last) — the caller then falls back. Otherwise it writes the
+// response/error to the client and returns false (committed).
+func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last {
@@ -315,7 +368,10 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 		return false
 	}
 	// An upstream 5xx/429 is a retriable failure when a next target exists.
-	if !last && (resp.StatusCode >= 500 || resp.StatusCode == 429) {
+	// Crossing a model-level fallback boundary (D5) also retries a "model not
+	// found" response — narrow on purpose: a plain 400 unrelated to the
+	// requested model must stay a client error, never replayed elsewhere.
+	if !last && (resp.StatusCode >= 500 || resp.StatusCode == 429 || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
 		return true
 	}
 	if resp.Headers != nil {
@@ -356,10 +412,15 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 
 // serveStream proxies one streaming target. Fallback is PRE-TTFT ONLY: if
 // Stream() returns an error before any event is yielded AND a next target exists
-// (!last), it returns retriable=true and the caller falls back. Once the first
-// event is teed the response is committed; a mid-stream error terminates the
-// stream (no fallback). Returns false in all committed cases.
-func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last bool, start time.Time, table *pricing.Table) (retriable bool) {
+// (!last), it returns retriable=true and the caller falls back — this already
+// covers a cross-model "model not found" (D5, crossModelNext) since the
+// anthropic provider's Stream() wraps ANY non-2xx pre-TTFT response as an
+// error, unlike Complete()'s status-in-response path (see serveComplete),
+// so crossModelNext needs no extra gating here; it is accepted only for
+// parity with serveComplete's signature. Once the first event is teed the
+// response is committed; a mid-stream error terminates the stream (no
+// fallback). Returns false in all committed cases.
+func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last {
@@ -404,8 +465,21 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 	var ttft float64
 	for ev, err := range seq {
 		if err != nil {
-			// upstream broke mid-stream; client sees truncated stream (M5: error event)
-			h.auditCompletedPartial(p, model, upstream, usage, tracing.TraceID(req.Context()))
+			// upstream broke mid-stream: the 200 is already committed, so the
+			// failure surfaces as an SSE error event rather than a silently
+			// truncated stream (H4 gate finding). The error detail is logged
+			// server-side only — an AWS SDK error string can carry an account
+			// id/ARN (same principle providers/bedrock/errors.go applies) — and
+			// never echoed to the client.
+			log.Printf("anthropicapi: stream interrupted (model=%s upstream=%s provider=%s): %v", model, upstream, providerName, err)
+			writeStreamErrorEvent(w)
+			flusher.Flush()
+			// Tokens already delivered to the client are real infrastructure
+			// cost — bill them (ADR-030). Before this, a stream that broke
+			// mid-flight skipped settle() entirely and everything already
+			// streamed was free, with no pricing_missing flag to show it.
+			partialCost := h.settle(p, providerName, model, upstream, lastUsage, table)
+			h.auditCompletedPartial(p, model, upstream, usage, partialCost, tracing.TraceID(req.Context()))
 			recordSpanResponse(req, prov.Name(), upstream, usage, true) // committed (partial)
 			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 200, time.Since(start).Seconds(), ttft)
 			return false
@@ -415,10 +489,20 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 		}
 		w.Write(ev.Raw) // tee original bytes verbatim
 		flusher.Flush()
-		// ev.Chunk.Usage on message_delta is the settlement observation point (M3/M5).
-		if ev.Chunk != nil && ev.Chunk.Usage != nil {
-			usage = usageRef(ev.Chunk.Usage)
-			lastUsage = ev.Chunk.Usage
+		// Settlement observation: FOLD every usage-bearing frame, never
+		// overwrite (ADR-030). Anthropic splits the counts across two frames —
+		// message_start carries input + cache_read + cache_creation nested
+		// under message.usage, while message_delta commonly carries
+		// output_tokens alone. Reading only the top-level usage of the last
+		// frame billed streaming requests for output tokens only.
+		if ev.Chunk != nil {
+			if ev.Chunk.Message != nil && ev.Chunk.Message.Usage != nil {
+				lastUsage = schema.MergeUsage(lastUsage, ev.Chunk.Message.Usage)
+			}
+			if ev.Chunk.Usage != nil {
+				lastUsage = schema.MergeUsage(lastUsage, ev.Chunk.Usage)
+			}
+			usage = usageRef(lastUsage)
 		}
 	}
 	cost := h.settle(p, providerName, model, upstream, lastUsage, table)
@@ -442,18 +526,21 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 // Governor's post-call settlement (quota debit + cost + budget debit), returning
 // the audit CostRef. nil when governance is disabled or there is no usage.
 //
-// M5 mapping notes: schema does not yet split cache_creation by TTL, so the
-// whole cache_creation_input_tokens total maps to CacheWrite5m as a
-// conservative default (the cheaper 5m tier); cache_read maps to CacheRead.
+// Cache writes are TTL-tiered (1h costs 2x the input rate, 5m costs 1.25x), so
+// the two tiers are resolved separately via schema.Usage.CacheWriteTiers rather
+// than collapsed into the cheaper one (ADR-030 — the collapse under-billed 1h
+// writes by ~40%).
 func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table) *audit.CostRef {
 	if h.gov == nil || u == nil {
 		return nil
 	}
+	write5m, write1h := u.CacheWriteTiers()
 	pu := pricing.Usage{
 		Input:        deref(u.InputTokens),
 		Output:       deref(u.OutputTokens),
 		CacheRead:    deref(u.CacheReadInputTokens),
-		CacheWrite5m: deref(u.CacheCreationInputTokens),
+		CacheWrite5m: write5m,
+		CacheWrite1h: write1h,
 	}
 	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table)
 	return &audit.CostRef{
@@ -471,17 +558,20 @@ func keyPolicyOf(p keystore.Principal) governance.KeyPolicy {
 }
 
 // observeTokens records the per-type token usage counters for one settled
-// request. Mirrors the settle() mapping (cache_creation → cache_write_5m). The
-// provider arg is the CONFIG provider name (pricing/metrics key), matching the
-// request metric labels. No-op when usage is nil or metrics is nil.
+// request. Mirrors the settle() mapping, including the cache-write TTL split
+// (ADR-030) so the metrics and the billed amount can't disagree. The provider
+// arg is the CONFIG provider name (pricing/metrics key), matching the request
+// metric labels. No-op when usage is nil or metrics is nil.
 func (h *MessagesHandler) observeTokens(model, provider, team string, u *schema.Usage) {
 	if u == nil {
 		return
 	}
+	write5m, write1h := u.CacheWriteTiers()
 	h.metrics.ObserveTokenUsage("input", model, provider, team, deref(u.InputTokens))
 	h.metrics.ObserveTokenUsage("output", model, provider, team, deref(u.OutputTokens))
 	h.metrics.ObserveTokenUsage("cache_read", model, provider, team, deref(u.CacheReadInputTokens))
-	h.metrics.ObserveTokenUsage("cache_write_5m", model, provider, team, deref(u.CacheCreationInputTokens))
+	h.metrics.ObserveTokenUsage("cache_write_5m", model, provider, team, write5m)
+	h.metrics.ObserveTokenUsage("cache_write_1h", model, provider, team, write1h)
 }
 
 // copyUpstreamHeaders tees upstream response headers to the client, skipping
@@ -560,7 +650,7 @@ func (h *MessagesHandler) auditCompleted(id string, p keystore.Principal, model,
 
 // auditCompletedPartial records a stream that broke mid-flight: status 200 was
 // already sent to the client, but the response is partial.
-func (h *MessagesHandler) auditCompletedPartial(p keystore.Principal, model, upstream string, usage *audit.UsageRef, traceID string) {
+func (h *MessagesHandler) auditCompletedPartial(p keystore.Principal, model, upstream string, usage *audit.UsageRef, cost *audit.CostRef, traceID string) {
 	if h.aud == nil {
 		return
 	}
@@ -573,6 +663,7 @@ func (h *MessagesHandler) auditCompletedPartial(p keystore.Principal, model, ups
 		Request:       audit.RequestRef{Ingress: "anthropic", ModelRequested: model, ModelResolved: upstream},
 		Outcome:       &audit.OutcomeRef{Status: 200, Partial: true},
 		Usage:         usage,
+		Cost:          cost,
 	}
 	if traceID != "" {
 		rec.TraceID = &traceID
@@ -622,4 +713,24 @@ func writeErr(w http.ResponseWriter, status int, errType, msg string) {
 		"type":  "error",
 		"error": map[string]string{"type": errType, "message": msg},
 	})
+}
+
+// writeStreamErrorEvent emits an Anthropic SSE `error` event on a stream whose
+// 200 status is already committed (mid-stream upstream failure) — mirroring
+// bedrockapi's exception-frame partialFinish path so a client sees a real
+// error instead of a silently truncated stream. The message is a fixed,
+// generic string; the real error goes to the server log only (see caller).
+func writeStreamErrorEvent(w http.ResponseWriter) {
+	io.WriteString(w, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"upstream stream interrupted\"}}\n\n")
+}
+
+// pricedTargets projects the resolved chain onto the (provider, upstream) pairs
+// the request could be billed against — the same key pricing.CostUSDMicros
+// uses — so the pricing guard checks exactly what settlement will look up.
+func pricedTargets(chain []router.ChainTarget) []governance.PricedTarget {
+	out := make([]governance.PricedTarget, 0, len(chain))
+	for _, ct := range chain {
+		out = append(out, governance.PricedTarget{Provider: ct.ProviderName, Upstream: ct.Upstream})
+	}
+	return out
 }

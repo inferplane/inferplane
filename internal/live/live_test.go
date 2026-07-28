@@ -195,3 +195,186 @@ func TestBuildStateAliases(t *testing.T) {
 		t.Fatal("Route must resolve the canonical name")
 	}
 }
+
+// familyConfig has two configured opus versions and one sonnet, so the
+// family heuristic has a real choice to make.
+func familyConfig() *config.Config {
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"anthropic-direct": {Type: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "sk-x"},
+		},
+		Models: map[string]config.ModelConfig{
+			"claude-opus-4-6":           {Targets: []config.Target{{Provider: "anthropic-direct", Model: "claude-opus-4-6"}}},
+			"claude-opus-4-8":           {Targets: []config.Target{{Provider: "anthropic-direct", Model: "claude-opus-4-8"}}},
+			"claude-sonnet-4-6":         {Targets: []config.Target{{Provider: "anthropic-direct", Model: "claude-sonnet-4-6"}}},
+			"claude-sonnet-4-6-bedrock": {Targets: []config.Target{{Provider: "anthropic-direct", Model: "claude-sonnet-4-6-bedrock"}}},
+		},
+	}
+	cfg.Pricing.OnMissing = "allow"
+	return cfg
+}
+
+// D5: FallbackFor's explicit model_fallbacks entry wins over the family
+// heuristic, even when a family candidate also exists.
+func TestFallbackForExplicitWinsOverFamily(t *testing.T) {
+	cfg := familyConfig()
+	cfg.ModelFallbacks = map[string]string{"claude-opus-5": "claude-sonnet-4-6"}
+	st, _, err := BuildState(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.FallbackFor("claude-opus-5"); got != "claude-sonnet-4-6" {
+		t.Fatalf("FallbackFor = %q, want explicit target %q", got, "claude-sonnet-4-6")
+	}
+}
+
+// D5: with no explicit entry, FallbackFor picks the highest configured
+// version strictly below the requested one, within the same family.
+func TestFallbackForFamilyPicksHighestBelow(t *testing.T) {
+	cfg := familyConfig()
+	st, _, err := BuildState(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.FallbackFor("claude-opus-5"); got != "claude-opus-4-8" {
+		t.Fatalf("FallbackFor = %q, want %q", got, "claude-opus-4-8")
+	}
+}
+
+// D5: no configured version below the requested one in the family -> "".
+func TestFallbackForFamilyNoCandidateBelow(t *testing.T) {
+	cfg := familyConfig()
+	st, _, err := BuildState(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.FallbackFor("claude-opus-3"); got != "" {
+		t.Fatalf("FallbackFor = %q, want \"\" (no version below 3 configured)", got)
+	}
+}
+
+// D5: an explicit false ModelFallbackFamily disables the heuristic entirely.
+func TestFallbackForFamilyDisabled(t *testing.T) {
+	cfg := familyConfig()
+	off := false
+	cfg.ModelFallbackFamily = &off
+	st, _, err := BuildState(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.FallbackFor("claude-opus-5"); got != "" {
+		t.Fatalf("FallbackFor = %q, want \"\" (family heuristic disabled)", got)
+	}
+}
+
+// D5: a name with no numeric version tail is never a family candidate — an
+// operator wanting it reached via fallback must list it explicitly.
+func TestFallbackForFamilyIgnoresNonVersionedNames(t *testing.T) {
+	cfg := familyConfig()
+	st, _, err := BuildState(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// "claude-sonnet-4-6-bedrock" has no numeric tail, so a hypothetical
+	// unrouted "claude-sonnet-4-8-bedrock" must not match it by family.
+	if got := st.FallbackFor("claude-sonnet-4-8-bedrock"); got != "" {
+		t.Fatalf("FallbackFor = %q, want \"\" (non-versioned name is never a family candidate)", got)
+	}
+}
+
+// ADR-030 money guard: strictness follows the operator's pricing.on_missing.
+// With "block" an unpriced route must refuse to boot; with the default "allow"
+// it must warn and continue (a self-hosted model may genuinely have no price).
+func TestBuildState_unpricedRouteBlocksOnlyWhenOnMissingBlock(t *testing.T) {
+	base := func(onMissing string) *config.Config {
+		return &config.Config{
+			Providers: map[string]config.ProviderConfig{
+				"up": {Type: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "sk-x"},
+			},
+			Models: map[string]config.ModelConfig{
+				"m": {Targets: []config.Target{{Provider: "up", Model: "m"}}},
+			},
+			Pricing: config.PricingConfig{OnMissing: onMissing},
+		}
+	}
+
+	if _, _, err := BuildState(base("block")); err == nil {
+		t.Error(`on_missing "block" with an unpriced route must refuse to boot`)
+	} else if !strings.Contains(err.Error(), "up/m") {
+		t.Errorf("error must name the unpriced route, got: %v", err)
+	}
+
+	if _, _, err := BuildState(base("")); err != nil {
+		t.Errorf(`default on_missing "allow" must boot (warn only), got: %v`, err)
+	}
+}
+
+// A priced route boots under either posture.
+func TestBuildState_pricedRouteBootsUnderBlock(t *testing.T) {
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{"up": {Type: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "sk-x"}},
+		Models: map[string]config.ModelConfig{
+			"m": {Targets: []config.Target{{Provider: "up", Model: "m"}}},
+		},
+		Pricing: config.PricingConfig{
+			OnMissing: "block",
+			Overrides: map[string]map[string]config.RateConfig{
+				"up": {"m": {InputPerMTok: 1, OutputPerMTok: 2}},
+			},
+		},
+	}
+	if _, _, err := BuildState(cfg); err != nil {
+		t.Fatalf("priced route must boot under block: %v", err)
+	}
+}
+
+// A pricing override naming a provider or model that does not exist is a typo,
+// never a policy — at runtime it is indistinguishable from a missing rate and
+// made that provider free forever. Rejected regardless of on_missing.
+func TestBuildState_rejectsPricingOverrideTypos(t *testing.T) {
+	cases := map[string]config.PricingConfig{
+		"unknown provider": {Overrides: map[string]map[string]config.RateConfig{
+			"typo-provider": {"m": {InputPerMTok: 1}},
+		}},
+		"model no route uses": {Overrides: map[string]map[string]config.RateConfig{
+			"up": {"not-routed": {InputPerMTok: 1}},
+		}},
+	}
+	for name, pc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := &config.Config{
+				Providers: map[string]config.ProviderConfig{"up": {Type: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "sk-x"}},
+				Models: map[string]config.ModelConfig{
+					"m": {Targets: []config.Target{{Provider: "up", Model: "m"}}},
+				},
+				Pricing: pc,
+			}
+			if _, _, err := BuildState(cfg); err == nil {
+				t.Error("expected a load error for a pricing.overrides typo")
+			}
+		})
+	}
+}
+
+// A rate declared on the unprefixed upstream id must satisfy a route that uses
+// a Bedrock cross-region prefix — the deployed-demo shape (ADR-030).
+func TestUnpricedTargets_regionPrefixedRouteSatisfiedByBaseRate(t *testing.T) {
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{"bed": {Type: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "sk-x"}},
+		Models: map[string]config.ModelConfig{
+			"claude-opus-5": {Targets: []config.Target{{Provider: "bed", Model: "global.anthropic.claude-opus-5"}}},
+		},
+		Pricing: config.PricingConfig{
+			Overrides: map[string]map[string]config.RateConfig{
+				"bed": {"anthropic.claude-opus-5": {InputPerMTok: 5, OutputPerMTok: 25}},
+			},
+		},
+	}
+	if _, _, err := BuildState(cfg); err != nil {
+		t.Fatalf("base rate must cover the global.-prefixed route: %v", err)
+	}
+	tbl := pricingFromConfig(cfg)
+	if got := UnpricedTargets(cfg, tbl); len(got) != 0 {
+		t.Errorf("UnpricedTargets = %v, want empty", got)
+	}
+}
