@@ -261,6 +261,13 @@ func (s *SQLiteStore) EnsureKey(ctx context.Context, plaintext, team string, all
 
 var ErrKeyNotFound = errors.New("keystore: key not found")
 
+// ErrKeyExpired is returned by Resolve instead of ErrKeyNotFound when the
+// hash matched a live row whose ExpiresAt has passed. Distinguishing it lets
+// KeyAuth tell a caller "your key expired" rather than "invalid API key" —
+// meaningful for a CLI-minted key whose holder should re-run `inferplane
+// login` rather than suspect a typo (ADR-028).
+var ErrKeyExpired = errors.New("keystore: key expired")
+
 const keyColumns = `key_id, team, allowed_models, budget_usd_micros, tpm, rpm, expires_at, owner, metadata`
 
 // scanPrincipal reads one keyColumns-shaped row. Expiry is checked by the
@@ -296,7 +303,7 @@ func (s *SQLiteStore) Resolve(ctx context.Context, plaintext string) (Principal,
 		return Principal{}, err
 	}
 	if p.ExpiresAt != nil && p.ExpiresAt.Before(time.Now().UTC()) {
-		return Principal{}, ErrKeyNotFound
+		return Principal{}, ErrKeyExpired
 	}
 	return p, nil
 }

@@ -176,6 +176,14 @@ func (h *KeysHandler) create(w http.ResponseWriter, r *http.Request, id principa
 		json.NewEncoder(w).Encode(map[string]string{"error": "invalid key options: " + err.Error()})
 		return
 	}
+	// A non-admin OIDC identity cannot set owner to anyone but itself — the
+	// team-mapped caller and the "victim" it names in owner may be distinct
+	// people on the same team. Full admins and break-glass keep the field
+	// caller-supplied (e.g. bootstrap/service-account provisioning on behalf
+	// of someone else). ADR-028.
+	if id.AuthMethod == "oidc" && !id.IsAdmin {
+		opts.Owner = id.Subject
+	}
 	plaintext, p, err := h.store.CreateWithOptions(r.Context(), body.Team, body.AllowedModels, opts)
 	if err != nil {
 		http.Error(w, `{"error":"create failed"}`, http.StatusInternalServerError)

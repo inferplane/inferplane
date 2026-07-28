@@ -119,7 +119,7 @@ Client -> KeyAuth(RBAC) -> Governor.PreCheck -> Router(fallback+breaker) -> Prov
 ### Modules / Resources
 | Component | Path | Description |
 |-----------|------|-------------|
-| Binary | `cmd/inferplane` | serve / keys / audit subcommands |
+| Binary | `cmd/inferplane` | serve / keys / audit / report / bodies / login / token / logout subcommands |
 | Helm chart | `charts/inferplane` | Deployment, Service (data+admin), ServiceAccount, ConfigMap, optional Ingress, optional PVC (ADR-023), NOTES.txt |
 | Dashboard | `deploy/grafana/inferplane.json` | 9-panel Prometheus dashboard |
 

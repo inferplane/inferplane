@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadResolvesSecretRef(t *testing.T) {
@@ -325,6 +326,77 @@ func TestOIDCConfigRejectsDuplicateGroupKeys(t *testing.T) {
 	  ]}`
 	if _, err := Load(writeOIDCConfig(t, block)); err == nil {
 		t.Fatal("duplicate group keys: want load error")
+	}
+}
+
+// ADR-028: `inferplane login` CLI. cli_login opts a data-plane endpoint into
+// trading a verified ID token for a short-lived gateway virtual key. Its
+// client_id must differ from the console's — the console's public client is
+// secretless and a shared client_id would let any local process complete a
+// code flow with the console's audience.
+
+func TestCLILoginConfigLoads(t *testing.T) {
+	block := `{"issuer": "https://idp.example.com", "client_id": "console-client",
+	  "cli_login": {"enabled": true, "client_id": "cli-client", "key_ttl": "1h"}}`
+	cfg, err := Load(writeOIDCConfig(t, block))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl := cfg.Server.AdminAuth.OIDC.CLILogin
+	if cl == nil || !cl.Enabled || cl.ClientID != "cli-client" || cl.KeyTTLDuration() != time.Hour {
+		t.Fatalf("cli_login: %+v", cl)
+	}
+}
+
+func TestCLILoginConfigAbsentIsNil(t *testing.T) {
+	cfg, err := Load(writeOIDCConfig(t, `{"issuer": "https://idp.example.com", "client_id": "x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.AdminAuth.OIDC.CLILogin != nil {
+		t.Fatal("cli_login must be nil when absent")
+	}
+}
+
+func TestCLILoginConfigDefaultsKeyTTL(t *testing.T) {
+	block := `{"issuer": "https://idp.example.com", "client_id": "console-client",
+	  "cli_login": {"enabled": true, "client_id": "cli-client"}}`
+	cfg, err := Load(writeOIDCConfig(t, block))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Server.AdminAuth.OIDC.CLILogin.KeyTTLDuration(); got != 8*time.Hour {
+		t.Fatalf("default key_ttl = %s, want 8h", got)
+	}
+}
+
+func TestCLILoginConfigRejectsMissingClientID(t *testing.T) {
+	block := `{"issuer": "https://idp.example.com", "client_id": "console-client",
+	  "cli_login": {"enabled": true}}`
+	if _, err := Load(writeOIDCConfig(t, block)); err == nil {
+		t.Fatal("cli_login without client_id: want load error")
+	}
+}
+
+func TestCLILoginConfigRejectsSameClientIDAsConsole(t *testing.T) {
+	block := `{"issuer": "https://idp.example.com", "client_id": "shared-client",
+	  "cli_login": {"enabled": true, "client_id": "shared-client"}}`
+	if _, err := Load(writeOIDCConfig(t, block)); err == nil {
+		t.Fatal("cli_login.client_id == oidc.client_id: want load error")
+	}
+}
+
+func TestCLILoginConfigRejectsOutOfRangeKeyTTL(t *testing.T) {
+	for name, ttl := range map[string]string{
+		"too short":  "1m",
+		"too long":   "48h",
+		"unparsable": "not-a-duration",
+	} {
+		block := `{"issuer": "https://idp.example.com", "client_id": "console-client",
+		  "cli_login": {"enabled": true, "client_id": "cli-client", "key_ttl": "` + ttl + `"}}`
+		if _, err := Load(writeOIDCConfig(t, block)); err == nil {
+			t.Fatalf("%s (%s): want load error", name, ttl)
+		}
 	}
 }
 

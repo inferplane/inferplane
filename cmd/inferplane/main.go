@@ -1,6 +1,8 @@
 // Command inferplane is the gateway binary. Subcommands: `serve` (run the
-// gateway), `keys` (local virtual-key bootstrap CRUD), and `audit` (verify the
-// tamper-evident log chain).
+// gateway), `keys` (local virtual-key bootstrap CRUD), `audit` (verify the
+// tamper-evident log chain), and `login`/`token`/`logout` (ADR-028 — OIDC
+// login for humans, trading an IdP session for an automatically-renewing
+// short-lived virtual key instead of a hand-copied long-lived one).
 package main
 
 import (
@@ -44,6 +46,19 @@ func main() {
 		os.Exit(bodiesCmd(os.Args[2:]))
 	case "report":
 		os.Exit(reportCmd(os.Args[2:]))
+	case "login":
+		if err := loginCmd(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+	case "token":
+		if err := tokenCmd(os.Args[2:]); err != nil {
+			os.Exit(1) // tokenCmd already wrote its own stderr hint
+		}
+	case "logout":
+		if err := logoutCmd(os.Args[2:]); err != nil {
+			os.Exit(1) // logoutCmd already wrote its own stderr warning
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -59,6 +74,9 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  inferplane audit verify --file <path>")
 	fmt.Fprintln(os.Stderr, "  inferplane bodies rewrap-key --store <path> --old-key-env <VAR>|--old-key-file <path> --new-key-env <VAR>|--new-key-file <path>")
 	fmt.Fprintln(os.Stderr, "  inferplane report --file <path> [--since <RFC3339>] [--until <RFC3339>] [--by team|team,model]")
+	fmt.Fprintln(os.Stderr, "  inferplane login --gateway <url> [--team <t>] [--issuer <url> --client-id <id>] [--id-token-command <cmd>]")
+	fmt.Fprintln(os.Stderr, "  inferplane token [--export] [--raw]")
+	fmt.Fprintln(os.Stderr, "  inferplane logout")
 }
 
 // run assembles the gateway (gateway.go) and serves until SIGINT/SIGTERM.

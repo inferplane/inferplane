@@ -34,6 +34,7 @@ contract is in [docs/api-reference.md](../api-reference.md).
 | Logs + body API | `internal/server/analyticsapi/logs.go`, `internal/server/adminapi/bodies.go` | `GET /admin/logs` (**full-admin only**, D4/ADR-018) recent request events (id-keyset paginated, `body_ref` marks a captured body); `GET`/`DELETE /admin/bodies/{ref}` (**full-admin only**) fetch/erase a captured body — GET emits `body_accessed` (deduped 5m/viewer), DELETE emits `body_deleted`, both carry `record_ref` never `body_ref`; purged/erased/undecryptable → **410 tombstone**, never 500 |
 | Metrics endpoint | `internal/server/metricsapi.go` | unauthenticated Prometheus `/metrics` |
 | OpenAI conversion | `internal/openai/convert.go` | OpenAI ⇄ canonical request/response/chunk |
+| CLI login API | `internal/server/authapi/` | **Data-plane**, opt-in (`oidc.cli_login.enabled`, ADR-028): `GET /v1/auth/config` unauthenticated secret-free `{cli, issuer?, client_id?}`; `POST /v1/auth/key` (OIDC bearer, DISTINCT `client_id`/`Verifier` from the console's) mints a short-lived key — server decides `expires_at`/`owner`, never the client; per-subject mint rate limit; `DELETE /v1/auth/key` (ordinary `KeyAuth`) self-revoke, used by `inferplane logout`. `inferplane login`/`token` are the CLI counterpart |
 
 ### 3. Key Decisions
 - `count_tokens` must always return 200 — a non-200 crashes Claude Code (aliases are canonicalized here too, ADR-021).
@@ -47,8 +48,8 @@ contract is in [docs/api-reference.md](../api-reference.md).
 
 ### 5. Cross-references
 - Related modules: `internal/router`, `internal/governance`, `internal/alert`, `internal/bodystore`, `providers/`
-- Related ADRs: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md
-- Related runbooks: docs/runbooks/
+- Related ADRs: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md
+- Related runbooks: docs/runbooks/, docs/runbooks/cli-login.md
 
 <a id="korean"></a>
 ## 한국어
@@ -81,6 +82,7 @@ HTTP 표면입니다. 두 인그레스(Anthropic Messages, OpenAI Chat Completio
 | 로그 + 본문 API | `internal/server/analyticsapi/logs.go`, `internal/server/adminapi/bodies.go` | `GET /admin/logs` (**풀 어드민 전용**, D4/ADR-018) 최근 요청 이벤트(id keyset 페이지네이션, `body_ref`는 본문 저장 표시); `GET`/`DELETE /admin/bodies/{ref}` (**풀 어드민 전용**) 저장 본문 조회/삭제 — GET은 `body_accessed`(뷰어별 5분 dedupe), DELETE는 `body_deleted` 발행, 둘 다 `record_ref`만 가지며 `body_ref`는 절대 없음; purge/삭제/복호불가 → **410 톰스톤**, 500 아님 |
 | 메트릭 엔드포인트 | `internal/server/metricsapi.go` | 무인증 Prometheus `/metrics` |
 | OpenAI 변환 | `internal/openai/convert.go` | OpenAI ⇄ canonical 요청/응답/청크 |
+| CLI 로그인 API | `internal/server/authapi/` | **데이터 플레인**, 옵트인(`oidc.cli_login.enabled`, ADR-028): `GET /v1/auth/config` 무인증·시크릿 무노출 `{cli, issuer?, client_id?}`; `POST /v1/auth/key`(OIDC bearer, 콘솔과 별개의 `client_id`/`Verifier`)는 단기 키를 발급 — `expires_at`/`owner`는 서버가 결정, 클라이언트는 절대 지정 불가; subject별 발급 rate limit; `DELETE /v1/auth/key`(일반 `KeyAuth`)는 자기 취소, `inferplane logout`이 사용. `inferplane login`/`token`이 CLI 짝 |
 
 ### 3. 주요 결정
 - `count_tokens`는 항상 200 반환 — 비-200은 Claude Code를 크래시시킴 (여기서도 alias를 canonical로 정규화, ADR-021).
@@ -94,5 +96,5 @@ HTTP 표면입니다. 두 인그레스(Anthropic Messages, OpenAI Chat Completio
 
 ### 5. 상호 참조
 - 관련 모듈: `internal/router`, `internal/governance`, `internal/alert`, `internal/bodystore`, `providers/`
-- 관련 ADR: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md
-- 관련 런북: docs/runbooks/
+- 관련 ADR: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md
+- 관련 런북: docs/runbooks/, docs/runbooks/cli-login.md

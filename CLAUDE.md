@@ -23,7 +23,7 @@ Architecture overview: [docs/architecture.md](docs/architecture.md).
 ## Project Structure
 
 ```
-cmd/inferplane/    - Binary entrypoint: serve / keys / audit / report subcommands
+cmd/inferplane/    - Binary entrypoint: serve / keys / audit / report / login / token / logout subcommands
 internal/          - Private packages (gateway internals)
   server/          - HTTP data plane + admin plane, ingress handlers
   router/          - Model→provider resolution, fallback chain, circuit breaker

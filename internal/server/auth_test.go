@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,8 +12,9 @@ import (
 )
 
 type stubStore struct {
-	key string
-	p   keystore.Principal
+	key        string
+	p          keystore.Principal
+	expiredKey string // Resolve returns ErrKeyExpired for this plaintext
 }
 
 func (s stubStore) Create(context.Context, string, []string) (string, keystore.Principal, error) {
@@ -24,6 +26,9 @@ func (s stubStore) CreateWithOptions(context.Context, string, []string, keystore
 func (s stubStore) Resolve(_ context.Context, plaintext string) (keystore.Principal, error) {
 	if plaintext == s.key {
 		return s.p, nil
+	}
+	if s.expiredKey != "" && plaintext == s.expiredKey {
+		return keystore.Principal{}, keystore.ErrKeyExpired
 	}
 	return keystore.Principal{}, keystore.ErrKeyNotFound
 }
@@ -68,5 +73,33 @@ func TestKeyAuthResolvesPrincipal(t *testing.T) {
 	}
 	if gotTeam != "platform-eng" {
 		t.Fatalf("principal team not propagated: %q", gotTeam)
+	}
+}
+
+// TestKeyAuthDistinguishesExpiredKey (ADR-028): an expired key still 401s
+// (never reveal a key exists via status code) but carries a distinct message
+// so a human holding a CLI-minted key knows to re-run `inferplane login`
+// rather than suspect a typo.
+func TestKeyAuthDistinguishesExpiredKey(t *testing.T) {
+	store := stubStore{key: "ik_good", expiredKey: "ik_stale"}
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
+	h := KeyAuth(store, next)
+
+	req := httptest.NewRequest("POST", "/v1/messages", nil)
+	req.Header.Set("x-api-key", "ik_stale")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("got %d want 401", rec.Code)
+	}
+	var body struct {
+		Error struct{ Message string } `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Message != "API key expired" {
+		t.Fatalf("message = %q, want %q", body.Error.Message, "API key expired")
 	}
 }

@@ -3,6 +3,7 @@ package keystore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -128,8 +129,8 @@ func TestCreateWithOptions_expiredKeyDoesNotResolve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Resolve(ctx, plaintext); err == nil {
-		t.Fatal("expired key must not resolve")
+	if _, err := s.Resolve(ctx, plaintext); !errors.Is(err, ErrKeyExpired) {
+		t.Fatalf("expired key: got err %v, want ErrKeyExpired (ADR-028 distinguishes it from ErrKeyNotFound)", err)
 	}
 }
 

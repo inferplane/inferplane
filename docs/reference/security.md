@@ -19,6 +19,7 @@ are non-negotiable invariants (see CLAUDE.md → Security mandates).
 | OIDC verify | `internal/adminauth/` | shared `IsOIDCBearerShape`, groups→team `Resolve`, go-oidc verifier (alg pin, aud/azp, ±60s skew, JWKS negative cache) |
 | Console SSO (SPA=public client) | `internal/server/adminui/static/app.js` | ADR-026: OAuth2 Authorization Code + PKCE runs in the browser; gateway stays a resource server. `sessionStorage` holds ONLY `ip_sso_verifier`/`ip_sso_state`/`ip_sso_nonce` (cleared on every callback exit); id_token is memory-only. Callback follows RFC 6749 §4.1.2.1 (state-before-error, textContent-only error, replaceState-before-exchange, nonce check); discovered endpoints must be https. Opt-in via `oidc.login_origins` (empty ⇒ CSP byte-identical, SSO hidden) |
 | Console CSP connect-src | `internal/server/adminui/adminui.go` + `cmd/inferplane/gateway.go` (`ssoConnectSrc`) | ADR-026: when `login_origins` set, `connect-src 'self' <issuer-origin> <login_origins…>` (issuer path stripped so it can't break the source expression); script/style stay `'self'`. Empty ⇒ `default-src 'self'; frame-ancestors 'none'` unchanged |
+| CLI login (loopback PKCE) | `cmd/inferplane/login.go`, `internal/server/authapi/` | ADR-028: `inferplane login` runs Authorization Code + PKCE against a DISTINCT OIDC `client_id`/`Verifier` from the console's (never share — the console's is a secretless public client); every gateway/issuer URL validated https-or-loopback, discovered endpoints same-origin-or-subdomain of the issuer; issuer/client_id TOFU-pinned into the credential file, silent change refused without `--reset`. No IdP refresh token is ever cached (`credentials.go`) — a stored refresh token would be a stronger, gateway-unrevocable credential than the `ik_` key it protects. `POST /v1/auth/key` decides `expires_at`/`owner` server-side only, rate-limited per subject |
 | Config view | `internal/server/configapi/` | secret-free topology projection (ADR-005): view type cannot hold a secret; auth string from ref name / IAM mode only, never the resolved key |
 | RBAC | `internal/keystore/keystore.go` | `Principal.Allows()` (team + allowed models) |
 | Key hashing | `internal/keystore/sqlite.go` | SHA-256 at rest; plaintext shown once (or, for a declaratively-bootstrapped key, ADR-023, referenced via `virtual_keys[].key_ref` — never inline, same §7 posture as a provider's `api_key_ref`) |
@@ -38,8 +39,8 @@ are non-negotiable invariants (see CLAUDE.md → Security mandates).
 
 ### 5. Cross-references
 - Related modules: `internal/keystore`, `internal/audit`, `internal/metrics`
-- Related ADRs: docs/decisions/ (none yet)
-- Related runbooks: docs/runbooks/ ; policy in `SECURITY.md`
+- Related ADRs: docs/decisions/ADR-004-oidc-admin-authz.md, docs/decisions/ADR-026-console-sso-login.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md
+- Related runbooks: docs/runbooks/ ; docs/runbooks/cli-login.md ; policy in `SECURITY.md`
 
 <a id="korean"></a>
 ## 한국어
@@ -57,6 +58,7 @@ are non-negotiable invariants (see CLAUDE.md → Security mandates).
 | OIDC 검증 | `internal/adminauth/` | 공유 `IsOIDCBearerShape`, groups→team `Resolve`, go-oidc 검증기 (alg 고정, aud/azp, ±60s 스큐, JWKS negative cache) |
 | 콘솔 SSO (SPA=public client) | `internal/server/adminui/static/app.js` | ADR-026: OAuth2 Authorization Code + PKCE를 브라우저에서 수행, 게이트웨이는 리소스 서버 유지. `sessionStorage`는 `ip_sso_verifier`/`ip_sso_state`/`ip_sso_nonce` 3개만(모든 콜백 종료 경로에서 삭제), id_token은 메모리 전용. 콜백은 RFC 6749 §4.1.2.1 준수(state-먼저-error, textContent 에러, 교환 전 replaceState, nonce 검증); 발견된 엔드포인트는 https 필수. `oidc.login_origins` 옵트인(빈 값이면 CSP byte-동일·SSO 숨김) |
 | 콘솔 CSP connect-src | `internal/server/adminui/adminui.go` + `cmd/inferplane/gateway.go` (`ssoConnectSrc`) | ADR-026: `login_origins` 설정 시 `connect-src 'self' <issuer-origin> <login_origins…>` (issuer path 제거해 소스 표현식 파손 방지); script/style은 `'self'` 유지. 빈 값이면 `default-src 'self'; frame-ancestors 'none'` 무변경 |
+| CLI 로그인 (loopback PKCE) | `cmd/inferplane/login.go`, `internal/server/authapi/` | ADR-028: `inferplane login`은 콘솔과 별개의 OIDC `client_id`/`Verifier`로 Authorization Code + PKCE 수행(콘솔의 secretless public client와 절대 공유 금지); 모든 게이트웨이/issuer URL은 https-or-loopback 검증, 발견된 엔드포인트는 issuer와 same-origin-or-subdomain; issuer/client_id는 크리덴셜 파일에 TOFU 고정, `--reset` 없이 조용한 변경 거부. IdP refresh token은 절대 캐시하지 않음(`credentials.go`) — refresh token은 보호 대상 `ik_` 키보다 더 강력하고 게이트웨이가 취소할 수 없는 자격증명이기 때문. `POST /v1/auth/key`는 `expires_at`/`owner`를 서버에서만 결정, subject별 rate limit |
 | Config 뷰 | `internal/server/configapi/` | 시크릿 무노출 토폴로지 투영 (ADR-005): 뷰 타입이 시크릿을 담을 수 없음; auth 문자열은 ref 이름/IAM 모드만, 해석된 키 절대 금지 |
 | RBAC | `internal/keystore/keystore.go` | `Principal.Allows()` (팀 + 허용 모델) |
 | 키 해싱 | `internal/keystore/sqlite.go` | 저장 시 SHA-256; 평문은 1회만 표시(또는 선언적 부트스트랩 키의 경우, ADR-023, `virtual_keys[].key_ref`로 참조 — 인라인 금지, provider의 `api_key_ref`와 동일한 §7 원칙) |
@@ -76,5 +78,5 @@ are non-negotiable invariants (see CLAUDE.md → Security mandates).
 
 ### 5. 상호 참조
 - 관련 모듈: `internal/keystore`, `internal/audit`, `internal/metrics`
-- 관련 ADR: docs/decisions/ (아직 없음)
-- 관련 런북: docs/runbooks/ ; 정책은 `SECURITY.md`
+- 관련 ADR: docs/decisions/ADR-004-oidc-admin-authz.md, docs/decisions/ADR-026-console-sso-login.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md
+- 관련 런북: docs/runbooks/ ; docs/runbooks/cli-login.md ; 정책은 `SECURITY.md`

@@ -13,6 +13,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`inferplane login` / `token` / `logout`** (ADR-028): OIDC login for humans — trades an IdP session for an automatically-renewing, short-lived gateway virtual key instead of a hand-copied, never-expiring one. New opt-in data-plane endpoints `GET /v1/auth/config`, `POST /v1/auth/key`, `DELETE /v1/auth/key`; a second, distinct OIDC client from the admin console's; no IdP refresh token is ever cached on disk. CI/service-account provisioning (`inferplane keys create`, declarative `virtual_keys`) is unchanged.
+
+### Fixed
+- A non-admin OIDC identity issuing a key via `POST /admin/keys` could set `owner` to any value, letting a teammate attribute a key to someone else; the server now always overrides `owner` to the caller's own verified subject.
+
 ## [0.2.0] - 2026-06-14
 
 ### Added
@@ -59,6 +67,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 이 프로젝트의 모든 주요 변경 사항은 이 파일에 기록됩니다.
 이 문서는 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)를 기반으로 하며,
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 따릅니다.
+
+## [Unreleased]
+
+### 추가됨
+- **`inferplane login` / `token` / `logout`** (ADR-028): 사람을 위한 OIDC 로그인 — 손으로 복사한 만료 없는 키 대신, IdP 세션을 자동 갱신되는 단기 가상 키로 교환. 신규 옵트인 데이터 플레인 엔드포인트 `GET /v1/auth/config`, `POST /v1/auth/key`, `DELETE /v1/auth/key`; 관리 콘솔과 별개의 OIDC 클라이언트; IdP refresh token은 절대 디스크에 캐시하지 않음. CI/서비스 계정 발급(`inferplane keys create`, 선언적 `virtual_keys`)은 그대로.
+
+### 수정됨
+- `POST /admin/keys`로 키를 발급하는 비관리자 OIDC 신원이 `owner`를 임의 값으로 지정할 수 있어 팀원이 키를 남의 이름으로 귀속시킬 수 있던 문제 — 서버가 항상 `owner`를 호출자 본인의 검증된 subject로 덮어씀.
 
 ## [0.2.0] - 2026-06-14
 

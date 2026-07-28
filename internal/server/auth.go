@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -24,6 +25,15 @@ func KeyAuth(store keystore.Store, next http.Handler) http.Handler {
 		}
 		p, err := store.Resolve(r.Context(), key)
 		if err != nil {
+			// 401 either way (never reveal which keys exist) — but a distinct
+			// message for "expired" lets a CLI-minted key holder know to re-run
+			// `inferplane login` rather than suspect a typo. Claude Code's
+			// apiKeyHelper also re-invokes on any 401, so this message doesn't
+			// change client behavior, only what a human sees.
+			if errors.Is(err, keystore.ErrKeyExpired) {
+				writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "API key expired")
+				return
+			}
 			writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "invalid API key")
 			return
 		}

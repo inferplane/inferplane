@@ -112,12 +112,41 @@ type AdminAuth struct {
 // / SSRF-by-config guard); client_id is the mandatory expected audience —
 // leaving it optional is the classic cross-app token-reuse hole.
 type OIDCConfig struct {
-	Issuer        string         `json:"issuer"`
-	ClientID      string         `json:"client_id"`
-	GroupsClaim   string         `json:"groups_claim,omitempty"` // default "groups"; top-level claim, no traversal
-	AdminGroups   []string       `json:"admin_groups,omitempty"`
-	GroupMappings []GroupMapping `json:"group_mappings,omitempty"`
-	LoginOrigins  []string       `json:"login_origins,omitempty"`
+	Issuer        string          `json:"issuer"`
+	ClientID      string          `json:"client_id"`
+	GroupsClaim   string          `json:"groups_claim,omitempty"` // default "groups"; top-level claim, no traversal
+	AdminGroups   []string        `json:"admin_groups,omitempty"`
+	GroupMappings []GroupMapping  `json:"group_mappings,omitempty"`
+	LoginOrigins  []string        `json:"login_origins,omitempty"`
+	CLILogin      *CLILoginConfig `json:"cli_login,omitempty"`
+}
+
+// CLILoginConfig opts in to `inferplane login` (ADR-028): a data-plane
+// endpoint that trades a verified ID token for a short-lived gateway virtual
+// key, so a developer never copies a long-lived ik_... key by hand. ClientID
+// MUST differ from OIDCConfig.ClientID — the console SPA's public client is
+// secretless and registering a CLI loopback redirect on it would let any
+// local process complete a code flow with the console's audience (P2 gate).
+// KeyTTL bounds how long the minted key lives; the CLI cannot request a
+// longer one — a client-supplied TTL would make "short-lived" a false claim.
+type CLILoginConfig struct {
+	Enabled  bool   `json:"enabled"`
+	ClientID string `json:"client_id"`
+	KeyTTL   string `json:"key_ttl,omitempty"` // duration string, default "8h", clamped [15m, 24h]
+}
+
+// KeyTTLDuration parses KeyTTL, defaulting to 8h when unset. validateOIDC
+// already normalizes and range-checks KeyTTL at load time; this parse is
+// cheap and kept independently correct rather than trusting that mutation.
+func (c *CLILoginConfig) KeyTTLDuration() time.Duration {
+	if c == nil || c.KeyTTL == "" {
+		return 8 * time.Hour
+	}
+	d, err := time.ParseDuration(c.KeyTTL)
+	if err != nil {
+		return 8 * time.Hour
+	}
+	return d
 }
 
 // GroupMapping maps one IdP group to gateway teams ("*" = explicit wildcard).
@@ -866,6 +895,24 @@ func validateOIDC(aa *AdminAuth) error {
 	}
 	if o.GroupsClaim == "" {
 		o.GroupsClaim = "groups"
+	}
+	if cl := o.CLILogin; cl != nil {
+		if cl.ClientID == "" {
+			return fmt.Errorf("config: oidc.cli_login.client_id is required")
+		}
+		if cl.ClientID == o.ClientID {
+			return fmt.Errorf("config: oidc.cli_login.client_id must differ from oidc.client_id — the console's public client must not accept a CLI loopback redirect")
+		}
+		if cl.KeyTTL == "" {
+			cl.KeyTTL = "8h"
+		}
+		ttl, err := time.ParseDuration(cl.KeyTTL)
+		if err != nil {
+			return fmt.Errorf("config: oidc.cli_login.key_ttl: %w", err)
+		}
+		if ttl < 15*time.Minute || ttl > 24*time.Hour {
+			return fmt.Errorf("config: oidc.cli_login.key_ttl must be between 15m and 24h, got %s", cl.KeyTTL)
+		}
 	}
 	seen := map[string]bool{}
 	for _, m := range o.GroupMappings {

@@ -40,6 +40,21 @@ GET  /v1/models
 | `POST /v1/chat/completions` | Chat Completions; streaming via SSE when `"stream": true`. Converted via the canonical schema when the upstream protocol differs. |
 | `GET /v1/models` | Lists models the principal may use. |
 
+### CLI login (opt-in, ADR-028)
+
+Only mounted when `oidc.cli_login.enabled` is set — 404 otherwise. Lets
+`inferplane login` mint a short-lived virtual key instead of a human copying
+one out of the console. See [docs/runbooks/cli-login.md](runbooks/cli-login.md).
+
+```
+GET    /v1/auth/config   # unauthenticated; {cli, issuer?, client_id?}
+POST   /v1/auth/key      # Authorization: Bearer <IdP ID token>; {"team"?: "..."} -> {key, key_id, team, expires_at}
+DELETE /v1/auth/key      # x-api-key: <the minted key>; self-revoke, used by `inferplane logout`
+```
+
+`expires_at`/`owner` are always server-decided — a client cannot request a
+longer-lived key.
+
 ## Admin Plane (`:9090`)
 
 ### Unauthenticated
@@ -80,4 +95,7 @@ inferplane keys   create --team <t> --models <csv> --store <path>
 inferplane keys   list   --store <path>
 inferplane keys   revoke --id <key_id> --store <path>
 inferplane audit  verify --file <path>
+inferplane login  --gateway <url> [--team <t>] [--id-token-command <cmd>]  # ADR-028
+inferplane token  [--export] [--raw]                                      # ADR-028, meant to run as apiKeyHelper
+inferplane logout                                                         # ADR-028
 ```
