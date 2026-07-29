@@ -252,6 +252,27 @@ func TestInvokeModelFallbackCrossesOnUpstream404(t *testing.T) {
 	}
 }
 
+// D5: the URL names an UNROUTED model and is served its model_fallbacks
+// target — the substitution must be advertised in the response header, same as
+// anthropicapi's TestMessagesModelFallbackUnroutedModel. The chain-loop header
+// set only covers upstream-404 traversal, not this initial substitution.
+func TestInvokeModelFallbackUnroutedModelSetsHeader(t *testing.T) {
+	provs := map[string]providers.Provider{"good": &captureProvider{}}
+	models := map[string]config.ModelConfig{
+		"claude-x-fallback": {Targets: []config.Target{{Provider: "good", Model: "claude-x-fallback-up"}}},
+	}
+	h := holderForWithFallbacks(provs, models, map[string]string{"claude-x": "claude-x-fallback"})
+	handler := NewInvokeHandler(router.New(h), h, false)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, allowAll(invokeReq("claude-x", `{"messages":[{"role":"user","content":"hi"}]}`)))
+	if rec.Code != 200 {
+		t.Fatalf("unrouted model should be served its fallback, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Inferplane-Model-Fallback"); got != "claude-x-fallback" {
+		t.Fatalf("x-inferplane-model-fallback = %q, want %q", got, "claude-x-fallback")
+	}
+}
+
 func TestInvokeGovernorQuotaBlocks429AWSShape(t *testing.T) {
 	lim := limiter.NewMemory()
 	teams := map[string]governance.TeamPolicy{

@@ -990,3 +990,26 @@ func TestMessagesAliasRoutesToCanonical(t *testing.T) {
 		t.Fatalf("unrelated allow-list entry must still deny: got %d", rec3.Code)
 	}
 }
+
+// ADR-030: the pricing guard is a PRICING setting, not a governance one — a
+// deployment with budgets/quotas disabled (nil governor) and
+// pricing.on_missing "block" must still refuse an unpriced route rather than
+// serve it and bill 0.
+func TestMessagesPricingGuardBlocksWithoutGovernor(t *testing.T) {
+	provs := map[string]providers.Provider{"p": mockprovider.New("claude-sonnet-4-6")}
+	models := map[string]config.ModelConfig{
+		"claude-sonnet-4-6": {Targets: []config.Target{{Provider: "p", Model: "claude-sonnet-4-6"}}},
+	}
+	ids := map[string]string{"p": "p"}
+	h := &live.Holder{}
+	h.Swap(live.NewState(provs, models, pricing.New(pricing.OnMissingBlock, nil), ids))
+
+	handler := NewMessagesHandler(router.New(h)) // no governor
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-6","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, allowAll(req))
+	if rec.Code != 402 {
+		t.Fatalf("unpriced route with on_missing block must be refused even without a governor, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
