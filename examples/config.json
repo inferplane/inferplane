@@ -106,6 +106,7 @@
     "sample_ratio": 1.0,
     "service_name": "inferplane"
   },
+  "_comment_bedrock_pricing_parity": "Amazon Bedrock prices current-generation Claude models (4.6+) at PARITY with the Anthropic direct API — verified against aws.amazon.com/bedrock/pricing (2026-07). There is no Bedrock markup for these models; a Bedrock-specific rate below is only for a genuinely different published Bedrock price (e.g. a legacy model), never a default assumption.",
   "pricing": {
     "on_missing": "block",
     "version": "2026-07-example",
@@ -122,8 +123,8 @@
       },
       "bedrock-us": {
         "anthropic.claude-sonnet-4-6-v1:0": {
-          "input_per_mtok": 3.6,
-          "output_per_mtok": 18.0
+          "input_per_mtok": 3.0,
+          "output_per_mtok": 15.0
         }
       }
     }
