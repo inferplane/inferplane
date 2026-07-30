@@ -23,8 +23,12 @@ Architecture overview: [docs/architecture.md](docs/architecture.md).
 ## Project Structure
 
 ```
-cmd/mayu/    - Binary entrypoint: serve / keys / audit / report / pricing / login / token / logout subcommands
+cmd/mayu/          - Data plane binary (node-local proxy): serve / keys / audit / report / pricing / login / token / logout
+cmd/inferplaned/   - Control plane binary (ADR-031) — scaffold: health endpoints only
+api/v1alpha1/      - Versioned config API wire types (CRD-style shape, gRPC/HTTP delivery)
 internal/          - Private packages (gateway internals)
+  policy/          - Rule + lease schema shared by both binaries (the single truth, ADR-031)
+  proxy/ cache/ telemetry/ - Consolidation targets for the split (ADR-031); cache/ owns VolatileStore
   server/          - HTTP data plane + admin plane, ingress handlers
   router/          - Model→provider resolution, fallback chain, circuit breaker
   governance/      - Rate / quota / budget enforcement (PreCheck + Settle)

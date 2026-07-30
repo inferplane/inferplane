@@ -25,6 +25,8 @@ are leaves that others depend on).
 - `principal/` — request-scoped principal context (leaf, breaks import cycles).
 - `tracing/` — opt-in OpenTelemetry seam (ADR-011): owns the OTel SDK import (Init builds the OTLP exporter + TracerProvider + W3C propagator) and exposes Start/Extract/Inject/TraceID/SetGenAI* helpers. No-op default (library no-op tracer + `enabled` guard). Own `Config` mirror (imports no config). Handlers start one span per request, set GenAI-semconv attributes, inject traceparent upstream, and fill audit `trace_id`.
 - `filter/` — request-transform filter seam (ADR-009): `RequestFilter` interface + name registry + `Masking` (resolved per-team decision). Core imports this; concrete filters live under `plugins/<name>/` and register via blank import (like providers). Leaf (imports only `sort`).
+- `policy/` — (ADR-031) rule + budget-lease schema shared by BOTH binaries (`cmd/mayu`, `cmd/inferplaned`) — the single truth; converts `api/v1alpha1` wire docs to internal form and **explicitly rejects** anything unsupported (`UnsupportedError`, reported to the control plane — never silently ignored). Enforces: per-rule `failurePolicy` required (no default), hard-cap budget ⇒ FailClosed, lease grant/renew-interval required with NO hardcoded defaults (★1 open), `onAffinityConflict` required (cache affinity vs fallback has no default winner).
+- `proxy/`, `cache/`, `telemetry/` — (ADR-031) consolidation targets for the control-plane/data-plane split; doc-only today except `cache.VolatileStore` (payloads in memory only — never disk; lease state/counters/hashes go to SQLite; named for the guarantee, not tmpfs — macOS has neither tmpfs nor /dev/shm).
 
 ## Rules
 - Pre-check BEFORE billing, settle AFTER. `on_exceeded` block wins on tie.
