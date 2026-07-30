@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/inferplane/inferplane/internal/policy"
 )
@@ -222,5 +223,78 @@ func TestReloadPreservesLedger(t *testing.T) {
 	// Spend survived: allowance = 90k + min(grant 10k, remaining 10k) = 100k.
 	if got := r.Leases[0].AllowanceMicroUSD; got != 100_000 {
 		t.Fatalf("allowance after reload = %d, want 100000 (ledger must survive)", got)
+	}
+}
+
+// Review finding (major): a data plane whose lease horizon passed must have
+// its unspent allowance RELEASED — mayu's default instance id is per-boot,
+// so restart churn would otherwise permanently strand outstanding grants and
+// starve every live proxy's remaining budget. And after pruneAfter, the dead
+// data plane's ledger rows disappear entirely.
+func TestExpiredLeaseAllowanceReleasedAndPruned(t *testing.T) {
+	dir := t.TempDir()
+	// Tight limit so outstanding grants visibly clip: limit 15k µUSD,
+	// grant 10k, renew 5s (lease horizon 15s).
+	tight := `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: team-a }
+spec:
+  subject: { team: alpha }
+  rules:
+  - name: cap
+    failurePolicy: FailClosed
+    budget:
+      limitMilliUSD: 15
+      hardCap: true
+      lease: { grantMilliUSD: 10, renewInterval: "5s" }
+`
+	if err := os.WriteFile(filepath.Join(dir, "p.yaml"), []byte(tight), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Now()
+	s.now = func() time.Time { return clock }
+	mux := http.NewServeMux()
+	s.Mount(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// dp1 takes a 10k grant; dp2 is clipped to the remaining 5k.
+	doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp1"})
+	r := doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp2"})
+	if got := r.Leases[0].AllowanceMicroUSD; got != 5_000 {
+		t.Fatalf("dp2 allowance while dp1 live = %d, want 5000", got)
+	}
+
+	// dp1 goes silent past its 15s lease horizon: its unspent 10k is
+	// released, so dp2's next heartbeat gets the full grant.
+	clock = clock.Add(16 * time.Second)
+	r = doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp2"})
+	if got := r.Leases[0].AllowanceMicroUSD; got != 10_000 {
+		t.Fatalf("dp2 allowance after dp1 lease expiry = %d, want 10000 (stranded grant must be released)", got)
+	}
+
+	// dp1 had actually spent 3k before dying: that spend still counts...
+	s.mu.Lock()
+	s.ledger[ruleKey{policy: "team-a", rule: "cap"}].spent["dp1"] = 3_000
+	s.mu.Unlock()
+	r = doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp2"})
+	if got := r.Leases[0].AllowanceMicroUSD; got != 10_000 {
+		// remaining = 15k − 3k(dp1) − 0 = 12k → grant uncapped at 10k.
+		t.Fatalf("dp2 allowance with dead dp1 spend = %d, want 10000", got)
+	}
+
+	// ...until pruneAfter passes and dp1's rows are dropped wholesale.
+	clock = clock.Add(pruneAfter + time.Minute)
+	doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp2"})
+	s.mu.Lock()
+	_, spentKept := s.ledger[ruleKey{policy: "team-a", rule: "cap"}].spent["dp1"]
+	_, dpKept := s.dataplanes["dp1"]
+	s.mu.Unlock()
+	if spentKept || dpKept {
+		t.Fatal("dp1 rows must be pruned after pruneAfter")
 	}
 }

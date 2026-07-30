@@ -29,6 +29,14 @@ import (
 // listed by /v1alpha1/dataplanes.
 const staleAfter = 10 * time.Minute
 
+// pruneAfter is how long after its last heartbeat a data plane's ledger rows
+// are dropped entirely. Its window-scoped spend is forgotten at that point —
+// the same thing a window rollover does — which errs permissive by at most
+// the dead proxy's own spend; the alternative (keeping it forever) would
+// starve grants permanently once local windows roll. The durable ledger with
+// control-plane-owned window epochs replaces this trade-off (ADR-034).
+const pruneAfter = 24 * time.Hour
+
 // maxRejections caps the per-dataplane rejection ring.
 const maxRejections = 100
 
@@ -267,17 +275,47 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Prune data planes not seen for pruneAfter: drop their ledger rows and
+	// registration. Restart churn is the common case — mayu's default
+	// instance id is per-boot, so every restart strands a row; without
+	// release+prune those strandings would starve grants forever.
+	for id, dp := range s.dataplanes {
+		if now.Sub(dp.LastSeen) > pruneAfter {
+			delete(s.dataplanes, id)
+			for _, l := range s.ledger {
+				delete(l.spent, id)
+				delete(l.allowance, id)
+			}
+		}
+	}
+
 	// Grant leases: every lease-managed rule gets one, allowance =
-	// reported spend + a slice of what remains globally.
+	// reported spend + a slice of what remains globally. Another data
+	// plane's allowance counts as outstanding ONLY while its lease can
+	// still be valid (last heartbeat within the 3×renew expiry horizon):
+	// an expired lease's unspent grant is money its holder may no longer
+	// legally spend, so it is released back to the pool instead of
+	// permanently shrinking everyone's remaining budget.
 	resp := policy.SyncResponse{Generation: s.generation, SyncIntervalSeconds: s.interval}
 	for k, l := range s.ledger {
 		var globalSpent, outstanding int64
-		for d, sp := range l.spent {
+		for _, sp := range l.spent {
 			globalSpent += sp
-			if d != req.Dataplane {
-				if extra := l.allowance[d] - sp; extra > 0 {
-					outstanding += extra
-				}
+		}
+		// Outstanding iterates the ALLOWANCE map, not the spent map: a
+		// freshly granted data plane that has never reported yet has no
+		// spent entry, and skipping its grant here would hand the same
+		// remaining budget to every newcomer at once.
+		for d, al := range l.allowance {
+			if d == req.Dataplane {
+				continue
+			}
+			other, known := s.dataplanes[d]
+			if !known || now.Sub(other.LastSeen) > 3*l.renew {
+				continue // lease expired (or holder pruned): grant released
+			}
+			if extra := al - l.spent[d]; extra > 0 {
+				outstanding += extra
 			}
 		}
 		remaining := l.limitMicro - globalSpent - outstanding
