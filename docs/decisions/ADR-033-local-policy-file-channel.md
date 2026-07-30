@@ -48,15 +48,21 @@ Rejected at load (gates lift as enforcement lands): `routing` rules (no
 cache-affinity engine yet) and user-subject `budget`/`rate` (governance
 windows are team-keyed today).
 
-### 4. Team-policy precedence: file > DB record > config
+### 4. Team-policy layering: file dimensions overlay a DB/config base
 
-Policy FILES carry declarative intent (GitOps posture) and win over keystore
-team RECORDS (runtime console edits, ADR-016), which win over the static
-config map — all three produce `TeamPolicy` through the same
-`PolicyFromLimits`, so the burst rule can never diverge by source. Multiple
-policies matching one team merge most-restrictive-first (smallest non-zero
-limit binds; the binding budget's `hardCap` maps to `on_exceeded: block`,
-else `warn`).
+Base layer: a keystore team RECORD (runtime console edits) wins wholesale
+over the static config map — ADR-016's rule, unchanged. A GovernancePolicy
+FILE then overlays **only the dimensions its rules declare**: a budget rule
+replaces the base budget (its `hardCap` maps to `on_exceeded: block`, else
+`warn`), a rate rule replaces rpm/tpm, and everything undeclared —
+tokens/day quota, the other rate dimension, the budget when only rate is
+declared — falls through to the base. A rate-only policy must not silently
+unlimit the team's config budget, and a modelAccess-only policy contributes
+no team-limits entry at all (revised after review: the original
+wholesale-precedence draft let exactly that happen). All layers produce
+`TeamPolicy` through the same `PolicyFromLimits`, so the burst rule can
+never diverge by source. Multiple policies matching one team merge
+most-restrictive-first (smallest non-zero limit binds).
 
 ### 5. modelAccess narrows through one seam
 

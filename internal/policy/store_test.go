@@ -146,6 +146,26 @@ spec:
     failurePolicy: FailClosed
     budget: { limitMilliUSD: 1000, hardCap: true }
 `},
+		{"team-and-user budget (would merge to nothing)", `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: tu }
+spec:
+  subject: { team: demo, user: junseok }
+  rules:
+  - name: cap
+    failurePolicy: FailClosed
+    budget: { limitMilliUSD: 1000, hardCap: true }
+`},
+		{"team-and-user rate", `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: tur }
+spec:
+  subject: { team: demo, user: junseok }
+  rules:
+  - name: r
+    failurePolicy: FailOpen
+    rate: { rpm: 10 }
+`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -225,5 +245,33 @@ func TestChanged(t *testing.T) {
 	}
 	if !s.changed() {
 		t.Fatal("deleted file not detected")
+	}
+}
+
+// Regression (review finding, critical): a modelAccess-only team policy must
+// NOT create a TeamLimits entry — an all-zero (= unlimited) entry would let
+// the gateway's lookup chain shadow the team's DB-record/config budget.
+func TestModelAccessOnlyContributesNoTeamLimits(t *testing.T) {
+	dir := t.TempDir()
+	writePolicy(t, dir, "p.yaml", `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: m }
+spec:
+  subject: { team: demo }
+  rules:
+  - name: models
+    failurePolicy: FailOpen
+    modelAccess: { allow: ["claude-haiku-4-5"] }
+`)
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if tl, ok := s.TeamLimits("demo"); ok {
+		t.Fatalf("modelAccess-only policy manufactured TeamLimits %+v — would shadow base limits with unlimited", tl)
+	}
+	// The modelAccess rule itself still enforces.
+	if s.ModelAllowed("demo", "", "claude-opus-4-8", nil) {
+		t.Fatal("modelAccess rule not enforced")
 	}
 }

@@ -161,3 +161,33 @@ func TestSupports(t *testing.T) {
 		t.Fatal("Supports of unknown version = true")
 	}
 }
+
+// Review findings: duplicate rule names alias lease state later; oversized
+// milliUSD amounts would overflow the ×1000 µUSD conversion into negatives.
+func TestRejectDuplicateRuleNamesAndOverflow(t *testing.T) {
+	dup := validDoc()
+	dup.Spec.Rules[1].Name = dup.Spec.Rules[0].Name
+	if _, err := FromV1Alpha1(dup); err == nil {
+		t.Fatal("duplicate rule names accepted")
+	}
+
+	over := validDoc()
+	over.Spec.Rules[0].Budget.LimitMilliUSD = maxWireMilliUSD + 1
+	if _, err := FromV1Alpha1(over); err == nil {
+		t.Fatal("overflowing limitMilliUSD accepted")
+	}
+	overGrant := validDoc()
+	overGrant.Spec.Rules[0].Budget.Lease.GrantMilliUSD = maxWireMilliUSD + 1
+	if _, err := FromV1Alpha1(overGrant); err == nil {
+		t.Fatal("overflowing grantMilliUSD accepted")
+	}
+	atMax := validDoc()
+	atMax.Spec.Rules[0].Budget.LimitMilliUSD = maxWireMilliUSD
+	p, err := FromV1Alpha1(atMax)
+	if err != nil {
+		t.Fatalf("boundary value rejected: %v", err)
+	}
+	if p.Rules[0].Budget.LimitMicroUSD <= 0 {
+		t.Fatalf("boundary conversion overflowed: %d", p.Rules[0].Budget.LimitMicroUSD)
+	}
+}

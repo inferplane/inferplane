@@ -90,6 +90,18 @@ func newGateway(cfgPath string) (*gateway, error) {
 		return nil, err
 	}
 
+	// Local GovernancePolicy documents (ADR-033): loaded FIRST — before any
+	// resource opens — so an invalid or not-yet-enforceable document fails
+	// boot with nothing to unwind, rather than serving while silently not
+	// enforcing it. Watched for changes in serve.
+	var polStore *policy.Store
+	if len(raw.Policies) > 0 {
+		polStore, err = policy.NewStore(raw.Policies...)
+		if err != nil {
+			return nil, fmt.Errorf("policies: %w", err)
+		}
+	}
+
 	// Prometheus metrics sink: owned by main, threaded into the audit writer,
 	// router, governor, and ingress handlers, and exposed on the admin /metrics.
 	m := metrics.New()
@@ -276,50 +288,56 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// is passed into Settle per request from the resolved snapshot, so the
 	// governor holds no pricing — only its persistent rate/budget counters.
 	gov := governance.NewGovernor(policies, limiter.NewMemory(), budget.NewMemory(), m) // budget_spend / pricing_miss
-	// Local GovernancePolicy documents (ADR-033): loaded at boot — an invalid
-	// or not-yet-enforceable document fails boot rather than serving while
-	// silently not enforcing it — and watched for changes in serve.
-	var polStore *policy.Store
-	if len(cfg.Policies) > 0 {
-		polStore, err = policy.NewStore(cfg.Policies...)
-		if err != nil {
-			store.Close()
-			return nil, fmt.Errorf("policies: %w", err)
-		}
-	}
-	// Team-policy precedence (ADR-033 extends ADR-016): policy FILE (declarative
-	// intent, GitOps posture) > keystore team RECORD (runtime console edits) >
-	// static config map. All three produce TeamPolicy through the same
-	// PolicyFromLimits so the burst rule can never diverge. D3 (ADR-016): the
-	// record path is checked fresh on every request — no restart, no hot-reload
-	// needed for an admin-console budget/limit edit to take effect. A lookup
-	// ERROR (not a miss) falls back to the config map rather than blocking all
-	// traffic on a transient keystore error; store already does one SQLite read
-	// per request on this exact hot path (Resolve), so this adds one more point
-	// read, not a new failure class.
-	gov.SetTeamLookup(func(team string) (governance.TeamPolicy, bool) {
-		if polStore != nil {
-			if tl, ok := polStore.TeamLimits(team); ok {
-				exceeded := "warn"
-				if tl.BudgetHard {
-					exceeded = "block"
-				}
-				// Policy budgets window monthly (ADR-033); no quota rule kind
-				// yet, so tokens/day stays unlimited on this path.
-				return governance.PolicyFromLimits(tl.RPM, tl.TPM, 0, "",
-					tl.BudgetMicrosPerMonth, exceeded), true
-			}
-		}
+	// Team-policy layering (ADR-033 extends ADR-016). Base layer: keystore
+	// team RECORD (runtime console edits) wins wholesale over the static
+	// config map — D3's rule, checked fresh on every request (no restart, no
+	// hot-reload for a console edit to take effect; a lookup ERROR, not a
+	// miss, falls back to config rather than blocking traffic — store already
+	// does one SQLite read per request on this exact hot path (Resolve), so
+	// this adds one more point read, not a new failure class). Overlay: a
+	// GovernancePolicy FILE contributes ONLY the dimensions its rules declare
+	// — a rate-only policy must not silently unlimit the team's config
+	// budget, and a modelAccess-only policy contributes nothing here at all
+	// (TeamLimits reports no entry). All layers produce TeamPolicy through
+	// the same PolicyFromLimits so the burst rule can never diverge.
+	lookupBase := func(team string) (governance.TeamPolicy, bool) {
 		rec, ok, err := store.GetTeam(context.Background(), team)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "inferplane: team lookup:", err)
-			return governance.TeamPolicy{}, false
+		} else if ok {
+			return governance.PolicyFromLimits(rec.RPM, rec.TPM, rec.TokensPerDay,
+				rec.QuotaOnExceeded, rec.BudgetUSDMicros, rec.BudgetOnExceeded), true
 		}
+		tp, ok := policies[team]
+		return tp, ok
+	}
+	gov.SetTeamLookup(func(team string) (governance.TeamPolicy, bool) {
+		base, baseOK := lookupBase(team)
+		if polStore == nil {
+			return base, baseOK
+		}
+		tl, ok := polStore.TeamLimits(team)
 		if !ok {
-			return governance.TeamPolicy{}, false
+			return base, baseOK
 		}
-		return governance.PolicyFromLimits(rec.RPM, rec.TPM, rec.TokensPerDay,
-			rec.QuotaOnExceeded, rec.BudgetUSDMicros, rec.BudgetOnExceeded), true
+		rpm, tpm := tl.RPM, tl.TPM
+		if rpm == 0 {
+			rpm = base.RatePerMin
+		}
+		if tpm == 0 {
+			tpm = base.TokensPerMinute
+		}
+		budgetMicros, budgetExceeded := base.BudgetMicrosPerMonth, base.BudgetExceeded
+		if tl.BudgetMicrosPerMonth > 0 {
+			budgetMicros = tl.BudgetMicrosPerMonth
+			budgetExceeded = "warn"
+			if tl.BudgetHard {
+				budgetExceeded = "block"
+			}
+		}
+		// No quota rule kind yet — tokens/day always comes from the base.
+		return governance.PolicyFromLimits(rpm, tpm, base.TokensPerDay,
+			base.QuotaExceeded, budgetMicros, budgetExceeded), true
 	})
 	// modelAccess rules narrow every ingress RBAC decision through the router's
 	// policy gate (key allow-list must pass AND the policy must allow); team-

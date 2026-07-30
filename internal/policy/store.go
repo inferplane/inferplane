@@ -97,8 +97,13 @@ func checkEnforceable(p *Policy) error {
 		if r.Routing != nil {
 			return reject(r.Name, "routing rules are not yet enforceable by this data plane build")
 		}
-		if p.Subject.Team == "" && (r.Budget != nil || r.Rate != nil) {
-			return reject(r.Name, "user-subject budget/rate rules are not yet enforceable by this data plane build (user subjects currently support modelAccess only)")
+		// Budget/rate enforcement windows are team-keyed today, so ANY
+		// user-scoped variant — user-only or (team, user) — must be refused,
+		// not accepted-and-ignored. A (team, user) subject would otherwise
+		// pass validation, be skipped by mergeTeamLimits, and enforce
+		// nothing: the exact silent failure this gate exists to prevent.
+		if (r.Budget != nil || r.Rate != nil) && (p.Subject.Team == "" || p.Subject.User != "") {
+			return reject(r.Name, "budget/rate rules require a team-only subject in this build (user-scoped budget/rate are not yet enforceable; user subjects currently support modelAccess only)")
 		}
 	}
 	return nil
@@ -221,22 +226,28 @@ func allowsModel(allow []string, model string, canon func(string) string) bool {
 // TeamLimits per team, most-restrictive-wins: the smallest non-zero limit
 // binds each dimension, and the budget is hard if the binding (smallest)
 // budget rule — or any equal to it — is a hard cap.
+//
+// A team gets an entry ONLY when some rule actually contributed a budget or
+// rate: a modelAccess-only policy must not manufacture an all-zero (=
+// unlimited) entry, which the caller's lookup chain would let shadow the
+// team's DB-record/config limits.
 func mergeTeamLimits(policies []*Policy) map[string]TeamLimits {
 	out := make(map[string]TeamLimits)
 	for _, p := range policies {
 		if p.Subject.Team == "" || p.Subject.User != "" {
-			// Pure team subjects only: a (team, user) scoped budget/rate is
-			// rejected by checkEnforceable, and a user-only subject carries
-			// no budget/rate either.
+			// Pure team subjects only: user-scoped budget/rate (user-only or
+			// (team, user)) is rejected by checkEnforceable.
 			continue
 		}
-		tl := out[p.Subject.Team]
+		tl, contributed := out[p.Subject.Team]
 		for _, r := range p.Rules {
 			if r.Rate != nil {
+				contributed = true
 				tl.RPM = minNonZero(tl.RPM, r.Rate.RPM)
 				tl.TPM = minNonZero(tl.TPM, r.Rate.TPM)
 			}
 			if r.Budget != nil {
+				contributed = true
 				switch {
 				case tl.BudgetMicrosPerMonth == 0 || r.Budget.LimitMicroUSD < tl.BudgetMicrosPerMonth:
 					tl.BudgetMicrosPerMonth = r.Budget.LimitMicroUSD
@@ -246,7 +257,9 @@ func mergeTeamLimits(policies []*Policy) map[string]TeamLimits {
 				}
 			}
 		}
-		out[p.Subject.Team] = tl
+		if contributed {
+			out[p.Subject.Team] = tl
+		}
 	}
 	return out
 }

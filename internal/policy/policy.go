@@ -18,6 +18,7 @@ package policy
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
@@ -173,10 +174,17 @@ func FromV1Alpha1(doc *v1alpha1.GovernancePolicy) (*Policy, error) {
 		Subject:    Subject{Team: doc.Spec.Subject.Team, User: doc.Spec.Subject.User},
 		Rules:      make([]Rule, 0, len(doc.Spec.Rules)),
 	}
+	ruleNames := make(map[string]bool, len(doc.Spec.Rules))
 	for _, wr := range doc.Spec.Rules {
 		if wr.Name == "" {
 			return nil, reject("", "rule with empty name")
 		}
+		if ruleNames[wr.Name] {
+			// Rule names key leases and consumption reports later — a
+			// duplicate would silently alias two rules' state.
+			return nil, reject(wr.Name, "duplicate rule name within one policy")
+		}
+		ruleNames[wr.Name] = true
 		switch wr.FailurePolicy {
 		case v1alpha1.FailOpen, v1alpha1.FailClosed:
 		case "":
@@ -236,10 +244,16 @@ func FromV1Alpha1(doc *v1alpha1.GovernancePolicy) (*Policy, error) {
 // microPerMilli converts wire milliUSD to internal microUSD (exact).
 const microPerMilli = 1000
 
+// maxWireMilliUSD is the largest milliUSD amount whose µUSD conversion still
+// fits in int64. Anything larger would overflow into a negative internal
+// limit — a nonsense figure ($9.2 quadrillion) that can only be a typo, so
+// it is rejected rather than clamped.
+const maxWireMilliUSD = math.MaxInt64 / microPerMilli
+
 func budgetFromV1Alpha1(wr v1alpha1.Rule, reject func(rule, reason string) *UnsupportedError) (*Budget, error) {
 	wb := wr.Budget
-	if wb.LimitMilliUSD <= 0 {
-		return nil, reject(wr.Name, "budget.limitMilliUSD must be positive (1000 = $1)")
+	if wb.LimitMilliUSD <= 0 || wb.LimitMilliUSD > maxWireMilliUSD {
+		return nil, reject(wr.Name, fmt.Sprintf("budget.limitMilliUSD must be in (0, %d] (1000 = $1)", int64(maxWireMilliUSD)))
 	}
 	if wb.HardCap && wr.FailurePolicy != v1alpha1.FailClosed {
 		return nil, reject(wr.Name, "a hard-cap budget rule must be FailClosed: fail-open on lease expiry voids the cap")
@@ -247,8 +261,8 @@ func budgetFromV1Alpha1(wr v1alpha1.Rule, reject func(rule, reason string) *Unsu
 
 	grantMilli := wb.Lease.GrantMilliUSD
 	switch {
-	case grantMilli < 0:
-		return nil, reject(wr.Name, "budget.lease.grantMilliUSD must be >= 0 (0 = default)")
+	case grantMilli < 0 || grantMilli > maxWireMilliUSD:
+		return nil, reject(wr.Name, fmt.Sprintf("budget.lease.grantMilliUSD must be in [0, %d] (0 = default)", int64(maxWireMilliUSD)))
 	case grantMilli == 0:
 		// ADR-032 default: 0.1% of the limit, floored at 1 milliUSD.
 		grantMilli = wb.LimitMilliUSD * DefaultLeaseGrantBP / 10_000
