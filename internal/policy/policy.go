@@ -8,6 +8,12 @@
 // internal form and — critically — explicit rejection: a document the data
 // plane does not fully support is refused with an *UnsupportedError meant to
 // be reported back to the control plane, never silently dropped.
+//
+// Unit boundary (ADR-032): the wire speaks integer milliUSD (1000 = $1, the
+// operator-facing resolution); this package converts to integer microUSD
+// (×1000, exact) because internal cost accounting settles per-token amounts
+// that are sub-milliUSD — settling coarser re-opens the ADR-030 zero-cost
+// bug class.
 package policy
 
 import (
@@ -15,6 +21,28 @@ import (
 	"time"
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
+)
+
+// Cadence decisions (ADR-032). Cost control is near-real-time: worst-case
+// budget overshoot is bounded by lease grant × connected data planes, so the
+// lease defaults keep grants small and renewals frequent. Policy delivery is
+// push-based whenever the control-plane stream is up; the poll interval is
+// only the reconcile fallback for disconnected proxies.
+const (
+	// DefaultLeaseRenewInterval is how often a data plane reports
+	// consumption and renews its budget lease when the rule doesn't say.
+	DefaultLeaseRenewInterval = 10 * time.Second
+	// MinLeaseRenewInterval is the floor for an explicit renew interval.
+	MinLeaseRenewInterval = time.Second
+	// DefaultLeaseGrantBP is the default lease grant as basis points of
+	// the budget limit: 10 bp = 0.1%.
+	DefaultLeaseGrantBP = 10
+	// DefaultPolicySyncInterval is the reconcile-poll default for policy
+	// distribution when the push stream is down.
+	DefaultPolicySyncInterval = time.Minute
+	// MinPolicySyncInterval is the floor an operator may set the
+	// reconcile poll to.
+	MinPolicySyncInterval = 15 * time.Second
 )
 
 // SupportedAPIVersions lists the config API generations this build
@@ -50,20 +78,51 @@ func (e *UnsupportedError) Error() string {
 	return fmt.Sprintf("unsupported rule %q in %s/%s: %s", e.Rule, e.APIVersion, e.Kind, e.Reason)
 }
 
-// Rule is the internal, version-independent form of one governance rule.
+// Policy is the internal, version-independent form of one policy document.
+type Policy struct {
+	Name       string
+	Generation int64
+	Subject    Subject
+	Rules      []Rule
+}
+
+// Subject is who a policy governs: a team (department) and/or a user. User-
+// and team-level governance are equal citizens; when several policies match
+// one request, the most restrictive outcome wins (block beats warn).
+type Subject struct {
+	Team string
+	User string
+}
+
+// Rule is the internal form of one governance rule.
 type Rule struct {
 	Name          string
 	FailurePolicy v1alpha1.FailurePolicy
 	Budget        *Budget
 	Routing       *Routing
+	ModelAccess   *ModelAccess
+	Rate          *Rate
 }
 
-// Budget is the internal form of a budget rule. Cost is integer microUSD.
+// Budget is the internal form of a budget rule. All amounts are integer
+// microUSD (converted ×1000 from the wire's milliUSD, defaults applied).
 type Budget struct {
 	LimitMicroUSD      int64
 	HardCap            bool
 	LeaseGrantMicroUSD int64
 	LeaseRenewInterval time.Duration
+}
+
+// ModelAccess is the internal form of a model allow-list rule. Entries match
+// after alias canonicalization; "*" allows every configured model.
+type ModelAccess struct {
+	Allow []string
+}
+
+// Rate is the internal form of a throughput rule. 0 = unlimited dimension.
+type Rate struct {
+	RPM int64
+	TPM int64
 }
 
 // Routing is the internal form of a cache-affinity routing rule.
@@ -83,16 +142,18 @@ type Lease struct {
 	ExpiresAt     time.Time
 }
 
-// FromV1Alpha1 converts a wire document to internal rules, rejecting
+// FromV1Alpha1 converts a wire document to the internal form, rejecting
 // anything this build does not fully support. It validates the invariants
 // the design fixes:
 //
+//   - the subject must select a team and/or a user;
 //   - failurePolicy is required per rule — no silent defaults;
 //   - a hard-cap budget rule must be FailClosed (soft budgets fail open);
-//   - lease grant and renew interval are required and positive — their
-//     defaults are an open decision (★1) and must not be invented here;
-//   - a routing rule must state its affinity-vs-fallback preference.
-func FromV1Alpha1(doc *v1alpha1.GovernancePolicy) ([]Rule, error) {
+//   - lease grant / renew interval take the ADR-032 defaults when unset,
+//     but an explicit sub-floor renew interval is rejected;
+//   - a routing rule must state its affinity-vs-fallback preference;
+//   - exactly one rule kind per rule.
+func FromV1Alpha1(doc *v1alpha1.GovernancePolicy) (*Policy, error) {
 	reject := func(rule, reason string) *UnsupportedError {
 		return &UnsupportedError{APIVersion: doc.APIVersion, Kind: doc.Kind, Rule: rule, Reason: reason}
 	}
@@ -102,8 +163,16 @@ func FromV1Alpha1(doc *v1alpha1.GovernancePolicy) ([]Rule, error) {
 	if doc.Kind != v1alpha1.KindGovernancePolicy {
 		return nil, reject("", fmt.Sprintf("unknown kind %q", doc.Kind))
 	}
+	if doc.Spec.Subject.Team == "" && doc.Spec.Subject.User == "" {
+		return nil, reject("", "spec.subject must select a team and/or a user")
+	}
 
-	rules := make([]Rule, 0, len(doc.Spec.Rules))
+	p := &Policy{
+		Name:       doc.Metadata.Name,
+		Generation: doc.Metadata.Generation,
+		Subject:    Subject{Team: doc.Spec.Subject.Team, User: doc.Spec.Subject.User},
+		Rules:      make([]Rule, 0, len(doc.Spec.Rules)),
+	}
 	for _, wr := range doc.Spec.Rules {
 		if wr.Name == "" {
 			return nil, reject("", "rule with empty name")
@@ -115,50 +184,95 @@ func FromV1Alpha1(doc *v1alpha1.GovernancePolicy) ([]Rule, error) {
 		default:
 			return nil, reject(wr.Name, fmt.Sprintf("unknown failurePolicy %q", wr.FailurePolicy))
 		}
-		if (wr.Budget == nil) == (wr.Routing == nil) {
-			return nil, reject(wr.Name, "exactly one of budget or routing must be set")
+		kinds := 0
+		for _, set := range []bool{wr.Budget != nil, wr.Routing != nil, wr.ModelAccess != nil, wr.Rate != nil} {
+			if set {
+				kinds++
+			}
+		}
+		if kinds != 1 {
+			return nil, reject(wr.Name, "exactly one of budget, routing, modelAccess, or rate must be set")
 		}
 
 		r := Rule{Name: wr.Name, FailurePolicy: wr.FailurePolicy}
-		if wr.Budget != nil {
+		switch {
+		case wr.Budget != nil:
 			b, err := budgetFromV1Alpha1(wr, reject)
 			if err != nil {
 				return nil, err
 			}
 			r.Budget = b
-		}
-		if wr.Routing != nil {
+		case wr.Routing != nil:
 			switch wr.Routing.OnAffinityConflict {
 			case v1alpha1.PreferAffinity, v1alpha1.PreferFallback:
 			default:
 				return nil, reject(wr.Name, "routing.onAffinityConflict is required: cache affinity vs fallback has no default winner")
 			}
 			r.Routing = &Routing{OnAffinityConflict: wr.Routing.OnAffinityConflict}
+		case wr.ModelAccess != nil:
+			if len(wr.ModelAccess.Allow) == 0 {
+				return nil, reject(wr.Name, `modelAccess.allow must be non-empty (use ["*"] for all): an empty list is deny-all and must be written deliberately`)
+			}
+			for _, m := range wr.ModelAccess.Allow {
+				if m == "" {
+					return nil, reject(wr.Name, "modelAccess.allow contains an empty model name")
+				}
+			}
+			r.ModelAccess = &ModelAccess{Allow: append([]string(nil), wr.ModelAccess.Allow...)}
+		case wr.Rate != nil:
+			if wr.Rate.RPM < 0 || wr.Rate.TPM < 0 {
+				return nil, reject(wr.Name, "rate.rpm and rate.tpm must be >= 0")
+			}
+			if wr.Rate.RPM == 0 && wr.Rate.TPM == 0 {
+				return nil, reject(wr.Name, "rate rule must limit at least one of rpm or tpm")
+			}
+			r.Rate = &Rate{RPM: wr.Rate.RPM, TPM: wr.Rate.TPM}
 		}
-		rules = append(rules, r)
+		p.Rules = append(p.Rules, r)
 	}
-	return rules, nil
+	return p, nil
 }
+
+// microPerMilli converts wire milliUSD to internal microUSD (exact).
+const microPerMilli = 1000
 
 func budgetFromV1Alpha1(wr v1alpha1.Rule, reject func(rule, reason string) *UnsupportedError) (*Budget, error) {
 	wb := wr.Budget
-	if wb.LimitMicroUSD <= 0 {
-		return nil, reject(wr.Name, "budget.limitMicroUSD must be positive")
+	if wb.LimitMilliUSD <= 0 {
+		return nil, reject(wr.Name, "budget.limitMilliUSD must be positive (1000 = $1)")
 	}
 	if wb.HardCap && wr.FailurePolicy != v1alpha1.FailClosed {
 		return nil, reject(wr.Name, "a hard-cap budget rule must be FailClosed: fail-open on lease expiry voids the cap")
 	}
-	if wb.Lease.GrantMicroUSD <= 0 {
-		return nil, reject(wr.Name, "budget.lease.grantMicroUSD is required (no default yet — ★1)")
+
+	grantMilli := wb.Lease.GrantMilliUSD
+	switch {
+	case grantMilli < 0:
+		return nil, reject(wr.Name, "budget.lease.grantMilliUSD must be >= 0 (0 = default)")
+	case grantMilli == 0:
+		// ADR-032 default: 0.1% of the limit, floored at 1 milliUSD.
+		grantMilli = wb.LimitMilliUSD * DefaultLeaseGrantBP / 10_000
+		if grantMilli < 1 {
+			grantMilli = 1
+		}
 	}
-	iv, err := time.ParseDuration(wb.Lease.RenewInterval)
-	if err != nil || iv <= 0 {
-		return nil, reject(wr.Name, "budget.lease.renewInterval must be a positive Go duration (no default yet — ★1)")
+
+	iv := DefaultLeaseRenewInterval
+	if wb.Lease.RenewInterval != "" {
+		parsed, err := time.ParseDuration(wb.Lease.RenewInterval)
+		if err != nil {
+			return nil, reject(wr.Name, fmt.Sprintf("budget.lease.renewInterval %q is not a Go duration", wb.Lease.RenewInterval))
+		}
+		if parsed < MinLeaseRenewInterval {
+			return nil, reject(wr.Name, fmt.Sprintf("budget.lease.renewInterval must be >= %s", MinLeaseRenewInterval))
+		}
+		iv = parsed
 	}
+
 	return &Budget{
-		LimitMicroUSD:      wb.LimitMicroUSD,
+		LimitMicroUSD:      wb.LimitMilliUSD * microPerMilli,
 		HardCap:            wb.HardCap,
-		LeaseGrantMicroUSD: wb.Lease.GrantMicroUSD,
+		LeaseGrantMicroUSD: grantMilli * microPerMilli,
 		LeaseRenewInterval: iv,
 	}, nil
 }

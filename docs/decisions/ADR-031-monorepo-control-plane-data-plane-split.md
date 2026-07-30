@@ -84,7 +84,8 @@ restructured as a monorepo with two binaries.
 
 ## Open questions (★ — decide before implementing)
 
-1. Lease issuance unit and renewal cadence defaults.
+1. ~~Lease issuance unit and renewal cadence defaults~~ — **decided** in
+   ADR-032 (grant 0.1% of limit, renew 10s; policy poll 60s, floor 15s).
 2. ~~api/v1alpha1 shape~~ — **decided**: hybrid (CRD-style schema, gRPC/HTTP
    delivery).
 3. Whether to track server-cache TTL with a proxy-local timer (providers do

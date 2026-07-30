@@ -6,8 +6,16 @@
 // metadata / spec) so documents are kubectl-friendly and CNCF-idiomatic, but
 // DELIVERY is inferplane's own gRPC/HTTP channel: workstation mode has no
 // K8s API server, so nothing here may depend on Kubernetes machinery
-// (ADR-031). v1alpha1 is unstable — fields may change without notice until
-// v1beta1.
+// (ADR-031). The same document can be applied as a K8s CRD, loaded from a
+// local file (hot reload), or pushed by inferplaned. v1alpha1 is unstable —
+// fields may change without notice until v1beta1.
+//
+// Money on this API is integer milliUSD: 1000 = $1 (ADR-032). That is the
+// operator-facing resolution for limits and lease grants. INTERNAL cost
+// accounting stays integer microUSD: per-token costs are sub-milliUSD (e.g.
+// $0.25/MTok input is 0.25 µUSD per token), and settling in milliUSD would
+// round small requests to zero — the ADR-030 bug class. The boundary
+// conversion (×1000) is exact and lives in internal/policy.
 //
 // Version-skew stance: a data plane that receives a document it does not
 // fully understand must reject it explicitly and report the rejection to the
@@ -45,9 +53,24 @@ type GovernancePolicy struct {
 	Spec     GovernancePolicySpec `json:"spec"`
 }
 
-// GovernancePolicySpec carries the rules of one policy document.
+// GovernancePolicySpec carries the subject and rules of one policy document.
 type GovernancePolicySpec struct {
-	Rules []Rule `json:"rules"`
+	Subject Subject `json:"subject"`
+	Rules   []Rule  `json:"rules"`
+}
+
+// Subject selects who a policy governs. At least one selector is required —
+// user-level and team-level governance are equal citizens (ADR-032).
+//
+// Team is the organizational unit (a department maps here); User is an
+// individual, matched against the request's resolved identity (OIDC sub, or
+// a virtual key's owner). Setting both scopes the policy to that user within
+// that team. Several policies may match one request; enforcement applies all
+// of them and the most restrictive outcome wins (block beats warn — the same
+// tie rule two-phase governance already uses).
+type Subject struct {
+	Team string `json:"team,omitempty"`
+	User string `json:"user,omitempty"`
 }
 
 // FailurePolicy is what a rule does when the control plane is unreachable
@@ -64,43 +87,63 @@ const (
 )
 
 // Rule is one governance rule. Exactly one of the kind-specific fields
-// (Budget, Routing) is set. FailurePolicy is REQUIRED — there is no default,
-// because a defaulted failure mode is a silent one.
+// (Budget, Routing, ModelAccess, Rate) is set. FailurePolicy is REQUIRED —
+// there is no default, because a defaulted failure mode is a silent one.
 type Rule struct {
-	Name          string        `json:"name"`
-	FailurePolicy FailurePolicy `json:"failurePolicy"`
-	Budget        *BudgetRule   `json:"budget,omitempty"`
-	Routing       *RoutingRule  `json:"routing,omitempty"`
+	Name          string           `json:"name"`
+	FailurePolicy FailurePolicy    `json:"failurePolicy"`
+	Budget        *BudgetRule      `json:"budget,omitempty"`
+	Routing       *RoutingRule     `json:"routing,omitempty"`
+	ModelAccess   *ModelAccessRule `json:"modelAccess,omitempty"`
+	Rate          *RateRule        `json:"rate,omitempty"`
 }
 
 // BudgetRule enforces spend via budget leases: the control plane grants the
 // data plane a slice of budget it may burn without a network round trip, the
-// data plane reports consumption asynchronously and renews (§ lease pattern,
-// ADR-031). Cost is integer microUSD — never float.
+// data plane reports consumption asynchronously and renews (ADR-031). Cost
+// control is near-real-time by default: worst-case overshoot is bounded by
+// lease grant × number of data planes, and the defaults (0.1% grant, 10s
+// renew — ADR-032) keep that bound tight without putting the control plane
+// on the request path.
 type BudgetRule struct {
-	// LimitMicroUSD is the global limit this rule enforces across all
-	// data planes for the budget window.
-	LimitMicroUSD int64 `json:"limitMicroUSD"`
+	// LimitMilliUSD is the global limit this rule enforces across all
+	// data planes for the budget window. 1000 = $1.
+	LimitMilliUSD int64 `json:"limitMilliUSD"`
 	// HardCap marks the limit as inviolable. A hard-cap rule MUST carry
 	// FailurePolicy=FailClosed: when its lease expires and the control
 	// plane is unreachable, serving stops. Soft budgets fail open.
 	HardCap bool `json:"hardCap,omitempty"`
-	// Lease sizes the local-enforcement grant. No defaults are provided
-	// yet — issuance unit and renewal cadence are the parameters that
-	// trade budget-overshoot tolerance against control-plane load, and
-	// their defaults are an open decision (★1, ADR-031). Both fields are
-	// therefore required.
-	Lease LeaseSpec `json:"lease"`
+	// Lease tunes the local-enforcement grant. Optional — zero values take
+	// the ADR-032 defaults.
+	Lease LeaseSpec `json:"lease,omitempty"`
 }
 
-// LeaseSpec sizes a budget lease. Both fields are required; defaults are
-// deliberately not chosen yet (★1, ADR-031).
+// LeaseSpec sizes a budget lease. Both fields are optional; defaults are
+// fixed by ADR-032 and applied in internal/policy.
 type LeaseSpec struct {
-	// GrantMicroUSD is how much budget one lease grants a data plane.
-	GrantMicroUSD int64 `json:"grantMicroUSD"`
+	// GrantMilliUSD is how much budget one lease grants one data plane.
+	// 0 = default: 0.1% of LimitMilliUSD, floored at 1 milliUSD.
+	GrantMilliUSD int64 `json:"grantMilliUSD,omitempty"`
 	// RenewInterval is how often the data plane reports consumption and
-	// renews, as a Go duration string (e.g. "30s").
-	RenewInterval string `json:"renewInterval"`
+	// renews, as a Go duration string. Empty = default "10s"; values below
+	// 1s are rejected.
+	RenewInterval string `json:"renewInterval,omitempty"`
+}
+
+// ModelAccessRule restricts which models the subject may request. Matching
+// happens after alias canonicalization, mirroring the existing key/team RBAC
+// (`allowed_models`); "*" allows every configured model.
+type ModelAccessRule struct {
+	Allow []string `json:"allow"`
+}
+
+// RateRule limits request and token throughput for the subject. At least one
+// of the two must be positive; 0 means "not limited on this dimension".
+type RateRule struct {
+	// RPM is requests per minute.
+	RPM int64 `json:"rpm,omitempty"`
+	// TPM is tokens per minute.
+	TPM int64 `json:"tpm,omitempty"`
 }
 
 // ConflictPreference resolves the collision between cache-affinity routing
