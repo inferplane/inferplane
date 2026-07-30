@@ -7,7 +7,7 @@ Automate the release process with validation checks.
 ### 1. Pre-release Checks
 - Verify working tree is clean: `git status`
 - Verify all tests pass: `go test ./... -race`
-- Verify the static binary builds: `CGO_ENABLED=0 go build ./cmd/inferplane`
+- Verify the static binary builds: `CGO_ENABLED=0 go build ./cmd/mayu`
 
 ### 2. Determine Version
 - Review changes since last tag: `git log $(git describe --tags --abbrev=0 2>/dev/null || echo HEAD)..HEAD --oneline`

@@ -17,7 +17,7 @@ lives in its own package. This is the project's headline extensibility promise
 ## Rules — adding a provider
 1. Create `providers/<name>/<name>.go` implementing `Provider` (and `TokenCounter` if it supports counting).
 2. Call `providers.Register("<type>", factory)` in an `init()`.
-3. Add one blank import in `cmd/inferplane/main.go`.
+3. Add one blank import in `cmd/mayu/main.go`.
 4. Document it in `docs/reference/agent-llm.md`.
 5. **Do not touch core packages.** A provider PR that edits `internal/*` has violated the boundary.
 

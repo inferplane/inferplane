@@ -1,7 +1,7 @@
 // Package filter is the core-side seam for request-transform plugins (the
 // spec's filter chain ⑥). It holds ONLY the interface + a name registry — the
 // concrete filters live under plugins/<name>/ and register themselves via a
-// blank import in cmd/inferplane, exactly like providers. Core packages
+// blank import in cmd/mayu, exactly like providers. Core packages
 // (server, router) import this interface, never a concrete plugin, so the
 // plugin surface stays isolated (ADR-009).
 package filter

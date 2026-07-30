@@ -15,8 +15,8 @@ echo "Downloading Go modules..."
 go mod download
 
 # Build the static binary
-echo "Building bin/inferplane..."
-CGO_ENABLED=0 go build -trimpath -o bin/inferplane ./cmd/inferplane
+echo "Building bin/mayu..."
+CGO_ENABLED=0 go build -trimpath -o bin/mayu ./cmd/mayu
 
 # Setup environment
 if [ -f ".env.example" ] && [ ! -f ".env" ]; then
@@ -36,4 +36,4 @@ echo "Next steps:"
 echo "  1. Edit .env with your configuration"
 echo "  2. Read CLAUDE.md for project conventions"
 echo "  3. Read docs/onboarding.md for the development workflow"
-echo "  4. Run: go run ./cmd/inferplane serve --config examples/config.json"
+echo "  4. Run: go run ./cmd/mayu serve --config examples/config.json"

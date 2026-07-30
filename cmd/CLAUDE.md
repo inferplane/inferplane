@@ -1,7 +1,7 @@
 # cmd Module
 
 ## Role
-Binary entrypoints. Currently one binary: `cmd/inferplane`.
+Binary entrypoints. Currently one binary: `cmd/mayu`.
 
 ## Key Files
 - `inferplane/main.go` — CLI dispatch (`serve` / `keys` / `audit` / `report` / `pricing` / `login` / `token` / `logout`), wiring of keystore + audit + governor + metrics + router + providers, the TLS branch, and graceful shutdown.

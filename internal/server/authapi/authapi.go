@@ -97,7 +97,7 @@ func pickTeam(id principal.AdminIdentity, requested string) (team string, err er
 
 // MintHandler serves POST /v1/auth/key. It is mounted behind server.AdminAuth
 // (the SAME OIDC-verify + groups→team middleware the admin plane uses, keyed
-// to the CLI's own client_id — see cliVerifier in cmd/inferplane/gateway.go)
+// to the CLI's own client_id — see cliVerifier in cmd/mayu/gateway.go)
 // so principal.AdminFrom(ctx) is already populated on entry; a request that
 // reached here without it is denied, never silently trusted.
 func MintHandler(store keystore.Store, ttl time.Duration, mint limiter.LimiterStore, emit func(audit.Record)) http.Handler {

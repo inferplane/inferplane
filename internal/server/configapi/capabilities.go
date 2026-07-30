@@ -15,7 +15,7 @@ import (
 type Capabilities struct {
 	// AnalyticsIndex is "A" (local single-replica, Phase 1a), "B" (shared
 	// Postgres store + fenced aggregator, Phase 1b, ADR-015), or "off". The
-	// caller (cmd/inferplane gateway assembly) decides which per config —
+	// caller (cmd/mayu gateway assembly) decides which per config —
 	// this package only carries the value through, it never derives it.
 	AnalyticsIndex      string `json:"analytics_index"`
 	LogsBodies          bool   `json:"logs_bodies"`

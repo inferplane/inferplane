@@ -37,7 +37,7 @@ inferplane은 이 체인 자체를 없앤다. `inferplane keys create`로 발급
 (`ik_...`)는 SHA-256으로 해시되어 키 스토어에 1회 저장되고, 평문은 발급 시 한 번만
 노출된다(복구 불가). 클라이언트는 이 키를 그대로 `Authorization` 헤더에 담아 계속
 사용하며, AWS SSO·IAM Role·별도 토큰 서비스가 존재하지 않는다. 키 폐기는
-`inferplane keys revoke --id <key_id>` 한 줄이다(`cmd/inferplane/keys.go:25`) — LiteLLM처럼
+`inferplane keys revoke --id <key_id>` 한 줄이다(`cmd/mayu/keys.go:25`) — LiteLLM처럼
 UI와 DynamoDB 두 곳을 손으로 지울 필요가 없다.
 
 ### 2. CI/헤드리스 환경 인증 불가 — ✅ 직접 해결 (row 39)

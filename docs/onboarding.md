@@ -16,7 +16,7 @@ cd mayu
 go mod download
 
 # Build the static binary
-CGO_ENABLED=0 go build -trimpath -o bin/inferplane ./cmd/inferplane
+CGO_ENABLED=0 go build -trimpath -o bin/mayu ./cmd/mayu
 ```
 
 ### 3. Verify
@@ -27,7 +27,7 @@ gofmt -l .               # must print nothing
 
 # Run against the example config
 ANTHROPIC_API_KEY=sk-ant-... INFERPLANE_ADMIN_TOKEN=dev \
-  go run ./cmd/inferplane serve --config examples/config.json
+  go run ./cmd/mayu serve --config examples/config.json
 ```
 
 ## Project Overview
@@ -40,7 +40,7 @@ ANTHROPIC_API_KEY=sk-ant-... INFERPLANE_ADMIN_TOKEN=dev \
 ## Development Workflow
 - Branch naming: `feat/`, `fix/`, `docs/`, `refactor/`, `chore/`.
 - Commit convention: Conventional Commits, **DCO signed off** (`git commit -s`). CI rejects unsigned commits.
-- Provider PRs touch only `providers/<name>/`, the blank-import line in `cmd/inferplane/main.go`, and provider docs — zero core diff (design §8).
+- Provider PRs touch only `providers/<name>/`, the blank-import line in `cmd/mayu/main.go`, and provider docs — zero core diff (design §8).
 - Run `go test ./... -race` and `bash tests/run-all.sh` before submitting.
 
 ## Key Concepts

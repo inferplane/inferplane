@@ -23,7 +23,7 @@ Architecture overview: [docs/architecture.md](docs/architecture.md).
 ## Project Structure
 
 ```
-cmd/inferplane/    - Binary entrypoint: serve / keys / audit / report / pricing / login / token / logout subcommands
+cmd/mayu/    - Binary entrypoint: serve / keys / audit / report / pricing / login / token / logout subcommands
 internal/          - Private packages (gateway internals)
   server/          - HTTP data plane + admin plane, ingress handlers
   router/          - Model→provider resolution, fallback chain, circuit breaker
@@ -48,7 +48,7 @@ tests/             - Harness tests (hooks, secret patterns, structure) — bash,
 ## Conventions
 
 - **Go style:** `gofmt`-clean (tabs), `go vet`-clean. Package comments on exported packages. Errors wrapped with `%w`.
-- **Provider isolation (design §8):** a new provider adds **one package** under `providers/<name>/` plus a blank-import line in `cmd/inferplane/main.go`. Provider PRs touch only `providers/<name>/` and provider docs — **zero core diff**.
+- **Provider isolation (design §8):** a new provider adds **one package** under `providers/<name>/` plus a blank-import line in `cmd/mayu/main.go`. Provider PRs touch only `providers/<name>/` and provider docs — **zero core diff**.
 - **Canonical schema invariant (§2.2):** same-protocol round-trip is lossless. Pipeline-interpreted fields are typed; everything else is preserved verbatim (`Extra map[string]json.RawMessage`). Streaming-frame string fields are `*string` so empty values survive.
 - **Cache invariant (§4.4):** when provider protocol == ingress protocol, forward the request body **verbatim** (`RawBody`) so `cache_control` and prompt-cache hits are never corrupted.
 - **Two-phase governance:** pre-check BEFORE billing, settle AFTER. `on_exceeded` is `block` | `warn` (block wins on tie).
@@ -67,7 +67,7 @@ tests/             - Harness tests (hooks, secret patterns, structure) — bash,
 
 ```bash
 # Build the static binary
-CGO_ENABLED=0 go build -trimpath -o bin/inferplane ./cmd/inferplane
+CGO_ENABLED=0 go build -trimpath -o bin/mayu ./cmd/mayu
 
 # Test (race detector) / vet / format check
 go test ./... -race
@@ -75,15 +75,15 @@ go vet ./...
 gofmt -l .
 
 # Run the gateway
-go run ./cmd/inferplane serve --config examples/config.json
+go run ./cmd/mayu serve --config examples/config.json
 
 # Issue a virtual key / verify the audit chain
-go run ./cmd/inferplane keys create --team demo --models '*' --store keys.db
-go run ./cmd/inferplane audit verify --file audit.jsonl
-go run ./cmd/inferplane report --file audit.jsonl --by team,model
+go run ./cmd/mayu keys create --team demo --models '*' --store keys.db
+go run ./cmd/mayu audit verify --file audit.jsonl
+go run ./cmd/mayu report --file audit.jsonl --by team,model
 
 # Verify every configured model has a pricing rate (ADR-030 CI guard; exit 1 if not)
-INFERPLANE_ADMIN_TOKEN=lint go run ./cmd/inferplane pricing check --config examples/config.json
+INFERPLANE_ADMIN_TOKEN=lint go run ./cmd/mayu pricing check --config examples/config.json
 
 # Harness tests (hooks/structure)
 bash tests/run-all.sh

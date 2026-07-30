@@ -55,7 +55,7 @@ git clone https://github.com/inferplane/mayu.git
 cd mayu
 
 # Build the static binary
-CGO_ENABLED=0 go build -trimpath -o bin/inferplane ./cmd/inferplane
+CGO_ENABLED=0 go build -trimpath -o bin/mayu ./cmd/mayu
 ```
 
 ## Usage
@@ -243,7 +243,7 @@ service mesh instead.
 ## Project Structure
 
 ```
-cmd/inferplane/    # Binary entrypoint: serve / keys / audit
+cmd/mayu/    # Binary entrypoint: serve / keys / audit
 internal/          # Gateway internals (server, router, governance, keystore, audit, ...)
 providers/         # Upstream providers (anthropic, bedrock, openaicompat) — the extension surface
 pkg/               # Public packages: schema (canonical types), ulid
@@ -284,7 +284,7 @@ inferplane audit  verify --file <path>
 5. Open a Pull Request
 
 Provider PRs touch only `providers/<name>/`, the blank-import line in
-`cmd/inferplane/main.go`, and provider docs — zero core diff (design §8). See
+`cmd/mayu/main.go`, and provider docs — zero core diff (design §8). See
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
@@ -341,7 +341,7 @@ git clone https://github.com/inferplane/mayu.git
 cd mayu
 
 # 정적 바이너리 빌드
-CGO_ENABLED=0 go build -trimpath -o bin/inferplane ./cmd/inferplane
+CGO_ENABLED=0 go build -trimpath -o bin/mayu ./cmd/mayu
 ```
 
 ## 사용법
@@ -498,7 +498,7 @@ TLS: 비-Kubernetes 배포에서는 `server.tls.cert_file` / `server.tls.key_fil
 ## 프로젝트 구조
 
 ```
-cmd/inferplane/    # 바이너리 엔트리포인트: serve / keys / audit
+cmd/mayu/    # 바이너리 엔트리포인트: serve / keys / audit
 internal/          # 게이트웨이 내부 (server, router, governance, keystore, audit, ...)
 providers/         # 상위 공급자 (anthropic, bedrock, openaicompat) — 확장 표면
 pkg/               # 공개 패키지: schema(canonical 타입), ulid
@@ -538,7 +538,7 @@ inferplane audit  verify --file <path>
 4. 브랜치에 Push 합니다 (`git push origin feat/amazing-feature`)
 5. Pull Request 를 엽니다
 
-공급자 PR은 `providers/<name>/`, `cmd/inferplane/main.go`의 blank-import 라인,
+공급자 PR은 `providers/<name>/`, `cmd/mayu/main.go`의 blank-import 라인,
 공급자 문서만 건드립니다 — 코어 무수정(설계 §8). [CONTRIBUTING.md](CONTRIBUTING.md)
 참조.
 
