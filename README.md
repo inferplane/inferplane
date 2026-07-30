@@ -118,6 +118,13 @@ export ANTHROPIC_API_KEY=ik_...
 claude
 ```
 
+Governance rules live in CRD-style `GovernancePolicy` YAML — the same
+documents the control plane will distribute, applied locally today: add
+`"policies": ["examples/policies/"]` to the config and edit the YAML
+(per-team/per-user model allow-lists, budgets in milliUSD, rate limits — see
+[`examples/policies/demo.yaml`](examples/policies/demo.yaml)). Files are
+watched: **save a change and it applies within ~2 seconds**, no restart.
+
 Port `8080` is the data plane; `9090` is the admin plane (`/healthz`,
 `/metrics`, key-management API, and the web console at
 `http://localhost:9090/admin/ui/`). For a self-hosted-only setup (vLLM/Ollama,

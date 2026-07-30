@@ -21,6 +21,9 @@ type Router struct {
 	live    *live.Holder
 	brk     *breaker
 	metrics *metrics.Metrics // nil-safe: no-op when nil
+	// policyGate is an optional model-access narrowing check (see
+	// SetPolicyGate). nil = no policy restriction.
+	policyGate func(p keystore.Principal, model string, canonical func(string) string) bool
 }
 
 func New(holder *live.Holder) *Router {
@@ -67,16 +70,37 @@ func (r *Router) ResolveModel(requested string) (served string, substituted bool
 // isn't silently locked out of every request. Still exact-match once
 // canonicalized — no broadening of what a key can reach.
 func (r *Router) Allows(p keystore.Principal, model string) bool {
-	if p.Allows(model) {
-		return true
-	}
+	allowed := p.Allows(model)
 	st := r.live.Load()
-	for _, m := range p.AllowedModels {
-		if st.Canonical(m) == model {
-			return true
+	if !allowed {
+		for _, m := range p.AllowedModels {
+			if st.Canonical(m) == model {
+				allowed = true
+				break
+			}
 		}
 	}
-	return false
+	if !allowed {
+		return false
+	}
+	if r.policyGate != nil {
+		return r.policyGate(p, model, st.Canonical)
+	}
+	return true
+}
+
+// SetPolicyGate installs an additional model-access check consulted AFTER
+// the key's own allow-list passes (both must allow — a policy can only
+// narrow, never widen, what a key may reach). The gate receives the
+// already-canonicalized model plus the generation's canonicalizer so its own
+// allow-list entries get the same alias treatment as key lists (ADR-021).
+// Every ingress RBAC decision funnels through Allows, so this one seam
+// covers /v1/messages, /v1/chat/completions, Bedrock invoke, the model
+// listings, and cross-model fallback filtering alike. Startup-only
+// assignment (same posture as governance.SetTeamLookup) — never call it
+// after the server starts serving.
+func (r *Router) SetPolicyGate(gate func(p keystore.Principal, model string, canonical func(string) string) bool) {
+	r.policyGate = gate
 }
 
 // ChainTarget is one resolved fallback target: the provider instance, its

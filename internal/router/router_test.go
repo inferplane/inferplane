@@ -449,3 +449,32 @@ func TestFilterModelAllowed(t *testing.T) {
 		t.Fatalf("FilterModelAllowed = %+v, want both targets kept", got)
 	}
 }
+
+// ADR-033: the policy gate NARROWS what a key's own allow-list already
+// grants — both must allow, and the gate never widens a denied model.
+func TestAllowsPolicyGateNarrows(t *testing.T) {
+	provs := map[string]providers.Provider{"a": mockprovider.New("claude-sonnet-4-6")}
+	models := map[string]config.ModelConfig{
+		"claude-sonnet-4-6": {Targets: []config.Target{{Provider: "a", Model: "claude-sonnet-4-6"}}},
+		"claude-haiku-4-5":  {Targets: []config.Target{{Provider: "a", Model: "claude-haiku-4-5"}}},
+	}
+	r, _ := newTestRouter(provs, models)
+
+	wildcard := keystore.Principal{Team: "t", AllowedModels: []string{"*"}}
+	r.SetPolicyGate(func(p keystore.Principal, model string, canonical func(string) string) bool {
+		return p.Team == "t" && model == "claude-haiku-4-5"
+	})
+	if r.Allows(wildcard, "claude-sonnet-4-6") {
+		t.Fatal("policy gate denial ignored")
+	}
+	if !r.Allows(wildcard, "claude-haiku-4-5") {
+		t.Fatal("policy-allowed model denied")
+	}
+
+	// The gate can only narrow: a key whose own list denies stays denied
+	// even when the gate would allow.
+	narrowKey := keystore.Principal{Team: "t", AllowedModels: []string{"claude-sonnet-4-6"}}
+	if r.Allows(narrowKey, "claude-haiku-4-5") {
+		t.Fatal("policy gate widened a key's allow-list")
+	}
+}

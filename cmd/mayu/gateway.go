@@ -30,6 +30,7 @@ import (
 	"github.com/inferplane/inferplane/internal/limiter"
 	"github.com/inferplane/inferplane/internal/live"
 	"github.com/inferplane/inferplane/internal/metrics"
+	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/providerstore"
 	"github.com/inferplane/inferplane/internal/router"
 	"github.com/inferplane/inferplane/internal/server"
@@ -68,6 +69,7 @@ type gateway struct {
 	notifier         *alert.Notifier             // nil unless budget_alerts is configured (D5b, ADR-017)
 	healthStore      *configapi.HealthStore      // nil unless provider_health_check is configured (ADR-014 deferred item)
 	healthProbeEvery time.Duration               // probe interval
+	polStore         *policy.Store               // nil unless policies is configured (ADR-033); watched in serve
 	reloadMu         sync.Mutex                  // serializes reloads AND UI writes (concurrent SIGHUPs/triggers)
 	dataLn           net.Listener
 	adminLn          net.Listener
@@ -274,14 +276,40 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// is passed into Settle per request from the resolved snapshot, so the
 	// governor holds no pricing — only its persistent rate/budget counters.
 	gov := governance.NewGovernor(policies, limiter.NewMemory(), budget.NewMemory(), m) // budget_spend / pricing_miss
-	// D3 (ADR-016): a team record in the keystore takes precedence over the
-	// config map above, and is checked fresh on every request — no restart, no
-	// hot-reload needed for an admin-console budget/limit edit to take effect.
-	// A lookup ERROR (not a miss) falls back to the config map rather than
-	// blocking all traffic on a transient keystore error; store already does
-	// one SQLite read per request on this exact hot path (Resolve), so this
-	// adds one more point read, not a new failure class.
+	// Local GovernancePolicy documents (ADR-033): loaded at boot — an invalid
+	// or not-yet-enforceable document fails boot rather than serving while
+	// silently not enforcing it — and watched for changes in serve.
+	var polStore *policy.Store
+	if len(cfg.Policies) > 0 {
+		polStore, err = policy.NewStore(cfg.Policies...)
+		if err != nil {
+			store.Close()
+			return nil, fmt.Errorf("policies: %w", err)
+		}
+	}
+	// Team-policy precedence (ADR-033 extends ADR-016): policy FILE (declarative
+	// intent, GitOps posture) > keystore team RECORD (runtime console edits) >
+	// static config map. All three produce TeamPolicy through the same
+	// PolicyFromLimits so the burst rule can never diverge. D3 (ADR-016): the
+	// record path is checked fresh on every request — no restart, no hot-reload
+	// needed for an admin-console budget/limit edit to take effect. A lookup
+	// ERROR (not a miss) falls back to the config map rather than blocking all
+	// traffic on a transient keystore error; store already does one SQLite read
+	// per request on this exact hot path (Resolve), so this adds one more point
+	// read, not a new failure class.
 	gov.SetTeamLookup(func(team string) (governance.TeamPolicy, bool) {
+		if polStore != nil {
+			if tl, ok := polStore.TeamLimits(team); ok {
+				exceeded := "warn"
+				if tl.BudgetHard {
+					exceeded = "block"
+				}
+				// Policy budgets window monthly (ADR-033); no quota rule kind
+				// yet, so tokens/day stays unlimited on this path.
+				return governance.PolicyFromLimits(tl.RPM, tl.TPM, 0, "",
+					tl.BudgetMicrosPerMonth, exceeded), true
+			}
+		}
 		rec, ok, err := store.GetTeam(context.Background(), team)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "inferplane: team lookup:", err)
@@ -293,6 +321,14 @@ func newGateway(cfgPath string) (*gateway, error) {
 		return governance.PolicyFromLimits(rec.RPM, rec.TPM, rec.TokensPerDay,
 			rec.QuotaOnExceeded, rec.BudgetUSDMicros, rec.BudgetOnExceeded), true
 	})
+	// modelAccess rules narrow every ingress RBAC decision through the router's
+	// policy gate (key allow-list must pass AND the policy must allow); team-
+	// and user-subject rules both apply, user matched on the key's Owner.
+	if polStore != nil {
+		r.SetPolicyGate(func(p keystore.Principal, model string, canonical func(string) string) bool {
+			return polStore.ModelAllowed(p.Team, p.Owner, model, canonical)
+		})
+	}
 	// Per-team record lookup for NON-governance overrides (D6/ADR-019's
 	// guardrail override; D7/ADR-020's region-lock reuses this same closure).
 	// Same fresh-per-request posture as SetTeamLookup above; a lookup error
@@ -470,6 +506,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		bodyMaxBytes:     bodyMaxBytes,
 		healthStore:      healthStore,
 		healthProbeEvery: healthProbeEvery,
+		polStore:         polStore,
 		dataLn:           dataLn,
 		adminLn:          adminLn,
 	}
@@ -992,6 +1029,19 @@ func (g *gateway) serve(ctx context.Context) error {
 		healthProbeDone = make(chan struct{})
 		go g.healthProbeWorker(workerCtx, healthProbeDone)
 	}
+	// Local policy-file watch (ADR-033): mtime poll → reload on change, the
+	// workstation save-and-it's-live loop. A bad edit keeps the previous
+	// policy set serving and logs — same never-fatal posture as SIGHUP reload.
+	var policyWatchDone chan struct{}
+	if g.polStore != nil {
+		policyWatchDone = make(chan struct{})
+		go func() {
+			defer close(policyWatchDone)
+			g.polStore.Watch(workerCtx, func(err error) {
+				fmt.Fprintln(os.Stderr, "inferplane:", err)
+			})
+		}()
+	}
 	defer func() {
 		cancelWorker()
 		<-workerDone
@@ -1006,6 +1056,9 @@ func (g *gateway) serve(ctx context.Context) error {
 		}
 		if healthProbeDone != nil {
 			<-healthProbeDone
+		}
+		if policyWatchDone != nil {
+			<-policyWatchDone
 		}
 	}()
 

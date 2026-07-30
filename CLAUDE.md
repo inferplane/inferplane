@@ -17,6 +17,7 @@ Architecture overview: [docs/architecture.md](docs/architecture.md).
 - **Build:** single static binary, `CGO_ENABLED=0` (every dependency is pure-Go)
 - **Storage:** `modernc.org/sqlite` (cgo-free SQLite) for the key store; disk WAL for audit
 - **AWS:** `aws-sdk-go-v2` (`config` + `bedrockruntime`) for the Bedrock provider
+- **Policy files:** `sigs.k8s.io/yaml` (pure Go) for CRD-style GovernancePolicy documents (`policies` config key, ADR-033)
 - **Observability:** `prometheus/client_golang`; OpenTelemetry GenAI semantic conventions for metric naming
 - **Packaging:** multi-stage Dockerfile → `distroless/static:nonroot`; Helm chart in `charts/inferplane`
 

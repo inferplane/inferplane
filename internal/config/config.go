@@ -364,6 +364,13 @@ type Config struct {
 	// "claude-opus-*" version below it) for models with no explicit entry in
 	// ModelFallbacks. Nil (absent) means enabled; explicit false disables it.
 	ModelFallbackFamily *bool `json:"model_fallback_family,omitempty"`
+	// Policies lists local GovernancePolicy document paths (files or
+	// directories of *.yaml/*.yml/*.json — the api/v1alpha1 schema, ADR-032/
+	// ADR-033). Loaded at boot (boot fails on an invalid document) and
+	// watched for changes at runtime (save → applied within seconds; a bad
+	// edit keeps the previous set serving). Standalone mode's local policy
+	// channel — the same documents inferplaned will distribute.
+	Policies []string `json:"policies,omitempty"`
 }
 
 // FallbackFamilyEnabled reports whether the family fallback heuristic is on
@@ -545,6 +552,11 @@ func LoadRaw(path string) (*Config, error) {
 	}
 	if err := validateVirtualKeys(cfg.VirtualKeys); err != nil {
 		return nil, err
+	}
+	for i, p := range cfg.Policies {
+		if strings.TrimSpace(p) == "" {
+			return nil, fmt.Errorf("config: policies[%d] is empty", i)
+		}
 	}
 	return &cfg, nil
 }
