@@ -62,8 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/metrics` carries no secret or `key_id`, and bounds label cardinality with a `_rejected` sentinel on pre-resolution 403/404 paths.
 - `count_tokens` always returns 200 to avoid crashing Claude Code.
 
-[0.2.0]: https://github.com/inferplane/mayu/releases/tag/v0.2.0
-[0.1.0]: https://github.com/inferplane/mayu/releases/tag/v0.1.0
+[0.2.0]: https://github.com/inferplane/inferplane/releases/tag/v0.2.0
+[0.1.0]: https://github.com/inferplane/inferplane/releases/tag/v0.1.0
 
 ---
 
@@ -121,5 +121,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/metrics`는 시크릿·`key_id`를 담지 않으며, 사전 해석 403/404 경로에서 `_rejected` 센티넬로 레이블 카디널리티 제한.
 - `count_tokens`는 Claude Code 크래시 방지를 위해 항상 200 반환.
 
-[0.2.0]: https://github.com/inferplane/mayu/releases/tag/v0.2.0
-[0.1.0]: https://github.com/inferplane/mayu/releases/tag/v0.1.0
+[0.2.0]: https://github.com/inferplane/inferplane/releases/tag/v0.2.0
+[0.1.0]: https://github.com/inferplane/inferplane/releases/tag/v0.1.0

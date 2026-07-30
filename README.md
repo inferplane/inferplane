@@ -51,7 +51,7 @@ Architecture: [docs/architecture.md](docs/architecture.md)
 
 ```bash
 # Clone the repository
-git clone https://github.com/inferplane/mayu.git
+git clone https://github.com/inferplane/inferplane.git
 cd mayu
 
 # Build the static binary
@@ -294,7 +294,7 @@ Apache-2.0 — see [LICENSE](LICENSE).
 ## Contact
 
 - Maintainer: [@atomoh](https://github.com/atomoh)
-- Issues: https://github.com/inferplane/mayu/issues
+- Issues: https://github.com/inferplane/inferplane/issues
 - Security: ojs0106@gmail.com (see [SECURITY.md](SECURITY.md))
 
 ---
@@ -337,7 +337,7 @@ Kubernetes-native, Apache-2.0, **외부 SaaS 의존성 없음**.
 
 ```bash
 # 저장소 클론
-git clone https://github.com/inferplane/mayu.git
+git clone https://github.com/inferplane/inferplane.git
 cd mayu
 
 # 정적 바이너리 빌드
@@ -549,5 +549,5 @@ Apache-2.0 — [LICENSE](LICENSE) 참조.
 ## 연락처
 
 - 메인테이너: [@atomoh](https://github.com/atomoh)
-- 이슈: https://github.com/inferplane/mayu/issues
+- 이슈: https://github.com/inferplane/inferplane/issues
 - 보안: ojs0106@gmail.com ([SECURITY.md](SECURITY.md) 참조)

@@ -11,7 +11,7 @@
 ### 2. Setup
 ```bash
 # Clone and fetch dependencies
-git clone https://github.com/inferplane/mayu.git
+git clone https://github.com/inferplane/inferplane.git
 cd mayu
 go mod download
 
