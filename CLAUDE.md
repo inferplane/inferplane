@@ -25,11 +25,12 @@ Architecture overview: [docs/architecture.md](docs/architecture.md).
 
 ```
 cmd/mayu/          - Data plane binary (node-local proxy): serve / keys / audit / report / pricing / login / token / logout
-cmd/inferplaned/   - Control plane binary (ADR-031) — scaffold: health endpoints only
+cmd/inferplaned/   - Control plane binary: policy distribution + budget leases (ADR-034); credential broker TBD
 api/v1alpha1/      - Versioned config API wire types (CRD-style shape, gRPC/HTTP delivery)
 internal/          - Private packages (gateway internals)
-  policy/          - Rule + lease schema shared by both binaries (the single truth, ADR-031)
-  proxy/ cache/ telemetry/ - Consolidation targets for the split (ADR-031); cache/ owns VolatileStore
+  policy/          - Rule + lease schema shared by both binaries (the single truth, ADR-031); loader/store + sync wire types (ADR-033/034)
+  controlplane/    - inferplaned distribution core: sync heartbeat, lease ledger, dataplane view (ADR-034)
+  proxy/ cache/ telemetry/ - Consolidation targets (ADR-031); proxy/ owns the control-plane Syncer + LeaseTable (ADR-034); cache/ owns VolatileStore
   server/          - HTTP data plane + admin plane, ingress handlers
   router/          - Model→provider resolution, fallback chain, circuit breaker
   governance/      - Rate / quota / budget enforcement (PreCheck + Settle)

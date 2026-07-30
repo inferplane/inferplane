@@ -2,10 +2,13 @@ package policy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync/atomic"
 	"time"
+
+	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
 )
 
 // LocalWatchInterval is the mtime-poll cadence for locally loaded policy
@@ -59,6 +62,56 @@ func NewStore(paths ...string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// NewEmptyStore builds a store with no policies, to be fed by a control
+// plane via ApplyWire (ADR-034). It has no file paths — Reload/Watch are
+// meaningless on it and must not be used.
+func NewEmptyStore() *Store {
+	s := &Store{}
+	s.snap.Store(&snapshot{teams: map[string]TeamLimits{}})
+	return s
+}
+
+// ApplyWire replaces the policy set from control-plane-distributed wire
+// documents. Unlike the all-or-nothing file path (an operator's local edit
+// should fail fast and whole), distribution applies PER DOCUMENT: schema
+// errors and rules this build cannot enforce reject that one document, the
+// rest apply, and every rejection is returned for the next heartbeat's
+// report — refused loudly upstream, never silently dropped (the version-skew
+// stance). Atomic swap: readers see either the old set or the new one.
+func (s *Store) ApplyWire(docs []v1alpha1.GovernancePolicy) []Rejection {
+	var accepted []*Policy
+	var rejected []Rejection
+	seen := make(map[string]bool, len(docs))
+	for i := range docs {
+		name := docs[i].Metadata.Name
+		if name == "" || seen[name] {
+			rejected = append(rejected, Rejection{Policy: name, Reason: "metadata.name missing or duplicate in distributed set"})
+			continue
+		}
+		seen[name] = true
+		p, err := FromV1Alpha1(&docs[i])
+		if err == nil {
+			err = checkEnforceable(p)
+		}
+		if err != nil {
+			rej := Rejection{Policy: name, Reason: err.Error()}
+			var ue *UnsupportedError
+			if errors.As(err, &ue) {
+				rej.Rule = ue.Rule
+				rej.Reason = ue.Reason
+			}
+			rejected = append(rejected, rej)
+			continue
+		}
+		accepted = append(accepted, p)
+	}
+	s.snap.Store(&snapshot{
+		policies: accepted,
+		teams:    mergeTeamLimits(accepted),
+	})
+	return rejected
 }
 
 // Reload re-reads every configured path and atomically swaps the snapshot.

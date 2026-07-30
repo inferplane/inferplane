@@ -3,9 +3,11 @@
 ## Role
 Binary entrypoints. Two binaries (ADR-031): `cmd/mayu` — the node-local data
 plane (the former gateway; `mayu` is a component name, not a project name) —
-and `cmd/inferplaned` — the control plane, currently a scaffold serving only
-`/healthz` + `/readyz` so both binaries import `internal/policy` from day one
-and schema version skew fails at compile time.
+and `cmd/inferplaned` — the control plane: `--policies` distributes watched
+GovernancePolicy documents and issues budget leases over `/v1alpha1/sync`
+(ADR-034; `INFERPLANED_TOKEN` gates it — loopback-only until set), plus
+`/healthz` + `/readyz`. Both binaries import `internal/policy`, so schema
+version skew fails at compile time.
 
 ## Key Files
 - `mayu/main.go` — CLI dispatch (`serve` / `keys` / `audit` / `report` / `pricing` / `login` / `token` / `logout`), wiring of keystore + audit + governor + metrics + router + providers, the TLS branch, and graceful shutdown.

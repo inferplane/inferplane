@@ -4,10 +4,12 @@
 // through it — mayu (cmd/mayu), the node-local data plane, sits on the
 // request path and enforces what inferplaned distributes.
 //
-// This is a scaffold (ADR-031): it serves health/readiness only. It exists
-// now — before it does anything useful — so that both binaries import
-// internal/policy from day one and schema version skew is caught at compile
-// time rather than after policy logic has grown into the proxy.
+// Distribution (ADR-034) is live: --policies points at GovernancePolicy
+// files/directories (watched — edits propagate on the next heartbeat), data
+// planes POST /v1alpha1/sync (policy pull + consumption report + lease
+// renewal + rejection report in one round trip), and GET /v1alpha1/dataplanes
+// shows the connected version distribution. Credential brokering and
+// telemetry aggregation are still to come (ADR-031).
 package main
 
 import (
@@ -23,22 +25,26 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/inferplane/inferplane/internal/controlplane"
 	"github.com/inferplane/inferplane/internal/policy"
 )
 
 func main() {
-	// Loopback-only by default: the control plane has no authn yet, so it
-	// must not listen on all interfaces until it does.
+	// Loopback-only by default: without INFERPLANED_TOKEN set there is no
+	// authentication, so the control plane must not listen on all
+	// interfaces. Set the token (shared with each mayu's
+	// control_plane.token_ref) before widening the listen address.
 	listen := flag.String("listen", "127.0.0.1:7601", "control plane listen address")
+	policies := flag.String("policies", "", "GovernancePolicy file or directory to distribute (watched)")
 	flag.Parse()
 
-	if err := run(*listen); err != nil {
+	if err := run(*listen, *policies, os.Getenv("INFERPLANED_TOKEN")); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(listen string) error {
+func run(listen, policies, token string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -53,6 +59,20 @@ func run(listen string) error {
 		})
 	})
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	var cp *controlplane.Server
+	if policies != "" {
+		var err error
+		cp, err = controlplane.NewServer(token, policies)
+		if err != nil {
+			return fmt.Errorf("policies: %w", err)
+		}
+		cp.Mount(mux)
+		go cp.Watch(ctx, func(err error) { log.Print("inferplaned: ", err) })
+	}
+
 	srv := &http.Server{
 		Addr:              listen,
 		Handler:           mux,
@@ -61,20 +81,25 @@ func run(listen string) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("inferplaned control plane listening on %s (scaffold: health endpoints only)", listen)
+		mode := "scaffold: health endpoints only"
+		if cp != nil {
+			mode = "distributing policies from " + policies
+			if token == "" {
+				mode += " (UNAUTHENTICATED — set INFERPLANED_TOKEN before leaving loopback)"
+			}
+		}
+		log.Printf("inferplaned control plane listening on %s (%s)", listen, mode)
 		errCh <- srv.ListenAndServe()
 	}()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	select {
 	case err := <-errCh:
 		return fmt.Errorf("listen on %s: %w", listen, err)
-	case sig := <-stop:
-		log.Printf("received %s, shutting down", sig)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	case <-ctx.Done():
+		log.Print("shutting down")
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := srv.Shutdown(ctx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		if err := srv.Shutdown(sctx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("shutdown: %w", err)
 		}
 		return nil

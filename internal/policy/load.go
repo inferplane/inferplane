@@ -17,12 +17,13 @@ import (
 // line, so one file can carry several GovernancePolicy documents kubectl-style.
 var docSep = regexp.MustCompile(`(?m)^---\s*$`)
 
-// ParseDocs parses one YAML (or JSON — YAML is a superset) stream of
-// GovernancePolicy documents. Unmarshalling is STRICT: an unknown field is a
-// version-skew symptom and is rejected, never silently dropped — a document
-// written for a newer schema must fail loudly here, not lose its newest field.
-func ParseDocs(data []byte) ([]*Policy, error) {
-	var out []*Policy
+// parseWireDocs parses one YAML (or JSON — YAML is a superset) stream into
+// wire documents, schema-validating each through FromV1Alpha1. Unmarshalling
+// is STRICT: an unknown field is a version-skew symptom and is rejected,
+// never silently dropped — a document written for a newer schema must fail
+// loudly here, not lose its newest field.
+func parseWireDocs(data []byte) ([]v1alpha1.GovernancePolicy, error) {
+	var out []v1alpha1.GovernancePolicy
 	for i, doc := range docSep.Split(string(data), -1) {
 		if strings.TrimSpace(doc) == "" {
 			continue
@@ -31,13 +32,39 @@ func ParseDocs(data []byte) ([]*Policy, error) {
 		if err := sigyaml.UnmarshalStrict([]byte(doc), &wire); err != nil {
 			return nil, fmt.Errorf("document %d: %w", i+1, err)
 		}
-		p, err := FromV1Alpha1(&wire)
-		if err != nil {
+		if _, err := FromV1Alpha1(&wire); err != nil {
 			return nil, fmt.Errorf("document %d: %w", i+1, err)
+		}
+		out = append(out, wire)
+	}
+	return out, nil
+}
+
+// ParseDocs parses a YAML/JSON stream of GovernancePolicy documents into the
+// internal form (see parseWireDocs for the strictness stance).
+func ParseDocs(data []byte) ([]*Policy, error) {
+	wires, err := parseWireDocs(data)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*Policy, 0, len(wires))
+	for i := range wires {
+		p, err := FromV1Alpha1(&wires[i])
+		if err != nil {
+			return nil, err // unreachable: parseWireDocs already validated
 		}
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+// readPolicyFile reads one policy file with path context on error.
+func readPolicyFile(f string) ([]byte, error) {
+	data, err := os.ReadFile(f)
+	if err != nil {
+		return nil, fmt.Errorf("policy file %s: %w", f, err)
+	}
+	return data, nil
 }
 
 // enumerate lists the policy files under the given paths. A path may be a
@@ -71,6 +98,10 @@ func enumerate(paths ...string) ([]string, error) {
 	sort.Strings(files)
 	return files, nil
 }
+
+// Enumerate is the exported enumeration used by external watchers
+// (internal/controlplane) to poll the same file set LoadPaths would read.
+func Enumerate(paths ...string) ([]string, error) { return enumerate(paths...) }
 
 // LoadPaths reads GovernancePolicy documents from the given paths (see
 // enumerate for path semantics). Policy names must be unique across

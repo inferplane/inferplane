@@ -32,6 +32,7 @@ import (
 	"github.com/inferplane/inferplane/internal/metrics"
 	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/providerstore"
+	"github.com/inferplane/inferplane/internal/proxy"
 	"github.com/inferplane/inferplane/internal/router"
 	"github.com/inferplane/inferplane/internal/server"
 	"github.com/inferplane/inferplane/internal/server/analyticsapi"
@@ -69,7 +70,8 @@ type gateway struct {
 	notifier         *alert.Notifier             // nil unless budget_alerts is configured (D5b, ADR-017)
 	healthStore      *configapi.HealthStore      // nil unless provider_health_check is configured (ADR-014 deferred item)
 	healthProbeEvery time.Duration               // probe interval
-	polStore         *policy.Store               // nil unless policies is configured (ADR-033); watched in serve
+	polStore         *policy.Store               // nil unless policies/control_plane is configured (ADR-033/034); file mode watched in serve
+	syncer           *proxy.Syncer               // nil unless control_plane is configured (ADR-034); heartbeats in serve
 	reloadMu         sync.Mutex                  // serializes reloads AND UI writes (concurrent SIGHUPs/triggers)
 	dataLn           net.Listener
 	adminLn          net.Listener
@@ -95,11 +97,21 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// boot with nothing to unwind, rather than serving while silently not
 	// enforcing it. Watched for changes in serve.
 	var polStore *policy.Store
+	var leases *proxy.LeaseTable
 	if len(raw.Policies) > 0 {
 		polStore, err = policy.NewStore(raw.Policies...)
 		if err != nil {
 			return nil, fmt.Errorf("policies: %w", err)
 		}
+	}
+	// Control-plane mode (ADR-034): the same store is fed by heartbeats
+	// instead of files (config validation guarantees exclusivity). Boot does
+	// NOT wait for the control plane — fault isolation means a data plane
+	// starts ungoverned-until-first-sync rather than not at all; hard caps
+	// arrive with the first heartbeat and then fail closed on lease expiry.
+	if raw.ControlPlane != nil {
+		polStore = policy.NewEmptyStore()
+		leases = proxy.NewLeaseTable()
 	}
 
 	// Prometheus metrics sink: owned by main, threaded into the audit writer,
@@ -335,6 +347,29 @@ func newGateway(cfgPath string) (*gateway, error) {
 				budgetExceeded = "block"
 			}
 		}
+		// Budget-lease clamp (ADR-034): within a lease the local limit is
+		// the granted allowance, so enforcement needs no network round
+		// trip. A zero/negative allowance (global budget exhausted) can't
+		// be expressed as 0 — that means "unlimited" in TeamPolicy — so it
+		// clamps to 1 µUSD: pre-check blocks as soon as any spend has
+		// settled (one request of overshoot, the same accepted §5.3
+		// posture; a HARD cap at zero allowance is blocked outright by the
+		// lease gate before this closure even matters).
+		if leases != nil {
+			if l, ok := leases.Get(team); ok {
+				allowance := l.AllowanceMicroUSD
+				if allowance < 1 {
+					allowance = 1
+				}
+				if budgetMicros == 0 || allowance < budgetMicros {
+					budgetMicros = allowance
+					budgetExceeded = "warn"
+					if l.HardCap {
+						budgetExceeded = "block"
+					}
+				}
+			}
+		}
 		// No quota rule kind yet — tokens/day always comes from the base.
 		return governance.PolicyFromLimits(rpm, tpm, base.TokensPerDay,
 			base.QuotaExceeded, budgetMicros, budgetExceeded), true
@@ -346,6 +381,34 @@ func newGateway(cfgPath string) (*gateway, error) {
 		r.SetPolicyGate(func(p keystore.Principal, model string, canonical func(string) string) bool {
 			return polStore.ModelAllowed(p.Team, p.Owner, model, canonical)
 		})
+	}
+	// Control-plane heartbeat (ADR-034): lease gate + syncer. The gate fails
+	// a HARD-cap team closed when its lease expired (control plane
+	// unreachable past tolerance) or its allowance is exhausted globally;
+	// soft rules fail open per failurePolicy.
+	var syncer *proxy.Syncer
+	if raw.ControlPlane != nil {
+		gov.SetLeaseGate(leases.Blocked)
+		dataplaneID := raw.ControlPlane.Dataplane
+		if dataplaneID == "" {
+			dataplaneID = instanceID()
+		}
+		syncer = &proxy.Syncer{
+			URL:       raw.ControlPlane.URL,
+			Token:     raw.ControlPlane.Token,
+			Dataplane: dataplaneID,
+			Store:     polStore,
+			Leases:    leases,
+			SpentOf: func(team string) int64 {
+				if u := gov.UsageOf(team, "", governance.KeyPolicy{}); u.TeamBudget != nil {
+					return u.TeamBudget.SpentUSDMicros
+				}
+				return 0
+			},
+			OnError: func(err error) {
+				fmt.Fprintln(os.Stderr, "inferplane:", err)
+			},
+		}
 	}
 	// Per-team record lookup for NON-governance overrides (D6/ADR-019's
 	// guardrail override; D7/ADR-020's region-lock reuses this same closure).
@@ -525,6 +588,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		healthStore:      healthStore,
 		healthProbeEvery: healthProbeEvery,
 		polStore:         polStore,
+		syncer:           syncer,
 		dataLn:           dataLn,
 		adminLn:          adminLn,
 	}
@@ -1051,13 +1115,24 @@ func (g *gateway) serve(ctx context.Context) error {
 	// workstation save-and-it's-live loop. A bad edit keeps the previous
 	// policy set serving and logs — same never-fatal posture as SIGHUP reload.
 	var policyWatchDone chan struct{}
-	if g.polStore != nil {
+	if g.polStore != nil && len(g.cfg.Policies) > 0 {
 		policyWatchDone = make(chan struct{})
 		go func() {
 			defer close(policyWatchDone)
 			g.polStore.Watch(workerCtx, func(err error) {
 				fmt.Fprintln(os.Stderr, "inferplane:", err)
 			})
+		}()
+	}
+	// Control-plane heartbeat loop (ADR-034): same clean-lifecycle pattern.
+	// Outages log and retry — never fatal; lease expiry is what flips hard
+	// caps to fail-closed while the loop keeps retrying.
+	var syncDone chan struct{}
+	if g.syncer != nil {
+		syncDone = make(chan struct{})
+		go func() {
+			defer close(syncDone)
+			g.syncer.Run(workerCtx)
 		}()
 	}
 	defer func() {
@@ -1077,6 +1152,9 @@ func (g *gateway) serve(ctx context.Context) error {
 		}
 		if policyWatchDone != nil {
 			<-policyWatchDone
+		}
+		if syncDone != nil {
+			<-syncDone
 		}
 	}()
 

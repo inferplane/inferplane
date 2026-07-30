@@ -55,9 +55,10 @@ flowchart LR
 
 - **`inferplaned`** (control plane) — distributes versioned policy
   ([`api/v1alpha1`](api/v1alpha1/): CRD-style schema, delivered over
-  inferplane's own gRPC/HTTP — no Kubernetes required), issues budget leases,
-  brokers short-lived provider credentials via OIDC, and aggregates telemetry.
-  *Currently a scaffold (health endpoints only).*
+  inferplane's own HTTP channel — no Kubernetes required) and issues budget
+  leases; each data plane heartbeat carries the policy pull, consumption
+  report, lease renewal, and version-skew rejections in one round trip.
+  Credential brokering and telemetry aggregation are still to come.
 - **`mayu`** (data plane) — the full gateway: model→provider routing with
   fallback and circuit breakers, Anthropic⇄OpenAI schema translation,
   cache-safe verbatim forwarding, virtual keys with team RBAC, two-phase
@@ -141,8 +142,8 @@ config hot-reload, OIDC SSO, and `mayu login` short-lived keys, see
 | Component | State |
 |---|---|
 | `mayu` standalone (gateway, keys, RBAC, quotas/budgets, audit, console) | Working — the former inferplane gateway, moved intact |
-| `inferplaned` control plane | Scaffold (health endpoints only) |
-| `api/v1alpha1` policy schema, budget leases, credential brokering | Schema landed; distribution not yet wired |
+| `inferplaned` control plane | Policy distribution + budget-lease ledger working (in-memory); credential brokering TBD |
+| `api/v1alpha1` policy schema + local file channel + sync protocol | Working — same document, three channels (file / control plane / K8s CRD planned) |
 
 The project targets CNCF Sandbox. Design records live in
 [docs/decisions/](docs/decisions/) (start with
