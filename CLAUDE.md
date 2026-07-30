@@ -45,7 +45,8 @@ providers/         - Upstream provider implementations (the extension surface)
   anthropic/ bedrock/ openaicompat/ - One package per provider; testing/ has mocks
 pkg/               - Public packages: schema/ (canonical types), ulid/
 docs/              - specs, decisions (ADRs), runbooks, reference, architecture
-charts/inferplane/ - Helm chart
+charts/inferplane/ - Helm chart (incl. policies ConfigMap channel, ADR-035)
+deploy/crd/        - GovernancePolicy CustomResourceDefinition (ADR-035)
 deploy/grafana/    - Grafana dashboard
 .claude/           - Claude settings, hooks, skills, commands, agents
 tests/             - Harness tests (hooks, secret patterns, structure) — bash, not Go

@@ -143,7 +143,7 @@ config hot-reload, OIDC SSO, and `mayu login` short-lived keys, see
 |---|---|
 | `mayu` standalone (gateway, keys, RBAC, quotas/budgets, audit, console) | Working — the former inferplane gateway, moved intact |
 | `inferplaned` control plane | Policy distribution + budget-lease ledger working (in-memory); credential brokering TBD |
-| `api/v1alpha1` policy schema + local file channel + sync protocol | Working — same document, three channels (file / control plane / K8s CRD planned) |
+| `api/v1alpha1` policy schema + delivery channels | Working — same document via local file, control-plane push, Helm ConfigMap; CRD manifest for kubectl-native validation ([`deploy/crd/`](deploy/crd/)) |
 
 The project targets CNCF Sandbox. Design records live in
 [docs/decisions/](docs/decisions/) (start with

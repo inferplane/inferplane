@@ -1,0 +1,19 @@
+{{- if .Values.policies }}
+# GovernancePolicy documents (ADR-033/035) mounted at
+# /etc/inferplane/policies. Add `"policies": ["/etc/inferplane/policies"]`
+# to .Values.config to enforce them. Edits via `helm upgrade` or
+# `kubectl edit configmap` reach the pod through the kubelet's ConfigMap
+# sync (~1 min) and mayu's file watcher applies them within seconds —
+# no restart.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "inferplane.fullname" . }}-policies
+  labels:
+    {{- include "inferplane.labels" . | nindent 4 }}
+data:
+  {{- range $name, $doc := .Values.policies }}
+  {{ $name }}: |
+{{ $doc | indent 4 }}
+  {{- end }}
+{{- end }}

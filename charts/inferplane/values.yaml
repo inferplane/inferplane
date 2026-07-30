@@ -61,3 +61,22 @@ config:
     claude-sonnet-4-6:
       targets: [ { provider: anthropic-direct, model: claude-sonnet-4-6 } ]
 resources: {}
+
+# GovernancePolicy documents (api/v1alpha1, ADR-033/035): filename → document
+# body (multi-doc YAML allowed). Rendered into a ConfigMap mounted at
+# /etc/inferplane/policies; add `policies: ["/etc/inferplane/policies"]` to
+# `config` above to enforce them. ConfigMap edits reach the pod via kubelet
+# sync (~1 min) and apply live — no restart. The same documents also install
+# as CRDs (deploy/crd/) for kubectl-native validation.
+policies: {}
+# policies:
+#   demo-team.yaml: |
+#     apiVersion: inferplane.dev/v1alpha1
+#     kind: GovernancePolicy
+#     metadata: { name: demo-team }
+#     spec:
+#       subject: { team: demo }
+#       rules:
+#       - name: monthly-hard-cap
+#         failurePolicy: FailClosed
+#         budget: { limitMilliUSD: 50000, hardCap: true }   # 1000 = $1
