@@ -47,17 +47,31 @@ func main() {
 
 // isLoopback reports whether the listen address binds only a loopback
 // interface. An empty host (":7601") binds ALL interfaces and is not
-// loopback; "localhost" is trusted as loopback without resolution.
+// loopback. A hostname — "localhost" included — is trusted only when EVERY
+// address it resolves to is loopback (PR #50 review): this guard is the sole
+// thing standing between an unauthenticated inferplaned and the network, so
+// it must not depend on the literal string when /etc/hosts (or a rogue
+// resolver) can map it elsewhere. The bind below uses the same resolver, so
+// the check and the bind can't disagree.
 func isLoopback(listen string) bool {
 	host, _, err := net.SplitHostPort(listen)
 	if err != nil || host == "" {
 		return false
 	}
-	if host == "localhost" {
-		return true
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
 	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	addrs, err := net.LookupHost(host)
+	if err != nil || len(addrs) == 0 {
+		return false
+	}
+	for _, a := range addrs {
+		ip := net.ParseIP(a)
+		if ip == nil || !ip.IsLoopback() {
+			return false
+		}
+	}
+	return true
 }
 
 func run(listen, policies, token string) error {

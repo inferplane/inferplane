@@ -507,6 +507,7 @@ func TestIsLoopbackHost(t *testing.T) {
 	}{
 		{"localhost", true},
 		{"127.0.0.1", true},
+		{"127.8.9.1", true}, // full 127/8 range, not just the canonical literal
 		{"::1", true},
 		{"10.0.0.5", false},
 		{"cp.example.com", false},

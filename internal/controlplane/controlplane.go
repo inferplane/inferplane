@@ -16,6 +16,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"sync"
@@ -298,9 +299,14 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	// permanently shrinking everyone's remaining budget.
 	resp := policy.SyncResponse{Generation: s.generation, SyncIntervalSeconds: s.interval}
 	for k, l := range s.ledger {
+		// Sums saturate instead of wrapping (PR #50 review): each term is
+		// bounded by maxWireMilliUSD×1000, but N data planes' terms are not.
+		// A wrapped (negative→huge) sum would report a spuriously LOW global
+		// total and mint allowance the budget does not have; saturation
+		// drives remaining to zero — the ledger under-grants, never over.
 		var globalSpent, outstanding int64
 		for _, sp := range l.spent {
-			globalSpent += sp
+			globalSpent = satAdd(globalSpent, sp)
 		}
 		// Outstanding iterates the ALLOWANCE map, not the spent map: a
 		// freshly granted data plane that has never reported yet has no
@@ -315,10 +321,10 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 				continue // lease expired (or holder pruned): grant released
 			}
 			if extra := al - l.spent[d]; extra > 0 {
-				outstanding += extra
+				outstanding = satAdd(outstanding, extra)
 			}
 		}
-		remaining := l.limitMicro - globalSpent - outstanding
+		remaining := l.limitMicro - satAdd(globalSpent, outstanding)
 		if remaining < 0 {
 			remaining = 0
 		}
@@ -344,6 +350,17 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(&resp)
+}
+
+// satAdd adds two non-negative µUSD amounts, saturating at MaxInt64 instead
+// of wrapping. Every ledger term is individually bounded, but their sum
+// across data planes is not — and this is grant math for a governance tool
+// that must never mint money it does not have.
+func satAdd(a, b int64) int64 {
+	if a > math.MaxInt64-b {
+		return math.MaxInt64
+	}
+	return a + b
 }
 
 // handleDataplanes lists recently-seen data planes with the API versions

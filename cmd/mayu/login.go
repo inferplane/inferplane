@@ -74,8 +74,18 @@ func isTrustedScheme(u *url.URL) bool {
 	return u.Scheme == "https" || (u.Scheme == "http" && isLoopbackHost(u.Hostname()))
 }
 
+// isLoopbackHost covers the full loopback range (127.0.0.0/8, ::1), not just
+// the two canonical literals — some test harnesses bind e.g. 127.8.9.1, and
+// the gateway's unauthenticated-control-plane warning must not fire on those
+// (PR #50 review). "localhost" stays string-trusted here: both call sites are
+// client-side dev conveniences (plain-http trust, a startup warning), not the
+// server-side bind guard, which resolves it (cmd/inferplaned isLoopback).
 func isLoopbackHost(host string) bool {
-	return host == "127.0.0.1" || host == "::1" || host == "localhost"
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // sameOriginOrSubdomain reports whether candidate is a trusted-scheme URL

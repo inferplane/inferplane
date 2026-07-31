@@ -99,3 +99,10 @@ work alongside credential brokering.
   rules in several policies reports the same cumulative spend against each
   rule, so every rule beyond the tightest is under-granted (conservative,
   never permissive). Per-rule spend tracking lands with the durable ledger.
+- Version-skew rejections are delivered once per policy-set application, not
+  re-sent on every heartbeat, and the control plane keeps only a bounded
+  ring of recent rejections per data plane. Under a large fleet an operator
+  who misses the first reporting window can't distinguish "no rejections"
+  from "ring overwritten" — an observability gap (enforcement is unaffected:
+  rejected documents stay out of the applied set regardless). Durable
+  rejection state lands with the durable ledger.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -326,4 +327,19 @@ func TestDataplanesViewConcurrentWithSync(t *testing.T) {
 		resp.Body.Close()
 	}
 	<-done
+}
+
+// PR #50 review: the grant math saturates instead of wrapping — a wrapped
+// sum would report a spuriously LOW global total and mint allowance the
+// budget does not have.
+func TestSatAddSaturates(t *testing.T) {
+	if got := satAdd(math.MaxInt64-1, 5); got != math.MaxInt64 {
+		t.Fatalf("satAdd near ceiling = %d, want MaxInt64", got)
+	}
+	if got := satAdd(3, 4); got != 7 {
+		t.Fatalf("satAdd(3,4) = %d, want 7", got)
+	}
+	if got := satAdd(0, math.MaxInt64); got != math.MaxInt64 {
+		t.Fatalf("satAdd(0,Max) = %d, want MaxInt64", got)
+	}
 }
