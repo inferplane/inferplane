@@ -29,16 +29,16 @@ policy shadowing base budgets (critical), (team,user) budget silently
 unenforced, ledger not counting unreported grants, stranded-grant
 starvation, window-rollover re-spend hole, milliUSD overflow guards.
 
-## The single blocker on PR #50
+## PR #50 status
 
-`claude-review` (required check) fails with
-`Not authorized to perform sts:AssumeRoleWithWebIdentity`: the repo was
-renamed `inferplane/mayu` → `inferplane/inferplane`, but the AWS IAM role in
-secret `AWS_ROLE_TO_ASSUME` still trusts `repo:inferplane/mayu:*`. Fix the
-trust policy condition to `repo:inferplane/inferplane:*` and re-run the
-failed job — OR merge with admin bypass (code is sound: full
-`go test ./... -race` green locally; the failure is CI infra only).
-There are NO merge conflicts with main.
+The IAM OIDC trust policy was fixed (2026-07-31) and `claude-review` now
+runs for real. Its first pass flagged one HIGH (soft policy budget
+downgrading a blocking base to warn) plus medium/low items — ALL addressed
+in the follow-up commit on this branch (block-wins-on-tie preserved in the
+overlay AND the lease clamp, dataplane-view deep copy, inferplaned
+read/write timeouts, sync backoff, full-length generation hash, release
+skill builds both binaries). If the check is green, merge; there are NO
+merge conflicts with main.
 
 ## Next work (after #50 merges, on a NEW branch off main)
 

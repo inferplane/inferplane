@@ -47,7 +47,9 @@ type Rejection struct {
 
 // ConsumptionReport is cumulative spend for one budget rule's team in the
 // current window, in µUSD. Cumulative (not delta) so a lost heartbeat never
-// loses spend — the control plane takes the max it has seen.
+// loses spend; a DECREASE tells the control plane the reporter's budget
+// window rolled over (or its counters restarted), and the ledger adopts the
+// fresh counter rather than keeping the old maximum.
 type ConsumptionReport struct {
 	Policy        string `json:"policy"`
 	Rule          string `json:"rule"`
@@ -86,14 +88,17 @@ type LeaseGrant struct {
 
 // GenerationOf fingerprints a policy document set: the sha256 of the
 // canonical JSON encoding, order-sensitive (documents are loaded in sorted
-// file order, so the same set hashes the same everywhere).
+// file order, so the same set hashes the same everywhere). The FULL digest
+// is used: a truncated fingerprint colliding would silently suppress a
+// policy update forever, since a matching generation skips the payload
+// (PR #50 review finding).
 func GenerationOf(docs []v1alpha1.GovernancePolicy) string {
 	h := sha256.New()
 	enc := json.NewEncoder(h)
 	for i := range docs {
 		_ = enc.Encode(&docs[i])
 	}
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // LoadWirePaths reads GovernancePolicy documents from files/dirs (same path

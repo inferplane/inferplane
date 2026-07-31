@@ -3,6 +3,7 @@ package controlplane
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -297,4 +298,32 @@ spec:
 	if spentKept || dpKept {
 		t.Fatal("dp1 rows must be pruned after pruneAfter")
 	}
+}
+
+// PR #50 review finding (data race): the dataplane view must deep-copy under
+// the lock — encoding shared *dpInfo pointers after unlock races with
+// concurrent heartbeats. Run with -race.
+func TestDataplanesViewConcurrentWithSync(t *testing.T) {
+	_, ts := newTestServer(t, "")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 30; i++ {
+			doSync(t, ts.URL, "", policy.SyncRequest{
+				Dataplane:   "dp-race",
+				APIVersions: []string{"inferplane.dev/v1alpha1"},
+				Rejections:  []policy.Rejection{{Policy: "p", Reason: "r"}},
+				Reports:     []policy.ConsumptionReport{{Policy: "team-a", Rule: "cap", Team: "alpha", SpentMicroUSD: int64(i)}},
+			})
+		}
+	}()
+	for i := 0; i < 30; i++ {
+		resp, err := http.Get(ts.URL + "/v1alpha1/dataplanes")
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+	<-done
 }

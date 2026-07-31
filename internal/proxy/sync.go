@@ -122,14 +122,7 @@ type Syncer struct {
 // Failures keep the last-applied policy set and leases (their expiry is what
 // eventually flips hard caps to fail-closed) and retry next tick.
 func (s *Syncer) Run(ctx context.Context) {
-	interval := time.Duration(policy.MinPolicySyncInterval)
-	if next, err := s.syncOnce(ctx); err != nil {
-		if s.OnError != nil {
-			s.OnError(err)
-		}
-	} else {
-		interval = next
-	}
+	interval := s.tick(ctx, policy.MinPolicySyncInterval)
 	t := time.NewTimer(interval)
 	defer t.Stop()
 	for {
@@ -137,16 +130,33 @@ func (s *Syncer) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if next, err := s.syncOnce(ctx); err != nil {
-				if s.OnError != nil {
-					s.OnError(err)
-				}
-			} else {
-				interval = next
-			}
+			interval = s.tick(ctx, interval)
 			t.Reset(interval)
 		}
 	}
+}
+
+// tick runs one heartbeat and returns the next cadence. Failures back off
+// exponentially (doubling up to DefaultPolicySyncInterval) so a fleet of
+// data planes doesn't hammer an already-degraded control plane in lockstep
+// (PR #50 review finding); the first success snaps back to the control
+// plane's requested cadence.
+func (s *Syncer) tick(ctx context.Context, prev time.Duration) time.Duration {
+	next, err := s.syncOnce(ctx)
+	if err == nil {
+		return next
+	}
+	if s.OnError != nil {
+		s.OnError(err)
+	}
+	backoff := prev * 2
+	if backoff < policy.MinPolicySyncInterval {
+		backoff = policy.MinPolicySyncInterval
+	}
+	if backoff > policy.DefaultPolicySyncInterval {
+		backoff = policy.DefaultPolicySyncInterval
+	}
+	return backoff
 }
 
 // syncOnce does one heartbeat and returns the next cadence.

@@ -133,3 +133,58 @@ spec:
 		t.Fatalf("second request: status %d, want 402 (file budget must bind)", r2.StatusCode)
 	}
 }
+
+// PR #50 review finding (HIGH): a SOFT policy budget layered on a config
+// team whose budget blocks must NOT loosen enforcement to warn — block wins
+// on tie. Before the fix, the overlay unconditionally reset on_exceeded to
+// the policy's own mode, so a tighter-but-soft file rule silently disabled
+// blocking.
+func TestE2EPolicyFileSoftBudgetKeepsBaseBlock(t *testing.T) {
+	up := newAnthropicUpstream(t)
+	dataURL, adminURL, _ := bootGateway(t, func(cfg map[string]any, dir string) {
+		teamsAPIConfig(up.srv.URL)(cfg, dir)
+		// Config: roomy budget, but BLOCK on exceed.
+		cfg["teams"] = map[string]any{
+			"pol-team": map[string]any{
+				"allowed_models": []any{"*"},
+				"budget":         map[string]any{"usd_per_month": 1000.0, "on_exceeded": "block"},
+			},
+		}
+		polDir := filepath.Join(dir, "policies")
+		if err := os.MkdirAll(polDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// Policy: tighter budget, SOFT (no hardCap) — must inherit block.
+		pol := `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: pol-team-soft-cap }
+spec:
+  subject: { team: pol-team }
+  rules:
+  - name: soft-cap
+    failurePolicy: FailOpen
+    budget: { limitMilliUSD: 1 }
+`
+		if err := os.WriteFile(filepath.Join(polDir, "cap.yaml"), []byte(pol), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg["policies"] = []any{polDir}
+	})
+
+	_, key := createKey(t, adminURL, "pol-team", []string{"*"})
+
+	r1 := postMessages(t, dataURL, key, "claude-test")
+	io.Copy(io.Discard, r1.Body)
+	r1.Body.Close()
+	if r1.StatusCode != http.StatusOK {
+		t.Fatalf("first request: status %d, want 200", r1.StatusCode)
+	}
+	// Past the 1 milliUSD file limit now. warn would admit (200); the base's
+	// block must win → 402.
+	r2 := postMessages(t, dataURL, key, "claude-test")
+	io.Copy(io.Discard, r2.Body)
+	r2.Body.Close()
+	if r2.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("second request: status %d, want 402 (soft policy budget must not downgrade base block to warn)", r2.StatusCode)
+	}
+}

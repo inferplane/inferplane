@@ -352,10 +352,18 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDataplanes(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
 	now := s.now()
-	out := map[string]*dpInfo{}
+	// DEEP-copy the entries: encoding happens after the lock is released,
+	// and handleSync mutates these structs concurrently — handing the
+	// encoder shared pointers would be a data race (PR #50 review finding).
+	out := make(map[string]dpInfo, len(s.dataplanes))
 	for id, dp := range s.dataplanes {
 		if now.Sub(dp.LastSeen) <= staleAfter {
-			out[id] = dp
+			out[id] = dpInfo{
+				APIVersions: append([]string(nil), dp.APIVersions...),
+				Generation:  dp.Generation,
+				LastSeen:    dp.LastSeen,
+				Rejections:  append([]policy.Rejection(nil), dp.Rejections...),
+			}
 		}
 	}
 	body := map[string]any{

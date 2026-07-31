@@ -74,9 +74,14 @@ func run(listen, policies, token string) error {
 	}
 
 	srv := &http.Server{
-		Addr:              listen,
-		Handler:           mux,
+		Addr:    listen,
+		Handler: mux,
+		// Full read/write deadlines, not just headers: a slow-dripped sync
+		// body would otherwise hold a goroutine forever — MaxBytesReader
+		// bounds the size but not the rate (PR #50 review finding).
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
 	}
 
 	errCh := make(chan error, 1)

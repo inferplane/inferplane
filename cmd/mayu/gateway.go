@@ -111,6 +111,9 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// arrive with the first heartbeat and then fail closed on lease expiry.
 	if raw.ControlPlane != nil {
 		polStore = policy.NewEmptyStore()
+		// leases is not a gateway field: it stays alive through the
+		// governor's team-lookup closure, the lease gate, and the syncer
+		// built below — the three places that share it.
 		leases = proxy.NewLeaseTable()
 	}
 
@@ -342,9 +345,14 @@ func newGateway(cfgPath string) (*gateway, error) {
 		budgetMicros, budgetExceeded := base.BudgetMicrosPerMonth, base.BudgetExceeded
 		if tl.BudgetMicrosPerMonth > 0 {
 			budgetMicros = tl.BudgetMicrosPerMonth
-			budgetExceeded = "warn"
-			if tl.BudgetHard {
+			// Block wins on tie (CLAUDE.md): a soft policy budget layered
+			// on a base that blocks must NOT loosen enforcement to warn —
+			// the base's on_exceeded is not a dimension the policy rule
+			// declared (PR #50 review finding).
+			if tl.BudgetHard || base.BudgetExceeded == "block" {
 				budgetExceeded = "block"
+			} else {
+				budgetExceeded = "warn"
 			}
 		}
 		// Budget-lease clamp (ADR-034): within a lease the local limit is
@@ -363,9 +371,12 @@ func newGateway(cfgPath string) (*gateway, error) {
 				}
 				if budgetMicros == 0 || allowance < budgetMicros {
 					budgetMicros = allowance
-					budgetExceeded = "warn"
-					if l.HardCap {
+					// Same block-wins-on-tie rule as the overlay above: a
+					// soft lease clamping a blocking budget keeps block.
+					if l.HardCap || budgetExceeded == "block" {
 						budgetExceeded = "block"
+					} else {
+						budgetExceeded = "warn"
 					}
 				}
 			}
