@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -273,5 +274,24 @@ spec:
 	// The modelAccess rule itself still enforces.
 	if s.ModelAllowed("demo", "", "claude-opus-4-8", nil) {
 		t.Fatal("modelAccess rule not enforced")
+	}
+}
+
+// PR #50 review finding: a stray Reload/Watch on a control-plane-fed store
+// must fail loudly instead of silently wiping the distributed set with an
+// empty file scan.
+func TestEmptyStoreRejectsReloadAndWatch(t *testing.T) {
+	s := NewEmptyStore()
+	rejected := s.ApplyWire(nil)
+	if len(rejected) != 0 {
+		t.Fatalf("empty ApplyWire rejected: %v", rejected)
+	}
+	if err := s.Reload(); err == nil {
+		t.Fatal("Reload on a control-plane-fed store must error")
+	}
+	called := false
+	s.Watch(context.Background(), func(error) { called = true })
+	if !called {
+		t.Fatal("Watch on a control-plane-fed store must report and return")
 	}
 }

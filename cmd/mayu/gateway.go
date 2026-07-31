@@ -335,6 +335,12 @@ func newGateway(cfgPath string) (*gateway, error) {
 		if !ok {
 			return base, baseOK
 		}
+		// A team known ONLY to a policy file (no config entry, no keystore
+		// record) is deliberately governed by exactly the dimensions the
+		// policy declares — the same posture as a DB-only team record
+		// (ADR-016, TestTeamLookup_dbOnlyTeamEnforced). Returning ok=false
+		// here would not deny the team; it would make it UNGOVERNED, which
+		// is strictly worse than enforcing the declared budget/rate.
 		rpm, tpm := tl.RPM, tl.TPM
 		if rpm == 0 {
 			rpm = base.RatePerMin

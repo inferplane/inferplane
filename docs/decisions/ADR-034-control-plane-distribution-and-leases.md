@@ -95,3 +95,7 @@ work alongside credential brokering.
   follow-up, not a semantic change.
 - `user`-subject budget/rate rules remain rejected by data planes (ADR-033
   gate) until per-user governance windows land.
+- Consumption reports read ONE team-level spend counter: a team with budget
+  rules in several policies reports the same cumulative spend against each
+  rule, so every rule beyond the tightest is under-granted (conservative,
+  never permissive). Per-rule spend tracking lands with the durable ledger.

@@ -171,6 +171,13 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 		Rejections:  s.pending,
 	}
 	// Cumulative spend per lease-managed budget rule of the APPLIED set.
+	//
+	// TODO(per-rule spend): SpentOf reads ONE team-level counter, so a team
+	// with budget rules in several policies reports the same cumulative
+	// spend against each rule — the ledger then under-grants every rule
+	// beyond the tightest (conservative, never permissive). Per-rule spend
+	// tracking lands with the durable-ledger milestone (ADR-034 known
+	// limits).
 	for _, p := range s.Store.Policies() {
 		if p.Subject.Team == "" {
 			continue

@@ -117,6 +117,13 @@ func (s *Store) ApplyWire(docs []v1alpha1.GovernancePolicy) []Rejection {
 // Reload re-reads every configured path and atomically swaps the snapshot.
 // On error the previous snapshot (if any) stays in force.
 func (s *Store) Reload() error {
+	// Runtime guard, not just a doc comment (PR #50 review finding): on a
+	// control-plane-fed store (NewEmptyStore) a stray generic Reload —
+	// e.g. from a future SIGHUP handler — would otherwise silently WIPE
+	// the distributed policy set with an empty file scan.
+	if len(s.paths) == 0 {
+		return errors.New("policy store has no file paths (control-plane-fed): Reload/Watch do not apply")
+	}
 	policies, files, err := LoadPaths(s.paths...)
 	if err != nil {
 		return err
@@ -168,6 +175,12 @@ func checkEnforceable(p *Policy) error {
 // old snapshot and are passed to onErr; they do not stop the watch. Returns
 // when ctx is done.
 func (s *Store) Watch(ctx context.Context, onErr func(error)) {
+	if len(s.paths) == 0 {
+		if onErr != nil {
+			onErr(errors.New("policy store has no file paths (control-plane-fed): Watch does not apply"))
+		}
+		return
+	}
 	t := time.NewTicker(LocalWatchInterval)
 	defer t.Stop()
 	var lastErr string // a broken file stays broken across polls; log it once, not every 2s

@@ -19,6 +19,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -44,7 +45,30 @@ func main() {
 	}
 }
 
+// isLoopback reports whether the listen address binds only a loopback
+// interface. An empty host (":7601") binds ALL interfaces and is not
+// loopback; "localhost" is trusted as loopback without resolution.
+func isLoopback(listen string) bool {
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil || host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func run(listen, policies, token string) error {
+	// Refuse to serve unauthenticated beyond loopback (PR #50 review
+	// finding): an open /v1alpha1/sync would let any network peer reset
+	// reported spend or read the fleet view. An advisory log is not a
+	// guard — this is.
+	if token == "" && !isLoopback(listen) {
+		return fmt.Errorf("INFERPLANED_TOKEN must be set when --listen (%s) is not loopback; refusing to start unauthenticated on a non-loopback address", listen)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
