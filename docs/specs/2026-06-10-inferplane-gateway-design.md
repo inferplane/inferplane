@@ -740,7 +740,7 @@ key_store:                                     # virtual key / team 메타데이
 ## 8. 프로젝트 구조
 
 ```
-cmd/inferplane/main.go           # 단일 바이너리 (serve / keys / audit 서브커맨드)
+cmd/mayu/main.go           # 단일 바이너리 (serve / keys / audit 서브커맨드)
 api/                             # (예약) CRD 타입 — config 스키마 안정 후 v1alpha1
 pkg/                             # ★ 공개 API는 이 두 패키지뿐
   schema/                        #   canonical 타입 (ChatRequest/Chunk/Usage...)

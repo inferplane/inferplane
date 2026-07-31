@@ -11,7 +11,7 @@ every dependency pure-Go), Kubernetes-native, Apache-2.0, CNCF Sandbox aspirant.
 ## Build · test · lint
 
 ```bash
-CGO_ENABLED=0 go build -trimpath -o bin/inferplane ./cmd/inferplane
+CGO_ENABLED=0 go build -trimpath -o bin/mayu ./cmd/mayu
 go test ./... -race
 go vet ./... && gofmt -l .
 bash tests/run-all.sh   # harness tests (bash, not Go)
@@ -23,7 +23,7 @@ credentials, or a real IdP (httptest fakes only).
 ## Architectural boundaries
 
 - `providers/<name>/` is the extension surface: a new provider = one package +
-  one blank import in `cmd/inferplane/main.go`. **A provider PR that touches
+  one blank import in `cmd/mayu/main.go`. **A provider PR that touches
   `internal/*` has violated the boundary.**
 - `internal/principal`, `internal/metrics`, `internal/governance`,
   `internal/adminauth` are import-cycle-free leaves — they must not grow
@@ -31,7 +31,7 @@ credentials, or a real IdP (httptest fakes only).
 - Config-coupled packages get decoupled mirror types (e.g.
   `governance.ConfigTeam`, `adminauth.MappingConfig`) — never import
   `internal/config` from a leaf.
-- `cmd/inferplane` stays a thin assembly diagram; logic lives in `internal/*`.
+- `cmd/mayu` stays a thin assembly diagram; logic lives in `internal/*`.
 
 ## Banned patterns / security mandates (violations are CRITICAL)
 

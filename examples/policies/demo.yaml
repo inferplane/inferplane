@@ -1,0 +1,43 @@
+# Local GovernancePolicy documents (api/v1alpha1, ADR-032/033).
+# Enable by adding to config.json:   "policies": ["examples/policies/"]
+# Files are watched: save a change and it applies within ~2 seconds.
+# Money is integer milliUSD: 1000 = $1.
+apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata:
+  name: demo-team
+spec:
+  subject:
+    team: demo            # organizational unit (department)
+  rules:
+  - name: monthly-hard-cap
+    failurePolicy: FailClosed          # hard caps must be FailClosed
+    budget:
+      limitMilliUSD: 50000             # $50 / month
+      hardCap: true
+      # lease omitted → defaults: grant 0.1% of limit, renew every 10s
+  - name: throughput
+    failurePolicy: FailOpen
+    rate:
+      rpm: 300
+      tpm: 2000000
+  - name: models
+    failurePolicy: FailOpen
+    modelAccess:
+      allow: ["claude-sonnet-4-6", "claude-haiku-4-5"]   # "*" = all
+---
+# User-subject policy: applies wherever this identity appears (a virtual
+# key's owner today; OIDC sub with the control plane). Matching team AND
+# user policies both apply — the most restrictive outcome wins.
+apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata:
+  name: demo-intern
+spec:
+  subject:
+    user: intern-01
+  rules:
+  - name: haiku-only
+    failurePolicy: FailOpen
+    modelAccess:
+      allow: ["claude-haiku-4-5"]

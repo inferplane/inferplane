@@ -17,14 +17,20 @@ Architecture overview: [docs/architecture.md](docs/architecture.md).
 - **Build:** single static binary, `CGO_ENABLED=0` (every dependency is pure-Go)
 - **Storage:** `modernc.org/sqlite` (cgo-free SQLite) for the key store; disk WAL for audit
 - **AWS:** `aws-sdk-go-v2` (`config` + `bedrockruntime`) for the Bedrock provider
+- **Policy files:** `sigs.k8s.io/yaml` (pure Go) for CRD-style GovernancePolicy documents (`policies` config key, ADR-033)
 - **Observability:** `prometheus/client_golang`; OpenTelemetry GenAI semantic conventions for metric naming
 - **Packaging:** multi-stage Dockerfile → `distroless/static:nonroot`; Helm chart in `charts/inferplane`
 
 ## Project Structure
 
 ```
-cmd/inferplane/    - Binary entrypoint: serve / keys / audit / report / pricing / login / token / logout subcommands
+cmd/mayu/          - Data plane binary (node-local proxy): serve / keys / audit / report / pricing / login / token / logout
+cmd/inferplaned/   - Control plane binary: policy distribution + budget leases (ADR-034); credential broker TBD
+api/v1alpha1/      - Versioned config API wire types (CRD-style shape, gRPC/HTTP delivery)
 internal/          - Private packages (gateway internals)
+  policy/          - Rule + lease schema shared by both binaries (the single truth, ADR-031); loader/store + sync wire types (ADR-033/034)
+  controlplane/    - inferplaned distribution core: sync heartbeat, lease ledger, dataplane view (ADR-034)
+  proxy/ cache/ telemetry/ - Consolidation targets (ADR-031); proxy/ owns the control-plane Syncer + LeaseTable (ADR-034); cache/ owns VolatileStore
   server/          - HTTP data plane + admin plane, ingress handlers
   router/          - Model→provider resolution, fallback chain, circuit breaker
   governance/      - Rate / quota / budget enforcement (PreCheck + Settle)
@@ -39,7 +45,8 @@ providers/         - Upstream provider implementations (the extension surface)
   anthropic/ bedrock/ openaicompat/ - One package per provider; testing/ has mocks
 pkg/               - Public packages: schema/ (canonical types), ulid/
 docs/              - specs, decisions (ADRs), runbooks, reference, architecture
-charts/inferplane/ - Helm chart
+charts/inferplane/ - Helm chart (incl. policies ConfigMap channel, ADR-035)
+deploy/crd/        - GovernancePolicy CustomResourceDefinition (ADR-035)
 deploy/grafana/    - Grafana dashboard
 .claude/           - Claude settings, hooks, skills, commands, agents
 tests/             - Harness tests (hooks, secret patterns, structure) — bash, not Go
@@ -48,7 +55,7 @@ tests/             - Harness tests (hooks, secret patterns, structure) — bash,
 ## Conventions
 
 - **Go style:** `gofmt`-clean (tabs), `go vet`-clean. Package comments on exported packages. Errors wrapped with `%w`.
-- **Provider isolation (design §8):** a new provider adds **one package** under `providers/<name>/` plus a blank-import line in `cmd/inferplane/main.go`. Provider PRs touch only `providers/<name>/` and provider docs — **zero core diff**.
+- **Provider isolation (design §8):** a new provider adds **one package** under `providers/<name>/` plus a blank-import line in `cmd/mayu/main.go`. Provider PRs touch only `providers/<name>/` and provider docs — **zero core diff**.
 - **Canonical schema invariant (§2.2):** same-protocol round-trip is lossless. Pipeline-interpreted fields are typed; everything else is preserved verbatim (`Extra map[string]json.RawMessage`). Streaming-frame string fields are `*string` so empty values survive.
 - **Cache invariant (§4.4):** when provider protocol == ingress protocol, forward the request body **verbatim** (`RawBody`) so `cache_control` and prompt-cache hits are never corrupted.
 - **Two-phase governance:** pre-check BEFORE billing, settle AFTER. `on_exceeded` is `block` | `warn` (block wins on tie).
@@ -67,7 +74,7 @@ tests/             - Harness tests (hooks, secret patterns, structure) — bash,
 
 ```bash
 # Build the static binary
-CGO_ENABLED=0 go build -trimpath -o bin/inferplane ./cmd/inferplane
+CGO_ENABLED=0 go build -trimpath -o bin/mayu ./cmd/mayu
 
 # Test (race detector) / vet / format check
 go test ./... -race
@@ -75,15 +82,15 @@ go vet ./...
 gofmt -l .
 
 # Run the gateway
-go run ./cmd/inferplane serve --config examples/config.json
+go run ./cmd/mayu serve --config examples/config.json
 
 # Issue a virtual key / verify the audit chain
-go run ./cmd/inferplane keys create --team demo --models '*' --store keys.db
-go run ./cmd/inferplane audit verify --file audit.jsonl
-go run ./cmd/inferplane report --file audit.jsonl --by team,model
+go run ./cmd/mayu keys create --team demo --models '*' --store keys.db
+go run ./cmd/mayu audit verify --file audit.jsonl
+go run ./cmd/mayu report --file audit.jsonl --by team,model
 
 # Verify every configured model has a pricing rate (ADR-030 CI guard; exit 1 if not)
-INFERPLANE_ADMIN_TOKEN=lint go run ./cmd/inferplane pricing check --config examples/config.json
+INFERPLANE_ADMIN_TOKEN=lint go run ./cmd/mayu pricing check --config examples/config.json
 
 # Harness tests (hooks/structure)
 bash tests/run-all.sh

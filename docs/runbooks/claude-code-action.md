@@ -43,7 +43,7 @@ Create a role (its ARN goes in the `AWS_ROLE_TO_ASSUME` secret).
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {
       "StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
-      "StringLike": { "token.actions.githubusercontent.com:sub": "repo:inferplane/mayu:*" }
+      "StringLike": { "token.actions.githubusercontent.com:sub": "repo:inferplane/inferplane:*" }
     }
   }]
 }
@@ -115,8 +115,8 @@ The self-review flagged several items; resolved here:
   accepts both `--allowed-tools` and `--allowedTools`.)
 - **Least privilege (LOW):** the review workflow dropped `actions: read`; `claude.yml`
   `issues:` trigger is `[opened]` only (no re-trigger on assignment).
-- **Trust `sub` is `repo:inferplane/mayu:*` (LOW) — kept intentionally:** the PR-review
-  workflow runs on `pull_request` events whose OIDC `sub` is `repo:inferplane/mayu:pull_request`,
+- **Trust `sub` is `repo:inferplane/inferplane:*` (LOW) — kept intentionally:** the PR-review
+  workflow runs on `pull_request` events whose OIDC `sub` is `repo:inferplane/inferplane:pull_request`,
   so tightening the trust to `…:ref:refs/heads/main` only would BREAK PR review. Keep `:*`
   (or explicitly allow both `main` and `pull_request`).
 - Deferred/INFO: prompt-injection via diff content is mitigated by the read+comment-only

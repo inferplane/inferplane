@@ -17,7 +17,7 @@ type ConfigTeam struct {
 // PolicyFromLimits builds a TeamPolicy from already-resolved limits (budget in
 // µUSD, no unit conversion here). Factored out so the burst rule below can
 // never diverge between the config path (PoliciesFromConfig) and the D3
-// keystore-team-record path (cmd/inferplane assembly's Governor.SetTeamLookup
+// keystore-team-record path (cmd/mayu assembly's Governor.SetTeamLookup
 // callback) — both must produce byte-identical TeamPolicy shapes for the same
 // numbers, or ADR-016's "DB record wins" precedence would also silently
 // change enforcement behavior, not just the source of the values.

@@ -120,7 +120,7 @@ Client -> KeyAuth(RBAC) -> Governor.PreCheck -> Router(fallback+breaker) -> Prov
 ### Modules / Resources
 | Component | Path | Description |
 |-----------|------|-------------|
-| Binary | `cmd/inferplane` | serve / keys / audit / report / bodies / login / token / logout subcommands |
+| Binary | `cmd/mayu` | serve / keys / audit / report / bodies / login / token / logout subcommands |
 | Helm chart | `charts/inferplane` | Deployment, Service (data+admin), ServiceAccount, ConfigMap, optional Ingress, optional PVC (ADR-023), NOTES.txt |
 | Dashboard | `deploy/grafana/inferplane.json` | 9-panel Prometheus dashboard |
 
@@ -280,7 +280,7 @@ Client -> KeyAuth(RBAC) -> Governor.PreCheck -> Router(폴백+브레이커) -> P
 ### 모듈 / 리소스
 | 구성요소 | 경로 | 설명 |
 |-----------|------|-------------|
-| 바이너리 | `cmd/inferplane` | serve / keys / audit 서브커맨드 |
+| 바이너리 | `cmd/mayu` | serve / keys / audit 서브커맨드 |
 | Helm 차트 | `charts/inferplane` | Deployment, Service(data+admin), ServiceAccount, ConfigMap, 선택적 Ingress, 선택적 PVC(ADR-023), NOTES.txt |
 | 대시보드 | `deploy/grafana/inferplane.json` | 9패널 Prometheus 대시보드 |
 

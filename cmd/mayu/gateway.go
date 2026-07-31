@@ -30,7 +30,9 @@ import (
 	"github.com/inferplane/inferplane/internal/limiter"
 	"github.com/inferplane/inferplane/internal/live"
 	"github.com/inferplane/inferplane/internal/metrics"
+	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/providerstore"
+	"github.com/inferplane/inferplane/internal/proxy"
 	"github.com/inferplane/inferplane/internal/router"
 	"github.com/inferplane/inferplane/internal/server"
 	"github.com/inferplane/inferplane/internal/server/analyticsapi"
@@ -68,6 +70,8 @@ type gateway struct {
 	notifier         *alert.Notifier             // nil unless budget_alerts is configured (D5b, ADR-017)
 	healthStore      *configapi.HealthStore      // nil unless provider_health_check is configured (ADR-014 deferred item)
 	healthProbeEvery time.Duration               // probe interval
+	polStore         *policy.Store               // nil unless policies/control_plane is configured (ADR-033/034); file mode watched in serve
+	syncer           *proxy.Syncer               // nil unless control_plane is configured (ADR-034); heartbeats in serve
 	reloadMu         sync.Mutex                  // serializes reloads AND UI writes (concurrent SIGHUPs/triggers)
 	dataLn           net.Listener
 	adminLn          net.Listener
@@ -86,6 +90,31 @@ func newGateway(cfgPath string) (*gateway, error) {
 	raw, err := config.LoadRaw(cfgPath)
 	if err != nil {
 		return nil, err
+	}
+
+	// Local GovernancePolicy documents (ADR-033): loaded FIRST — before any
+	// resource opens — so an invalid or not-yet-enforceable document fails
+	// boot with nothing to unwind, rather than serving while silently not
+	// enforcing it. Watched for changes in serve.
+	var polStore *policy.Store
+	var leases *proxy.LeaseTable
+	if len(raw.Policies) > 0 {
+		polStore, err = policy.NewStore(raw.Policies...)
+		if err != nil {
+			return nil, fmt.Errorf("policies: %w", err)
+		}
+	}
+	// Control-plane mode (ADR-034): the same store is fed by heartbeats
+	// instead of files (config validation guarantees exclusivity). Boot does
+	// NOT wait for the control plane — fault isolation means a data plane
+	// starts ungoverned-until-first-sync rather than not at all; hard caps
+	// arrive with the first heartbeat and then fail closed on lease expiry.
+	if raw.ControlPlane != nil {
+		polStore = policy.NewEmptyStore()
+		// leases is not a gateway field: it stays alive through the
+		// governor's team-lookup closure, the lease gate, and the syncer
+		// built below — the three places that share it.
+		leases = proxy.NewLeaseTable()
 	}
 
 	// Prometheus metrics sink: owned by main, threaded into the audit writer,
@@ -274,25 +303,141 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// is passed into Settle per request from the resolved snapshot, so the
 	// governor holds no pricing — only its persistent rate/budget counters.
 	gov := governance.NewGovernor(policies, limiter.NewMemory(), budget.NewMemory(), m) // budget_spend / pricing_miss
-	// D3 (ADR-016): a team record in the keystore takes precedence over the
-	// config map above, and is checked fresh on every request — no restart, no
-	// hot-reload needed for an admin-console budget/limit edit to take effect.
-	// A lookup ERROR (not a miss) falls back to the config map rather than
-	// blocking all traffic on a transient keystore error; store already does
-	// one SQLite read per request on this exact hot path (Resolve), so this
-	// adds one more point read, not a new failure class.
-	gov.SetTeamLookup(func(team string) (governance.TeamPolicy, bool) {
+	// Team-policy layering (ADR-033 extends ADR-016). Base layer: keystore
+	// team RECORD (runtime console edits) wins wholesale over the static
+	// config map — D3's rule, checked fresh on every request (no restart, no
+	// hot-reload for a console edit to take effect; a lookup ERROR, not a
+	// miss, falls back to config rather than blocking traffic — store already
+	// does one SQLite read per request on this exact hot path (Resolve), so
+	// this adds one more point read, not a new failure class). Overlay: a
+	// GovernancePolicy FILE contributes ONLY the dimensions its rules declare
+	// — a rate-only policy must not silently unlimit the team's config
+	// budget, and a modelAccess-only policy contributes nothing here at all
+	// (TeamLimits reports no entry). All layers produce TeamPolicy through
+	// the same PolicyFromLimits so the burst rule can never diverge.
+	lookupBase := func(team string) (governance.TeamPolicy, bool) {
 		rec, ok, err := store.GetTeam(context.Background(), team)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "inferplane: team lookup:", err)
-			return governance.TeamPolicy{}, false
+		} else if ok {
+			return governance.PolicyFromLimits(rec.RPM, rec.TPM, rec.TokensPerDay,
+				rec.QuotaOnExceeded, rec.BudgetUSDMicros, rec.BudgetOnExceeded), true
 		}
+		tp, ok := policies[team]
+		return tp, ok
+	}
+	gov.SetTeamLookup(func(team string) (governance.TeamPolicy, bool) {
+		base, baseOK := lookupBase(team)
+		if polStore == nil {
+			return base, baseOK
+		}
+		tl, ok := polStore.TeamLimits(team)
 		if !ok {
-			return governance.TeamPolicy{}, false
+			return base, baseOK
 		}
-		return governance.PolicyFromLimits(rec.RPM, rec.TPM, rec.TokensPerDay,
-			rec.QuotaOnExceeded, rec.BudgetUSDMicros, rec.BudgetOnExceeded), true
+		// A team known ONLY to a policy file (no config entry, no keystore
+		// record) is deliberately governed by exactly the dimensions the
+		// policy declares — the same posture as a DB-only team record
+		// (ADR-016, TestTeamLookup_dbOnlyTeamEnforced). Returning ok=false
+		// here would not deny the team; it would make it UNGOVERNED, which
+		// is strictly worse than enforcing the declared budget/rate.
+		rpm, tpm := tl.RPM, tl.TPM
+		if rpm == 0 {
+			rpm = base.RatePerMin
+		}
+		if tpm == 0 {
+			tpm = base.TokensPerMinute
+		}
+		budgetMicros, budgetExceeded := base.BudgetMicrosPerMonth, base.BudgetExceeded
+		if tl.BudgetMicrosPerMonth > 0 {
+			budgetMicros = tl.BudgetMicrosPerMonth
+			// Block wins on tie (CLAUDE.md): a soft policy budget layered
+			// on a base that blocks must NOT loosen enforcement to warn —
+			// the base's on_exceeded is not a dimension the policy rule
+			// declared (PR #50 review finding).
+			if tl.BudgetHard || base.BudgetExceeded == "block" {
+				budgetExceeded = "block"
+			} else {
+				budgetExceeded = "warn"
+			}
+		}
+		// Budget-lease clamp (ADR-034): within a lease the local limit is
+		// the granted allowance, so enforcement needs no network round
+		// trip. A zero/negative allowance (global budget exhausted) can't
+		// be expressed as 0 — that means "unlimited" in TeamPolicy — so it
+		// clamps to 1 µUSD: pre-check blocks as soon as any spend has
+		// settled (one request of overshoot, the same accepted §5.3
+		// posture; a HARD cap at zero allowance is blocked outright by the
+		// lease gate before this closure even matters).
+		if leases != nil {
+			if l, ok := leases.Get(team); ok {
+				allowance := l.AllowanceMicroUSD
+				if allowance < 1 {
+					allowance = 1
+				}
+				if budgetMicros == 0 || allowance < budgetMicros {
+					budgetMicros = allowance
+					// Same block-wins-on-tie rule as the overlay above: a
+					// soft lease clamping a blocking budget keeps block.
+					if l.HardCap || budgetExceeded == "block" {
+						budgetExceeded = "block"
+					} else {
+						budgetExceeded = "warn"
+					}
+				}
+			}
+		}
+		// No quota rule kind yet — tokens/day always comes from the base.
+		return governance.PolicyFromLimits(rpm, tpm, base.TokensPerDay,
+			base.QuotaExceeded, budgetMicros, budgetExceeded), true
 	})
+	// modelAccess rules narrow every ingress RBAC decision through the router's
+	// policy gate (key allow-list must pass AND the policy must allow); team-
+	// and user-subject rules both apply, user matched on the key's Owner.
+	if polStore != nil {
+		r.SetPolicyGate(func(p keystore.Principal, model string, canonical func(string) string) bool {
+			return polStore.ModelAllowed(p.Team, p.Owner, model, canonical)
+		})
+	}
+	// Control-plane heartbeat (ADR-034): lease gate + syncer. The gate fails
+	// a HARD-cap team closed when its lease expired (control plane
+	// unreachable past tolerance) or its allowance is exhausted globally;
+	// soft rules fail open per failurePolicy.
+	var syncer *proxy.Syncer
+	if raw.ControlPlane != nil {
+		gov.SetLeaseGate(leases.Blocked)
+		// Mirror inferplaned's startup guard from the client side (PR #50
+		// review): a remote control plane without a token means every
+		// heartbeat goes out unauthenticated. A properly configured
+		// inferplaned refuses those, so warn loudly here instead of letting
+		// the operator discover it as a silent sync failure — non-fatal,
+		// because a dev loopback deployment without a token is legitimate.
+		if raw.ControlPlane.Token == "" {
+			if u, err := url.Parse(raw.ControlPlane.URL); err == nil && !isLoopbackHost(u.Hostname()) {
+				fmt.Fprintf(os.Stderr, "inferplane: WARNING: control_plane.url %q is not loopback and control_plane.token_ref is unset — heartbeats will be UNAUTHENTICATED (an inferplaned with INFERPLANED_TOKEN set will refuse them)\n", raw.ControlPlane.URL)
+			}
+		}
+		dataplaneID := raw.ControlPlane.Dataplane
+		if dataplaneID == "" {
+			dataplaneID = instanceID()
+		}
+		syncer = &proxy.Syncer{
+			URL:       raw.ControlPlane.URL,
+			Token:     raw.ControlPlane.Token,
+			Dataplane: dataplaneID,
+			Store:     polStore,
+			Leases:    leases,
+			SpentOf: func(team string) int64 {
+				if u := gov.UsageOf(team, "", governance.KeyPolicy{}); u.TeamBudget != nil {
+					return u.TeamBudget.SpentUSDMicros
+				}
+				return 0
+			},
+			OnError: func(err error) {
+				fmt.Fprintln(os.Stderr, "inferplane:", err)
+			},
+		}
+	}
 	// Per-team record lookup for NON-governance overrides (D6/ADR-019's
 	// guardrail override; D7/ADR-020's region-lock reuses this same closure).
 	// Same fresh-per-request posture as SetTeamLookup above; a lookup error
@@ -470,6 +615,8 @@ func newGateway(cfgPath string) (*gateway, error) {
 		bodyMaxBytes:     bodyMaxBytes,
 		healthStore:      healthStore,
 		healthProbeEvery: healthProbeEvery,
+		polStore:         polStore,
+		syncer:           syncer,
 		dataLn:           dataLn,
 		adminLn:          adminLn,
 	}
@@ -992,6 +1139,30 @@ func (g *gateway) serve(ctx context.Context) error {
 		healthProbeDone = make(chan struct{})
 		go g.healthProbeWorker(workerCtx, healthProbeDone)
 	}
+	// Local policy-file watch (ADR-033): mtime poll → reload on change, the
+	// workstation save-and-it's-live loop. A bad edit keeps the previous
+	// policy set serving and logs — same never-fatal posture as SIGHUP reload.
+	var policyWatchDone chan struct{}
+	if g.polStore != nil && len(g.cfg.Policies) > 0 {
+		policyWatchDone = make(chan struct{})
+		go func() {
+			defer close(policyWatchDone)
+			g.polStore.Watch(workerCtx, func(err error) {
+				fmt.Fprintln(os.Stderr, "inferplane:", err)
+			})
+		}()
+	}
+	// Control-plane heartbeat loop (ADR-034): same clean-lifecycle pattern.
+	// Outages log and retry — never fatal; lease expiry is what flips hard
+	// caps to fail-closed while the loop keeps retrying.
+	var syncDone chan struct{}
+	if g.syncer != nil {
+		syncDone = make(chan struct{})
+		go func() {
+			defer close(syncDone)
+			g.syncer.Run(workerCtx)
+		}()
+	}
 	defer func() {
 		cancelWorker()
 		<-workerDone
@@ -1006,6 +1177,12 @@ func (g *gateway) serve(ctx context.Context) error {
 		}
 		if healthProbeDone != nil {
 			<-healthProbeDone
+		}
+		if policyWatchDone != nil {
+			<-policyWatchDone
+		}
+		if syncDone != nil {
+			<-syncDone
 		}
 	}()
 

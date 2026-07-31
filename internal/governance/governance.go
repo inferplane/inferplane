@@ -81,6 +81,7 @@ type Governor struct {
 	lookup          func(team string) (TeamPolicy, bool)                     // D3/ADR-016: optional dynamic override, checked before teams
 	notifyBudget    func(team string, spentMicros, limitMicros int64)        // D5b/ADR-017: optional budget-alert hook, called after each team debit
 	notifyKeyBudget func(team, keyID string, spentMicros, limitMicros int64) // D5b/ADR-017 per-key follow-up: optional per-key budget-alert hook, called after each key debit
+	leaseGate       func(team string) (blocked bool, reason string)          // ADR-034: optional budget-lease check, consulted first in PreCheck
 	lim             limiter.LimiterStore
 	bud             budget.BudgetStore
 	metrics         *metrics.Metrics // nil-safe: no-op when nil
@@ -126,6 +127,16 @@ func (g *Governor) SetKeyBudgetNotify(f func(team, keyID string, spentMicros, li
 	g.notifyKeyBudget = f
 }
 
+// SetLeaseGate installs a budget-lease check (ADR-034), consulted FIRST in
+// PreCheck: when it reports blocked, the request is denied 402 with the
+// gate's reason before any counter is charged. This is how an expired
+// hard-cap lease fails closed — the data plane can no longer verify the
+// global budget, so it must not serve. Like SetTeamLookup, a startup-only
+// assignment with no synchronization; nil (the default) disables the gate.
+func (g *Governor) SetLeaseGate(f func(team string) (blocked bool, reason string)) {
+	g.leaseGate = f
+}
+
 // policyOf resolves a team's policy: a dynamic-lookup hit wins over a config
 // entry of the same name (ADR-016 precedence — an admin console edit must not
 // be silently shadowed by the config file); a team present in neither is
@@ -164,6 +175,14 @@ type GovDecision struct {
 // (but a key limit, if any, still applies — see KeyPolicy). keyID scopes the
 // key-level counters; pass "" with a zero KeyPolicy when there is none.
 func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int64) GovDecision {
+	// Budget-lease gate (ADR-034) first: an expired hard-cap lease means the
+	// global budget can no longer be verified locally — fail closed before
+	// charging any rate/quota counter.
+	if g.leaseGate != nil {
+		if blocked, reason := g.leaseGate(team); blocked {
+			return GovDecision{Status: 402, Reason: reason, Code: audit.DenyTeamBudgetExceeded}
+		}
+	}
 	if p, ok := g.policyOf(team); ok {
 		// rate limit (RPM): 1 request unit
 		if p.RatePerMin > 0 && !g.lim.AllowRate("rate:"+team, 1, p.RatePerMin, max64(p.RateBurst, 1)) {

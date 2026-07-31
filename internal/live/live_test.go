@@ -11,7 +11,7 @@ import (
 	"github.com/inferplane/inferplane/internal/config"
 
 	// Provider factories register via init() — blank-imported here (as
-	// cmd/inferplane/main.go does) so BuildState's providers.New can resolve
+	// cmd/mayu/main.go does) so BuildState's providers.New can resolve
 	// real provider types in this unit test.
 	_ "github.com/inferplane/inferplane/providers/anthropic"
 	_ "github.com/inferplane/inferplane/providers/bedrock"

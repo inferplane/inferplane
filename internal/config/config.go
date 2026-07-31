@@ -364,6 +364,33 @@ type Config struct {
 	// "claude-opus-*" version below it) for models with no explicit entry in
 	// ModelFallbacks. Nil (absent) means enabled; explicit false disables it.
 	ModelFallbackFamily *bool `json:"model_fallback_family,omitempty"`
+	// Policies lists local GovernancePolicy document paths (files or
+	// directories of *.yaml/*.yml/*.json — the api/v1alpha1 schema, ADR-032/
+	// ADR-033). Loaded at boot (boot fails on an invalid document) and
+	// watched for changes at runtime (save → applied within seconds; a bad
+	// edit keeps the previous set serving). Standalone mode's local policy
+	// channel — the same documents inferplaned will distribute. Mutually
+	// exclusive with ControlPlane: one policy source at a time.
+	Policies []string `json:"policies,omitempty"`
+	// ControlPlane connects this data plane to inferplaned (ADR-034):
+	// policies, budget leases, and rejection reporting flow over one
+	// heartbeat. Mutually exclusive with Policies.
+	ControlPlane *ControlPlaneConfig `json:"control_plane,omitempty"`
+}
+
+// ControlPlaneConfig is the data plane's inferplaned connection (ADR-034).
+type ControlPlaneConfig struct {
+	// URL is inferplaned's base URL (e.g. "https://inferplaned.infra:7601").
+	URL string `json:"url"`
+	// TokenRef resolves the shared bearer token — referenced, never inline
+	// (§7), same posture as every other secret. Optional only for loopback
+	// control planes.
+	TokenRef *SecretRef `json:"token_ref,omitempty"`
+	// Token is the resolved secret; never serialized.
+	Token string `json:"-"`
+	// Dataplane is this proxy's stable instance id; defaults to the
+	// hostname plus a boot-time suffix when empty.
+	Dataplane string `json:"dataplane,omitempty"`
 }
 
 // FallbackFamilyEnabled reports whether the family fallback heuristic is on
@@ -546,7 +573,41 @@ func LoadRaw(path string) (*Config, error) {
 	if err := validateVirtualKeys(cfg.VirtualKeys); err != nil {
 		return nil, err
 	}
+	for i, p := range cfg.Policies {
+		if strings.TrimSpace(p) == "" {
+			return nil, fmt.Errorf("config: policies[%d] is empty", i)
+		}
+	}
+	if err := validateControlPlane(&cfg); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+// validateControlPlane checks the ADR-034 connection block: https/http URL,
+// referenced (never inline) token, and mutual exclusion with local policy
+// files — two authoritative policy sources would need merge semantics
+// nobody has defined, so it is rejected outright.
+func validateControlPlane(cfg *Config) error {
+	cp := cfg.ControlPlane
+	if cp == nil {
+		return nil
+	}
+	if len(cfg.Policies) > 0 {
+		return fmt.Errorf("config: control_plane and policies are mutually exclusive — the control plane is the policy source once connected")
+	}
+	u, err := url.Parse(cp.URL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("config: control_plane.url must be an absolute http(s) URL")
+	}
+	if cp.TokenRef != nil {
+		tok, err := ResolveSecretRef(cp.TokenRef)
+		if err != nil {
+			return fmt.Errorf("config: control_plane.token_ref: %w", err)
+		}
+		cp.Token = tok
+	}
+	return nil
 }
 
 // ValidateModelAliases checks that no model's alias collides with another

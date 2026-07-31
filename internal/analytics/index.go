@@ -123,7 +123,7 @@ func OpenSQLite(path string) (*Index, error) {
 
 func (ix *Index) Close() error { return ix.db.Close() }
 
-// Billable mirrors cmd/inferplane/report.go: only settled completed records.
+// Billable mirrors cmd/mayu/report.go: only settled completed records.
 func Billable(r audit.Record) bool { return r.Event == "request_completed" && r.Cost != nil }
 
 // ModelOf returns the resolved model when available, falling back to the
@@ -219,7 +219,7 @@ func (ix *Index) Health() (Health, error) {
 // Replay scans a JSONL audit stream and ingests every billable, newline-
 // terminated line inside ONE transaction (so a large boot replay does not pay
 // an fsync per row). It reads only complete lines (ReadString), dropping an
-// unterminated final remainder exactly as cmd/inferplane/report.go does — so a
+// unterminated final remainder exactly as cmd/mayu/report.go does — so a
 // crash-truncated last record is never half-ingested. Malformed lines are
 // skipped. Idempotent. The returned count is billable lines SEEN (duplicates
 // already present count as seen) — only for a boot log line.

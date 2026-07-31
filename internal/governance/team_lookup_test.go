@@ -119,3 +119,29 @@ func TestTeamLookup_settleDebitsSameCounterKeyPreCheckReads(t *testing.T) {
 		t.Fatal("Settle's debit under a lookup-sourced policy must be visible to the next PreCheck via the same counter key")
 	}
 }
+
+// ADR-034: the lease gate is consulted FIRST in PreCheck — a blocked team is
+// denied 402 before any rate/quota counter is charged, and an unblocked team
+// flows through unchanged.
+func TestLeaseGateBlocksBeforeCounters(t *testing.T) {
+	g := NewGovernor(nil, limiter.NewMemory(), budget.NewMemory(), nil)
+	blocked := true
+	g.SetLeaseGate(func(team string) (bool, string) {
+		if team == "capped" && blocked {
+			return true, "budget lease expired (control plane unreachable): hard cap fails closed"
+		}
+		return false, ""
+	})
+
+	d := g.PreCheck("capped", "k", KeyPolicy{}, 10)
+	if d.Allowed || d.Status != 402 {
+		t.Fatalf("gated team: %+v, want 402 deny", d)
+	}
+	if d := g.PreCheck("free", "k", KeyPolicy{}, 10); !d.Allowed {
+		t.Fatalf("ungated team denied: %+v", d)
+	}
+	blocked = false
+	if d := g.PreCheck("capped", "k", KeyPolicy{}, 10); !d.Allowed {
+		t.Fatalf("unblocked team still denied: %+v", d)
+	}
+}

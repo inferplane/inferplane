@@ -3,7 +3,7 @@
 ## Role
 Request-transform filter plugins — the spec's filter chain ⑥ (v0.2+). This is an
 **extension surface** mirroring `providers/`: a new filter is **one package**
-under `plugins/<name>/` plus a blank import in `cmd/inferplane/main.go`, with
+under `plugins/<name>/` plus a blank import in `cmd/mayu/main.go`, with
 **zero core diff**. Core packages (`internal/server`, `router`) import only the
 `internal/filter` interface, never a concrete plugin.
 

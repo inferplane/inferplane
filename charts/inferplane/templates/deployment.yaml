@@ -48,10 +48,20 @@ spec:
               mountPath: /etc/inferplane
             - name: data
               mountPath: /var/lib/inferplane
+            {{- if .Values.policies }}
+            - name: policies
+              mountPath: /etc/inferplane/policies
+              readOnly: true
+            {{- end }}
       volumes:
         - name: config
           configMap:
             name: {{ include "inferplane.fullname" . }}-config
+        {{- if .Values.policies }}
+        - name: policies
+          configMap:
+            name: {{ include "inferplane.fullname" . }}-policies
+        {{- end }}
         - name: data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:
