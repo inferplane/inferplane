@@ -12,7 +12,7 @@
 ```bash
 # Clone and fetch dependencies
 git clone https://github.com/inferplane/inferplane.git
-cd mayu
+cd inferplane
 go mod download
 
 # Build the static binary

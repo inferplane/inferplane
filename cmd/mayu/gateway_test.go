@@ -497,3 +497,24 @@ func readAllString(resp *http.Response) (string, error) {
 	b, err := io.ReadAll(resp.Body)
 	return string(b), err
 }
+
+// PR #50 review (advisory): the data plane warns when its control plane URL
+// is remote and no token is configured. isLoopbackHost is the predicate.
+func TestIsLoopbackHost(t *testing.T) {
+	cases := []struct {
+		host string
+		want bool
+	}{
+		{"localhost", true},
+		{"127.0.0.1", true},
+		{"::1", true},
+		{"10.0.0.5", false},
+		{"cp.example.com", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isLoopbackHost(tc.host); got != tc.want {
+			t.Errorf("isLoopbackHost(%q) = %v, want %v", tc.host, got, tc.want)
+		}
+	}
+}

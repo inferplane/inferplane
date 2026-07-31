@@ -406,6 +406,17 @@ func newGateway(cfgPath string) (*gateway, error) {
 	var syncer *proxy.Syncer
 	if raw.ControlPlane != nil {
 		gov.SetLeaseGate(leases.Blocked)
+		// Mirror inferplaned's startup guard from the client side (PR #50
+		// review): a remote control plane without a token means every
+		// heartbeat goes out unauthenticated. A properly configured
+		// inferplaned refuses those, so warn loudly here instead of letting
+		// the operator discover it as a silent sync failure — non-fatal,
+		// because a dev loopback deployment without a token is legitimate.
+		if raw.ControlPlane.Token == "" {
+			if u, err := url.Parse(raw.ControlPlane.URL); err == nil && !isLoopbackHost(u.Hostname()) {
+				fmt.Fprintf(os.Stderr, "inferplane: WARNING: control_plane.url %q is not loopback and control_plane.token_ref is unset — heartbeats will be UNAUTHENTICATED (an inferplaned with INFERPLANED_TOKEN set will refuse them)\n", raw.ControlPlane.URL)
+			}
+		}
 		dataplaneID := raw.ControlPlane.Dataplane
 		if dataplaneID == "" {
 			dataplaneID = instanceID()
