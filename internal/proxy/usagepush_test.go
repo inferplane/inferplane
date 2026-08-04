@@ -2,12 +2,14 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/inferplane/inferplane/internal/controlplane"
 	"github.com/inferplane/inferplane/internal/pricing"
 	"github.com/inferplane/inferplane/internal/telemetry"
 )
@@ -203,5 +205,47 @@ func TestRedirectIsNotFollowed(t *testing.T) {
 	// 3xx is permanent (never followed; retrying forever would wedge the FIFO).
 	if drops.Load() != 1 || len(p.buf) != 0 {
 		t.Fatalf("redirect must be a permanent drop: drops=%d buffered=%d", drops.Load(), len(p.buf))
+	}
+}
+
+// The spec's integration round trip with no stubs between the seams: a real
+// Collector drained by a real UsagePusher into the real control-plane usage
+// handler, then queried back — µUSD and the ADR-030 cache tiers must survive
+// the full mayu→inferplaned path bit-exact.
+func TestUsageRoundTripEndToEnd(t *testing.T) {
+	agg := telemetry.NewMemoryAggregator(24 * time.Hour)
+	mux := http.NewServeMux()
+	controlplane.NewUsageServer("tok", agg).Mount(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	col := telemetry.NewCollector("dp-e2e")
+	col.Record("demo", "u1", "claude-opus-5", pricing.Usage{
+		Input: 100, Output: 40, CacheRead: 30, CacheWrite5m: 20, CacheWrite1h: 8,
+	}, 5230)
+	p := &UsagePusher{URL: srv.URL, Token: "tok", Collector: col}
+	p.Tick(context.Background())
+	if len(p.buf) != 0 {
+		t.Fatalf("push did not land: %d buffered", len(p.buf))
+	}
+
+	req, _ := http.NewRequest("GET", srv.URL+"/v1alpha1/usage?group_by=model", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var res telemetry.QueryResult
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		t.Fatal(err)
+	}
+	if res.TotalMicroUSD != 5230 || len(res.Rows) != 1 {
+		t.Fatalf("round trip lost spend: %+v", res)
+	}
+	r := res.Rows[0]
+	if r.Key != "claude-opus-5" || r.InputTokens != 100 || r.OutputTokens != 40 ||
+		r.CacheReadTokens != 30 || r.CacheWrite5mTokens != 20 || r.CacheWrite1hTokens != 8 {
+		t.Fatalf("round trip mangled fields (cache tiers must survive intact): %+v", r)
 	}
 }
