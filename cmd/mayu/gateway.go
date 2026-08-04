@@ -73,6 +73,7 @@ type gateway struct {
 	healthProbeEvery time.Duration               // probe interval
 	polStore         *policy.Store               // nil unless policies/control_plane is configured (ADR-033/034); file mode watched in serve
 	syncer           *proxy.Syncer               // nil unless control_plane is configured (ADR-034); heartbeats in serve
+	usagePusher      *proxy.UsagePusher          // nil unless control_plane is configured; drains the collector every minute
 	reloadMu         sync.Mutex                  // serializes reloads AND UI writes (concurrent SIGHUPs/triggers)
 	dataLn           net.Listener
 	adminLn          net.Listener
@@ -406,6 +407,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// soft rules fail open per failurePolicy.
 	var syncer *proxy.Syncer
 	var usageCol *telemetry.Collector
+	var usagePusher *proxy.UsagePusher
 	if raw.ControlPlane != nil {
 		gov.SetLeaseGate(leases.Blocked)
 		// Mirror inferplaned's startup guard from the client side (PR #50
@@ -427,6 +429,13 @@ func newGateway(cfgPath string) (*gateway, error) {
 		// pusher (T5) drains it to the control plane. Only in control-plane
 		// mode — standalone stays byte-identical.
 		usageCol = telemetry.NewCollector(dataplaneID)
+		usagePusher = &proxy.UsagePusher{
+			URL:       raw.ControlPlane.URL,
+			Token:     raw.ControlPlane.Token,
+			Collector: usageCol,
+			OnError:   func(err error) { fmt.Fprintln(os.Stderr, "inferplane:", err) },
+			OnDrop:    m.IncUsageWindowDropped,
+		}
 		syncer = &proxy.Syncer{
 			URL:       raw.ControlPlane.URL,
 			Token:     raw.ControlPlane.Token,
@@ -623,6 +632,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		healthProbeEvery: healthProbeEvery,
 		polStore:         polStore,
 		syncer:           syncer,
+		usagePusher:      usagePusher,
 		dataLn:           dataLn,
 		adminLn:          adminLn,
 	}
@@ -1169,6 +1179,14 @@ func (g *gateway) serve(ctx context.Context) error {
 			g.syncer.Run(workerCtx)
 		}()
 	}
+	var pushDone chan struct{}
+	if g.usagePusher != nil {
+		pushDone = make(chan struct{})
+		go func() {
+			defer close(pushDone)
+			g.usagePusher.Run(workerCtx)
+		}()
+	}
 	defer func() {
 		cancelWorker()
 		<-workerDone
@@ -1189,6 +1207,9 @@ func (g *gateway) serve(ctx context.Context) error {
 		}
 		if syncDone != nil {
 			<-syncDone
+		}
+		if pushDone != nil {
+			<-pushDone
 		}
 	}()
 
