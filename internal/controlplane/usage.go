@@ -70,6 +70,14 @@ func (s *UsageServer) handleIngest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"bad usage batch"}`, http.StatusBadRequest)
 		return
 	}
+	// A far-future window defeats wall-clock retention (it is never older
+	// than the horizon, so an authenticated skewed sender could grow memory
+	// without bound — P4 gate). 400 = permanent: the sender's clock needs
+	// fixing; retrying the same batch can never succeed.
+	if b.WindowStart.After(time.Now().Add(time.Hour)) {
+		http.Error(w, `{"error":"window_start too far in the future — check the data plane clock"}`, http.StatusBadRequest)
+		return
+	}
 	if err := b.Validate(); err != nil {
 		// Invalid content can never be stored — a 4xx tells the data plane
 		// to drop it (its pusher treats 4xx as permanent), keeping a poison
@@ -191,6 +199,7 @@ func (s *UsageServer) handleExport(w http.ResponseWriter, r *http.Request) {
 				headerWritten = true
 			}
 			extend()
+			defer cw.Flush() // per-row: buffered rows must not vanish on a mid-stream abort
 			return cw.Write([]string{
 				row.Dataplane, row.WindowStart.Format(time.RFC3339Nano), row.WindowEnd.Format(time.RFC3339Nano),
 				row.Team, row.User, row.Model,
@@ -245,10 +254,15 @@ func (s *UsageServer) handleExport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"usage store unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
-	// err != nil after rows were written: the stream is already committed —
-	// terminating without finish() leaves an unterminated body the client's
-	// parser rejects, which is the honest signal.
-	if err == nil {
-		finish()
+	// err != nil after rows were written: the stream is already committed.
+	// JSON is left unterminated (the client parser rejects it — honest);
+	// CSV has no terminator, so a truncated file would LOOK complete — write
+	// an explicit abort marker that breaks any CSV parser instead (P4 gate).
+	if err != nil {
+		if format == "csv" {
+			_, _ = w.Write([]byte("\nEXPORT-ABORTED: store failure mid-stream - file is incomplete\n"))
+		}
+		return
 	}
+	finish()
 }

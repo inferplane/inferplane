@@ -142,13 +142,13 @@ func (m *MemoryAggregator) Query(_ context.Context, f QueryFilter) (QueryResult,
 				r = &QueryRow{Key: key}
 				acc[key] = r
 			}
-			r.SpentMicroUSD += e.SpentMicroUSD
-			r.InputTokens += e.InputTokens
-			r.OutputTokens += e.OutputTokens
-			r.CacheReadTokens += e.CacheReadTokens
-			r.CacheWrite5mTokens += e.CacheWrite5mTokens
-			r.CacheWrite1hTokens += e.CacheWrite1hTokens
-			total += e.SpentMicroUSD
+			r.SpentMicroUSD = satAdd(r.SpentMicroUSD, e.SpentMicroUSD)
+			r.InputTokens = satAdd(r.InputTokens, e.InputTokens)
+			r.OutputTokens = satAdd(r.OutputTokens, e.OutputTokens)
+			r.CacheReadTokens = satAdd(r.CacheReadTokens, e.CacheReadTokens)
+			r.CacheWrite5mTokens = satAdd(r.CacheWrite5mTokens, e.CacheWrite5mTokens)
+			r.CacheWrite1hTokens = satAdd(r.CacheWrite1hTokens, e.CacheWrite1hTokens)
+			total = satAdd(total, e.SpentMicroUSD)
 		}
 	}
 	rows := make([]QueryRow, 0, len(acc))
@@ -190,6 +190,17 @@ func (m *MemoryAggregator) Rows(_ context.Context, since, until time.Time, fn fu
 		}
 	}
 	return nil
+}
+
+// satAdd is a saturating add: per-entry values are bounded (1e15) but a
+// window can hold thousands of entries, and an overflowed total returning
+// negative "spend" would be worse than a pinned ceiling (P4 gate).
+func satAdd(a, b int64) int64 {
+	c := a + b
+	if c < a {
+		return int64(^uint64(0) >> 1) // math.MaxInt64 without the import
+	}
+	return c
 }
 
 var _ Aggregator = (*MemoryAggregator)(nil)

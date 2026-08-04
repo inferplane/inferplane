@@ -174,8 +174,15 @@ func (p *PostgresAggregator) Query(ctx context.Context, f QueryFilter) (QueryRes
 }
 
 // Rows iterates the cursor directly — no memory lock, no materialization.
+// Migration/first-connect is bounded (pgReadTimeout) so a stalled DB can't
+// pin the handler before any row flows; the cursor itself runs on the
+// caller's ctx — a long export is legitimate and the client's disconnect
+// (or the export handler's rolling deadline) bounds it.
 func (p *PostgresAggregator) Rows(ctx context.Context, since, until time.Time, fn func(StoredRow) error) error {
-	if err := p.ensureSchema(ctx); err != nil {
+	mctx, cancel := context.WithTimeout(ctx, pgReadTimeout)
+	err := p.ensureSchema(mctx)
+	cancel()
+	if err != nil {
 		return err
 	}
 	rows, err := p.db.Query(ctx, `

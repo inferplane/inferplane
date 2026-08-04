@@ -70,16 +70,24 @@ func (c *Collector) Drain(now time.Time) *UsageBatch {
 		c.start = now
 		return nil
 	}
+	// Swap the map under the lock and build the batch AFTER releasing it —
+	// Record runs on the request path, and copying a high-cardinality window
+	// while holding its mutex would stall inference handlers (P4 gate).
+	buckets := c.buckets
+	c.buckets = map[[3]string]*UsageEntry{}
+	start := c.start
+	c.start = now
+	c.mu.Unlock()
+
 	b := &UsageBatch{
 		Dataplane:   c.dataplane,
-		WindowStart: c.start,
+		WindowStart: start,
 		WindowEnd:   now,
-		Entries:     make([]UsageEntry, 0, len(c.buckets)),
+		Entries:     make([]UsageEntry, 0, len(buckets)),
 	}
-	for _, e := range c.buckets {
+	for _, e := range buckets {
 		b.Entries = append(b.Entries, *e)
 	}
-	c.buckets = map[[3]string]*UsageEntry{}
-	c.start = now
+	c.mu.Lock() // re-acquire for the deferred Unlock
 	return b
 }

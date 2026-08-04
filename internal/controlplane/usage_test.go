@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,14 +23,24 @@ func usageMux(t *testing.T, token string) (*http.ServeMux, *telemetry.MemoryAggr
 	return mux, agg
 }
 
-const goodBatch = `{
+// batchStart is recent (the ingest guard rejects far-future windows), fixed
+// per process so duplicate-delivery tests hit the same idempotency key.
+var batchStart = time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Minute)
+
+var goodBatch = fmt.Sprintf(`{
   "dataplane": "dp-1",
-  "window_start": "2026-08-04T12:00:00Z",
-  "window_end":   "2026-08-04T12:01:00Z",
+  "window_start": %q,
+  "window_end":   %q,
   "entries": [{"team":"demo","user":"u1","model":"m1","spent_micro_usd":100,
     "input_tokens":10,"output_tokens":5,"cache_read_tokens":3,
     "cache_write_5m_tokens":2,"cache_write_1h_tokens":1}]
-}`
+}`, batchStart.Format(time.RFC3339), batchStart.Add(time.Minute).Format(time.RFC3339))
+
+// exportRange brackets batchStart for query/export params.
+func exportRange() string {
+	return "since=" + batchStart.Add(-time.Hour).Format(time.RFC3339) +
+		"&until=" + batchStart.Add(time.Hour).Format(time.RFC3339)
+}
 
 func postUsage(mux *http.ServeMux, token, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest("POST", "/v1alpha1/usage", strings.NewReader(body))
@@ -51,7 +62,7 @@ func TestUsageIngestAndQuery(t *testing.T) {
 		t.Fatalf("duplicate ingest: %d", rec.Code)
 	}
 
-	req := httptest.NewRequest("GET", "/v1alpha1/usage?team=demo&since=2026-08-04&group_by=model", nil)
+	req := httptest.NewRequest("GET", "/v1alpha1/usage?team=demo&group_by=model&"+exportRange(), nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -162,7 +173,7 @@ func getExport(mux *http.ServeMux, query string) *httptest.ResponseRecorder {
 func TestExportCSV(t *testing.T) {
 	mux, _ := usageMux(t, "tok")
 	seedUsage(t, mux)
-	rec := getExport(mux, "since=2026-08-04&until=2026-08-05&format=csv")
+	rec := getExport(mux, exportRange()+"&format=csv")
 	if rec.Code != 200 {
 		t.Fatalf("csv export: %d %s", rec.Code, rec.Body.String())
 	}
@@ -181,7 +192,7 @@ func TestExportCSV(t *testing.T) {
 func TestExportJSONRoundTrips(t *testing.T) {
 	mux, _ := usageMux(t, "tok")
 	seedUsage(t, mux)
-	rec := getExport(mux, "since=2026-08-04&until=2026-08-05") // default json
+	rec := getExport(mux, exportRange()) // default json
 	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
 		t.Fatalf("json export: %d %s", rec.Code, rec.Header().Get("Content-Type"))
 	}
@@ -196,13 +207,13 @@ func TestExportJSONRoundTrips(t *testing.T) {
 
 func TestExportValidation(t *testing.T) {
 	mux, _ := usageMux(t, "tok")
-	for _, q := range []string{"", "since=2026-08-04", "until=2026-08-05", "since=2026-08-04&until=2026-08-05&format=xml", "since=bad&until=2026-08-05"} {
+	for _, q := range []string{"", "since=2026-08-04", "until=2026-08-05", exportRange() + "&format=xml", "since=bad&until=2026-08-05"} {
 		if rec := getExport(mux, q); rec.Code != 400 {
 			t.Fatalf("query %q must 400, got %d", q, rec.Code)
 		}
 	}
 	// 401 without token.
-	req := httptest.NewRequest("GET", "/v1alpha1/usage/export?since=2026-08-04&until=2026-08-05", nil)
+	req := httptest.NewRequest("GET", "/v1alpha1/usage/export?"+exportRange(), nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != 401 {
@@ -213,7 +224,7 @@ func TestExportValidation(t *testing.T) {
 func TestExport503WhenStoreDown(t *testing.T) {
 	mux := http.NewServeMux()
 	NewUsageServer("tok", failingAgg{}).Mount(mux)
-	if rec := getExport(mux, "since=2026-08-04&until=2026-08-05"); rec.Code != 503 {
+	if rec := getExport(mux, exportRange()); rec.Code != 503 {
 		t.Fatalf("PG-down export must 503, got %d", rec.Code)
 	}
 }
@@ -227,7 +238,7 @@ func TestExportOutlivesServerWriteTimeout(t *testing.T) {
 	agg := telemetry.NewMemoryAggregator(24 * time.Hour)
 	// Seed 5 windows.
 	for i := 0; i < 5; i++ {
-		ws := time.Date(2026, 8, 4, 12, i, 0, 0, time.UTC)
+		ws := batchStart.Add(time.Duration(i) * time.Minute)
 		_ = agg.Upsert(context.Background(), &telemetry.UsageBatch{
 			Dataplane: "dp-1", WindowStart: ws, WindowEnd: ws.Add(time.Minute),
 			Entries: []telemetry.UsageEntry{{Team: "demo", Model: "m1", SpentMicroUSD: 1}},
@@ -241,7 +252,7 @@ func TestExportOutlivesServerWriteTimeout(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/v1alpha1/usage/export?since=2026-08-04&until=2026-08-05&format=csv")
+	resp, err := http.Get(srv.URL + "/v1alpha1/usage/export?" + exportRange() + "&format=csv")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,4 +285,17 @@ func (s slowAgg) Rows(ctx context.Context, since, until time.Time, fn func(telem
 		time.Sleep(s.delay)
 		return fn(r)
 	})
+}
+
+// A far-future window (skewed data-plane clock) is a permanent 400: it would
+// otherwise sit above the wall-clock retention horizon forever (P4 gate).
+func TestUsageIngestRejectsFarFutureWindow(t *testing.T) {
+	mux, _ := usageMux(t, "tok")
+	future := time.Now().UTC().Add(3 * time.Hour)
+	batch := fmt.Sprintf(`{"dataplane":"dp-1","window_start":%q,"window_end":%q,
+	  "entries":[{"team":"demo","model":"m1","spent_micro_usd":1}]}`,
+		future.Format(time.RFC3339), future.Add(time.Minute).Format(time.RFC3339))
+	if rec := postUsage(mux, "tok", batch); rec.Code != 400 {
+		t.Fatalf("far-future window must 400 (permanent), got %d", rec.Code)
+	}
 }

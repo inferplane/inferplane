@@ -8,7 +8,12 @@
   let token = "";
 
   const $ = (id) => document.getElementById(id);
-  const usd = (micros) => "$" + (micros / 1e6).toFixed(4);
+  // Integer-string formatting — no float division on money (the µUSD
+  // mandate applies to display honesty too; toFixed loses precision).
+  const usd = (micros) => {
+    const s = String(micros).padStart(7, "0");
+    return "$" + s.slice(0, -6) + "." + s.slice(-6, -2);
+  };
 
   function setError(msg) {
     const el = $("error");
