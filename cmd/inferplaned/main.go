@@ -28,6 +28,7 @@ import (
 
 	"github.com/inferplane/inferplane/internal/controlplane"
 	"github.com/inferplane/inferplane/internal/policy"
+	"github.com/inferplane/inferplane/internal/telemetry"
 )
 
 func main() {
@@ -85,6 +86,13 @@ func run(listen, policies, token string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Usage telemetry (ADR-036) mounts UNCONDITIONALLY — a telemetry-only
+	// inferplaned (no --policies) is a valid deployment; policy distribution
+	// below stays opt-in. Memory keeps a bounded 24h of windows; durable
+	// history is the opt-in Postgres layer (INFERPLANED_USAGE_DSN, Task 8).
+	agg := telemetry.Aggregator(telemetry.NewMemoryAggregator(24 * time.Hour))
+	controlplane.NewUsageServer(token, agg).Mount(mux)
 
 	var cp *controlplane.Server
 	if policies != "" {

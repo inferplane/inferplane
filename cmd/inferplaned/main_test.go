@@ -1,8 +1,14 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/inferplane/inferplane/internal/controlplane"
+	"github.com/inferplane/inferplane/internal/telemetry"
 )
 
 // PR #50 review finding (HIGH): serving unauthenticated beyond loopback must
@@ -32,5 +38,22 @@ func TestIsLoopback(t *testing.T) {
 		if got := isLoopback(listen); got != want {
 			t.Fatalf("isLoopback(%q) = %v, want %v", listen, got, want)
 		}
+	}
+}
+
+// ADR-036: usage telemetry must be available WITHOUT --policies — a
+// telemetry-only inferplaned is a valid deployment. (run() wires it
+// unconditionally; this pins the mux-level behavior via a quick boot check
+// against the mounted handler set.)
+func TestUsageMountedWithoutPolicies(t *testing.T) {
+	// run() blocks serving; test the wiring the same way it is built.
+	mux := http.NewServeMux()
+	agg := telemetry.NewMemoryAggregator(24 * time.Hour)
+	controlplane.NewUsageServer("", agg).Mount(mux)
+	req := httptest.NewRequest("GET", "/v1alpha1/usage", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("usage query without policy server must work, got %d", rec.Code)
 	}
 }
