@@ -153,6 +153,7 @@ func TestMemoryAggregatorRetention(t *testing.T) {
 	a := NewMemoryAggregator(time.Hour)
 	old := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
 	fresh := old.Add(2 * time.Hour)
+	a.now = func() time.Time { return fresh } // pin the wall clock (retention anchor)
 
 	_ = a.Upsert(ctx, &UsageBatch{Dataplane: "dp-1", WindowStart: old, WindowEnd: old.Add(time.Minute),
 		Entries: []UsageEntry{{Team: "demo", Model: "m1", SpentMicroUSD: 100}}})
@@ -203,5 +204,25 @@ func TestMemoryRowsDoesNotBlockUpsert(t *testing.T) {
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A clock-skewed data plane sending a far-future window must not mass-evict
+// everyone else's current windows (retention anchors to the wall clock).
+func TestRetentionImmuneToFutureSkew(t *testing.T) {
+	ctx := context.Background()
+	a := NewMemoryAggregator(24 * time.Hour)
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	a.now = func() time.Time { return now }
+
+	_ = a.Upsert(ctx, &UsageBatch{Dataplane: "dp-1", WindowStart: now, WindowEnd: now.Add(time.Minute),
+		Entries: []UsageEntry{{Team: "demo", Model: "m1", SpentMicroUSD: 100}}})
+	// Skewed plane: +30 days.
+	_ = a.Upsert(ctx, &UsageBatch{Dataplane: "dp-skew", WindowStart: now.Add(30 * 24 * time.Hour), WindowEnd: now.Add(30*24*time.Hour + time.Minute),
+		Entries: []UsageEntry{{Team: "demo", Model: "m1", SpentMicroUSD: 1}}})
+
+	res, _ := a.Query(ctx, QueryFilter{Since: now.Add(-time.Hour), Until: now.Add(time.Hour), GroupBy: "team"})
+	if res.TotalMicroUSD != 100 {
+		t.Fatalf("current window evicted by a skewed peer: total=%d", res.TotalMicroUSD)
 	}
 }

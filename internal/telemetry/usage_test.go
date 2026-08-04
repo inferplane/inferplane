@@ -121,3 +121,17 @@ func TestJSONWireShape(t *testing.T) {
 		t.Fatalf("round trip lost spend: %+v", back.Entries[0])
 	}
 }
+
+func TestValidateSaneBounds(t *testing.T) {
+	b := validBatch()
+	b.Entries[0].InputTokens = int64(1e15) + 1
+	if err := b.Validate(); err == nil {
+		t.Fatal("overflow-scale count accepted")
+	}
+	b2 := validBatch()
+	b2.WindowStart = time.Date(2263, 1, 1, 0, 0, 0, 0, time.UTC)
+	b2.WindowEnd = b2.WindowStart.Add(time.Minute)
+	if err := b2.Validate(); err == nil {
+		t.Fatal("out-of-range window accepted (UnixNano collision risk)")
+	}
+}

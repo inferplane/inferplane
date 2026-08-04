@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+// maxEntryValue bounds every per-entry count (µUSD and tokens): large enough
+// for any real window ($1B / 10^15 tokens), small enough that summing
+// thousands of maxed entries cannot overflow int64.
+const maxEntryValue = int64(1e15)
+
 // UsageEntry is one (team, user, model) line of a usage window: settled cost
 // in integer µUSD (never float — CLAUDE.md invariant) plus token counts with
 // the prompt-cache 5m/1h creation tiers kept separate, because the tiers bill
@@ -53,6 +58,11 @@ func (b *UsageBatch) Validate() error {
 	if !b.WindowStart.Before(b.WindowEnd) {
 		return fmt.Errorf("telemetry: batch window_start must precede window_end")
 	}
+	// Sane bounds: UnixNano is undefined outside ~1678–2262, and a wildly
+	// future/past window is clock-skew garbage either way.
+	if b.WindowStart.Year() < 2000 || b.WindowEnd.Year() > 2200 {
+		return fmt.Errorf("telemetry: batch window outside the sane range (2000–2200)")
+	}
 	seen := make(map[[3]string]bool, len(b.Entries))
 	for i := range b.Entries {
 		e := &b.Entries[i]
@@ -74,6 +84,12 @@ func (b *UsageBatch) Validate() error {
 		} {
 			if n < 0 {
 				return fmt.Errorf("telemetry: entry %d: negative %s", i, name)
+			}
+			// One window of one team/user/model can't legitimately reach
+			// 1e15 (µUSD = $1B; tokens = quadrillions) — a larger value is
+			// garbage and, unbounded, could overflow aggregation sums.
+			if n > maxEntryValue {
+				return fmt.Errorf("telemetry: entry %d: %s exceeds the sane bound", i, name)
 			}
 		}
 		key := [3]string{e.Team, e.User, e.Model}

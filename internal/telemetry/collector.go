@@ -60,6 +60,12 @@ func (c *Collector) Drain(now time.Time) *UsageBatch {
 	now = now.UTC()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// Time must move forward: a non-increasing now (clock step) would make
+	// a populated window invalid (start !< end, losing its data) or regress
+	// the next window into overlap. Nudge past start instead.
+	if !now.After(c.start) {
+		now = c.start.Add(time.Nanosecond)
+	}
 	if len(c.buckets) == 0 {
 		c.start = now
 		return nil

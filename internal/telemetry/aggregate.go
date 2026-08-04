@@ -74,13 +74,13 @@ type MemoryAggregator struct {
 	mu        sync.Mutex
 	retention time.Duration
 	windows   map[windowKey]*UsageBatch
-	newest    time.Time
+	now       func() time.Time // injectable clock (tests)
 }
 
 // NewMemoryAggregator builds a memory store keeping roughly `retention` of
 // recent windows (24h is the standard default).
 func NewMemoryAggregator(retention time.Duration) *MemoryAggregator {
-	return &MemoryAggregator{retention: retention, windows: map[windowKey]*UsageBatch{}}
+	return &MemoryAggregator{retention: retention, windows: map[windowKey]*UsageBatch{}, now: time.Now}
 }
 
 func (m *MemoryAggregator) Upsert(_ context.Context, b *UsageBatch) error {
@@ -93,10 +93,10 @@ func (m *MemoryAggregator) Upsert(_ context.Context, b *UsageBatch) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.windows[windowKey{b.Dataplane, b.WindowStart.UnixNano()}] = &cp
-	if b.WindowStart.After(m.newest) {
-		m.newest = b.WindowStart
-	}
-	horizon := m.newest.Add(-m.retention)
+	// Retention is anchored to the WALL clock, never to data: a single
+	// clock-skewed data plane sending a far-future window must not advance
+	// the horizon and mass-evict everyone else's current windows.
+	horizon := m.now().Add(-m.retention)
 	for k := range m.windows {
 		if time.Unix(0, k.start).Before(horizon) {
 			delete(m.windows, k)
