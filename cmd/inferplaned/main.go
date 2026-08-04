@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/inferplane/inferplane/internal/controlplane"
+	"github.com/inferplane/inferplane/internal/controlplane/ui"
 	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/telemetry"
 )
@@ -106,6 +107,9 @@ func run(listen, policies, token string) error {
 		log.Print("inferplaned: usage telemetry persisting to postgres (INFERPLANED_USAGE_DSN set)")
 	}
 	controlplane.NewUsageServer(token, agg).Mount(mux)
+	// The read-only usage console (data-free static shell; data via the
+	// bearer-gated usage API — see internal/controlplane/ui).
+	mux.Handle("/ui/", http.StripPrefix("/ui", ui.Handler()))
 
 	var cp *controlplane.Server
 	if policies != "" {
