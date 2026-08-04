@@ -128,3 +128,16 @@ func TestUsageQueryBadParams(t *testing.T) {
 		}
 	}
 }
+
+// Backend failure on the query path must be 503, never a client-error 400
+// (kiro task-gate MEDIUM — Task 8's durable store hits this immediately).
+func TestUsageQuery503WhenStoreDown(t *testing.T) {
+	mux := http.NewServeMux()
+	NewUsageServer("", failingAgg{}).Mount(mux)
+	req := httptest.NewRequest("GET", "/v1alpha1/usage", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != 503 {
+		t.Fatalf("backend query failure must 503, got %d", rec.Code)
+	}
+}

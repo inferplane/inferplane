@@ -59,7 +59,10 @@ type Aggregator interface {
 	Rows(ctx context.Context, since, until time.Time, fn func(StoredRow) error) error
 }
 
-func validGroupBy(g string) bool { return g == "team" || g == "user" || g == "model" }
+// ValidGroupBy reports whether g is a legal QueryFilter.GroupBy value —
+// exported so HTTP handlers can distinguish the one client-caused Query
+// error (bad group_by → 400) from backend failures (→ 503).
+func ValidGroupBy(g string) bool { return g == "team" || g == "user" || g == "model" }
 
 type windowKey struct {
 	dataplane string
@@ -106,7 +109,7 @@ func (m *MemoryAggregator) Upsert(_ context.Context, b *UsageBatch) error {
 }
 
 func (m *MemoryAggregator) Query(_ context.Context, f QueryFilter) (QueryResult, error) {
-	if !validGroupBy(f.GroupBy) {
+	if !ValidGroupBy(f.GroupBy) {
 		return QueryResult{}, fmt.Errorf("telemetry: invalid group_by %q", f.GroupBy)
 	}
 	m.mu.Lock()

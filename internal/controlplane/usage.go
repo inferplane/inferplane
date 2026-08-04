@@ -105,10 +105,16 @@ func (s *UsageServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"bad until"}`, http.StatusBadRequest)
 		return
 	}
+	// group_by is the only client-caused Query error — validate it HERE so a
+	// backend failure (durable store down, Task 8) is never misreported as a
+	// client error.
+	if !telemetry.ValidGroupBy(f.GroupBy) {
+		http.Error(w, `{"error":"bad group_by"}`, http.StatusBadRequest)
+		return
+	}
 	res, err := s.agg.Query(r.Context(), f)
 	if err != nil {
-		// Invalid group_by is the only client-caused Query error.
-		http.Error(w, `{"error":"bad query"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"usage store unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

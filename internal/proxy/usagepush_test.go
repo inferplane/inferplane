@@ -249,3 +249,23 @@ func TestUsageRoundTripEndToEnd(t *testing.T) {
 		t.Fatalf("round trip mangled fields (cache tiers must survive intact): %+v", r)
 	}
 }
+
+func TestTransient408IsRetryable(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(408)
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+	p, col := pusherFor(t, srv.URL)
+	var drops atomic.Int32
+	p.OnDrop = func() { drops.Add(1) }
+	record(col)
+	p.Tick(context.Background())
+	if drops.Load() != 0 || len(p.buf) != 1 {
+		t.Fatalf("408 must be retryable: drops=%d buffered=%d", drops.Load(), len(p.buf))
+	}
+}

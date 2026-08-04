@@ -54,8 +54,11 @@ func (p *UsagePusher) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			// Final best-effort flush so a clean shutdown ships the last
-			// window instead of dropping it (bounded by the client timeout).
-			p.Tick(context.Background())
+			// window instead of dropping it — bounded so a slow-but-alive
+			// control plane cannot hold shutdown for the whole backlog.
+			fctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			p.Tick(fctx)
+			cancel()
 			return
 		case <-t.C:
 			p.Tick(ctx)
