@@ -52,6 +52,9 @@ prompt-cache hits are never corrupted.
 ### Observability Layer (`internal/metrics`)
 - Prometheus registry with OpenTelemetry GenAI semantic-convention naming (`gen_ai_*`) plus `inferplane_*` operational series. Cardinality is config-bounded; a sentinel `_rejected` model label protects pre-resolution 403/404 paths.
 
+### Control-Plane Telemetry (`internal/telemetry`, `internal/controlplane`, ADR-036)
+- The "telemetry up" arrow of the split (ADR-031): each mayu folds settled usage — team/user/model, integer µUSD, cache 5m/1h tiers — into 60s windows (`telemetry.Collector`) pushed to inferplaned's `POST /v1alpha1/usage` on a channel deliberately separate from the enforcement-critical sync heartbeat. The data plane's bounded FIFO is the single retry store (the control plane acks only what is stored — 503 otherwise); storage is always-on bounded memory plus opt-in Postgres write-through (`INFERPLANED_USAGE_DSN`), queried via `GET /v1alpha1/usage`, streamed exports, and the read-only `/ui/` console.
+
 ### Security Layer (cross-cutting)
 - Virtual-key auth + team RBAC (`Principal.Allows`), inline-secret rejection, client/upstream key isolation, no secret leakage on `/metrics`.
 

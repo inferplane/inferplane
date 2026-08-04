@@ -173,3 +173,17 @@ logged — never field-level merges.
 - Charts/graphs in the web view.
 - mayu user-facing CLI `status` command (item 2 of the original ask; separate
   design).
+
+---
+
+## Amendments (P2 consensus gate, recorded in ADR-036)
+
+- **D2 config shape**: the `usage_store {type, dsn_ref}` block is replaced by
+  the fixed env var `INFERPLANED_USAGE_DSN` — inferplaned has no config file;
+  the `INFERPLANED_TOKEN` precedent applies (secret value in the env, never
+  on a flag).
+- **D2 durability composition**: Postgres is a write-through layer BEHIND the
+  always-on memory aggregator (PG commit → memory → ack; 503 on failure so
+  the data plane's FIFO is the single retry store). The r2 draft's
+  control-plane-side async write queue was deleted — it acked before
+  durability and lost its depth on an ECS task replacement.
