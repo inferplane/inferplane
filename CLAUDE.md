@@ -30,7 +30,7 @@ api/v1alpha1/      - Versioned config API wire types (CRD-style shape, gRPC/HTTP
 internal/          - Private packages (gateway internals)
   policy/          - Rule + lease schema shared by both binaries (the single truth, ADR-031); loader/store + sync wire types (ADR-033/034)
   controlplane/    - inferplaned distribution core: sync heartbeat, lease ledger, dataplane view (ADR-034)
-  proxy/ cache/ telemetry/ - Consolidation targets (ADR-031); proxy/ owns the control-plane Syncer + LeaseTable (ADR-034); cache/ owns VolatileStore
+  proxy/ cache/ telemetry/ - proxy/ owns the control-plane Syncer + LeaseTable (ADR-034) and the UsagePusher (ADR-036); telemetry/ is live (ADR-036): usage wire types, window collector, memory/postgres/durable aggregators; cache/ owns VolatileStore (ADR-031 consolidation target)
   server/          - HTTP data plane + admin plane, ingress handlers
   router/          - Model→provider resolution, fallback chain, circuit breaker
   governance/      - Rate / quota / budget enforcement (PreCheck + Settle)
@@ -60,6 +60,7 @@ tests/             - Harness tests (hooks, secret patterns, structure) — bash,
 - **Cache invariant (§4.4):** when provider protocol == ingress protocol, forward the request body **verbatim** (`RawBody`) so `cache_control` and prompt-cache hits are never corrupted.
 - **Two-phase governance:** pre-check BEFORE billing, settle AFTER. `on_exceeded` is `block` | `warn` (block wins on tie).
 - **Cost is integer microUSD** — never float. Round-half-even via `math/big`.
+- **`mayu` runs standalone by design** — a control plane is optional. `policies` (local file channel) and `control_plane` (ADR-034 heartbeat to `inferplaned`) are mutually exclusive config: one policy source at a time.
 
 ### Security mandates (non-negotiable)
 
@@ -81,7 +82,10 @@ go test ./... -race
 go vet ./...
 gofmt -l .
 
-# Run the gateway
+# Run a single package's tests, or a single test by name
+go test ./internal/policy/... -run TestModelAllowed -v
+
+# Run the gateway (data plane :8080, admin plane + console :9090/admin/ui/)
 go run ./cmd/mayu serve --config examples/config.json
 
 # Issue a virtual key / verify the audit chain

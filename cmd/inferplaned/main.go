@@ -27,7 +27,9 @@ import (
 	"time"
 
 	"github.com/inferplane/inferplane/internal/controlplane"
+	"github.com/inferplane/inferplane/internal/controlplane/ui"
 	"github.com/inferplane/inferplane/internal/policy"
+	"github.com/inferplane/inferplane/internal/telemetry"
 )
 
 func main() {
@@ -85,6 +87,29 @@ func run(listen, policies, token string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Usage telemetry (ADR-036) mounts UNCONDITIONALLY — a telemetry-only
+	// inferplaned (no --policies) is a valid deployment; policy distribution
+	// below stays opt-in. Memory keeps a bounded 24h of windows; setting
+	// INFERPLANED_USAGE_DSN (the INFERPLANED_TOKEN precedent — a fixed env
+	// var, never a flag value carrying a secret) layers the durable Postgres
+	// store behind it: writes ack only after the PG commit, queries fall
+	// back to memory (marked degraded) through an outage. Construction is
+	// lazy — a PG outage never blocks boot.
+	agg := telemetry.Aggregator(telemetry.NewMemoryAggregator(24 * time.Hour))
+	if dsn := os.Getenv("INFERPLANED_USAGE_DSN"); dsn != "" {
+		pg, err := telemetry.NewPostgresAggregator(dsn)
+		if err != nil {
+			return fmt.Errorf("usage store: %w", err)
+		}
+		defer pg.Close()
+		agg = telemetry.NewDurableAggregator(agg, pg)
+		log.Print("inferplaned: usage telemetry persisting to postgres (INFERPLANED_USAGE_DSN set)")
+	}
+	controlplane.NewUsageServer(token, agg).Mount(mux)
+	// The read-only usage console (data-free static shell; data via the
+	// bearer-gated usage API — see internal/controlplane/ui).
+	mux.Handle("/ui/", http.StripPrefix("/ui", ui.Handler()))
 
 	var cp *controlplane.Server
 	if policies != "" {

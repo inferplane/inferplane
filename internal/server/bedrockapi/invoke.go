@@ -22,6 +22,7 @@ import (
 	"github.com/inferplane/inferplane/internal/pricing"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
+	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/internal/tracing"
 	"github.com/inferplane/inferplane/pkg/schema"
 	"github.com/inferplane/inferplane/pkg/ulid"
@@ -43,6 +44,7 @@ type InvokeHandler struct {
 	mask       *filter.Masking
 	teamPolicy func(team string) (keystore.TeamRecord, bool)
 	bodies     *bodystore.Recorder
+	usage      *telemetry.Collector // nil-safe: usage telemetry off when nil (control-plane mode)
 	streaming  bool
 }
 
@@ -61,6 +63,10 @@ func (h *InvokeHandler) SetMasking(m *filter.Masking) { h.mask = m }
 func (h *InvokeHandler) SetTeamPolicy(fn func(team string) (keystore.TeamRecord, bool)) {
 	h.teamPolicy = fn
 }
+
+// SetUsageCollector enables per-request usage telemetry (control-plane mode);
+// nil-safe, mirrors anthropicapi.
+func (h *InvokeHandler) SetUsageCollector(c *telemetry.Collector) { h.usage = c }
 
 func (h *InvokeHandler) SetBodyRecorder(r *bodystore.Recorder) { h.bodies = r }
 
@@ -459,6 +465,10 @@ func (h *InvokeHandler) settle(p keystore.Principal, providerName, model, upstre
 		CacheWrite1h: write1h,
 	}
 	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table)
+	if h.usage != nil {
+		// Attribute to the UPSTREAM model — the name pricing billed.
+		h.usage.Record(p.Team, p.Owner, upstream, pu, cost)
+	}
 	return &audit.CostRef{
 		AmountUSDMicros: cost,
 		PricingMissing:  missing,

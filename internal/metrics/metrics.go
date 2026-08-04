@@ -25,6 +25,7 @@ type Metrics struct {
 	auditBufferUtil prometheus.Gauge         // inferplane_audit_buffer_utilization_ratio
 	piiMask         *prometheus.CounterVec   // inferplane_pii_mask_redactions_total
 	anchorFail      prometheus.Counter       // inferplane_audit_anchor_failures_total
+	usageDropped    prometheus.Counter       // inferplane_usage_windows_dropped_total
 }
 
 func New() *Metrics {
@@ -75,13 +76,17 @@ func New() *Metrics {
 		piiMask: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "inferplane_pii_mask_redactions_total", Help: "PII redactions applied to request text (ADR-009).",
 		}, []string{"team"}),
+		usageDropped: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "inferplane_usage_windows_dropped_total",
+			Help: "Usage-telemetry windows dropped on pusher buffer overflow or permanent rejection (never silent; no team/key labels).",
+		}),
 		anchorFail: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "inferplane_audit_anchor_failures_total", Help: "Audit chain-head anchor (WORM) write failures (ADR-012).",
 		}),
 	}
 	reg.MustRegister(m.tokenUsage, m.requestDuration, m.ttft, m.requestsTotal,
 		m.fallbackTotal, m.circuitState, m.quotaUtil, m.budgetUtil, m.budgetSpend, m.pricingMiss,
-		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail)
+		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped)
 	// Prometheus only emits a labeled metric family once it has at least one
 	// observed child series. Pre-initialize the token-usage family to zero so
 	// gen_ai_client_token_usage_total is always present in exposition (stable
@@ -125,6 +130,16 @@ func (m *Metrics) ObservePIIMask(team string, redactions int) {
 		return
 	}
 	m.piiMask.WithLabelValues(team).Add(float64(redactions))
+}
+
+// IncUsageWindowDropped counts a usage-telemetry window dropped by the
+// pusher (buffer overflow or a permanently-rejected batch) — surfacing loss
+// instead of silence. Deliberately unlabeled: window contents span teams.
+func (m *Metrics) IncUsageWindowDropped() {
+	if m == nil {
+		return
+	}
+	m.usageDropped.Inc()
 }
 
 // IncAnchorFailure counts a failed audit-anchor write (ADR-012).

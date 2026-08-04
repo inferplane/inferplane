@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>inferplane — usage</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>inferplane usage</h1>
+    <p class="sub">control-plane view · integer µUSD · read-only</p>
+  </header>
+
+  <section id="auth-section">
+    <label for="token">Control-plane token</label>
+    <input type="password" id="token" autocomplete="off" placeholder="INFERPLANED_TOKEN">
+    <button id="connect">Connect</button>
+    <p class="hint">Held in page memory only — never stored.</p>
+  </section>
+
+  <section id="controls" hidden>
+    <label for="since">From</label>
+    <input type="date" id="since">
+    <label for="until">To</label>
+    <input type="date" id="until">
+    <button id="refresh">Refresh</button>
+  </section>
+
+  <div id="degraded-banner" class="banner" hidden>
+    history incomplete — durable store unavailable (showing recent in-memory data only)
+  </div>
+  <p id="error" class="error" hidden></p>
+
+  <section id="teams-section" hidden>
+    <h2>Spend by team</h2>
+    <table id="teams">
+      <thead><tr><th>Team</th><th>Spend (USD)</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write 5m</th><th>Cache write 1h</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section id="models-section" hidden>
+    <h2>Breakdown by model <span id="model-team-label"></span></h2>
+    <table id="models">
+      <thead><tr><th>Model</th><th>Spend (USD)</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write 5m</th><th>Cache write 1h</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>

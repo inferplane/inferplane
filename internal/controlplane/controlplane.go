@@ -214,6 +214,7 @@ func (s *Server) changed() bool {
 func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1alpha1/sync", s.auth(s.handleSync))
 	mux.HandleFunc("GET /v1alpha1/dataplanes", s.auth(s.handleDataplanes))
+	s.mountExport(mux) // GET /v1alpha1/config/export (export.go)
 }
 
 // auth enforces the shared bearer token when one is configured. Comparison

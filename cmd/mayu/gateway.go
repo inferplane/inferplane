@@ -38,6 +38,7 @@ import (
 	"github.com/inferplane/inferplane/internal/server/analyticsapi"
 	"github.com/inferplane/inferplane/internal/server/authapi"
 	"github.com/inferplane/inferplane/internal/server/configapi"
+	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/internal/tracing"
 	"github.com/inferplane/inferplane/pkg/ulid"
 	"github.com/inferplane/inferplane/providers"
@@ -72,6 +73,7 @@ type gateway struct {
 	healthProbeEvery time.Duration               // probe interval
 	polStore         *policy.Store               // nil unless policies/control_plane is configured (ADR-033/034); file mode watched in serve
 	syncer           *proxy.Syncer               // nil unless control_plane is configured (ADR-034); heartbeats in serve
+	usagePusher      *proxy.UsagePusher          // nil unless control_plane is configured; drains the collector every minute
 	reloadMu         sync.Mutex                  // serializes reloads AND UI writes (concurrent SIGHUPs/triggers)
 	dataLn           net.Listener
 	adminLn          net.Listener
@@ -404,6 +406,8 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// unreachable past tolerance) or its allowance is exhausted globally;
 	// soft rules fail open per failurePolicy.
 	var syncer *proxy.Syncer
+	var usageCol *telemetry.Collector
+	var usagePusher *proxy.UsagePusher
 	if raw.ControlPlane != nil {
 		gov.SetLeaseGate(leases.Blocked)
 		// Mirror inferplaned's startup guard from the client side (PR #50
@@ -420,6 +424,17 @@ func newGateway(cfgPath string) (*gateway, error) {
 		dataplaneID := raw.ControlPlane.Dataplane
 		if dataplaneID == "" {
 			dataplaneID = instanceID()
+		}
+		// Usage telemetry (T4): every settle folds into this collector; the
+		// pusher (T5) drains it to the control plane. Only in control-plane
+		// mode — standalone stays byte-identical.
+		usageCol = telemetry.NewCollector(dataplaneID)
+		usagePusher = &proxy.UsagePusher{
+			URL:       raw.ControlPlane.URL,
+			Token:     raw.ControlPlane.Token,
+			Collector: usageCol,
+			OnError:   func(err error) { fmt.Fprintln(os.Stderr, "inferplane:", err) },
+			OnDrop:    m.IncUsageWindowDropped,
 		}
 		syncer = &proxy.Syncer{
 			URL:       raw.ControlPlane.URL,
@@ -617,6 +632,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		healthProbeEvery: healthProbeEvery,
 		polStore:         polStore,
 		syncer:           syncer,
+		usagePusher:      usagePusher,
 		dataLn:           dataLn,
 		adminLn:          adminLn,
 	}
@@ -626,7 +642,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 	if pstore != nil {
 		writer = g
 	}
-	g.dataSrv = &http.Server{Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg))}
+	g.dataSrv = &http.Server{Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol))}
 	// Capability map the console reads on bootstrap (spec §4.4). Phase 0a:
 	// analytics index not built yet; provider_store + guardrails reflect what
 	// this assembly already knows. Later phases flip the rest on as they land.
@@ -1163,6 +1179,14 @@ func (g *gateway) serve(ctx context.Context) error {
 			g.syncer.Run(workerCtx)
 		}()
 	}
+	var pushDone chan struct{}
+	if g.usagePusher != nil {
+		pushDone = make(chan struct{})
+		go func() {
+			defer close(pushDone)
+			g.usagePusher.Run(workerCtx)
+		}()
+	}
 	defer func() {
 		cancelWorker()
 		<-workerDone
@@ -1183,6 +1207,9 @@ func (g *gateway) serve(ctx context.Context) error {
 		}
 		if syncDone != nil {
 			<-syncDone
+		}
+		if pushDone != nil {
+			<-pushDone
 		}
 	}()
 

@@ -27,6 +27,7 @@ import (
 	"github.com/inferplane/inferplane/internal/server/configapi"
 	"github.com/inferplane/inferplane/internal/server/openaiapi"
 	"github.com/inferplane/inferplane/internal/server/usageapi"
+	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/pkg/ulid"
 )
 
@@ -38,6 +39,19 @@ type AuthConfigView struct {
 	SSO      bool   `json:"sso"`
 	Issuer   string `json:"issuer,omitempty"`
 	ClientID string `json:"client_id,omitempty"`
+}
+
+// DataMuxOption configures optional DataMux wiring.
+type DataMuxOption func(*dataMuxOptions)
+
+type dataMuxOptions struct {
+	usage *telemetry.Collector
+}
+
+// WithUsageCollector threads the control-plane usage collector into every
+// generation handler's settle path (nil-safe; absent = standalone default).
+func WithUsageCollector(c *telemetry.Collector) DataMuxOption {
+	return func(o *dataMuxOptions) { o.usage = c }
 }
 
 // DataMux builds the data-plane (:8080) handler: Anthropic, Bedrock, and OpenAI
@@ -61,12 +75,20 @@ type AuthConfigView struct {
 // never accepted here), and DELETE /v1/auth/key (self-revoke, behind KeyAuth
 // like any other data-plane route). cliVerifier nil ⇒ none of the three are
 // mounted (404) — the feature is off unless oidc.cli_login is configured.
-func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *audit.Writer, gov *governance.Governor, m *metrics.Metrics, mask *filter.Masking, teamPolicy func(team string) (keystore.TeamRecord, bool), bodies *bodystore.Recorder, cliVerifier OIDCVerifier, cliMapping adminauth.MappingConfig, cliConfig func() authapi.ConfigView, cliKeyTTL time.Duration) http.Handler {
+// A trailing DataMuxOption list carries the optional control-plane wiring
+// (usage telemetry today) without growing the positional signature — every
+// existing call site compiles unchanged.
+func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *audit.Writer, gov *governance.Governor, m *metrics.Metrics, mask *filter.Masking, teamPolicy func(team string) (keystore.TeamRecord, bool), bodies *bodystore.Recorder, cliVerifier OIDCVerifier, cliMapping adminauth.MappingConfig, cliConfig func() authapi.ConfigView, cliKeyTTL time.Duration, opts ...DataMuxOption) http.Handler {
+	var o dataMuxOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	mux := http.NewServeMux()
 	msgs := anthropicapi.NewMessagesHandlerMetrics(r, aud, gov, m)
 	msgs.SetMasking(mask) // PII masking for configured teams (ADR-009); nil = off
 	msgs.SetTeamPolicy(teamPolicy)
 	msgs.SetBodyRecorder(bodies)
+	msgs.SetUsageCollector(o.usage)
 	mux.Handle("POST /v1/messages", msgs)
 	ct := anthropicapi.NewCountTokensHandler(r)
 	ct.SetMasking(mask)          // mask the count body too (T6); never 500
@@ -76,16 +98,19 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	chat.SetMasking(mask) // masked teams rejected on the OpenAI ingress (T6b)
 	chat.SetTeamPolicy(teamPolicy)
 	chat.SetBodyRecorder(bodies)
+	chat.SetUsageCollector(o.usage)
 	mux.Handle("POST /v1/chat/completions", chat)
 	invoke := bedrockapi.NewInvokeHandlerMetrics(r, holder, aud, gov, m, false)
 	invoke.SetMasking(mask)
 	invoke.SetTeamPolicy(teamPolicy)
 	invoke.SetBodyRecorder(bodies)
+	invoke.SetUsageCollector(o.usage)
 	mux.Handle("POST /model/{modelId}/invoke", invoke)
 	stream := bedrockapi.NewInvokeHandlerMetrics(r, holder, aud, gov, m, true)
 	stream.SetMasking(mask)
 	stream.SetTeamPolicy(teamPolicy)
 	stream.SetBodyRecorder(bodies)
+	stream.SetUsageCollector(o.usage)
 	mux.Handle("POST /model/{modelId}/invoke-with-response-stream", stream)
 	bct := bedrockapi.NewCountTokensHandler(r, holder)
 	bct.SetMasking(mask)

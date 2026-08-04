@@ -72,3 +72,14 @@ func gather(t *testing.T, m *Metrics) string {
 	_ = prometheus.NewRegistry
 	return sb.String()
 }
+
+func TestIncUsageWindowDropped(t *testing.T) {
+	m := New()
+	m.IncUsageWindowDropped()
+	m.IncUsageWindowDropped()
+	if v := testutil.ToFloat64(m.usageDropped); v != 2 {
+		t.Fatalf("inferplane_usage_windows_dropped_total = %v, want 2", v)
+	}
+	var nilM *Metrics
+	nilM.IncUsageWindowDropped() // nil-safe like every other hook
+}
