@@ -21,6 +21,7 @@ import (
 	"github.com/inferplane/inferplane/internal/pricing"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
+	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/internal/tracing"
 	"github.com/inferplane/inferplane/pkg/schema"
 	"github.com/inferplane/inferplane/pkg/ulid"
@@ -50,6 +51,7 @@ type MessagesHandler struct {
 	mask       *filter.Masking                               // nil-safe: masking off when nil (ADR-009)
 	teamPolicy func(team string) (keystore.TeamRecord, bool) // nil-safe: no per-team overrides when nil (D6/D7, ADR-016 fresh-read pattern)
 	bodies     *bodystore.Recorder                           // nil-safe: body capture off when nil (D4, ADR-018)
+	usage      *telemetry.Collector                          // nil-safe: usage telemetry off when nil (control-plane mode)
 }
 
 // SetMasking enables the PII masking filter for the configured teams (ADR-009).
@@ -68,6 +70,12 @@ func (h *MessagesHandler) SetTeamPolicy(fn func(team string) (keystore.TeamRecor
 // SetBodyRecorder enables opt-in request/response body capture (D4, ADR-018).
 // nil-safe: leaving it unset keeps the zero-overhead fast path.
 func (h *MessagesHandler) SetBodyRecorder(r *bodystore.Recorder) { h.bodies = r }
+
+// SetUsageCollector enables per-request usage telemetry (control-plane mode):
+// every settle folds (team, owner, upstream model, usage, cost) into the
+// collector's current window. nil-safe: unset keeps standalone behavior
+// byte-identical.
+func (h *MessagesHandler) SetUsageCollector(c *telemetry.Collector) { h.usage = c }
 
 func NewMessagesHandler(r *router.Router) *MessagesHandler { return &MessagesHandler{r: r} }
 
@@ -543,6 +551,10 @@ func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upst
 		CacheWrite1h: write1h,
 	}
 	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table)
+	if h.usage != nil {
+		// Attribute to the UPSTREAM model — the name pricing billed.
+		h.usage.Record(p.Team, p.Owner, upstream, pu, cost)
+	}
 	return &audit.CostRef{
 		AmountUSDMicros: cost,
 		PricingMissing:  missing,

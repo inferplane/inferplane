@@ -19,6 +19,7 @@ import (
 	"github.com/inferplane/inferplane/internal/limiter"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
+	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/pkg/schema"
 	"github.com/inferplane/inferplane/providers"
 )
@@ -453,5 +454,42 @@ func TestInvokeStreamingMidStreamErrorEmitsExceptionFrame(t *testing.T) {
 	}
 	if got := headerStr(t, msgs[1], ":exception-type"); got != "internalServerException" {
 		t.Fatalf(":exception-type = %q", got)
+	}
+}
+
+// T4 (usage telemetry): one settled request → one collector entry attributed
+// to the upstream (pricing-billed) model.
+func TestInvokeRecordsUsageIntoCollector(t *testing.T) {
+	gov := governance.NewGovernor(nil, limiter.NewMemory(), budget.NewMemory(), nil)
+	provs := map[string]providers.Provider{"p": &captureProvider{}}
+	models := map[string]config.ModelConfig{
+		"claude-x": {Targets: []config.Target{{Provider: "p", Model: "up"}}},
+	}
+	h := holderFor(provs, models)
+	handler := NewInvokeHandlerMetrics(router.New(h), h, nil, gov, nil, false)
+	col := telemetry.NewCollector("dp-test")
+	handler.SetUsageCollector(col)
+
+	req := invokeReq("claude-x", `{"messages":[{"role":"user","content":"hi"}]}`)
+	req = req.WithContext(principal.With(req.Context(), keystore.Principal{
+		KeyID: "ik", Team: "platform-eng", AllowedModels: []string{"*"},
+		KeyOptions: keystore.KeyOptions{Owner: "dev-3"},
+	}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+
+	b := col.Drain(time.Now())
+	if b == nil || len(b.Entries) != 1 {
+		t.Fatalf("want exactly one collector entry, got %+v", b)
+	}
+	e := b.Entries[0]
+	if e.Team != "platform-eng" || e.User != "dev-3" || e.Model != "up" {
+		t.Fatalf("attribution wrong (model must be the UPSTREAM id): %+v", e)
+	}
+	if e.InputTokens != 10 || e.OutputTokens != 5 {
+		t.Fatalf("token counts wrong: %+v", e)
 	}
 }

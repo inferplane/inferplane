@@ -38,6 +38,7 @@ import (
 	"github.com/inferplane/inferplane/internal/server/analyticsapi"
 	"github.com/inferplane/inferplane/internal/server/authapi"
 	"github.com/inferplane/inferplane/internal/server/configapi"
+	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/internal/tracing"
 	"github.com/inferplane/inferplane/pkg/ulid"
 	"github.com/inferplane/inferplane/providers"
@@ -404,6 +405,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// unreachable past tolerance) or its allowance is exhausted globally;
 	// soft rules fail open per failurePolicy.
 	var syncer *proxy.Syncer
+	var usageCol *telemetry.Collector
 	if raw.ControlPlane != nil {
 		gov.SetLeaseGate(leases.Blocked)
 		// Mirror inferplaned's startup guard from the client side (PR #50
@@ -421,6 +423,10 @@ func newGateway(cfgPath string) (*gateway, error) {
 		if dataplaneID == "" {
 			dataplaneID = instanceID()
 		}
+		// Usage telemetry (T4): every settle folds into this collector; the
+		// pusher (T5) drains it to the control plane. Only in control-plane
+		// mode — standalone stays byte-identical.
+		usageCol = telemetry.NewCollector(dataplaneID)
 		syncer = &proxy.Syncer{
 			URL:       raw.ControlPlane.URL,
 			Token:     raw.ControlPlane.Token,
@@ -626,7 +632,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 	if pstore != nil {
 		writer = g
 	}
-	g.dataSrv = &http.Server{Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg))}
+	g.dataSrv = &http.Server{Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol))}
 	// Capability map the console reads on bootstrap (spec §4.4). Phase 0a:
 	// analytics index not built yet; provider_store + guardrails reflect what
 	// this assembly already knows. Later phases flip the rest on as they land.

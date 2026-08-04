@@ -24,6 +24,7 @@ import (
 	"github.com/inferplane/inferplane/internal/pricing"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
+	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/pkg/schema"
 	"github.com/inferplane/inferplane/providers"
 	"github.com/inferplane/inferplane/providers/testing/mockprovider"
@@ -1011,5 +1012,49 @@ func TestMessagesPricingGuardBlocksWithoutGovernor(t *testing.T) {
 	handler.ServeHTTP(rec, allowAll(req))
 	if rec.Code != 402 {
 		t.Fatalf("unpriced route with on_missing block must be refused even without a governor, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// T4 (usage telemetry): a served request lands exactly one collector entry
+// carrying the settled cost, attributed to the UPSTREAM (pricing-billed)
+// model; and the ADR-030 cache tiers flow from the wire schema.Usage into
+// the collector entry intact.
+func TestMessagesRecordsUsageIntoCollector(t *testing.T) {
+	gov := governance.NewGovernor(nil, limiter.NewMemory(), budget.NewMemory(), nil)
+	h := NewMessagesHandlerFull(testRouter(), nil, gov)
+	col := telemetry.NewCollector("dp-test")
+	h.SetUsageCollector(col)
+
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-6","stream":true,"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	ctx := principal.With(req.Context(), keystore.Principal{
+		KeyID: "ik", Team: "platform-eng", AllowedModels: []string{"*"},
+		KeyOptions: keystore.KeyOptions{Owner: "dev-1"},
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req.WithContext(ctx))
+	if rec.Code != 200 {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+
+	b := col.Drain(time.Now())
+	if b == nil || len(b.Entries) != 1 {
+		t.Fatalf("want exactly one collector entry, got %+v", b)
+	}
+	e := b.Entries[0]
+	if e.Team != "platform-eng" || e.User != "dev-1" {
+		t.Fatalf("attribution wrong: %+v", e)
+	}
+	// The streaming mock reports input=10 output=5 cache_read=40 and a
+	// 5m/20-token + 1h/4-token cache-write split → 52 µUSD under govPricing
+	// (the TestMessagesStreamingSettlesFullUsage fixture).
+	if e.SpentMicroUSD != 52 {
+		t.Fatalf("collector spend %d, want the settled 52 µUSD", e.SpentMicroUSD)
+	}
+	if e.CacheWrite5mTokens != 20 || e.CacheWrite1hTokens != 4 || e.CacheReadTokens != 40 {
+		t.Fatalf("ADR-030 cache tiers lost between schema.Usage and the collector: %+v", e)
+	}
+	if e.InputTokens != 10 || e.OutputTokens != 5 {
+		t.Fatalf("token counts wrong: %+v", e)
 	}
 }

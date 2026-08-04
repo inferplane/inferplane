@@ -19,6 +19,7 @@ import (
 	"github.com/inferplane/inferplane/internal/openai"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
+	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/pkg/schema"
 	"github.com/inferplane/inferplane/providers"
 	"github.com/inferplane/inferplane/providers/testing/mockprovider"
@@ -427,5 +428,39 @@ func TestChatModelFallbackCrossesOnUpstream404(t *testing.T) {
 	}
 	if got := rec.Header().Get("X-Inferplane-Model-Fallback"); got != "gpt-x-fallback" {
 		t.Fatalf("x-inferplane-model-fallback = %q, want %q", got, "gpt-x-fallback")
+	}
+}
+
+// T4 (usage telemetry): one settled request → one collector entry attributed
+// to the upstream (pricing-billed) model; nil collector stays no-op (every
+// other test in this file runs without one).
+func TestChatRecordsUsageIntoCollector(t *testing.T) {
+	gov := governance.NewGovernor(nil, limiter.NewMemory(), budget.NewMemory(), nil)
+	h := NewChatHandlerFull(testRouter(), nil, gov)
+	col := telemetry.NewCollector("dp-test")
+	h.SetUsageCollector(col)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-x","messages":[{"role":"user","content":"hi"}]}`))
+	ctx := principal.With(req.Context(), keystore.Principal{
+		KeyID: "ik", Team: "t", AllowedModels: []string{"*"},
+		KeyOptions: keystore.KeyOptions{Owner: "dev-2"},
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req.WithContext(ctx))
+	if rec.Code != 200 {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+
+	b := col.Drain(time.Now())
+	if b == nil || len(b.Entries) != 1 {
+		t.Fatalf("want exactly one collector entry, got %+v", b)
+	}
+	e := b.Entries[0]
+	if e.Team != "t" || e.User != "dev-2" || e.Model != "gpt-x" {
+		t.Fatalf("attribution wrong: %+v", e)
+	}
+	if e.InputTokens != 10 || e.OutputTokens != 5 {
+		t.Fatalf("token counts wrong: %+v", e)
 	}
 }
