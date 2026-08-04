@@ -6,9 +6,11 @@ package controlplane
 
 import (
 	"crypto/subtle"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/inferplane/inferplane/internal/telemetry"
@@ -38,6 +40,7 @@ func NewUsageServer(token string, agg telemetry.Aggregator) *UsageServer {
 func (s *UsageServer) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1alpha1/usage", s.auth(s.handleIngest))
 	mux.HandleFunc("GET /v1alpha1/usage", s.auth(s.handleQuery))
+	mux.HandleFunc("GET /v1alpha1/usage/export", s.auth(s.handleExport))
 }
 
 // auth mirrors Server.auth (constant-time bearer comparison) — duplicated
@@ -130,4 +133,122 @@ func parseTimeParam(s string, def time.Time) (time.Time, error) {
 		return t, nil
 	}
 	return time.Parse("2006-01-02", s)
+}
+
+// handleExport streams finest-granularity rows as CSV or JSON. since/until
+// are REQUIRED so an export is always an explicitly bounded range (plan r3).
+// Rows are written as the callback fires — nothing materializes server-side —
+// and the per-write deadline is extended via ResponseController because the
+// server's global WriteTimeout (30s, an ADR-034 slow-drip guard) would
+// otherwise silently truncate a long export (CSV has no trailer). The rolling
+// deadline still cuts off a STALLED client; it just doesn't cap total
+// transfer time. A durable-store failure aborts with 503 up front (and
+// mid-stream simply terminates the connection — never a silent partial file
+// presented as complete, and never a mid-cursor fallback).
+func (s *UsageServer) handleExport(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if q.Get("since") == "" || q.Get("until") == "" {
+		http.Error(w, `{"error":"since and until are required"}`, http.StatusBadRequest)
+		return
+	}
+	since, err := parseTimeParam(q.Get("since"), time.Time{})
+	if err != nil {
+		http.Error(w, `{"error":"bad since"}`, http.StatusBadRequest)
+		return
+	}
+	until, err := parseTimeParam(q.Get("until"), time.Time{})
+	if err != nil {
+		http.Error(w, `{"error":"bad until"}`, http.StatusBadRequest)
+		return
+	}
+	format := q.Get("format")
+	if format == "" {
+		format = "json"
+	}
+	if format != "json" && format != "csv" {
+		http.Error(w, `{"error":"format must be csv or json"}`, http.StatusBadRequest)
+		return
+	}
+
+	rc := http.NewResponseController(w)
+	extend := func() { _ = rc.SetWriteDeadline(time.Now().Add(30 * time.Second)) }
+
+	var writeRow func(telemetry.StoredRow) error
+	var finish func()
+	switch format {
+	case "csv":
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		cw := csv.NewWriter(w)
+		header := []string{"dataplane", "window_start", "window_end", "team", "user", "model",
+			"spent_micro_usd", "input_tokens", "output_tokens",
+			"cache_read_tokens", "cache_write_5m_tokens", "cache_write_1h_tokens"}
+		headerWritten := false
+		writeRow = func(row telemetry.StoredRow) error {
+			if !headerWritten {
+				if err := cw.Write(header); err != nil {
+					return err
+				}
+				headerWritten = true
+			}
+			extend()
+			return cw.Write([]string{
+				row.Dataplane, row.WindowStart.Format(time.RFC3339Nano), row.WindowEnd.Format(time.RFC3339Nano),
+				row.Team, row.User, row.Model,
+				strconv.FormatInt(row.SpentMicroUSD, 10), strconv.FormatInt(row.InputTokens, 10),
+				strconv.FormatInt(row.OutputTokens, 10), strconv.FormatInt(row.CacheReadTokens, 10),
+				strconv.FormatInt(row.CacheWrite5mTokens, 10), strconv.FormatInt(row.CacheWrite1hTokens, 10),
+			})
+		}
+		finish = func() {
+			if !headerWritten {
+				_ = cw.Write(header) // empty export still yields the header
+			}
+			cw.Flush()
+		}
+	default: // json — a stream of row objects inside an array
+		w.Header().Set("Content-Type", "application/json")
+		enc := json.NewEncoder(w)
+		first := true
+		writeRow = func(row telemetry.StoredRow) error {
+			// The opening bracket is written lazily with the FIRST row so a
+			// store failure before any output can still send a clean 503
+			// (writing it eagerly would commit the 200).
+			sep := ","
+			if first {
+				sep = "["
+				first = false
+			}
+			if _, err := w.Write([]byte(sep)); err != nil {
+				return err
+			}
+			extend()
+			return enc.Encode(row)
+		}
+		finish = func() {
+			if first {
+				_, _ = w.Write([]byte("[]"))
+				return
+			}
+			_, _ = w.Write([]byte("]"))
+		}
+	}
+
+	// Probe availability BEFORE committing the 200: run Rows and let the
+	// first callback commit the response. If Rows fails before any row was
+	// written, we can still send a clean 503.
+	wroteAny := false
+	err = s.agg.Rows(r.Context(), since, until, func(row telemetry.StoredRow) error {
+		wroteAny = true
+		return writeRow(row)
+	})
+	if err != nil && !wroteAny {
+		http.Error(w, `{"error":"usage store unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	// err != nil after rows were written: the stream is already committed —
+	// terminating without finish() leaves an unterminated body the client's
+	// parser rejects, which is the honest signal.
+	if err == nil {
+		finish()
+	}
 }
