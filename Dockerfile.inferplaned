@@ -1,0 +1,16 @@
+# Build a static single binary, run on a minimal distroless base.
+FROM golang:1.25 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+# CGO disabled → pure-Go static binary
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/inferplaned ./cmd/inferplaned
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/inferplaned /usr/local/bin/inferplaned
+COPY examples/policies-ecs-demo /etc/inferplaned/policies
+USER nonroot:nonroot
+EXPOSE 7601
+ENTRYPOINT ["/usr/local/bin/inferplaned"]
+CMD ["--listen", ":7601", "--policies", "/etc/inferplaned/policies"]

@@ -1,0 +1,26 @@
+# Control-plane demo policy for the inferplaned ECS deployment (inferplane-demo).
+# Distinct from examples/policies/demo.yaml (that one documents the local
+# file-channel model names); this one matches the actual model ids the
+# itrust demo requests via Bedrock global inference profiles.
+apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata:
+  name: demo-team
+spec:
+  subject:
+    team: demo
+  rules:
+  - name: monthly-hard-cap
+    failurePolicy: FailClosed
+    budget:
+      limitMilliUSD: 50000
+      hardCap: true
+  - name: throughput
+    failurePolicy: FailOpen
+    rate:
+      rpm: 300
+      tpm: 2000000
+  - name: models
+    failurePolicy: FailOpen
+    modelAccess:
+      allow: ["*"]
