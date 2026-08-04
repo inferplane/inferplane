@@ -1,5 +1,7 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 88e0393ee739 · generated-at: 2026-06-12 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
-> You are Codex, an external reviewer — project context below.
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 923ba8e33aaf · generated-at: 2026-08-01 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+> You are an external reviewer for this repo — project context below, distilled
+> from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
+> per-AI copy).
 
 # inferplane — reviewer context
 
@@ -7,6 +9,12 @@ LLM consumption-governance gateway: virtual keys, team RBAC, quotas/budgets,
 tamper-evident audit for Claude Code / OpenCode traffic → Anthropic / Bedrock /
 OpenAI-compatible upstreams. Go 1.25, single static binary (`CGO_ENABLED=0`,
 every dependency pure-Go), Kubernetes-native, Apache-2.0, CNCF Sandbox aspirant.
+
+Two binaries: **`cmd/mayu`** is the node-local data plane (the full gateway —
+routing, auth, governance, audit; runs standalone, no control plane required).
+**`cmd/inferplaned`** is the control plane (ADR-034) — distributes
+`GovernancePolicy` documents and issues budget leases over one heartbeat; it
+never carries inference traffic.
 
 ## Build · test · lint
 
@@ -31,7 +39,12 @@ credentials, or a real IdP (httptest fakes only).
 - Config-coupled packages get decoupled mirror types (e.g.
   `governance.ConfigTeam`, `adminauth.MappingConfig`) — never import
   `internal/config` from a leaf.
-- `cmd/mayu` stays a thin assembly diagram; logic lives in `internal/*`.
+- `cmd/mayu` and `cmd/inferplaned` stay thin assembly diagrams; logic lives in
+  `internal/*`. `internal/policy` is the rule/lease schema shared by both
+  binaries — the single source of truth for policy semantics.
+- A data plane's policy source is `policies` (local file, watched) XOR
+  `control_plane` (ADR-034 heartbeat) — config load must reject both set at
+  once.
 
 ## Banned patterns / security mandates (violations are CRITICAL)
 
@@ -50,6 +63,8 @@ credentials, or a real IdP (httptest fakes only).
 - Admin-plane: JWT-shaped static tokens with OIDC enabled; non-https OIDC
   issuer; email or raw IdP groups in audit records or request context
   (opaque `sub` only); auditing 401s (only authenticated 403s are audited).
+- A `GovernancePolicy` rule with `hardCap: true` and a non-`FailClosed`
+  `failurePolicy` (hard caps must fail closed).
 - Skipping DCO sign-off on commits.
 
 ## Review expectations
@@ -57,7 +72,9 @@ credentials, or a real IdP (httptest fakes only).
 - TDD: tests land with (or before) the change; adversarial cases for any
   auth/governance path (alg confusion, fallthrough, fail-open on error paths).
 - Two-phase governance: PreCheck BEFORE billing, Settle AFTER; `on_exceeded`
-  block wins ties.
+  block wins ties — including across layered sources (config team vs. policy
+  overlay vs. control-plane lease clamp: most-restrictive wins, never a soft
+  layer loosening a blocking one).
 - Errors wrapped with `%w`; ingress errors returned in the ingress protocol's
   own error shape.
 - Audit chain: records are hashed as exact line bytes — new fields are
@@ -70,8 +87,10 @@ credentials, or a real IdP (httptest fakes only).
 2. Any banned pattern above? Any secret in code, config, or test fixtures?
 3. Auth paths: total routing, no fallthrough, 401 vs 403 correct, fail-closed
    error paths, constant-time comparisons preserved?
-4. Tests: can each new assertion actually fail? Races under `-race`?
-5. Docs: ADR for decisions, reference docs synced for schema/endpoint changes.
+4. Policy/governance layering: does a narrower/softer source ever loosen a
+   stricter one it's layered under (block→warn, hard→soft)?
+5. Tests: can each new assertion actually fail? Races under `-race`?
+6. Docs: ADR for decisions, reference docs synced for schema/endpoint changes.
 
 Known false-positives to suppress: `/metrics` being unauthenticated is by
 design (§5.5); the admin console's static assets being unauthenticated is by

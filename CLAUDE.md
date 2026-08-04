@@ -60,6 +60,7 @@ tests/             - Harness tests (hooks, secret patterns, structure) — bash,
 - **Cache invariant (§4.4):** when provider protocol == ingress protocol, forward the request body **verbatim** (`RawBody`) so `cache_control` and prompt-cache hits are never corrupted.
 - **Two-phase governance:** pre-check BEFORE billing, settle AFTER. `on_exceeded` is `block` | `warn` (block wins on tie).
 - **Cost is integer microUSD** — never float. Round-half-even via `math/big`.
+- **`mayu` runs standalone by design** — a control plane is optional. `policies` (local file channel) and `control_plane` (ADR-034 heartbeat to `inferplaned`) are mutually exclusive config: one policy source at a time.
 
 ### Security mandates (non-negotiable)
 
@@ -81,7 +82,10 @@ go test ./... -race
 go vet ./...
 gofmt -l .
 
-# Run the gateway
+# Run a single package's tests, or a single test by name
+go test ./internal/policy/... -run TestModelAllowed -v
+
+# Run the gateway (data plane :8080, admin plane + console :9090/admin/ui/)
 go run ./cmd/mayu serve --config examples/config.json
 
 # Issue a virtual key / verify the audit chain
