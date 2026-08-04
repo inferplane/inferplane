@@ -2,15 +2,20 @@
 
 **Spec:** docs/superpowers/specs/2026-08-04-control-plane-usage-telemetry-design.md
 **Branch:** feat/control-plane-usage-telemetry
-**Revision:** r3 — two P2 consensus gate rounds (codex gpt-5.6-sol, kiro-cli
-claude-opus-4.8, agy Gemini 3.1 Pro). Round 1 (unanimous FAIL): eight issue
-classes, all confirmed resolved in round 2 by all three reviewers. Round 2
-(unanimous FAIL on NEW findings): ack-before-durable data loss, unbounded
-memory retention, poison-batch head-of-line blocking, export materialization,
-DSN leakage, boot-blocking PG connect — folded into r3 (notably: the CP-side
-write queue is DELETED; mayu's FIFO is the single retry store, PG writes are
-synchronous-when-healthy). Chair verified code-level claims each round; refuted
-with evidence: partial-settle double-count (settle runs once per request).
+**Revision:** r4 — three P2 consensus gate rounds (codex gpt-5.6-sol, kiro-cli
+claude-opus-4.8, agy Gemini 3.1 Pro), each round's classes confirmed resolved
+by the next. R1: eight architectural classes. R2: durability design (CP-side
+write queue DELETED — mayu's FIFO is the single retry store, PG writes
+synchronous-when-healthy, 503 on failure), bounded retention, poison-batch
+classification, streamed export, DSN redaction, lazy connect. R3: export vs
+30s WriteTimeout (ResponseController per-request deadline), snapshot-under-lock
+memory streaming (slow client must not freeze ingestion), degraded-data signal
+on memory fallback, no-redirect HTTP client, NUL prevalidation, PG read
+timeout, no mid-cursor fallback, 408/429 retryable carve-out. Chair verified
+code-level claims each round; refuted with evidence: partial-settle
+double-count (settle runs once per request). Accepted limitation (recorded,
+not fixed): no batch splitting for >4 MiB pathological-cardinality windows —
+dropped and counted.
 **Method:** TDD per task, one commit per task (`git commit -s`), all four gates
 green each task: build (`CGO_ENABLED=0 go build ./cmd/...`), `go test ./... -race`,
 `go vet ./... && gofmt -l .`, `bash tests/run-all.sh`.
@@ -33,11 +38,13 @@ CacheReadTokens, CacheWrite5mTokens, CacheWrite1hTokens int64}` and
 `UsageBatch{Dataplane string; WindowStart, WindowEnd time.Time; Entries
 []UsageEntry}` with JSON tags matching spec D3. `(*UsageBatch).Validate()
 error`: non-empty dataplane, WindowStart < WindowEnd, non-negative counts,
-team+model required per entry (user may be empty), and **no duplicate
+team+model required per entry (user may be empty), **no duplicate
 (team, user, model) key within a batch** (a duplicate would violate the
 Postgres primary key and turn the batch into a permanently-rejected poison
-message). `Model` is the **resolved** model (the name pricing billed), not the
-requested alias — pinned by test.
+message), and **no NUL bytes in any string field** (valid JSON but invalid
+Postgres TEXT — without prevalidation such a batch 503s forever). `Model` is
+the **resolved** model (the name pricing billed), not the requested alias —
+pinned by test.
 
 - [ ] Write failing tests: valid batch passes Validate; each violation fails
       with a distinct error message
@@ -63,9 +70,14 @@ requested alias — pinned by test.
   contract Tasks 7, 9, 11 build on.
 - `Rows(ctx, since, until time.Time, fn func(StoredRow) error) error` —
   finest-granularity raw rows for Task 9's export, delivered through a
-  callback so no implementation ever materializes an unbounded slice
-  (`StoredRow` = UsageEntry + dataplane + window bounds; Postgres iterates the
-  cursor, memory iterates the map).
+  callback so no implementation materializes an unbounded slice (`StoredRow` =
+  UsageEntry + dataplane + window bounds). **The memory implementation
+  snapshots the matching rows under the lock, releases it, THEN invokes the
+  callback** — the callback writes to a network client, and holding the mutex
+  across client writes would let one slow export freeze all ingestion (the
+  snapshot is bounded by the 24h retention, so this is not the unbounded
+  materialization banned above). Postgres iterates its cursor — no memory lock
+  involved.
 
 `NewMemoryAggregator(retention time.Duration)` — mutex-guarded map keyed by
 `(dataplane, window_start)` with **bounded retention**: on every Upsert,
@@ -148,11 +160,14 @@ Drain → append to a bounded FIFO (cap 60 windows ≈ 1h) → **flush the whole
 backlog oldest-first**, stopping at the first **retryable** failure (so the
 buffer actually drains after an outage instead of shrinking by at most one per
 tick). Failure classification prevents poison-batch head-of-line blocking:
-**4xx = permanent** (the batch will never be accepted — drop it and count it),
-**5xx / network error = retryable** (keep and retry next tick; this is the
-retry leg the control plane relies on — Task 8 returns 503 while Postgres is
-down). The HTTP client has an explicit timeout (10s, same posture as the
-Syncer) so a hung POST can never stall future drains or shutdown. On overflow
+**4xx = permanent** (drop and count) **except 408 and 429, which are
+retryable** (an LB/proxy in front of inferplaned emits both for transient
+conditions); **5xx / network error = retryable** (keep and retry next tick;
+this is the retry leg the control plane relies on — Task 8 returns 503 while
+Postgres is down). The HTTP client has an explicit timeout (10s, same posture
+as the Syncer) and **does not follow redirects**
+(`CheckRedirect: ErrUseLastResponse` — a redirected POST silently becomes a
+GET and a 200 from the wrong endpoint would discard an unpersisted batch). On overflow
 drop the oldest and log + increment a Prometheus counter
 (`inferplane_usage_windows_dropped_total`, no team/key labels) — never
 silently. The counter is registered in `internal/metrics` like every other
@@ -246,7 +261,14 @@ the exact deployment reality the spec cites). So:
   is NO CP-side write queue. `Query`/`Rows` serve from PG when healthy (full
   history; the synchronous write also closes the read-after-write gap), fall
   back to memory (retention window) on PG error — queries keep serving through
-  an outage.
+  an outage. Three read-path rules (round-3 gate): PG reads run under a
+  **short per-query context timeout (5s)** so the fallback fires well inside
+  the HTTP write deadline; a memory-fallback result is **explicitly marked
+  degraded** (`QueryResult.Degraded bool`, surfaced in the API response and
+  the Task 11 UI — a billing view silently missing history is worse than an
+  error); `Rows` decides PG-vs-memory **once, up front — never mid-cursor**
+  (falling back after the callback has emitted PG rows would duplicate rows
+  in committed output; a mid-cursor failure aborts the export with an error).
 - Config: fixed env var `INFERPLANED_USAGE_DSN` (the `INFERPLANED_TOKEN`
   precedent — inferplaned has no config file; the spec's `usage_store` block
   shape is amended accordingly, recorded in ADR-036). Set → durable
@@ -272,10 +294,20 @@ rows via the `Aggregator.Rows` callback (no grouping), behind the bearer
 middleware, written row-by-row to the response as the callback fires (真
 streaming — nothing materializes server-side). `since`/`until` are
 **required** (400 when absent) so an export is always an explicitly bounded
-range. Analysis/migration convenience, not DR.
+range. inferplaned's `http.Server` has `WriteTimeout: 30s` (an ADR-034-era
+slow-drip guard) — an export outlasting it would be **silently truncated**
+(CSV has no trailer), so the handler extends its own deadline per write via
+`http.NewResponseController(w).SetWriteDeadline` (the DoS posture holds: the
+rolling deadline still cuts off a stalled client, it just doesn't cap total
+transfer time). During a Postgres outage export returns **503** rather than a
+silently partial 24h-window file (Task 8's no-mid-cursor-fallback rule; a
+degraded export is worse than a retryable error for analysis data).
+Analysis/migration convenience, not DR.
 
 - [ ] Write failing tests: CSV header + row count; JSON round-trips; default
-      format json; missing since/until → 400; 401 without token
+      format json; missing since/until → 400; 401 without token; an export
+      running past the server WriteTimeout is NOT truncated (short-timeout
+      test server); PG-down export → 503
 - [ ] Implement export; gates green; commit
 
 ### Task 10: Config export (GovernancePolicy YAML)
@@ -314,7 +346,9 @@ paradox: the browser loads the shell, the operator enters the bearer token
 once, JS holds it in memory only (never localStorage/sessionStorage/cookies)
 and calls the **authed** `GET /v1alpha1/usage`. Vanilla JS, `go:embed`, CSP
 `default-src 'self'`, no inline style/handlers. Team table → period spend →
-model breakdown. No charts (YAGNI).
+model breakdown; when the response carries `degraded: true` (Task 8's
+memory-fallback signal) the view shows a visible "history incomplete —
+durable store unavailable" banner. No charts (YAGNI).
 
 - [ ] Write failing tests: CSP header on every UI response; embedded assets
       served at /ui/; served bytes contain no secret AND no
