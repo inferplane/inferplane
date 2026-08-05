@@ -92,6 +92,7 @@
     token = tok;
     $("auth-section").hidden = true;
     $("controls").hidden = false;
+    $("nav").hidden = false;
     loadTeams();
   }
 
@@ -101,6 +102,210 @@
     unlock(tok);
   });
   $("refresh").addEventListener("click", loadTeams);
+
+  /* ---------- Policies tab ---------- */
+
+  // api is the shared fetch wrapper for the policy endpoints: it surfaces the
+  // server's own {"error":…} text (those messages are sanitized and secret-free)
+  // and returns null for 204. Mirrors mayu's adminui api() helper.
+  async function api(method, path, body) {
+    const resp = await fetch(path, {
+      method,
+      headers: Object.assign(
+        token ? { Authorization: "Bearer " + token } : {},
+        body ? { "Content-Type": "application/json" } : {}
+      ),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (resp.status === 401) throw new Error("unauthorized — check the token");
+    if (resp.status === 204) return null;
+    if (!resp.ok) {
+      let msg = "request failed (HTTP " + resp.status + ")";
+      try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch { /* keep generic */ }
+      throw new Error(msg);
+    }
+    return resp.json();
+  }
+
+  let policiesLoaded = false;
+
+  function showView(which) {
+    setError("");
+    $("usage-view").hidden = which !== "usage";
+    $("policies-view").hidden = which !== "policies";
+    if (which === "policies" && !policiesLoaded) {
+      policiesLoaded = true;
+      loadPolicies();
+    }
+  }
+  $("nav-usage").addEventListener("click", () => showView("usage"));
+  $("nav-policies").addEventListener("click", () => showView("policies"));
+
+  function loadPolicies() {
+    return api("GET", "/v1alpha1/policies")
+      .then((res) => {
+        const list = $("policies-list");
+        list.textContent = "";
+        $("policies-readonly").hidden = !!res.writable;
+        for (const view of res.policies || []) {
+          list.appendChild(policyCard(view, res.writable));
+        }
+      })
+      .catch((e) => setError(e.message));
+  }
+
+  // firstRule returns the first rule object carrying the given kind field
+  // ("budget" | "rate" | "modelAccess"), or null. Rules are a list and a rule
+  // may be named anything, so the KIND field — not the name — identifies it.
+  function firstRule(doc, kind) {
+    for (const r of (doc.spec.rules || [])) if (r[kind]) return r;
+    return null;
+  }
+
+  // applyRule edits one rule kind in place: unchecked removes the rule
+  // entirely, checked updates the existing rule or appends a new one named
+  // defaultName. Every other rule in the document is left untouched.
+  function applyRule(doc, kind, enabled, defaultName, build, failurePolicy) {
+    const existing = firstRule(doc, kind);
+    if (!enabled) {
+      if (existing) doc.spec.rules = doc.spec.rules.filter((r) => r !== existing);
+      return;
+    }
+    if (existing) {
+      existing[kind] = build();
+      if (failurePolicy) existing.failurePolicy = failurePolicy;
+      return;
+    }
+    const rule = { name: defaultName, failurePolicy: failurePolicy || "FailOpen" };
+    rule[kind] = build();
+    doc.spec.rules.push(rule);
+  }
+
+  // saveCard mutates a structuredClone of the FETCHED document and PUTs the
+  // whole thing — never a document rebuilt from the inputs. A policy may carry
+  // rules this form does not render (e.g. routing) and any future field; the
+  // clone-and-mutate discipline is what lets them survive the round trip.
+  function saveCard(view, refs) {
+    if (refs.modelsOn.checked) {
+      const parsed = refs.allow.value.split(",").map((s) => s.trim()).filter((s) => s !== "");
+      if (parsed.length === 0) {
+        setError("model access allow list cannot be empty — use * to allow every model");
+        return;
+      }
+    }
+    const doc = structuredClone(view.policy);
+    doc.spec.rules = doc.spec.rules || [];
+    applyRule(doc, "budget", refs.budgetOn.checked, "budget", () => ({
+      limitMilliUSD: Number(refs.limit.value),
+      hardCap: refs.hardCap.checked,
+      lease: { grantMilliUSD: Number(refs.grant.value), renewInterval: refs.renew.value },
+      adminContact: refs.contact.value,
+    }), refs.hardCap.checked ? "FailClosed" : "FailOpen");
+    applyRule(doc, "rate", refs.rateOn.checked, "throughput", () => ({
+      rpm: Number(refs.rpm.value), tpm: Number(refs.tpm.value),
+    }), "FailOpen");
+    applyRule(doc, "modelAccess", refs.modelsOn.checked, "models", () => ({
+      allow: refs.allow.value.split(",").map((s) => s.trim()).filter((s) => s !== ""),
+    }), "FailOpen");
+    return api("PUT", "/v1alpha1/policies/" + encodeURIComponent(view.name), doc)
+      .then(loadPolicies)
+      .catch((e) => setError(e.message));
+  }
+
+  function policyCard(view, writable) {
+    const doc = view.policy;
+    const card = document.createElement("section");
+    card.className = "card";
+
+    const title = document.createElement("h3");
+    title.textContent = view.name;
+    card.appendChild(title);
+
+    const subject = (doc.spec && doc.spec.subject) || {};
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    let hintText = "team: " + (subject.team || "—") + " · user: " + (subject.user || "—");
+    if (view.updated_at) hintText += " · updated " + view.updated_at;
+    hint.textContent = hintText;
+    card.appendChild(hint);
+
+    const inputs = [];
+    const field = (parent, labelText, type, value, placeholder) => {
+      const label = document.createElement("label");
+      label.textContent = labelText;
+      const input = document.createElement("input");
+      input.type = type;
+      if (placeholder) input.placeholder = placeholder;
+      if (type === "checkbox") input.checked = !!value;
+      else input.value = value == null ? "" : String(value);
+      label.appendChild(input);
+      parent.appendChild(label);
+      inputs.push(input);
+      return input;
+    };
+    const group = (titleText, exists) => {
+      const div = document.createElement("div");
+      div.className = "field-group";
+      const on = field(div, titleText, "checkbox", exists);
+      card.appendChild(div);
+      return { div, on };
+    };
+
+    const budgetRule = firstRule(doc, "budget");
+    const b = (budgetRule && budgetRule.budget) || {};
+    const bLease = b.lease || {};
+    const budgetGroup = group("Budget", !!budgetRule);
+    const limit = field(budgetGroup.div, "limitMilliUSD", "number", b.limitMilliUSD);
+    const hardCap = field(budgetGroup.div, "hardCap", "checkbox", b.hardCap);
+    const grant = field(budgetGroup.div, "lease.grantMilliUSD", "number", bLease.grantMilliUSD);
+    const renew = field(budgetGroup.div, "lease.renewInterval", "text", bLease.renewInterval, "10s");
+    const contact = field(budgetGroup.div, "adminContact", "text", b.adminContact);
+
+    const rateRule = firstRule(doc, "rate");
+    const rt = (rateRule && rateRule.rate) || {};
+    const rateGroup = group("Rate", !!rateRule);
+    const rpm = field(rateGroup.div, "rpm", "number", rt.rpm);
+    const tpm = field(rateGroup.div, "tpm", "number", rt.tpm);
+
+    const modelsRule = firstRule(doc, "modelAccess");
+    const ma = (modelsRule && modelsRule.modelAccess) || {};
+    const modelsGroup = group("Model access", !!modelsRule);
+    const allow = field(modelsGroup.div, "allow (comma-separated)", "text",
+      (ma.allow || []).join(", "), "*");
+
+    if (!writable) {
+      for (const input of inputs) input.disabled = true;
+      return card;
+    }
+
+    const refs = {
+      budgetOn: budgetGroup.on, limit: limit, hardCap: hardCap, grant: grant,
+      renew: renew, contact: contact,
+      rateOn: rateGroup.on, rpm: rpm, tpm: tpm,
+      modelsOn: modelsGroup.on, allow: allow,
+    };
+
+    const save = document.createElement("button");
+    save.textContent = "Save";
+    save.addEventListener("click", () => {
+      setError("");
+      saveCard(view, refs);
+    });
+    card.appendChild(save);
+
+    const del = document.createElement("button");
+    del.textContent = "Delete";
+    del.addEventListener("click", () => {
+      if (!confirm('Delete policy "' + view.name + '"? Its rules stop being enforced.')) return;
+      setError("");
+      api("DELETE", "/v1alpha1/policies/" + encodeURIComponent(view.name))
+        .then(loadPolicies)
+        .catch((e) => setError(e.message));
+    });
+    card.appendChild(del);
+
+    return card;
+  }
 
   /* ---------- console SSO (ADR-037, ported from mayu's adminui) ---------- */
 

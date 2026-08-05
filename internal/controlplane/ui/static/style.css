@@ -37,3 +37,11 @@ th:first-child, td:first-child { text-align: left; }
 thead th { border-bottom: 2px solid var(--accent); }
 tr.clickable { cursor: pointer; }
 tr.clickable:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+/* ---------- policies tab ---------- */
+nav { margin: 1rem 0; display: flex; gap: 0.5rem; }
+.card { margin: 1.2rem 0; padding: 0.9rem 1rem; border: 1px solid var(--border); border-radius: 6px; }
+.card h3 { margin: 0 0 0.2rem; font-size: 1.05rem; }
+.card label { display: inline-flex; align-items: center; gap: 0.35rem; margin: 0.25rem 0.9rem 0.25rem 0; }
+.card input { max-width: 11rem; }
+.field-group { margin: 0.6rem 0 0; padding-top: 0.6rem; border-top: 1px dashed var(--border); }

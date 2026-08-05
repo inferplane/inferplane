@@ -12,6 +12,11 @@
     <p class="sub">control-plane view · integer µUSD · read-only</p>
   </header>
 
+  <nav id="nav" hidden>
+    <button id="nav-usage">Usage</button>
+    <button id="nav-policies">Policies</button>
+  </nav>
+
   <section id="auth-section">
     <label for="token">Control-plane token</label>
     <input type="password" id="token" autocomplete="off" placeholder="INFERPLANED_TOKEN">
@@ -21,6 +26,7 @@
     <button id="sso-button" hidden>Sign in with SSO</button>
   </section>
 
+  <div id="usage-view">
   <section id="controls" hidden>
     <label for="since">From</label>
     <input type="date" id="since">
@@ -32,7 +38,6 @@
   <div id="degraded-banner" class="banner" hidden>
     history incomplete — durable store unavailable (showing recent in-memory data only)
   </div>
-  <p id="error" class="error" hidden></p>
 
   <section id="teams-section" hidden>
     <h2>Spend by team</h2>
@@ -49,6 +54,18 @@
       <tbody></tbody>
     </table>
   </section>
+  </div>
+
+  <p id="error" class="error" hidden></p>
+
+  <div id="policies-view" hidden>
+    <h2>GovernancePolicy documents</h2>
+    <p id="policies-readonly" class="hint" hidden>
+      Read-only: no policy store is configured. Set INFERPLANED_POLICY_DSN on inferplaned
+      to edit policies here; until then, edit the --policies files and redeploy.
+    </p>
+    <div id="policies-list"></div>
+  </div>
 
   <script src="app.js"></script>
 </body>
