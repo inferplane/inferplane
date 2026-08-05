@@ -30,8 +30,13 @@ import (
 	"github.com/inferplane/inferplane/internal/controlplane"
 	"github.com/inferplane/inferplane/internal/controlplane/ui"
 	"github.com/inferplane/inferplane/internal/policy"
+	"github.com/inferplane/inferplane/internal/policystore"
 	"github.com/inferplane/inferplane/internal/telemetry"
 )
+
+// policyStoreBootTimeout bounds the policy store's boot attach (seed + first
+// load) so an unreachable database fails the boot instead of hanging it.
+const policyStoreBootTimeout = 10 * time.Second
 
 func main() {
 	// Loopback-only by default: without INFERPLANED_TOKEN set there is no
@@ -158,10 +163,37 @@ func buildMux(policies, token string, oidc *oidcEnv) (mux *http.ServeMux, cp *co
 		}))
 	}
 
+	// Policy documents are DB-authoritative when INFERPLANED_POLICY_DSN is set
+	// (ADR-038): the --policies file channel becomes the ONE-TIME seed source
+	// and stops being watched. v1 keeps --policies required as that seed
+	// source — a DSN alone has nothing to seed from.
+	policyDSN := os.Getenv("INFERPLANED_POLICY_DSN")
+	if policyDSN != "" && policies == "" {
+		return nil, nil, closePG, errors.New("INFERPLANED_POLICY_DSN is set but --policies is empty: the policy file channel is the one-time seed source for the policy store")
+	}
 	if policies != "" {
 		cp, err = controlplane.NewServer(token, policies, opts...)
 		if err != nil {
 			return nil, nil, closePG, fmt.Errorf("policies: %w", err)
+		}
+		if policyDSN != "" {
+			ps, err := policystore.NewPostgres(policyDSN)
+			if err != nil {
+				return nil, nil, closePG, fmt.Errorf("policy store: %w", err)
+			}
+			closeUsage := closePG
+			closePG = func() { ps.Close(); closeUsage() }
+			// Unlike the usage store (ADR-036, lazy — losing telemetry beats
+			// blocking boot), the policy store is AUTHORITATIVE: booting on
+			// possibly-stale file content while claiming DB authority would
+			// distribute the wrong rules. Attach (seed + first load) is
+			// therefore a hard, bounded boot dependency.
+			actx, cancel := context.WithTimeout(context.Background(), policyStoreBootTimeout)
+			defer cancel()
+			if err := cp.AttachPolicyStore(actx, ps); err != nil {
+				return nil, nil, closePG, fmt.Errorf("policy store: %w", err)
+			}
+			log.Print("inferplaned: GovernancePolicy documents are postgres-authoritative (INFERPLANED_POLICY_DSN set); --policies is seed-only and no longer watched")
 		}
 		cp.Mount(mux)
 	}
@@ -181,7 +213,7 @@ func run(listen, policies, token string, oidc *oidcEnv) error {
 		return err
 	}
 	defer closePG()
-	if cp != nil {
+	if cp != nil && !cp.PolicyStoreAttached() {
 		go cp.Watch(ctx, func(err error) { log.Print("inferplaned: ", err) })
 	}
 
