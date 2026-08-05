@@ -15,6 +15,14 @@ spec:
     budget:
       limitMilliUSD: 50000
       hardCap: true
+      lease:
+        # Hand out the full $50 cap on the first lease, no trickle. Assumes a
+        # single data plane (this devbox's mayu): the first dataplane to renew
+        # claims the whole remaining budget, so a second one would be granted
+        # 0 and immediately fail closed (hardCap+FailClosed). If a second
+        # dataplane joins, lower grantMilliUSD and add renewInterval: "30s".
+        grantMilliUSD: 50000
+      adminContact: "atomoh@inferplane.dev"
   - name: throughput
     failurePolicy: FailOpen
     rate:
