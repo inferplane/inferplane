@@ -8,7 +8,9 @@ during implementation; chair verified every code-level claim before accepting.
 **Related:** ADR-031 (control/data plane split — this is the "telemetry
 aggregation" half), ADR-034 (sync heartbeat; this channel is deliberately
 separate), ADR-030 (cache-tier billing — tiers preserved end to end), ADR-008
-(export posture), spec: `docs/superpowers/specs/2026-08-04-control-plane-usage-telemetry-design.md`.
+(export posture), ADR-037 (console SSO — replaces this ADR's single shared
+`INFERPLANED_TOKEN` console login with per-human OIDC identity, on the same
+`/ui/` console this ADR shipped), spec: `docs/superpowers/specs/2026-08-04-control-plane-usage-telemetry-design.md`.
 
 ## Context
 
