@@ -22,6 +22,7 @@ import (
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
 	"github.com/inferplane/inferplane/internal/policy"
+	"github.com/inferplane/inferplane/internal/policystore"
 )
 
 // staleAfter is how long after its last heartbeat a data plane is still
@@ -53,6 +54,9 @@ type Server struct {
 	dataplanes map[string]*dpInfo
 	files      map[string]time.Time
 	now        func() time.Time // injectable clock for tests
+
+	policyStore policystore.Store    // nil ⇒ file-authoritative; PUT/DELETE ⇒ 405
+	updated     map[string]time.Time // policy name → store updated_at (nil on the file path)
 }
 
 type ruleKey struct{ policy, rule string }
@@ -104,7 +108,22 @@ func (s *Server) Reload() error {
 	if err != nil {
 		return err
 	}
+	mtimes := make(map[string]time.Time, len(files))
+	for _, f := range files {
+		if info, err := os.Stat(f); err == nil {
+			mtimes[f] = info.ModTime()
+		}
+	}
+	return s.applyWire(wire, mtimes)
+}
 
+// applyWire installs a document set: it rebuilds the lease ledger (carrying
+// spend/allowance forward for every rule whose policy+rule name pair still
+// exists), recomputes the heartbeat interval, and swaps in the new set and
+// generation. The ONE path both the file loader (Reload) and the policy store
+// (ReloadFromStore) go through, so a DB-sourced document set can never get
+// different ledger semantics from a file-sourced one.
+func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ledger := map[ruleKey]*ruleLedger{}
@@ -146,12 +165,6 @@ func (s *Server) Reload() error {
 		interval = 1
 	}
 
-	mtimes := make(map[string]time.Time, len(files))
-	for _, f := range files {
-		if info, err := os.Stat(f); err == nil {
-			mtimes[f] = info.ModTime()
-		}
-	}
 	s.wire, s.generation = wire, policy.GenerationOf(wire)
 	s.ledger, s.interval, s.files = ledger, interval, mtimes
 	return nil
@@ -188,6 +201,10 @@ func (s *Server) Watch(ctx interface{ Done() <-chan struct{} }, onErr func(error
 
 func (s *Server) changed() bool {
 	s.mu.Lock()
+	if s.policyStore != nil {
+		s.mu.Unlock()
+		return false // DB-authoritative: file mtimes must never reload over a store write
+	}
 	known := make(map[string]time.Time, len(s.files))
 	for f, m := range s.files {
 		known[f] = m
@@ -215,7 +232,8 @@ func (s *Server) changed() bool {
 func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1alpha1/sync", authn(s.token, s.authOpts, s.handleSync))
 	mux.HandleFunc("GET /v1alpha1/dataplanes", authn(s.token, s.authOpts, s.handleDataplanes))
-	s.mountExport(mux) // GET /v1alpha1/config/export (export.go)
+	s.mountExport(mux)   // GET /v1alpha1/config/export (export.go)
+	s.mountPolicies(mux) // GET/PUT/DELETE /v1alpha1/policies (policies.go)
 }
 
 // handleSync is the single data-plane heartbeat (ADR-034).
