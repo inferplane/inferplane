@@ -15,7 +15,7 @@ INFERPLANED_OIDC_ISSUER=https://cognito-idp.ap-northeast-2.amazonaws.com/ap-nort
 INFERPLANED_OIDC_CLIENT_ID=<cognito app client id>
 INFERPLANED_OIDC_GROUPS_CLAIM=cognito:groups
 INFERPLANED_OIDC_ALLOWED_GROUPS=platform-admins,finance-readonly
-INFERPLANED_OIDC_LOGIN_ORIGINS=https://inferplane.example.com
+INFERPLANED_OIDC_LOGIN_ORIGINS=https://<your-cognito-domain>.auth.ap-northeast-2.amazoncognito.com
 ```
 
 | Var | Required | Notes |
@@ -24,7 +24,7 @@ INFERPLANED_OIDC_LOGIN_ORIGINS=https://inferplane.example.com
 | `INFERPLANED_OIDC_CLIENT_ID` | when any OIDC var is set | The public (no-secret) app client's ID — this is the expected token `aud`. |
 | `INFERPLANED_OIDC_GROUPS_CLAIM` | no (default `groups`) | **Set to `cognito:groups` for Cognito** — see the footgun below. |
 | `INFERPLANED_OIDC_ALLOWED_GROUPS` | **yes**, once OIDC is configured | Comma-separated. Any member of any listed group gets full console access — there is no per-team scoping yet (ADR-037 D4/D5). |
-| `INFERPLANED_OIDC_LOGIN_ORIGINS` | no | Comma-separated absolute https **origins** (no path) the console SPA runs from. Empty = OIDC verifies API callers but the browser "Sign in with SSO" button and its CSP widening stay off — byte-identical to a pre-SSO deploy. |
+| `INFERPLANED_OIDC_LOGIN_ORIGINS` | no | Comma-separated absolute https **origins** the browser flow FETCHES from — **not** the console's own origin (`'self'` already covers that). For Cognito this is the **hosted-UI domain** (`https://<domain>.auth.<region>.amazoncognito.com`) — a different host from the issuer, which is added to the CSP automatically. Empty = OIDC still verifies API callers, but the "Sign in with SSO" button and CSP widening stay off — byte-identical to a pre-SSO deploy. Getting this backwards (pointing it at the console's own URL instead of the hosted-UI domain) is the single most common misconfiguration: the button appears, the redirect to Cognito works, login succeeds, but the token exchange fetch is silently CSP-blocked and the console falls back to the manual-token screen — see Troubleshooting. |
 
 Restart the container to pick up new env vars — there is no hot-reload for
 these (unlike GovernancePolicy files).
@@ -49,6 +49,11 @@ from the one mayu's `/admin/ui/` uses, if both consoles exist:
   accounts only, never self-registration. This is unrelated to the console
   client above but is the standard companion setting on any pool this client
   points at.
+- **Add the pool's hosted-UI domain to `INFERPLANED_OIDC_LOGIN_ORIGINS`**
+  (`https://<domain>.auth.<region>.amazoncognito.com`) — find it via
+  `aws cognito-idp describe-user-pool --user-pool-id <pool> --query UserPool.Domain`.
+  This is the host the SPA's authorize redirect and token-exchange `fetch()`
+  actually hit; it is **not** the console's own URL.
 
 ### The groups-claim footgun (read this before you deploy)
 
@@ -86,7 +91,7 @@ right after login, check this env var first.
 ## Use it (operator, browser)
 
 1. Open `https://<console-host>/ui/`.
-2. If SSO is configured with `LOGIN_ORIGINS` including this origin, a "Sign
+2. If OIDC is configured (`ISSUER`/`CLIENT_ID`/`ALLOWED_GROUPS` set), a "Sign
    in with SSO" button appears below the manual token field.
 3. Click it → redirected to Cognito's hosted UI → sign in → redirected back
    to `/ui/` → the console unlocks automatically.
@@ -121,7 +126,8 @@ send a JWT-shaped bearer, so they never touch the OIDC verifier at all.
 | Every login succeeds but every subsequent request 403s ("identity maps to no team") | `INFERPLANED_OIDC_GROUPS_CLAIM` is still `groups` against a Cognito pool. Set it to `cognito:groups`. |
 | inferplaned refuses to boot: "INFERPLANED_OIDC_ALLOWED_GROUPS is required" | Set at least one allowed group before enabling any other OIDC var. |
 | inferplaned refuses to boot: "INFERPLANED_TOKEN must not be JWT-shaped" | You put an actual ID token or a JWT-looking string in `INFERPLANED_TOKEN`. Use a plain random secret instead — the OIDC token is never the static token. |
-| "Sign in with SSO" button never appears | `INFERPLANED_OIDC_LOGIN_ORIGINS` doesn't include the origin you're browsing from, or is unset entirely. Check `GET /ui/auth/config` returns `sso:true`. |
+| "Sign in with SSO" button never appears | OIDC isn't configured at all (`GET /ui/auth/config` 404s) — set `ISSUER`/`CLIENT_ID`/`ALLOWED_GROUPS`. |
+| Button appears, redirect to Cognito and login work, but you land back on the manual-token screen | `INFERPLANED_OIDC_LOGIN_ORIGINS` is missing the Cognito **hosted-UI domain** (or points at the console's own URL instead). Check the browser console for a CSP `connect-src` violation naming `.auth.<region>.amazoncognito.com` — that confirms it. |
 | `GET /ui/auth/config` 404s | OIDC is not configured at all (this is by design — no permanent `{sso:false}` route). Set the required env vars and restart. |
 | Browser console shows a CORS error on the token exchange | The Cognito app client's token endpoint doesn't have CORS enabled for this origin — check the app client settings, not inferplaned. |
 | Redirect loop or Cognito rejects the callback | The registered callback URL doesn't exactly match `https://<console-host>/ui/` (trailing slash matters; no wildcard host/port). |

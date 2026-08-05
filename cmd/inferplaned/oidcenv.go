@@ -18,7 +18,13 @@ type oidcEnv struct {
 	ClientID      string
 	GroupsClaim   string
 	AllowedGroups []string
-	LoginOrigins  []string
+	// LoginOrigins are extra origins the browser flow FETCHES from — for
+	// Cognito this is the hosted-UI domain (issuer + Cognito's own token
+	// endpoint live on DIFFERENT hosts), not the console's own origin
+	// (already covered by CSP 'self'). Getting this backwards is the classic
+	// first-deploy mistake: the CSP silently blocks the token exchange and
+	// the console falls back to the manual-token screen with no clear error.
+	LoginOrigins []string
 }
 
 // loadOIDCEnv parses the five INFERPLANED_OIDC_* vars via getenv (injected —

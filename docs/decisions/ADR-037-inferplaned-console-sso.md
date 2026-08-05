@@ -52,7 +52,16 @@ ported byte-for-byte.**
 least one required once OIDC is configured — the alternative is every login
 403ing with no diagnosis), `INFERPLANED_OIDC_LOGIN_ORIGINS`
 (comma-separated, gates the browser flow + CSP widening — empty ⇒ SSO off,
-byte-identical to today). Validation rules (`cmd/inferplaned/oidcenv.go`) are
+byte-identical to today). **This is not the console's own origin** (`'self'`
+already covers that) — it's every OTHER origin the browser flow fetches
+from. For Cognito that means the **hosted-UI domain**
+(`https://<domain>.auth.<region>.amazoncognito.com`), which is a different
+host from the issuer (`cognito-idp.<region>.amazonaws.com/<pool-id>`, added
+automatically): the issuer serves discovery, the hosted-UI domain serves the
+authorize redirect and the token endpoint the SPA `fetch()`s. Getting this
+backwards silently blocks the token exchange with no server-visible error —
+confirmed live during T7/T8 rollout (see the runbook's troubleshooting
+table). Validation rules (`cmd/inferplaned/oidcenv.go`) are
 ported from `internal/config`'s `validateOIDC` since inferplaned has no
 config loader to share them with: absolute https issuer/origins, no
 query/fragment/userinfo, login origins carry no path, no duplicates.
