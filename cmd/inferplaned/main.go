@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/inferplane/inferplane/internal/adminauth"
 	"github.com/inferplane/inferplane/internal/controlplane"
 	"github.com/inferplane/inferplane/internal/controlplane/ui"
 	"github.com/inferplane/inferplane/internal/policy"
@@ -41,7 +42,13 @@ func main() {
 	policies := flag.String("policies", "", "GovernancePolicy file or directory to distribute (watched)")
 	flag.Parse()
 
-	if err := run(*listen, *policies, os.Getenv("INFERPLANED_TOKEN")); err != nil {
+	oidc, err := loadOIDCEnv(os.Getenv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+
+	if err := run(*listen, *policies, os.Getenv("INFERPLANED_TOKEN"), oidc); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
@@ -62,13 +69,43 @@ func isLoopback(listen string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func run(listen, policies, token string) error {
+// validateBoot rejects the two ways INFERPLANED_TOKEN/OIDC config could leave
+// inferplaned either unauthenticatable or unauthenticated. Split out from
+// run() so it's testable without starting (and blocking on) a real listener.
+func validateBoot(listen, token string, oidc *oidcEnv) error {
+	// A JWT-shaped static token would be routed to the OIDC verifier by
+	// authn's total rule (adminauth.IsOIDCBearerShape) and could never
+	// authenticate — same rejection internal/config's validateOIDC applies
+	// to mayu's static admin tokens.
+	if adminauth.IsOIDCBearerShape(token) {
+		return fmt.Errorf("INFERPLANED_TOKEN must not be JWT-shaped (three dot-separated base64url segments) — it would be routed to the OIDC verifier and could never authenticate")
+	}
+
 	// Refuse to serve unauthenticated beyond loopback (PR #50 review
 	// finding): an open /v1alpha1/sync would let any network peer reset
 	// reported spend or read the fleet view. An advisory log is not a
-	// guard — this is.
-	if token == "" && !isLoopback(listen) {
-		return fmt.Errorf("INFERPLANED_TOKEN must be set when --listen (%s) is not loopback; refusing to start unauthenticated on a non-loopback address", listen)
+	// guard — this is. OIDC configured covers authentication on its own
+	// (an SSO-only deploy with no static token is a legitimate posture),
+	// so it — not just a non-empty token — satisfies the loopback waiver.
+	if token == "" && oidc == nil && !isLoopback(listen) {
+		return fmt.Errorf("INFERPLANED_TOKEN must be set (or console SSO configured) when --listen (%s) is not loopback; refusing to start unauthenticated on a non-loopback address", listen)
+	}
+	return nil
+}
+
+func run(listen, policies, token string, oidc *oidcEnv) error {
+	if err := validateBoot(listen, token, oidc); err != nil {
+		return err
+	}
+
+	var opts []controlplane.Option
+	var connectSrc []string
+	if oidc != nil {
+		verifier := adminauth.NewVerifier(adminauth.VerifierConfig{
+			Issuer: oidc.Issuer, ClientID: oidc.ClientID, GroupsClaim: oidc.GroupsClaim,
+		})
+		opts = append(opts, controlplane.WithOIDC(verifier, oidc.mapping()))
+		connectSrc = oidc.connectSrc()
 	}
 
 	mux := http.NewServeMux()
@@ -106,15 +143,25 @@ func run(listen, policies, token string) error {
 		agg = telemetry.NewDurableAggregator(agg, pg)
 		log.Print("inferplaned: usage telemetry persisting to postgres (INFERPLANED_USAGE_DSN set)")
 	}
-	controlplane.NewUsageServer(token, agg).Mount(mux)
+	controlplane.NewUsageServer(token, agg, opts...).Mount(mux)
 	// The read-only usage console (data-free static shell; data via the
-	// bearer-gated usage API — see internal/controlplane/ui).
-	mux.Handle("/ui/", http.StripPrefix("/ui", ui.Handler()))
+	// bearer-gated usage API — see internal/controlplane/ui). connectSrc is
+	// nil (byte-identical CSP) unless INFERPLANED_OIDC_LOGIN_ORIGINS is set.
+	mux.Handle("/ui/", http.StripPrefix("/ui", ui.Handler(connectSrc...)))
+	if oidc != nil {
+		// Exact pattern beats the "/ui/" prefix pattern above (Go 1.22
+		// ServeMux precedence) regardless of registration order. Mounted
+		// only when OIDC is configured — an always-{sso:false} route would
+		// be a permanent lie about a feature that was never wired up.
+		mux.HandleFunc("GET /ui/auth/config", controlplane.AuthConfigHandler(func() *controlplane.AuthConfigView {
+			return &controlplane.AuthConfigView{SSO: true, Issuer: oidc.Issuer, ClientID: oidc.ClientID}
+		}))
+	}
 
 	var cp *controlplane.Server
 	if policies != "" {
 		var err error
-		cp, err = controlplane.NewServer(token, policies)
+		cp, err = controlplane.NewServer(token, policies, opts...)
 		if err != nil {
 			return fmt.Errorf("policies: %w", err)
 		}
@@ -138,9 +185,12 @@ func run(listen, policies, token string) error {
 		mode := "scaffold: health endpoints only"
 		if cp != nil {
 			mode = "distributing policies from " + policies
-			if token == "" {
+			if token == "" && oidc == nil {
 				mode += " (UNAUTHENTICATED — set INFERPLANED_TOKEN before leaving loopback)"
 			}
+		}
+		if oidc != nil {
+			mode += " (console SSO enabled)"
 		}
 		log.Printf("inferplaned control plane listening on %s (%s)", listen, mode)
 		errCh <- srv.ListenAndServe()

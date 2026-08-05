@@ -15,7 +15,7 @@ import (
 // be refused at startup, not just logged.
 func TestRunRefusesUnauthenticatedNonLoopback(t *testing.T) {
 	for _, listen := range []string{"0.0.0.0:7601", ":7601", "10.0.0.5:7601", "[::]:7601"} {
-		if err := run(listen, "", ""); err == nil || !strings.Contains(err.Error(), "INFERPLANED_TOKEN") {
+		if err := run(listen, "", "", nil); err == nil || !strings.Contains(err.Error(), "INFERPLANED_TOKEN") {
 			t.Fatalf("run(%q) without token: err = %v, want refusal", listen, err)
 		}
 	}
@@ -55,5 +55,28 @@ func TestUsageMountedWithoutPolicies(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("usage query without policy server must work, got %d", rec.Code)
+	}
+}
+
+// A JWT-shaped INFERPLANED_TOKEN would be routed to the OIDC verifier by
+// authn's total rule and could never authenticate — reject it at boot
+// rather than let an operator discover a permanently-broken static token.
+func TestValidateBootRejectsJWTShapedToken(t *testing.T) {
+	shaped := "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1In0.sig"
+	if err := validateBoot("127.0.0.1:7601", shaped, nil); err == nil || !strings.Contains(err.Error(), "JWT-shaped") {
+		t.Fatalf("validateBoot with a JWT-shaped token: err = %v, want rejection", err)
+	}
+}
+
+// An SSO-only deploy (empty static token, OIDC configured) is a legitimate
+// non-loopback posture — OIDC covers authentication on its own.
+func TestValidateBootAllowsSSOOnlyNonLoopback(t *testing.T) {
+	o := &oidcEnv{Issuer: "https://idp.example.com", ClientID: "client-1", GroupsClaim: "groups", AllowedGroups: []string{"ops"}}
+	if err := validateBoot("0.0.0.0:7601", "", o); err != nil {
+		t.Fatalf("SSO-only non-loopback deploy must be allowed, got: %v", err)
+	}
+	// Without OIDC and without a token, the same address is still refused.
+	if err := validateBoot("0.0.0.0:7601", "", nil); err == nil {
+		t.Fatal("unauthenticated non-loopback must still be refused")
 	}
 }
