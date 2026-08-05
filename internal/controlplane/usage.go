@@ -5,7 +5,6 @@
 package controlplane
 
 import (
-	"crypto/subtle"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -26,37 +25,23 @@ const usageMaxBodyBytes = 4 << 20
 // control plane's bearer-token posture but is deliberately NOT part of the
 // policy Server — telemetry must work without a policy source.
 type UsageServer struct {
-	token string
-	agg   telemetry.Aggregator
+	token    string
+	agg      telemetry.Aggregator
+	authOpts authOptions
 }
 
 // NewUsageServer builds the usage endpoints over agg with the shared bearer
-// token (empty = unauthenticated, loopback-only — main.go enforces that).
-func NewUsageServer(token string, agg telemetry.Aggregator) *UsageServer {
-	return &UsageServer{token: token, agg: agg}
+// token (empty = unauthenticated, loopback-only — main.go enforces that
+// unless WithOIDC covers it).
+func NewUsageServer(token string, agg telemetry.Aggregator, opts ...Option) *UsageServer {
+	return &UsageServer{token: token, agg: agg, authOpts: newAuthOptions(opts)}
 }
 
 // Mount registers the usage endpoints on mux.
 func (s *UsageServer) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1alpha1/usage", s.auth(s.handleIngest))
-	mux.HandleFunc("GET /v1alpha1/usage", s.auth(s.handleQuery))
-	mux.HandleFunc("GET /v1alpha1/usage/export", s.auth(s.handleExport))
-}
-
-// auth mirrors Server.auth (constant-time bearer comparison) — duplicated
-// rather than shared so neither server type depends on the other existing.
-func (s *UsageServer) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if s.token != "" {
-			got := r.Header.Get("Authorization")
-			want := "Bearer " + s.token
-			if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-				return
-			}
-		}
-		next(w, r)
-	}
+	mux.HandleFunc("POST /v1alpha1/usage", authn(s.token, s.authOpts, s.handleIngest))
+	mux.HandleFunc("GET /v1alpha1/usage", authn(s.token, s.authOpts, s.handleQuery))
+	mux.HandleFunc("GET /v1alpha1/usage/export", authn(s.token, s.authOpts, s.handleExport))
 }
 
 func (s *UsageServer) handleIngest(w http.ResponseWriter, r *http.Request) {

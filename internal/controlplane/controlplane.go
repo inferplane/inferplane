@@ -13,7 +13,6 @@
 package controlplane
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -42,8 +41,9 @@ const maxRejections = 100
 
 // Server is the control-plane distribution state and its HTTP handlers.
 type Server struct {
-	paths []string
-	token string // shared bearer token; "" = no auth (loopback-only deployments)
+	paths    []string
+	token    string // shared bearer token; "" = no auth (loopback-only deployments)
+	authOpts authOptions
 
 	mu         sync.Mutex
 	wire       []v1alpha1.GovernancePolicy
@@ -80,11 +80,12 @@ type dpInfo struct {
 // NewServer loads the policy documents (wire form — the control plane may
 // hold rules some data planes can't enforce; per-dataplane rejections
 // surface that) and builds the ledger. token, when non-empty, is required as
-// a Bearer token on every endpoint.
-func NewServer(token string, paths ...string) (*Server, error) {
+// a Bearer token on every endpoint (see WithOIDC for the SSO alternative).
+func NewServer(token, path string, opts ...Option) (*Server, error) {
 	s := &Server{
-		paths:      paths,
+		paths:      []string{path},
 		token:      token,
+		authOpts:   newAuthOptions(opts),
 		ledger:     map[ruleKey]*ruleLedger{},
 		dataplanes: map[string]*dpInfo{},
 		now:        time.Now,
@@ -212,25 +213,9 @@ func (s *Server) changed() bool {
 
 // Mount registers the control-plane endpoints on mux.
 func (s *Server) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1alpha1/sync", s.auth(s.handleSync))
-	mux.HandleFunc("GET /v1alpha1/dataplanes", s.auth(s.handleDataplanes))
+	mux.HandleFunc("POST /v1alpha1/sync", authn(s.token, s.authOpts, s.handleSync))
+	mux.HandleFunc("GET /v1alpha1/dataplanes", authn(s.token, s.authOpts, s.handleDataplanes))
 	s.mountExport(mux) // GET /v1alpha1/config/export (export.go)
-}
-
-// auth enforces the shared bearer token when one is configured. Comparison
-// is constant-time; the token itself is never logged.
-func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if s.token != "" {
-			got := r.Header.Get("Authorization")
-			want := "Bearer " + s.token
-			if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-				return
-			}
-		}
-		next(w, r)
-	}
 }
 
 // handleSync is the single data-plane heartbeat (ADR-034).

@@ -19,7 +19,7 @@ import (
 // UI-editable policy store exists, import == placing these files in
 // --policies.
 func (s *Server) mountExport(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1alpha1/config/export", s.auth(s.handleConfigExport))
+	mux.HandleFunc("GET /v1alpha1/config/export", authn(s.token, s.authOpts, s.handleConfigExport))
 }
 
 func (s *Server) handleConfigExport(w http.ResponseWriter, _ *http.Request) {
