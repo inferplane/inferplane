@@ -93,11 +93,13 @@ func validateBoot(listen, token string, oidc *oidcEnv) error {
 	return nil
 }
 
-func run(listen, policies, token string, oidc *oidcEnv) error {
-	if err := validateBoot(listen, token, oidc); err != nil {
-		return err
-	}
-
+// buildMux assembles every HTTP route inferplaned serves. Split out from
+// run() so Task 8's end-to-end test can drive the real mux (real
+// adminauth.Verifier, real controlplane wiring) through httptest without
+// starting — and blocking on — a real listener. closePG releases the
+// Postgres pool when INFERPLANED_USAGE_DSN was set; it is a no-op otherwise
+// and safe to defer unconditionally.
+func buildMux(policies, token string, oidc *oidcEnv) (mux *http.ServeMux, cp *controlplane.Server, closePG func(), err error) {
 	var opts []controlplane.Option
 	var connectSrc []string
 	if oidc != nil {
@@ -108,7 +110,7 @@ func run(listen, policies, token string, oidc *oidcEnv) error {
 		connectSrc = oidc.connectSrc()
 	}
 
-	mux := http.NewServeMux()
+	mux = http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprintln(w, "ok")
@@ -122,9 +124,6 @@ func run(listen, policies, token string, oidc *oidcEnv) error {
 		})
 	})
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	// Usage telemetry (ADR-036) mounts UNCONDITIONALLY — a telemetry-only
 	// inferplaned (no --policies) is a valid deployment; policy distribution
 	// below stays opt-in. Memory keeps a bounded 24h of windows; setting
@@ -134,12 +133,13 @@ func run(listen, policies, token string, oidc *oidcEnv) error {
 	// back to memory (marked degraded) through an outage. Construction is
 	// lazy — a PG outage never blocks boot.
 	agg := telemetry.Aggregator(telemetry.NewMemoryAggregator(24 * time.Hour))
+	closePG = func() {}
 	if dsn := os.Getenv("INFERPLANED_USAGE_DSN"); dsn != "" {
 		pg, err := telemetry.NewPostgresAggregator(dsn)
 		if err != nil {
-			return fmt.Errorf("usage store: %w", err)
+			return nil, nil, nil, fmt.Errorf("usage store: %w", err)
 		}
-		defer pg.Close()
+		closePG = pg.Close
 		agg = telemetry.NewDurableAggregator(agg, pg)
 		log.Print("inferplaned: usage telemetry persisting to postgres (INFERPLANED_USAGE_DSN set)")
 	}
@@ -158,14 +158,30 @@ func run(listen, policies, token string, oidc *oidcEnv) error {
 		}))
 	}
 
-	var cp *controlplane.Server
 	if policies != "" {
-		var err error
 		cp, err = controlplane.NewServer(token, policies, opts...)
 		if err != nil {
-			return fmt.Errorf("policies: %w", err)
+			return nil, nil, closePG, fmt.Errorf("policies: %w", err)
 		}
 		cp.Mount(mux)
+	}
+	return mux, cp, closePG, nil
+}
+
+func run(listen, policies, token string, oidc *oidcEnv) error {
+	if err := validateBoot(listen, token, oidc); err != nil {
+		return err
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	mux, cp, closePG, err := buildMux(policies, token, oidc)
+	if err != nil {
+		return err
+	}
+	defer closePG()
+	if cp != nil {
 		go cp.Watch(ctx, func(err error) { log.Print("inferplaned: ", err) })
 	}
 
