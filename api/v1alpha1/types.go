@@ -116,6 +116,11 @@ type BudgetRule struct {
 	// Lease tunes the local-enforcement grant. Optional — zero values take
 	// the ADR-032 defaults.
 	Lease LeaseSpec `json:"lease,omitempty"`
+	// AdminContact is an opaque string surfaced verbatim in the 402 response
+	// and GET /v1/usage once this rule is the binding budget (e.g. an email
+	// or a Slack channel) — where to go when a hard cap blocks. Optional;
+	// empty means the error carries no contact hint.
+	AdminContact string `json:"adminContact,omitempty"`
 }
 
 // LeaseSpec sizes a budget lease. Both fields are optional; defaults are

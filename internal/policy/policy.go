@@ -112,6 +112,7 @@ type Budget struct {
 	HardCap            bool
 	LeaseGrantMicroUSD int64
 	LeaseRenewInterval time.Duration
+	AdminContact       string
 }
 
 // ModelAccess is the internal form of a model allow-list rule. Entries match
@@ -288,5 +289,6 @@ func budgetFromV1Alpha1(wr v1alpha1.Rule, reject func(rule, reason string) *Unsu
 		HardCap:            wb.HardCap,
 		LeaseGrantMicroUSD: grantMilli * microPerMilli,
 		LeaseRenewInterval: iv,
+		AdminContact:       wb.AdminContact,
 	}, nil
 }
