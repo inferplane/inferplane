@@ -10,19 +10,10 @@ spec:
   subject:
     team: demo
   rules:
-  - name: monthly-hard-cap
-    failurePolicy: FailClosed
-    budget:
-      limitMilliUSD: 50000
-      hardCap: true
-      lease:
-        # Hand out the full $50 cap on the first lease, no trickle. Assumes a
-        # single data plane (this devbox's mayu): the first dataplane to renew
-        # claims the whole remaining budget, so a second one would be granted
-        # 0 and immediately fail closed (hardCap+FailClosed). If a second
-        # dataplane joins, lower grantMilliUSD and add renewInterval: "30s".
-        grantMilliUSD: 50000
-      adminContact: "atomoh@inferplane.dev"
+  # No budget rule for team demo: the policy schema requires limitMilliUSD >
+  # 0 (no rule = no cap is the only "unlimited" the schema supports), so
+  # spend is unbounded here. Re-add a `budget:` rule (see git history for the
+  # $50 monthly-hard-cap shape) to reinstate a cap.
   - name: throughput
     failurePolicy: FailOpen
     rate:
