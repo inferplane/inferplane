@@ -46,7 +46,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION || 'us-west-2' }}
 
       - name: Run Claude Code (Bedrock)
-        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
+        uses: anthropics/claude-code-action@6b082c41935b4c8a3b8b0ef85ba4ba4d9eeb8975 # v1
         with:
           use_bedrock: "true"
           github_token: ${{ github.token }}
