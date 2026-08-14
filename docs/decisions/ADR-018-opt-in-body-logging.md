@@ -2,8 +2,7 @@
 
 **Date:** 2026-07-08
 **Status:** Accepted (implemented).
-**Related:** §4.2/§4.7/§6.3/§6.8/§8 D4 of `docs/superpowers/specs/2026-06-26-admin-console-litellm-ux-redesign-design.md`
-(the console UX spec's nominal ADR-017 slot — see numbering note); ADR-017
+**Related:** ADR-017
 (budget alerts — this repo's actual next-available slot, landed first);
 ADR-003 (the tamper-evident, content-free audit chain this feature
 deliberately does NOT put bodies into); ADR-009 (the PII-masking filter this
@@ -164,8 +163,7 @@ overridable.
 ## Deferred
 
 - ~~Key-rotation rewrap CLI (format fixed now; manual procedure documented
-  above).~~ — **implemented** (2026-07-12,
-  `docs/superpowers/plans/2026-07-12-body-key-rotation-cli.md`): `inferplane
+  above).~~ — **implemented** (2026-07-12): `inferplane
   bodies rewrap-key --store <path>|--postgres-dsn-env <VAR> --old-key-env
   <VAR>|--old-key-file <path> --new-key-env <VAR>|--new-key-file <path>`
   rewraps every row's `wrapped_key_*` columns, never touching `req_*`/`resp_*`

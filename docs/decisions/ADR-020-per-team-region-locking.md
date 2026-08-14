@@ -2,8 +2,7 @@
 
 **Date:** 2026-07-08
 **Status:** Accepted (implemented).
-**Related:** §6.7/§8 D7 of `docs/superpowers/specs/2026-06-26-admin-console-litellm-ux-redesign-design.md`;
-ADR-016 (teams as keystore records — this ADR extends the `teams` table and
+**Related:** ADR-016 (teams as keystore records — this ADR extends the `teams` table and
 reuses its fresh-per-request lookup posture); ADR-019 (D6 Bedrock Guardrails —
 this ADR reuses the exact same `SetTeamPolicy` setter rather than adding a
 second one).
@@ -120,7 +119,7 @@ is what makes it real.
 - ~~Audit deny-reason taxonomy: `region_blocked` is set as a plain string on
   `OutcomeRef.Error`; a broader enum/taxonomy across all deny reasons
   (allow-list, quota, budget, region) is a larger, separate cleanup.~~ —
-  **implemented** (2026-07-12, `docs/superpowers/plans/2026-07-12-audit-deny-reason-taxonomy.md`):
+  **implemented** (2026-07-12):
   `internal/audit.DenyReason` is a closed 9-value string type
   (`DenyModelNotAllowed`, `DenyTeamRateLimited`, `DenyTeamTokenRateLimited`,
   `DenyTeamQuotaExceeded`, `DenyKeyRateLimited`, `DenyKeyTokenRateLimited`,

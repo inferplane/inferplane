@@ -6,8 +6,7 @@
 gemini 3.1-pro) + internal Plan-architect collaboration — 16 design findings
 resolved before implementation
 **Related:** spec §5.1 (Identity/Principal/Policy), §5.5 (admin auth), ADR-001/002
-(console), ADR-003 (priority 1: free SSO), plan
-`docs/superpowers/plans/2026-06-12-oidc-admin-sso.md`
+(console), ADR-003 (priority 1: free SSO)
 
 ## Context
 

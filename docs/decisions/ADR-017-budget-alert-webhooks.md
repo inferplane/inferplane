@@ -2,9 +2,7 @@
 
 **Date:** 2026-07-08
 **Status:** Accepted (implemented).
-**Related:** §6.7/§8 D5b of `docs/superpowers/specs/2026-06-26-admin-console-litellm-ux-redesign-design.md`
-(the console UX spec's nominal ADR-018 slot — see numbering note below);
-ADR-013 (multi-replica HA — the per-instance counter caveat this ADR's
+**Related:** ADR-013 (multi-replica HA — the per-instance counter caveat this ADR's
 alerting state repeats); `internal/governance/` (the Settle choke point this
 hooks into); `internal/budget/` (extended with a read method).
 
@@ -172,8 +170,7 @@ operator the limit was reached, regardless of enforcement mode.
 ## Deferred
 
 - ~~Per-key budget alerts (needs a per-key destination design; key_id cannot
-  be a label).~~ — **implemented** (2026-07-12,
-  `docs/superpowers/plans/2026-07-12-per-key-budget-alerts.md`). The "key_id
+  be a label).~~ — **implemented** (2026-07-12). The "key_id
   cannot be a label" constraint is real but scoped to `/metrics` (a Prometheus
   cardinality rule) — it does not forbid `key_id` in a webhook JSON payload
   body, which `internal/alert.Notifier` never exposes to Prometheus at all.

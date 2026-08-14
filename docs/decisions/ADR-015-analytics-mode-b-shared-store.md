@@ -4,9 +4,7 @@
 **Status:** Accepted (implementation lands with this ADR — a real Postgres test
 environment is available, unlike ADR-013's deferred HA program at the time it
 was written).
-**Related:** §4.1/§4.6 of `docs/superpowers/specs/2026-06-26-admin-console-litellm-ux-redesign-design.md`
-(the console UX spec that named Mode A/B); `docs/superpowers/plans/2026-06-29-console-phase1a-analytics-index.md`
-(Phase 1a, Mode A — shipped); ADR-013 (multi-replica HA design — the Postgres
+**Related:** ADR-013 (multi-replica HA design — the Postgres
 config-shape/secret-ref conventions this ADR reuses); ADR-012 (per-instance
 audit anchoring — the segment/collection framing this ADR builds on);
 `internal/analytics/` (Mode A, extended here); `internal/providerstore/`

@@ -2,8 +2,7 @@
 
 **Date:** 2026-06-15
 **Status:** Accepted — implemented (T1–T11) on `feat/provider-registration-ux`.
-Plan in `docs/superpowers/plans/2026-06-15-provider-registration-ux.md`. Hardened
-through the `/co-agent:consensus` plan gate (antigravity/Gemini 3.1 Pro High;
+Hardened through the `/co-agent:consensus` plan gate (antigravity/Gemini 3.1 Pro High;
 codex unavailable on this host — 404 "Engine not found", as in ADR-009) over
 3 rounds: R1 → 2 CRITICAL (test-before-save endpoint shape; probe SSRF/
 secret-exfil) + 1 MAJOR (bedrock IAM) + 2 MINOR; R2 confirmed C1/C2, added
@@ -176,8 +175,7 @@ The two cards are unified behind a single guided flow (select-or-create provider
   change. Explicitly out of scope for ADR-014; tracked as a follow-up.
 - ~~**Periodic/auto health checks** — v1 is on-demand (D5); background probing
   is a follow-up (it needs a scheduler + cardinality-bounded status
-  storage).~~ — **implemented** (2026-07-12,
-  `docs/superpowers/plans/2026-07-12-provider-health-scheduler.md`): an opt-in
+  storage).~~ — **implemented** (2026-07-12): an opt-in
   `provider_health_check.interval` config block (nil = off, the v1 default
   unchanged) starts `gateway.healthProbeWorker`, a ticker that iterates the
   CURRENT live topology (`live.Holder.Load().Providers()`, so a hot-reload/

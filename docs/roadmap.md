@@ -1,6 +1,7 @@
 # Roadmap: closing the five operational gaps vs central-proxy gateways
 
-Status: proposed (2026-07-31). Source: critical comparison against LiteLLM —
+Status: proposed (2026-07-31), still fully open as of 2026-08-14 — none of
+the five items below have shipped. Source: critical comparison against LiteLLM —
 the split architecture's costs are already being paid (fleet of data planes,
 version skew management, distributed accounting); these five items are where
 the benefits are still only partially collected.
@@ -15,7 +16,7 @@ Sprint plan (each phase = separate PR(s), reviewed before the next):
 
 ---
 
-## ① Global rate limits via rate shares (ADR-036 candidate)
+## ① Global rate limits via rate shares (ADR candidate — unassigned; ADR-036 has since shipped as control-plane usage telemetry)
 
 **Gap.** `rpm`/`tpm` enforce against per-proxy in-memory buckets
 (`limiter.NewMemory`): a team capped at 300 rpm with 20 connected data planes
@@ -63,7 +64,7 @@ briefly while holding a small share — acceptable; document. Bursty split
 
 ---
 
-## ② Durable ledger + control-plane-owned budget windows (ADR-037 candidate)
+## ② Durable ledger + control-plane-owned budget windows (ADR candidate — unassigned; ADR-037 has since shipped as inferplaned console SSO)
 
 **Gap.** The lease ledger is in-memory: restart re-learns from cumulative
 reports, grants issued moments before a crash are re-derived, and — the real
@@ -107,7 +108,7 @@ difference between modes until standalone also adopts windowIDs.
 
 ---
 
-## ③ mayu version channel + signed self-update (ADR-038 candidate)
+## ③ mayu version channel + signed self-update (ADR candidate — unassigned; ADR-038 has since shipped as the control-plane policy store)
 
 **Gap.** mayu on developer laptops is an endpoint-agent fleet with no update
 mechanism. Version skew is *detected* (heartbeat + `/v1alpha1/dataplanes`)
@@ -167,7 +168,7 @@ discipline; `key_id`/owner stay out of the JSON by default.
 
 ---
 
-## ⑤ Provider coverage: embeddings first (ADR-040 candidate, S3)
+## ⑤ Provider coverage: embeddings first (ADR candidate — unassigned; next available slot is ADR-040 as of 2026-08-14)
 
 **Gap.** Three provider types, chat-only. The canonical schema is a
 Messages-superset — embeddings structurally don't fit it, and forcing them

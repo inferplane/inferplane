@@ -5,7 +5,7 @@
 **Deciders:** maintainers, with a 2-round multi-model consensus gate (codex
 gpt-5.5, gemini 3.1-pro) on the implementation plan
 **Related:** design spec §9 (roadmap), Appendix A ("UI separation" decision), §5.5 (admin
-auth), plan `docs/superpowers/plans/2026-06-11-e2e-gateway-setup-and-admin-ui.md`
+auth)
 
 ## Context
 
