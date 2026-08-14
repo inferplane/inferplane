@@ -79,8 +79,18 @@ spec:
                         enum: ["FailOpen", "FailClosed"]
                       budget:
                         type: object
-                        required: ["limitMilliUSD"]
+                        x-kubernetes-validations:
+                          # unlimited declares "no cap" explicitly instead of
+                          # omitting the rule; exactly one of unlimited or
+                          # limitMilliUSD must be set, and unlimited must not
+                          # be combined with hardCap/lease.
+                          - rule: "(has(self.unlimited) && self.unlimited) ? !has(self.limitMilliUSD) : has(self.limitMilliUSD)"
+                            message: "exactly one of unlimited or limitMilliUSD must be set"
+                          - rule: "!(has(self.unlimited) && self.unlimited) || (!has(self.hardCap) && !has(self.lease))"
+                            message: "unlimited must not be combined with hardCap or lease"
                         properties:
+                          unlimited:
+                            type: boolean
                           # Money is integer milliUSD: 1000 = $1 (ADR-032).
                           limitMilliUSD:
                             type: integer
@@ -119,9 +129,15 @@ spec:
                       rate:
                         type: object
                         x-kubernetes-validations:
-                          - rule: "(has(self.rpm) && self.rpm > 0) || (has(self.tpm) && self.tpm > 0)"
-                            message: "rate must limit at least one of rpm or tpm"
+                          # unlimited declares "no cap" explicitly instead of
+                          # omitting the rule (see budget.unlimited above).
+                          - rule: "!(has(self.unlimited) && self.unlimited) || (!has(self.rpm) && !has(self.tpm))"
+                            message: "unlimited must not be combined with rpm or tpm"
+                          - rule: "(has(self.unlimited) && self.unlimited) || (has(self.rpm) && self.rpm > 0) || (has(self.tpm) && self.tpm > 0)"
+                            message: "rate must limit at least one of rpm or tpm (or set unlimited: true)"
                         properties:
+                          unlimited:
+                            type: boolean
                           rpm:
                             type: integer
                             format: int64

@@ -100,6 +100,27 @@ func TestLeaseDefaults(t *testing.T) {
 	}
 }
 
+// A rule may declare unlimited: true instead of a numeric limit — an
+// explicit, auditable "no cap" that doesn't require deleting the rule (and
+// its observability) entirely.
+func TestFromV1Alpha1Unlimited(t *testing.T) {
+	doc := validDoc()
+	doc.Spec.Rules[0].Budget = &v1alpha1.BudgetRule{Unlimited: true}
+	doc.Spec.Rules[3].Rate = &v1alpha1.RateRule{Unlimited: true}
+	p, err := FromV1Alpha1(doc)
+	if err != nil {
+		t.Fatalf("FromV1Alpha1: %v", err)
+	}
+	b := p.Rules[0].Budget
+	if b == nil || !b.Unlimited || b.LimitMicroUSD != 0 || b.HardCap {
+		t.Fatalf("unlimited budget rule mangled: %+v", b)
+	}
+	r := p.Rules[3].Rate
+	if r == nil || !r.Unlimited || r.RPM != 0 || r.TPM != 0 {
+		t.Fatalf("unlimited rate rule mangled: %+v", r)
+	}
+}
+
 // Every rejection must be an explicit *UnsupportedError — never a silent
 // skip — because the data plane reports these back to the control plane.
 func TestFromV1Alpha1Rejections(t *testing.T) {
@@ -121,6 +142,18 @@ func TestFromV1Alpha1Rejections(t *testing.T) {
 		{"empty model name", func(d *v1alpha1.GovernancePolicy) { d.Spec.Rules[2].ModelAccess.Allow = []string{""} }},
 		{"rate with no dimension", func(d *v1alpha1.GovernancePolicy) { d.Spec.Rules[3].Rate = &v1alpha1.RateRule{} }},
 		{"negative rate", func(d *v1alpha1.GovernancePolicy) { d.Spec.Rules[3].Rate.RPM = -1 }},
+		{"unlimited combined with rpm", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules[3].Rate = &v1alpha1.RateRule{Unlimited: true, RPM: 10}
+		}},
+		{"unlimited budget combined with limitMilliUSD", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules[0].Budget = &v1alpha1.BudgetRule{Unlimited: true, LimitMilliUSD: 100}
+		}},
+		{"unlimited budget combined with hardCap", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules[0].Budget = &v1alpha1.BudgetRule{Unlimited: true, HardCap: true}
+		}},
+		{"unlimited budget combined with adminContact", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules[0].Budget = &v1alpha1.BudgetRule{Unlimited: true, AdminContact: "ops@example.com"}
+		}},
 		{"two kinds on one rule", func(d *v1alpha1.GovernancePolicy) {
 			d.Spec.Rules[0].Routing = &v1alpha1.RoutingRule{OnAffinityConflict: v1alpha1.PreferFallback}
 		}},

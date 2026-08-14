@@ -138,6 +138,15 @@ func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]t
 			if r.Budget == nil || internal.Subject.Team == "" {
 				continue
 			}
+			// An explicit "no cap" declaration has nothing to lease — a
+			// lease exists to bound local overspend against a real limit,
+			// and this rule's LimitMicroUSD/LeaseRenewInterval are both the
+			// zero value, not real ones. Leaving it in would let a rule
+			// processed after a real budget rule reset minRenew back to 0
+			// (any "== 0" rule always wins the minRenew comparison below).
+			if r.Budget.Unlimited {
+				continue
+			}
 			k := ruleKey{policy: internal.Name, rule: r.Name}
 			l := &ruleLedger{
 				team:       internal.Subject.Team,

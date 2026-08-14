@@ -146,6 +146,36 @@ func TestLeaseLedgerBoundsGlobalOvershoot(t *testing.T) {
 	}
 }
 
+// An unlimited: true budget rule has nothing to lease and must not create a
+// ledger entry — and, critically, must not perturb the heartbeat interval
+// computed from the REAL rule's lease.renewInterval. Before the fix, a
+// zero-value LeaseRenewInterval on the unlimited rule always won the
+// minRenew comparison ("== 0" is the sentinel for "not yet set"), silently
+// discarding the real rule's 5s renew interval.
+func TestUnlimitedBudgetRuleSkipsLedgerAndIntervalCalc(t *testing.T) {
+	const yaml = cpPolicyYAML + `  - name: no-cap
+    failurePolicy: FailOpen
+    budget: { unlimited: true }
+`
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "p.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.ledger[ruleKey{policy: "team-a", rule: "no-cap"}]; ok {
+		t.Fatal("an unlimited budget rule must not create a ledger entry")
+	}
+	if _, ok := s.ledger[ruleKey{policy: "team-a", rule: "cap"}]; !ok {
+		t.Fatal("the real budget rule's ledger entry must still exist")
+	}
+	if s.interval != 5 {
+		t.Fatalf("interval = %d, want 5 (the real rule's renewInterval; the unlimited rule must not reset it to the default)", s.interval)
+	}
+}
+
 func TestDataplanesListsVersionsAndRejections(t *testing.T) {
 	_, ts := newTestServer(t, "")
 	doSync(t, ts.URL, "", policy.SyncRequest{

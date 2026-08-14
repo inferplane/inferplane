@@ -318,6 +318,15 @@ func mergeTeamLimits(policies []*Policy) map[string]TeamLimits {
 			if r.Budget != nil {
 				contributed = true
 				switch {
+				case r.Budget.Unlimited:
+					// An explicit "no cap" declaration must never narrow OR
+					// widen a binding limit set by another rule — it only
+					// prevents this team from implicitly falling through to
+					// a config/DB default when it's the ONLY budget rule
+					// (handled below: LimitMicroUSD stays 0 in that case,
+					// same "no rule" sentinel every consumer already
+					// understands). Unlike the branches below, it never
+					// compares against or overwrites tl.BudgetMicrosPerMonth.
 				case tl.BudgetMicrosPerMonth == 0 || r.Budget.LimitMicroUSD < tl.BudgetMicrosPerMonth:
 					tl.BudgetMicrosPerMonth = r.Budget.LimitMicroUSD
 					tl.BudgetHard = r.Budget.HardCap
