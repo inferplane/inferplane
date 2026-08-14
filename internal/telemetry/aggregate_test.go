@@ -108,6 +108,9 @@ func aggregatorSuite(t *testing.T, newAgg func(t *testing.T) Aggregator) {
 		a := newAgg(t)
 		_ = a.Upsert(ctx, batch("dp-1", w0, entry("demo", "u1", "m1", 100)))
 		res, _ := a.Query(ctx, QueryFilter{Since: w0, Until: w0.Add(time.Hour), GroupBy: "team"})
+		if len(res.Rows) != 1 {
+			t.Fatalf("want 1 row, got %d: %+v", len(res.Rows), res)
+		}
 		r := res.Rows[0]
 		if r.CacheReadTokens != 7 || r.CacheWrite5mTokens != 5 || r.CacheWrite1hTokens != 3 {
 			t.Fatalf("cache tiers lost or collapsed: %+v", r)
@@ -143,7 +146,13 @@ func aggregatorSuite(t *testing.T, newAgg func(t *testing.T) Aggregator) {
 
 func TestMemoryAggregator(t *testing.T) {
 	aggregatorSuite(t, func(t *testing.T) Aggregator {
-		return NewMemoryAggregator(24 * time.Hour)
+		a := NewMemoryAggregator(24 * time.Hour)
+		// Pin the wall clock to aggregatorSuite's w0 so its fixtures (all
+		// within a few minutes of w0) never fall outside the 24h retention
+		// horizon — without this, Upsert evicts every fixture the instant
+		// today's date moves more than 24h past the hardcoded w0.
+		a.now = func() time.Time { return time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC) }
+		return a
 	})
 }
 
@@ -174,6 +183,11 @@ func TestMemoryRowsDoesNotBlockUpsert(t *testing.T) {
 	ctx := context.Background()
 	a := NewMemoryAggregator(24 * time.Hour)
 	w0 := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	// Pin the wall clock to w0: without it, retention (relative to the real
+	// now) evicts w0 on the very next Upsert once "today" drifts more than
+	// 24h past this hardcoded date, leaving Rows nothing to stream — the
+	// callback below never runs and <-inCallback hangs forever.
+	a.now = func() time.Time { return w0 }
 	_ = a.Upsert(ctx, &UsageBatch{Dataplane: "dp-1", WindowStart: w0, WindowEnd: w0.Add(time.Minute),
 		Entries: []UsageEntry{{Team: "demo", Model: "m1", SpentMicroUSD: 1}}})
 
