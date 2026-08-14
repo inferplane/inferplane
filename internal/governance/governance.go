@@ -292,17 +292,39 @@ func (g *Governor) UsageOf(team, keyID string, kp KeyPolicy) UsageStatus {
 // Settle records actual token usage against quota and computes+debits cost.
 // Returns the cost µUSD and whether pricing was missing (for the audit record).
 // An unknown team still computes cost (so the audit record carries it) but
-// debits nothing. keyID/kp mirror PreCheck's per-key budget (RPM/TPM are
-// charge-on-check only, like the team dimension — nothing to debit here).
+// debits nothing. keyID/kp mirror PreCheck's per-key budget. estimatedTokens
+// is the exact value PreCheck charged against the TPM bucket(s) (its
+// estimateTokens argument) — Settle uses it to true up TPM against the real
+// token count now that the response has completed (see AdjustRate).
 // Key-level spend is deliberately NOT added to /metrics: metric labels are
 // config-bounded (CLAUDE.md) and must never carry a key_id.
-func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model string, u pricing.Usage, table *pricing.Table) (costMicros int64, pricingMissing bool) {
+func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model string, u pricing.Usage, table *pricing.Table, estimatedTokens int64) (costMicros int64, pricingMissing bool) {
 	p, _ := g.policyOf(team)
+	// Total tokens actually processed, including cache tiers — the same
+	// figure both the daily quota debit and the TPM true-up below use.
+	// Excluding cache tokens here used to make a cache-read-heavy request
+	// (Claude Code's common case) debit far less quota than it actually
+	// consumed, the mirror image of ADR-030's pricing bug in the quota path.
+	actualTokens := u.Input + u.Output + u.CacheRead + u.CacheWrite5m + u.CacheWrite1h
 	if p.TokensPerDay > 0 {
-		g.lim.DebitQuota("quota:"+team, u.Input+u.Output, 24*time.Hour)
+		g.lim.DebitQuota("quota:"+team, actualTokens, 24*time.Hour)
 		// Reflect the post-debit daily quota utilization into the gauge (0..1).
 		used := g.lim.QuotaUsed("quota:"+team, 24*time.Hour)
 		g.metrics.SetQuotaUtilization(team, "day", float64(used)/float64(p.TokensPerDay))
+	}
+	// TPM true-up (§5.3): PreCheck pre-blocked on a coarse pre-request byte
+	// estimate (estimateTokens); now that actualTokens is known, correct the
+	// bucket(s) it charged — credit back an over-charge, debit an
+	// under-charge — instead of leaving the estimate as the permanent charge.
+	// Claude Code's cache-heavy requests are the case this matters for: the
+	// byte estimate counts the full cached prefix even though a cache HIT
+	// costs a fraction of that in real load.
+	tpmDelta := estimatedTokens - actualTokens
+	if p.TokensPerMinute > 0 {
+		g.lim.AdjustRate("tpm:"+team, tpmDelta, p.TokensPerMinute)
+	}
+	if kp.TokensPerMinute > 0 {
+		g.lim.AdjustRate("tpm:key:"+keyID, tpmDelta, kp.TokensPerMinute)
 	}
 	if table == nil {
 		costMicros, pricingMissing = 0, true

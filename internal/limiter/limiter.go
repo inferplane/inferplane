@@ -35,6 +35,17 @@ type LimiterStore interface {
 	// never writes back to the bucket (unlike AllowRate, which always
 	// refills/debits on every call).
 	RateUsed(key string, ratePerMin, burst int64) int64
+	// AdjustRate corrects an AllowRate charge after actual usage is known
+	// (post-response true-up, e.g. TPM billed on a coarse pre-request byte
+	// estimate but settled against real token counts). delta is added to the
+	// bucket: positive credits back an over-charge, negative debits an
+	// under-charge. The result is capped at burst on the high side but is
+	// deliberately NOT floored at zero on the low side — a large negative
+	// correction is allowed to push the bucket into debt that only refill
+	// time repays, so a chronic under-estimate can't be laundered into a
+	// free true-up every time. A no-op if the bucket has never been touched
+	// (nothing to correct — the request never actually charged this key).
+	AdjustRate(key string, delta, burst int64)
 }
 
 type bucket struct {
@@ -137,6 +148,27 @@ func (m *Memory) RateUsed(key string, ratePerMin, burst int64) int64 {
 	// the microseconds between a debit and this read would otherwise always
 	// bias the reported figure down by one (e.g. 199.9998 -> 199, not 200).
 	return int64(used + 0.5)
+}
+
+// AdjustRate applies a post-hoc correction directly to a bucket's token
+// count — no refill math, deliberately: the caller (Settle) runs moments
+// after the AllowRate call it is correcting, so treating this as a pure
+// balance adjustment rather than a second time-based refill keeps the two
+// operations from double-counting elapsed time. Re-caps at burst on the high
+// side, but — unlike AllowRate's refill cap — never floors at zero: a
+// bucket driven negative by a debit stays blocked until real refill time
+// repays it, which is the point (see the interface doc).
+func (m *Memory) AdjustRate(key string, delta, burst int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b := m.buckets[key]
+	if b == nil {
+		return // never charged; nothing to correct
+	}
+	b.tokens += float64(delta)
+	if b.tokens > float64(burst) {
+		b.tokens = float64(burst)
+	}
 }
 
 // curWindow returns the live window for key, resetting if elapsed. Caller holds mu.

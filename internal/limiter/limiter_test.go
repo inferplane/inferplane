@@ -101,3 +101,47 @@ func TestRateUsedPeeksWithoutMutating(t *testing.T) {
 		t.Fatalf("RateUsed after refill = %d, want 10", u)
 	}
 }
+
+func TestAdjustRateCreditsBackAnOvercharge(t *testing.T) {
+	l := NewMemory()
+	key := "team:tpm"
+	l.AllowRate(key, 50, 60, 100) // charged 50 of burst 100 (an estimate)
+	l.AdjustRate(key, 30, 100)    // actual usage was 20; credit back the 30-token overcharge
+	if u := l.RateUsed(key, 60, 100); u != 20 {
+		t.Fatalf("RateUsed after credit = %d, want 20", u)
+	}
+}
+
+func TestAdjustRateDebitsAnUndercharge(t *testing.T) {
+	l := NewMemory()
+	key := "team:tpm"
+	l.AllowRate(key, 20, 60, 100) // charged 20 of burst 100 (an estimate)
+	l.AdjustRate(key, -30, 100)   // actual usage was 50; debit the 30-token undercharge
+	if u := l.RateUsed(key, 60, 100); u != 50 {
+		t.Fatalf("RateUsed after debit = %d, want 50", u)
+	}
+}
+
+func TestAdjustRateCapsAtBurstButNeverFloorsAtZero(t *testing.T) {
+	l := NewMemory()
+	key := "team:tpm"
+	l.AllowRate(key, 10, 60, 100) // 90 tokens remain
+	l.AdjustRate(key, 1000, 100)  // an over-large credit must still cap at burst
+	if u := l.RateUsed(key, 60, 100); u != 0 {
+		t.Fatalf("RateUsed after capped credit = %d, want 0 (full bucket)", u)
+	}
+	l.AdjustRate(key, -500, 100) // a large debit is allowed to drive the bucket into debt
+	if u := l.RateUsed(key, 60, 100); u != 500 {
+		t.Fatalf("RateUsed after debt-driving debit = %d, want 500 (not floored at burst)", u)
+	}
+}
+
+func TestAdjustRateNoopOnUntouchedBucket(t *testing.T) {
+	l := NewMemory()
+	// A key that was never charged (e.g. TPM disabled for this team) must not
+	// spring into existence just because Settle tries to correct it.
+	l.AdjustRate("never:touched", -50, 100)
+	if u := l.RateUsed("never:touched", 60, 100); u != 0 {
+		t.Fatalf("RateUsed on an uncreated bucket = %d, want 0", u)
+	}
+}

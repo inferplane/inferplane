@@ -347,7 +347,7 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 	var cost *audit.CostRef
 	if resp.Parsed != nil {
 		usage = usageRef(resp.Parsed.Usage)
-		cost = h.settle(p, providerName, upstream, resp.Parsed.Usage, table)
+		cost = h.settle(p, providerName, upstream, resp.Parsed.Usage, table, estimateTokens(pr.RawBody))
 		h.observeTokens(model, providerName, p.Team, resp.Parsed.Usage)
 	}
 	// Body capture (D4, ADR-018): copy-only, AFTER the response was already
@@ -425,7 +425,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 			// cost — bill them (ADR-030). Before this, a stream that broke
 			// mid-flight skipped settle() entirely and everything already
 			// streamed was free, with no pricing_missing flag to show it.
-			partialCost := h.settle(p, providerName, upstream, lastUsage, table)
+			partialCost := h.settle(p, providerName, upstream, lastUsage, table, estimateTokens(pr.RawBody))
 			h.auditCompletedPartial(p, model, upstream, usage, partialCost, tracing.TraceID(req.Context()))
 			recordSpanResponse(req, prov.Name(), upstream, usage, true) // committed (partial)
 			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 200, time.Since(start).Seconds(), ttft)
@@ -467,7 +467,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 		w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
 	}
-	cost := h.settle(p, providerName, upstream, lastUsage, table)
+	cost := h.settle(p, providerName, upstream, lastUsage, table, estimateTokens(pr.RawBody))
 	h.observeTokens(model, providerName, p.Team, lastUsage)
 	// Body capture (D4, ADR-018): REQUEST ONLY for streams (no buffered
 	// response bytes exist to capture — see messages.go's serveStream).
@@ -512,7 +512,7 @@ func govErrType(status int) string {
 // CostRef. nil when governance is disabled or there is no usage. The cost key is
 // (providerName, upstream-model) to match the pricing table. Cache writes are
 // TTL-tiered via schema.Usage.CacheWriteTiers (ADR-030).
-func (h *ChatHandler) settle(p keystore.Principal, providerName, upstream string, u *schema.Usage, table *pricing.Table) *audit.CostRef {
+func (h *ChatHandler) settle(p keystore.Principal, providerName, upstream string, u *schema.Usage, table *pricing.Table, estimatedTokens int64) *audit.CostRef {
 	if h.gov == nil || u == nil {
 		return nil
 	}
@@ -524,7 +524,7 @@ func (h *ChatHandler) settle(p keystore.Principal, providerName, upstream string
 		CacheWrite5m: write5m,
 		CacheWrite1h: write1h,
 	}
-	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table)
+	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table, estimatedTokens)
 	if h.usage != nil {
 		// Attribute to the UPSTREAM model — the name pricing billed.
 		h.usage.Record(p.Team, p.Owner, upstream, pu, cost)

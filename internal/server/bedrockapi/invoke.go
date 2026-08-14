@@ -327,7 +327,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 			}
 		}
 		usage = usageRef(resp.Parsed.Usage)
-		cost = h.settle(p, providerName, model, upstream, resp.Parsed.Usage, table)
+		cost = h.settle(p, providerName, model, upstream, resp.Parsed.Usage, table, estimateTokens(pr.RawBody))
 		h.observeTokens(model, providerName, p.Team, resp.Parsed.Usage)
 	}
 	w.WriteHeader(resp.StatusCode)
@@ -397,7 +397,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		// cost — bill them (ADR-030). Before this, a stream that broke
 		// mid-flight skipped settle() entirely and everything already
 		// streamed was free, with no pricing_missing flag to show it.
-		partialCost := h.settle(p, providerName, model, upstream, lastUsage, table)
+		partialCost := h.settle(p, providerName, model, upstream, lastUsage, table, estimateTokens(pr.RawBody))
 		h.auditCompletedPartial(p, model, upstream, usage, partialCost, tracing.TraceID(req.Context()))
 		recordSpanResponse(req, prov.Name(), upstream, usage, true) // committed (partial)
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusOK, time.Since(start).Seconds(), ttft)
@@ -436,7 +436,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		}
 	}
 
-	cost := h.settle(p, providerName, model, upstream, lastUsage, table)
+	cost := h.settle(p, providerName, model, upstream, lastUsage, table, estimateTokens(pr.RawBody))
 	h.observeTokens(model, providerName, p.Team, lastUsage)
 	recID := ulid.New()
 	var bodyRef string
@@ -452,7 +452,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 // settle runs the Governor's post-call settlement. Cache writes are TTL-tiered
 // via schema.Usage.CacheWriteTiers (ADR-030) — 1h writes cost 2x the input rate
 // against 5m's 1.25x, so collapsing them under-bills.
-func (h *InvokeHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table) *audit.CostRef {
+func (h *InvokeHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table, estimatedTokens int64) *audit.CostRef {
 	if h.gov == nil || u == nil {
 		return nil
 	}
@@ -464,7 +464,7 @@ func (h *InvokeHandler) settle(p keystore.Principal, providerName, model, upstre
 		CacheWrite5m: write5m,
 		CacheWrite1h: write1h,
 	}
-	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table)
+	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table, estimatedTokens)
 	if h.usage != nil {
 		// Attribute to the UPSTREAM model — the name pricing billed.
 		h.usage.Record(p.Team, p.Owner, upstream, pu, cost)
