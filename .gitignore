@@ -23,3 +23,6 @@ coverage.out
 
 # serena tooling cache
 .serena/
+
+# playwright MCP browser-session artifacts (screenshots, console/page logs)
+.playwright-mcp/
