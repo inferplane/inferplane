@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-12
 **Status:** Accepted
-**Related:** spec §1.2 (경쟁 분석), §9 (로드맵), ADR-001/002 (admin console)
+**Related:** spec §1.2 (competitive analysis), §9 (roadmap), ADR-001/002 (admin console)
 
 ## Context
 
@@ -19,7 +19,7 @@ does not win deals.
 
 ## Decision
 
-Double down on the spec's wedge — **"거버넌스 전부 무료 + tamper-evident
+Double down on the spec's wedge — **"all governance free + tamper-evident
 audit"** — expressed across the four adoption gates, and reorder the v0.2
 roadmap by enterprise-adoption impact:
 
@@ -32,8 +32,8 @@ roadmap by enterprise-adoption impact:
 | 5 | **S3 Object Lock audit anchoring** | Upgrades tamper-*evident* toward tamper-*resistant* (§5.4 wording discipline) |
 
 Standing positioning (marketing line):
-> "LiteLLM은 거버넌스를 팔고, inferplane은 거버넌스가 무료 코어다 — 게다가
-> 증명 가능하다 (tamper-evident)."
+> "LiteLLM sells governance; inferplane makes governance a free core feature —
+> and a provable one (tamper-evident)."
 
 Assets we already hold and must keep loud:
 

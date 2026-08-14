@@ -15,7 +15,7 @@ tracked follow-up.
 **Related:** ADR-005 (provider visibility; UI-write deferred to this ADR),
 ADR-006 (config hot-reload — the `reload()` + `live.Holder` mechanism this builds
 on), ADR-003 (policy-as-code differentiator), spec §7 (secret-ref mandate, inline
-keys rejected), §4.5/§5.4 (reload semantics), 부록 A (secret-ref mandate)
+keys rejected), §4.5/§5.4 (reload semantics), Appendix A (secret-ref mandate)
 
 ## Context
 

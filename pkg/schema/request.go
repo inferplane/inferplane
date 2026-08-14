@@ -2,15 +2,16 @@ package schema
 
 import "encoding/json"
 
-// ChatRequest — canonical 요청. 파이프라인이 해석하는 필드만 타입화:
-// Model(라우팅·단가), Messages(블록 순서·cache 불변식), Stream, MaxTokens
-// (TPM 추정). system/tools/tool_choice/thinking/metadata는 raw 보존 —
-// 교차 프로토콜 변환(M5)에서 타입 승격한다.
+// ChatRequest — canonical request. Only pipeline-interpreted fields are
+// typed: Model (routing/pricing), Messages (block order + cache invariant),
+// Stream, MaxTokens (TPM estimate). system/tools/tool_choice/thinking/metadata
+// are kept as raw JSON and promoted to typed shapes only during cross-protocol
+// conversion.
 type ChatRequest struct {
 	Model     string    `json:"model"`
 	Messages  []Message `json:"messages"`
 	MaxTokens *int64    `json:"max_tokens,omitempty"`
-	// *bool: 명시적 "stream":false 보존 (48d412d와 동일한 omitempty 결함 계열)
+	// *bool: preserves an explicit "stream":false (same omitempty bug class as 48d412d)
 	Stream *bool `json:"stream,omitempty"`
 
 	System     json.RawMessage `json:"system,omitempty"`

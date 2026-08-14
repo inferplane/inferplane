@@ -9,10 +9,11 @@ import (
 	"testing"
 )
 
-// TestGoldenRoundTrip — §2.2-1 무손실 불변식의 집행 지점.
-// testdata/roundtrip/{request,response}/*.json 각각을 unmarshal→marshal
-// 후 의미 동등성 비교. 픽스처를 추가하면 자동으로 검증 대상이 된다
-// (M2 게이트에서 실제 Claude Code 캡처 트래픽을 여기에 추가).
+// TestGoldenRoundTrip — the enforcement point for the lossless round-trip
+// invariant. Each file under testdata/roundtrip/{request,response}/*.json is
+// unmarshaled then marshaled and compared for semantic equality. Adding a
+// fixture automatically puts it under test (captured real Claude Code traffic
+// belongs here).
 func TestGoldenRoundTrip(t *testing.T) {
 	kinds := map[string]func([]byte) ([]byte, error){
 		"request": func(in []byte) ([]byte, error) {
@@ -51,8 +52,8 @@ func TestGoldenRoundTrip(t *testing.T) {
 	}
 }
 
-// TestGoldenStreamRoundTrip — .sse 픽스처의 각 data: 라인을 ChatChunk로
-// 왕복. 이벤트 순서는 파일 순서가 보증한다.
+// TestGoldenStreamRoundTrip — round-trips each `data:` line of a .sse
+// fixture through ChatChunk. Event order is guaranteed by file order.
 func TestGoldenStreamRoundTrip(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join("testdata", "roundtrip", "stream", "*.sse"))
 	if err != nil || len(files) == 0 {

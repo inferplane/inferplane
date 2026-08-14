@@ -4,21 +4,22 @@
 **Status:** Accepted
 **Deciders:** maintainers, with a 2-round multi-model consensus gate (codex
 gpt-5.5, gemini 3.1-pro) on the implementation plan
-**Related:** design spec §9 (roadmap), 부록 A ("UI 분리" decision), §5.5 (admin
+**Related:** design spec §9 (roadmap), Appendix A ("UI separation" decision), §5.5 (admin
 auth), plan `docs/superpowers/plans/2026-06-11-e2e-gateway-setup-and-admin-ui.md`
 
 ## Context
 
-The design spec deliberately keeps UI out of the v0.1 core. 부록 A records the
-regret-prevention decision "UI 분리 (셀프서비스만 v0.2)" — a full UI in core was
-rejected as "소수 인원 프로젝트의 프론트 유지보수 세금" (frontend maintenance
-tax on a small-maintainer project). The v0.2 roadmap carries "키 발급 셀프서비스
-페이지 (최소 UI — 로그인 → 내 키 발급)".
+The design spec deliberately keeps UI out of the v0.1 core. Appendix A records the
+regret-prevention decision "keep UI out of core (self-service only in v0.2)" — a
+full UI in core was rejected as "a frontend-maintenance tax on a small-maintainer
+project." The v0.2 roadmap carries "key-issuance self-service page (minimal UI —
+log in → issue my key)".
 
 Meanwhile v0.1 operators have only two key-management surfaces: the
 token-gated `/admin/keys` JSON API and the local `inferplane keys` CLI.
-Operators evaluating the gateway ("5분 안에 붙는다") asked where the admin
-page is — there is none, and that gap is felt in the first five minutes.
+Operators evaluating the gateway (the "attach it in 5 minutes" pitch) asked
+where the admin page is — there is none, and that gap is felt in the first
+five minutes.
 
 ## Decision
 
@@ -45,7 +46,7 @@ ceiling on frontend surface:
 ## Alternatives considered
 
 1. **Full SPA (React/Vue + npm toolchain).** Rejected — exactly the
-   maintenance tax 부록 A predicted: lockfiles, supply-chain surface, a second
+   maintenance tax Appendix A predicted: lockfiles, supply-chain surface, a second
    build system in a CNCF-aspiring single-binary Go project.
 2. **Server-rendered templates with session/cookie auth.** Rejected — invents
    a second authentication path on the admin plane (sessions, CSRF) where one

@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-13
 **Status:** Accepted (stage 1 shipped; stage 2 deferred)
-**Related:** spec §7 (secret refs), 부록 A (secret-ref mandate, policy-as-code),
+**Related:** spec §7 (secret refs), Appendix A (secret-ref mandate, policy-as-code),
 ADR-001/002 (console), ADR-003 (policy-as-code as a differentiator vs LiteLLM)
 
 ## Context

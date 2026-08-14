@@ -6,7 +6,7 @@ import "encoding/json"
 // moves, or strips these (§4.4 — cache pass-through is a hard constraint).
 type CacheControl struct {
 	Type  string                     `json:"type"`          // "ephemeral"
-	TTL   string                     `json:"ttl,omitempty"` // "5m" | "1h" | "" (기본 5m)
+	TTL   string                     `json:"ttl,omitempty"` // "5m" | "1h" | "" (defaults to 5m)
 	Extra map[string]json.RawMessage `json:"-"`
 }
 

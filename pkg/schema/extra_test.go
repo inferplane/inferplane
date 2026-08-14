@@ -122,7 +122,7 @@ func TestExtraAllowsDistinctKeys(t *testing.T) {
 	}
 }
 
-// assertJSONSemanticEqual: 키 순서 무시, 숫자 정밀도 보존 비교.
+// assertJSONSemanticEqual compares ignoring key order, preserving numeric precision.
 func assertJSONSemanticEqual(t *testing.T, want, got []byte) {
 	t.Helper()
 	if !jsonSemanticEqual(want, got) {

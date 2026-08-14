@@ -1,4 +1,4 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 923ba8e33aaf · generated-at: 2026-08-01 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: d137ca676bb1 · generated-at: 2026-08-14 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
 > from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
 > per-AI copy).
@@ -14,7 +14,8 @@ Two binaries: **`cmd/mayu`** is the node-local data plane (the full gateway —
 routing, auth, governance, audit; runs standalone, no control plane required).
 **`cmd/inferplaned`** is the control plane (ADR-034) — distributes
 `GovernancePolicy` documents and issues budget leases over one heartbeat; it
-never carries inference traffic.
+never carries inference traffic. Credential brokering from the control plane
+is not yet implemented — don't assume it exists when reviewing a diff.
 
 ## Build · test · lint
 
@@ -45,6 +46,9 @@ credentials, or a real IdP (httptest fakes only).
 - A data plane's policy source is `policies` (local file, watched) XOR
   `control_plane` (ADR-034 heartbeat) — config load must reject both set at
   once.
+- `internal/cache` (VolatileStore, for cache-affinity routing) is an
+  unimplemented interface with no importers today — don't assume
+  cache-affinity is enforced anywhere yet.
 
 ## Banned patterns / security mandates (violations are CRITICAL)
 
@@ -80,6 +84,11 @@ credentials, or a real IdP (httptest fakes only).
 - Audit chain: records are hashed as exact line bytes — new fields are
   append-only with `omitempty`, proven by a mixed-version fixture test.
 - Fail closed: missing identity/lookup errors deny, never default-allow.
+- Multi-replica HA (a shared Postgres/Redis backend behind the existing
+  store interfaces) is designed (ADR-013) but not implemented — rate-limit
+  counters, budget/quota stores, and the circuit breaker are all
+  instance-local today. Don't flag "won't scale past one replica" as a new
+  finding; it's a known, tracked limitation.
 
 ## Review checklist
 
@@ -93,6 +102,7 @@ credentials, or a real IdP (httptest fakes only).
 6. Docs: ADR for decisions, reference docs synced for schema/endpoint changes.
 
 Known false-positives to suppress: `/metrics` being unauthenticated is by
-design (§5.5); the admin console's static assets being unauthenticated is by
-design (ADR-001/002 — they are data-free); key-existence signal on revoke 403
-is an accepted, documented trade-off.
+design (ADR-005); the admin console's static assets being unauthenticated is
+by design (ADR-001/002 — they are data-free); key-existence signal on revoke
+403 is an accepted, documented trade-off; single-replica-only enforcement
+(see ADR-013 note above) is known, not a new finding.

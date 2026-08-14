@@ -6,7 +6,7 @@ import (
 )
 
 func TestModelInfoRoundTrip(t *testing.T) {
-	// Anthropic /v1/models 의 data 원소 형태.
+	// Shape of one element in Anthropic /v1/models' data array.
 	in := `{"type":"model","id":"claude-sonnet-4-6","display_name":"Claude Sonnet 4.6","created_at":"2026-02-19T00:00:00Z"}`
 	var m ModelInfo
 	if err := json.Unmarshal([]byte(in), &m); err != nil {

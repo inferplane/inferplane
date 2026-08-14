@@ -19,8 +19,8 @@ without changing anything else. inferplane previously had no Bedrock-shaped
 401/404 and users had to switch their environment to `ANTHROPIC_BASE_URL`
 mode instead. Supporting the native mode directly removes that friction and
 is a capability LiteLLM markets; the maintainer decided to build it even
-without a hard compatibility requirement ("근본적인 우리가 LiteLLM보다 강점이
-될 거 같아, 원래 의도와 맞기도 하고").
+without a hard compatibility requirement ("this looks like a fundamental
+edge over LiteLLM, and it fits the original intent anyway").
 
 Wire facts this design rests on (verified against AWS API references and, for
 the client behavior, the AWS blog + Claude Code docs):
