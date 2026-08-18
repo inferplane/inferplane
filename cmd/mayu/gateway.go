@@ -1299,7 +1299,7 @@ func cliVerifier(cfg *config.Config) server.OIDCVerifier {
 }
 
 // cliAuthConfigView builds the secret-free /v1/auth/config payload closure
-// (ADR-028) that `inferplane login` reads to discover the CLI's issuer and
+// (ADR-028) that `mayu login` reads to discover the CLI's issuer and
 // client_id. Only called when cliVerifier(cfg) is non-nil (server.DataMux
 // gates the mount on that), so CLI is always true here.
 func cliAuthConfigView(cfg *config.Config) func() authapi.ConfigView {

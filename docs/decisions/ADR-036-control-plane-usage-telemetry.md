@@ -89,6 +89,8 @@ will — the container must stay stateless.
 - Accepted limitation (recorded, not fixed): no batch splitting for >4 MiB
   pathological-cardinality windows — dropped and counted.
 - Known deferral: per-rule spend in consumption reports (ADR-034 known
-  limits) and inferplaned HA are unchanged by this ADR.
+  limits) and inferplaned HA are unchanged by this ADR — see ADR-038
+  §Consequences for why "stateless container" here does not mean
+  horizontally scalable: the budget-lease ledger is still per-process.
 - `internal/telemetry` is now live code (was an ADR-031 placeholder): wire
   types, collector, aggregators shared by both binaries.

@@ -15,6 +15,63 @@ OpenAI Chat Completions, Bedrock InvokeModel), and enforces the rules the contro
 plane (`inferplaned`) hands it: per-user attribution, budget cutoffs, and model
 routing.
 
+## Goals
+
+1. Give Claude Code, OpenCode, and Codex[^codex] users a single entry point
+   to Anthropic, Amazon Bedrock, and OpenAI-compatible (vLLM/Ollama/etc.)
+   providers.
+
+[^codex]: Codex support is a goal, not yet a verified capability — no
+   Codex-specific code, fixture, or test exists in the tree; see the
+   Purpose alignment table in `docs/roadmap.md`.
+2. Let each user choose which model they talk to.
+3. Support cost-driven model substitution — swap to a cheaper model (e.g.
+   Sonnet → GLM) when cost, not just capability, decides.
+4. Set spend limits per team and per individual, block on breach, and always
+   show how much has been spent.
+5. Keep the control plane off the inference path, so a control-plane outage
+   never stops request traffic (no SPOF).
+
+Goal 5 pulls against making goal 4 accurate under horizontal scale — see
+[Current limits](#current-limits) below and `docs/roadmap.md`.
+
+## Target users
+
+Enterprise platform/SRE teams governing coding-assistant LLM traffic across
+many developers and teams. The on-ramp stays bottom-up — a single team can
+run `mayu` standalone in minutes with no control plane (see [Quick
+start](#quick-start--mayu-standalone)) — but the intended growth path is a
+platform team adopting `inferplaned` to govern that traffic fleet-wide once
+more than one team is on it.
+
+## Non-goals
+
+- **Not an MCP gateway.** Routing MCP traffic is already well served by
+  Envoy AI Gateway / Higress; that's not where inferplane differentiates.
+- **Not competing on data-plane inference performance.** The core is
+  governance — attribution, budget, audit — not inference optimization.
+- **No embeddings, image, audio, or rerank support in v1.** Chat/completions
+  traffic only until that lane is proven (see `docs/roadmap.md`).
+
+## Current limits
+
+**Single-replica `mayu` only, today.** `internal/keystore` is SQLite-only and
+`internal/limiter`/`internal/budget` are in-memory — running more than one
+`mayu` replica lets each enforce its own copy of every counter, so rate,
+token quota, and (in standalone mode) budget ceilings can each reach up to
+N× the configured value, and key resolution splits across replicas
+(ADR-013, design-only, not yet implemented). Budget is only *partially*
+better: when a control plane is attached, ADR-034's lease pattern bounds
+team-level overspend across data planes (worst case is the sum of
+outstanding grants, not exact) — but per-key budgets and standalone `mayu`
+get no lease at all. Making rate/quota equally accurate, and closing budget's
+remaining gaps, is the tracked next step — see `docs/roadmap.md`.
+
+**Goals 3 and 4 are partially unenforced today.** Per-user *model choice*
+(goal 2) is enforced. Per-user *budget/rate* and policy-driven cost
+substitution (goal 3, routing rules) are not yet — see the purpose-alignment
+table in `docs/roadmap.md` for exact status and code references.
+
 ## Why not a central gateway?
 
 Every "LLM gateway" puts a shared hop on the inference path. inferplane exists
@@ -142,6 +199,7 @@ config hot-reload, OIDC SSO, and `mayu login` short-lived keys, see
 | `mayu` standalone (gateway, keys, RBAC, quotas/budgets, audit, console) | Working — the former inferplane gateway, moved intact |
 | `inferplaned` control plane | Policy distribution + budget-lease ledger + usage telemetry working (ADR-034/036); credential brokering not yet implemented |
 | `api/v1alpha1` policy schema + delivery channels | Working — same document via local file, control-plane push, Helm ConfigMap; CRD manifest for kubectl-native validation ([`deploy/crd/`](deploy/crd/)) |
+| `inferplaned` policy store + console (ADR-038) | **Experimental, under review.** Opt-in Postgres store with a console Policies tab and `PUT`/`DELETE /v1alpha1/policies`; the write path has no per-rule-kind authorization tier or change audit yet — a superseding ADR is pending (see ADR-003 §Alternatives) |
 
 The project targets CNCF Sandbox.
 

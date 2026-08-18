@@ -81,7 +81,7 @@ only on success.
    ```
 2. Re-verify the local chain (detects intra-chain tampering on its own):
    ```bash
-   inferplane audit verify --file /var/lib/inferplane/audit.jsonl
+   mayu audit verify --file /var/lib/inferplane/audit.jsonl
    ```
 3. **Cross-check**: re-compute the local chain's head hash at record `count`
    (the anchor's `count`) and assert it **equals** the anchor's `head_hash`. A
@@ -89,7 +89,7 @@ only on success.
    anchor is the source of truth (it cannot have been changed). Records beyond
    the anchored `count` are within the RPO window (anchored at the next tick).
 
-> Automated anchor-aware `inferplane audit verify` (fetch + cross-check in one
+> Automated anchor-aware `mayu audit verify` (fetch + cross-check in one
 > command) is a tracked follow-up; v1 ships the anchoring writer + this manual
 > procedure.
 

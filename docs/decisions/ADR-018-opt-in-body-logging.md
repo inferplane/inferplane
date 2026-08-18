@@ -48,6 +48,14 @@ materially simpler HA story than analytics Mode B's fenced aggregator, and is
 possible only because bodies have no cross-replica aggregation requirement
 (unlike rollups).
 
+**Scope note:** this makes `bodystore` itself safe to run multi-replica — it
+does not mean the gateway as a whole is. `internal/keystore` (SQLite-only)
+and `internal/limiter`/`internal/budget` (in-memory) are still single-replica
+today (ADR-013, design-only, deferred). Don't read "every replica" above as
+"multi-replica deployment is supported" — it means "if you're already
+capturing bodies via the Postgres backend, adding replicas doesn't break
+that specific store."
+
 ### 2. Bodies are captured, encrypted, and stored OUTSIDE the audit chain
 
 `audit.Record` gains two fields, appended at the struct's END (the

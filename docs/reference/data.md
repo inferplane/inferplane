@@ -3,8 +3,13 @@
 ### 1. Overview
 Persistent and in-memory state: the SQLite virtual-key store, the disk-backed
 tamper-evident audit log, and the in-memory two-phase governance stores (limiter,
-budget). All persistent stores sit behind interfaces so the v0.2 Postgres/Redis
-backends are a swap, not a rewrite.
+budget). All persistent stores sit behind interfaces so a future shared backend
+is a swap, not a rewrite. **Today, all of them are single-instance:**
+`keystore`/`providerstore` are SQLite-only, `limiter`/`budget` are memory-only
+(not persistent stores at all), and no Redis/Valkey dependency exists anywhere
+in the tree — so the gateway is single-replica only (ADR-013, design-only).
+Postgres backends exist today only for `bodystore`, `policystore`, `telemetry`,
+and analytics Mode B — none of which are the enforcement path.
 
 ### 2. Components
 | Component | Path | Purpose |
@@ -18,7 +23,7 @@ backends are a swap, not a rewrite.
 | Audit anchoring | `internal/audit/s3anchor/` | opt-in WORM (S3 Object Lock) chain-head anchoring → tamper-resistant (ADR-012); refs/PII-free anchor objects |
 | Limiter store | `internal/limiter/limiter.go` | in-memory token bucket (TPM/RPM), two-phase |
 | Budget store | `internal/budget/budget.go` | in-memory microUSD budget, two-phase |
-| Body store | `internal/bodystore/` | opt-in captured-body store (D4, ADR-018), OUTSIDE the audit chain: `bodies` table (`ref` PK, `record_id`, `team`, `created_ts`, `expires_ts`, `size`, `wrapped_key_nonce`/`wrapped_key_ct`, `req_nonce`/`req_ct`, `resp_nonce`/`resp_ct` — BLOB/BYTEA ciphertext; `resp_*` nullable = streaming request-only). Envelope AEAD (per-record data key wrapped by a config-ref master key). Two backends (`sqlite.go`/`postgres.go`), TTL + size-cap `Purge`, hard-deletable per-row (GDPR erasure). Key rotation: `inferplane bodies rewrap-key` (ADR-018 deferred item) rewraps `wrapped_key_*` only, via `Store.ListWrappedKeys`/`UpdateWrappedKey` (CAS) — never reads or rewrites `req_*`/`resp_*` |
+| Body store | `internal/bodystore/` | opt-in captured-body store (D4, ADR-018), OUTSIDE the audit chain: `bodies` table (`ref` PK, `record_id`, `team`, `created_ts`, `expires_ts`, `size`, `wrapped_key_nonce`/`wrapped_key_ct`, `req_nonce`/`req_ct`, `resp_nonce`/`resp_ct` — BLOB/BYTEA ciphertext; `resp_*` nullable = streaming request-only). Envelope AEAD (per-record data key wrapped by a config-ref master key). Two backends (`sqlite.go`/`postgres.go`), TTL + size-cap `Purge`, hard-deletable per-row (GDPR erasure). Key rotation: `mayu bodies rewrap-key` (ADR-018 deferred item) rewraps `wrapped_key_*` only, via `Store.ListWrappedKeys`/`UpdateWrappedKey` (CAS) — never reads or rewrites `req_*`/`resp_*` |
 | Analytics index | `internal/analytics/` | derived usage read-model; `events` table gained `ts` + `body_ref` columns (D4, ADR-018) via ALTER-if-missing (SQLite) / `ADD COLUMN IF NOT EXISTS` (Postgres); backs `GET /admin/logs` |
 | ULID | `pkg/ulid/ulid.go` | monotonic record IDs (Crockford base32) |
 | Usage telemetry store | `internal/telemetry/` | ADR-036: `UsageBatch`/`UsageEntry` wire types (integer µUSD, 5m/1h cache tiers separate, resolved model names; Validate rejects poison classes — in-batch dup keys, NUL bytes, >1e15 counts, out-of-range windows); `MemoryAggregator` (always-on, wall-clock 24h retention, snapshot-under-lock Rows); `PostgresAggregator` (`usage_windows` table — PK `(dataplane, window_start, team, "user", model)`, `window_start` secondary index, portable types: pg_dump/RDS snapshots are the backup story; lazy connect, advisory-lock migration 847003, batch-replace tx, DSN never in errors); `DurableAggregator` (PG-commit→memory→ack write-through; queries prefer PG, memory fallback marked `degraded`) |

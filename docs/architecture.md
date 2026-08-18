@@ -3,7 +3,7 @@
 ## System Overview
 
 inferplane is split into two binaries: **`mayu`**, a node-local data plane that
-sits between coding agents (Claude Code, OpenCode) and upstream model providers
+sits between coding agents (Claude Code, OpenCode, Codex) and upstream model providers
 (Anthropic, Amazon Bedrock, self-hosted vLLM/Ollama), and **`inferplaned`**, a
 control plane that distributes policy and budget leases but never carries
 inference traffic (ADR-031). `mayu` authenticates virtual keys, enforces

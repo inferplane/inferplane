@@ -1,6 +1,6 @@
 # Runbook: body-store key rotation (ADR-018 deferred item)
 
-`inferplane bodies rewrap-key` rotates the AES-256 master key that wraps every
+`mayu bodies rewrap-key` rotates the AES-256 master key that wraps every
 captured body's per-record data key (`audit.log_bodies.key_ref`). It touches
 only the `wrapped_key_nonce`/`wrapped_key_ct` columns — the actual
 request/response ciphertext (`req_*`/`resp_*`) is never read or rewritten, so
@@ -25,7 +25,7 @@ rotation is fast and cheap regardless of how much body content is stored.
 ## Running it
 
 ```bash
-inferplane bodies rewrap-key \
+mayu bodies rewrap-key \
   --store /var/lib/inferplane/bodies.db \
   --old-key-env BODY_MASTER_KEY_OLD \
   --new-key-env BODY_MASTER_KEY_NEW
@@ -36,11 +36,15 @@ For the Postgres backend, replace `--store <path>` with
 Postgres DSN in this repo). Old/new keys may each come from `--old-key-file`/
 `--new-key-file` instead of an env var.
 
-**No fleet-wide quiesce is required.** Every replica already writes
-independently with no coordination (same posture as `Purge`) — a body
-captured by another live replica while rotation is running simply isn't in
-this run's row list; a second `bodies rewrap-key` run with the same old/new
-keys catches it.
+**No fleet-wide quiesce is required — for `bodystore` specifically.** This
+applies when you're running the Postgres `bodystore` backend across multiple
+`mayu` replicas (ADR-018): every replica already writes independently with no
+coordination (same posture as `Purge`) — a body captured by another live
+replica while rotation is running simply isn't in this run's row list; a
+second `bodies rewrap-key` run with the same old/new keys catches it. This
+does not imply the gateway as a whole supports multi-replica deployment
+today — `keystore`/`limiter`/`budget` are still single-replica only
+(ADR-013, deferred; see `docs/roadmap.md`).
 
 ## Reading the output
 

@@ -2,14 +2,47 @@
 
 ## Overview
 
-**inferplane** is an LLM consumption governance gateway: virtual keys, team RBAC,
-quotas, budgets, and tamper-evident audit logging for Claude Code / OpenCode
-traffic to Anthropic, Amazon Bedrock, and self-hosted vLLM/Ollama. Single static
-binary, Kubernetes-native, Apache-2.0, no external SaaS dependency. The project
-aspires to CNCF Sandbox.
+**inferplane** is a governance control plane + node-local data plane for LLM
+consumption: virtual keys, team RBAC, quotas, budgets, and tamper-evident audit
+logging for Claude Code / OpenCode / Codex traffic to Anthropic, Amazon Bedrock,
+and self-hosted vLLM/Ollama. Each of the two binaries (`mayu`, `inferplaned`)
+is itself a single static binary, Kubernetes-native, Apache-2.0, no external
+SaaS dependency. The project aspires to CNCF Sandbox.
 
 Architecture overview: [docs/architecture.md](docs/architecture.md).
 Design history / decisions: [docs/decisions/](docs/decisions/).
+
+## Core Purpose
+
+Every design decision, ADR, and scope call is judged against these five goals.
+If a change doesn't serve one of them, it needs a reason that isn't "seemed
+useful" — and if it weakens one to serve another, that trade-off must be
+stated explicitly (see the HA vs. rate-limit-accuracy tension below).
+
+1. **A single entry point for coding-assistant traffic** — Claude Code,
+   OpenCode, and Codex users route through inferplane to reach Anthropic,
+   Amazon Bedrock, and OpenAI-compatible (vLLM/Ollama/etc.) providers.
+   Codex support is the goal, not yet verified — no Codex-specific code or
+   test exists (`docs/roadmap.md` Purpose alignment).
+2. **Per-user model choice** — each user can pick which model they talk to.
+3. **Cost-driven model substitution** — swap to a cheaper model (e.g.
+   Sonnet → GLM) when cost, not just capability, is the deciding factor.
+4. **Budget control with visibility** — set spend limits per team and per
+   individual, block on breach, and always be able to answer "how much have
+   we spent."
+5. **No SPOF** — control plane and data plane are separate processes; a
+   control-plane outage must never stop inference-path request traffic. This
+   is specifically about the control plane, not about any one `mayu`
+   instance's own availability — see "Current limits" in README for that.
+
+**Known tension:** #5 (no SPOF) pulls against making enforcement accurate.
+Running N node-local data planes removes the SPOF, but in-memory
+per-instance counters mean rate limits and quotas become up to N× the
+configured value unless enforcement is made globally accurate — as ADR-034
+did (with bounded, not exact, overshoot) for team budget in control-plane
+mode, but not yet for rate/quota or standalone budget — see
+`docs/roadmap.md`. Any HA or multi-replica work must close this gap for #4,
+not just add replicas.
 
 ## Tech Stack
 

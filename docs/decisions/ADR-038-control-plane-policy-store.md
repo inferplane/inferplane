@@ -113,3 +113,15 @@ console, all opt-in behind one env var.
   to hang a read/write split on.
 - The env-only configuration follows the `INFERPLANED_TOKEN` /
   `INFERPLANED_USAGE_DSN` precedent — inferplaned has no config file.
+- **`inferplaned` is task-replaceable, not horizontally scalable: run exactly
+  one task.** Postgres-backing the policy/telemetry stores makes those stores
+  safe across task replacement, but the budget-lease ledger
+  (`internal/controlplane`) is still per-process in-memory. Two concurrent
+  `inferplaned` tasks would each grant full budget allowances against the
+  same rule — N× overshoot, not the bounded overshoot ADR-034 designs for a
+  single instance. A durable ledger (roadmap item ②) is required before
+  running more than one task. Even at exactly one task, an ECS-triggered
+  replacement (deploy, failed health check, spot interruption) resets the
+  ledger to empty — the replacement task starts with no memory of grants the
+  old task had already issued, and relies on the same cumulative-report
+  self-healing ADR-034 uses as its fallback rather than exact ledger state.

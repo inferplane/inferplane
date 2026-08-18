@@ -9,7 +9,7 @@ import (
 	"github.com/inferplane/inferplane/internal/live"
 )
 
-// pricingCmd implements `inferplane pricing check` — the CI guard for ADR-030.
+// pricingCmd implements `mayu pricing check` — the CI guard for ADR-030.
 //
 // It answers one question: does every model this config routes to have a rate?
 // A newly released model added to `models` without a matching
@@ -31,7 +31,7 @@ import (
 // Exit codes: 0 all routes priced, 1 one or more unpriced, 2 config error.
 func pricingCmd(args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: inferplane pricing check --config <path>")
+		fmt.Fprintln(os.Stderr, "usage: mayu pricing check --config <path>")
 		return 2
 	}
 	switch args[0] {

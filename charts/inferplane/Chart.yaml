@@ -1,6 +1,6 @@
 apiVersion: v2
 name: inferplane
-description: LLM consumption governance gateway
+description: mayu, the node-local data plane for inferplane's LLM consumption governance (this chart does not deploy inferplaned)
 type: application
 version: 0.2.0
 appVersion: "0.2.0"

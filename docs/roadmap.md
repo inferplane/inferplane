@@ -6,6 +6,31 @@ the split architecture's costs are already being paid (fleet of data planes,
 version skew management, distributed accounting); these five items are where
 the benefits are still only partially collected.
 
+## Purpose alignment (2026-08-14)
+
+`CLAUDE.md` → Core Purpose lists five goals. This table is the internal
+priority lens the LiteLLM-gap framing above doesn't give you — it's ordered
+by which goal each gap blocks, not by feature parity with a competitor. Its
+scope is broader than the five sprint items below: a row can be ✅ even
+though none of sprints S1-S3 have shipped, because some goals (e.g. #5) were
+already met by earlier work (ADR-031) outside this roadmap.
+
+| Purpose | Status | Evidence |
+|---|---|---|
+| #1 A single entry point for Claude Code/OpenCode/Codex | 🔶 partial | No Codex-specific code, fixture, or test anywhere in the tree (`grep -ri codex internal/ providers/ tests/` → 0 hits, excluding this doc); the OpenAI-compat ingress (`internal/server/openaiapi/chat.go`) is the presumed path but has never been verified against a real Codex client |
+| #2 Per-user model choice | ✅ done | User-subject `modelAccess` rules are enforced: `internal/policy/store.go:252` `ModelAllowed`, wired at `cmd/mayu/gateway.go:407` into `router.FilterModelAllowed`. (Per-user *budget/rate* is a separate, still-blocked item — see #4b.) |
+| #3 Cost-driven model substitution via policy (routing) | ❌ blocked | `internal/policy/store.go:161` — `routing` rules rejected outright as "not yet enforceable by this data plane build," for every subject shape. Config-level `model_fallbacks` substitution exists (`internal/router/router.go:44`) but only fires when a requested model has no route at all — it's availability-triggered, not cost-triggered. |
+| #4a Team budget + block | ✅ done, with caveats | ADR-034 lease pattern bounds team-level overspend across data planes when a control plane is attached (worst case = Σ outstanding grants, not exact; window edges are approximate — ADR-034 §Known limits). Per-key budgets are not lease-managed. Standalone `mayu` (no control plane) gets no lease at all — budget is plain in-memory there, like rate. |
+| #4b Per-user budget/rate | ❌ blocked | `internal/policy/store.go:168-169` — any rule containing `budget` or `rate` is rejected unless the subject is team-only; user-only and (team,user) subjects are refused for those two rule kinds specifically |
+| #4c Rate/quota global accuracy under horizontal scale | ❌ blocked | item ① below — in-memory per-replica buckets; N replicas admit up to N× the configured rate/TPM/quota in aggregate |
+| #4d Spend visibility | ✅ done | `internal/analytics` + console + `GET /admin/logs` (`analyticsapi.LogsHandler`, backed by the same analytics index — its `events` rows carry `cost_micros` per request, `internal/analytics/index.go:40`) |
+| #5 No SPOF (control/data plane split) | ✅ done | ADR-031 — scoped to the control plane not gating the inference path; it does not mean any one `mayu` instance is itself highly available (see #4c and "Current limits") |
+
+**The known tension:** #4c and #5 pull against each other — see `CLAUDE.md` →
+Core Purpose. HA work here means closing that gap, not merely adding
+replicas; a naive multi-replica deployment currently breaks #4c further
+without an accurate shared rate/quota store.
+
 Sprint plan (each phase = separate PR(s), reviewed before the next):
 
 | Sprint | Items | Why together |
@@ -198,7 +223,18 @@ details are swappable.
 
 ## Explicitly deferred (so the list stays five)
 
-- Control-plane HA / Postgres ledger backend (interface prepared in ②).
+- Control-plane HA / Postgres ledger backend (interface prepared in ②) — see
+  §"HA (multiple control-plane replicas) is explicitly out of scope here"
+  above.
+- **Data-plane (mayu) shared-state HA** — `keystore`/`limiter`/`budget`
+  moving off SQLite/in-memory onto a shared backend so #4c above stops being
+  blocked. Maintainer direction as of 2026-08-14 is **Postgres-only**, recorded
+  here pending a real ADR (narrower than
+  ADR-013's original Postgres+Redis/Valkey design — no Redis dependency is
+  planned). Still deferred: implementation has not started, and ADR-013
+  itself carries no superseded-by marker yet — a new ADR is needed before
+  work begins, and it must resolve what ADR-013 left open (fail-open vs.
+  fail-closed on a Postgres outage). See "Purpose alignment" above.
 - SSE push stream for policy distribution (poll-at-lease-cadence already
   beats the 60s/15s requirement).
 - CRD-watch controller in inferplaned (ADR-035 follow-up).

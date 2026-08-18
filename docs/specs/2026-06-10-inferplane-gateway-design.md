@@ -137,12 +137,15 @@ Core design principles:
 - **Audit is two-phase**: `request_started` right after the authorization
   decision (denials included), `request_completed` after usage settles — a
   crash still leaves a trace of any request that passed auth (§5.4).
-- **Stateless across requests**: no session affinity between requests — any
-  replica can handle any request. Persistent state lives in the quota store
-  and the key/team metadata store. Rate-limit counters, the circuit breaker,
-  the audit chain head, and the WAL buffer are **instance-local**, however;
-  restart-reset behavior and multi-replica limits are documented in §5.3,
-  §4.5, and §5.4.
+- **Stateless across requests (design intent, not yet built)**: the design
+  called for no session affinity, so any replica could handle any request.
+  Persistent state was meant to live in the quota store and the key/team
+  metadata store. **As shipped, this is not the case**: the key/team store
+  (`internal/keystore`) is SQLite-only, so a key issued on one replica 401s
+  on another. Rate-limit counters, the circuit breaker, the audit chain head,
+  and the WAL buffer are **instance-local**, as documented in §5.3, §4.5, and
+  §5.4. The shared-store backend this section assumes is ADR-013 (design
+  only, implementation deferred) — see `docs/roadmap.md` for status.
 
 ### 2.2 Canonical schema — decision
 
@@ -643,7 +646,8 @@ chicken-and-egg problem.
   Local-mode constraint: **restricted to pre-boot bootstrapping**, and it
   forces the key-issuance record into the same-path audit WAL (otherwise
   local mode would bypass audit, contradicting the "every governance event
-  is recorded" success criterion). When the key store is Postgres (HA),
+  is recorded" success criterion). When the key store is Postgres (HA —
+  **design intent; no Postgres key-store backend exists today, only SQLite**),
   local mode is disabled and everything goes through the admin API (to
   avoid split-brain).
 - Admin API calls are themselves audit events (key issuance/revocation are
@@ -796,14 +800,14 @@ audit:
     - { type: s3, bucket: llm-audit, prefix: gw/, format: jsonl }   # required defaults to true
   # hash chain: on by default in v0.1 — not a toggle (§5.4). v0.2: anchor: { type: s3_object_lock, interval: 5m }
 
-quota_store:                                   # omit for in-memory (single replica)
-  type: redis
-  addr: redis.infra.svc:6379
+quota_store:                                   # DESIGN ONLY — this key does not exist in shipped config.
+  type: redis                                  # No redis/valkey driver exists in the tree today (ADR-013, deferred).
+  addr: redis.infra.svc:6379                   # Quota/rate is in-memory, single-replica only, as shipped.
   failure_mode: fail_open                      # fail_open (default, keeps enforcing locally) | fail_closed (§5.3)
 
-key_store:                                     # virtual key / team metadata
-  type: sqlite                                 # sqlite = single replica only | postgres = required for multi-replica HA (v0.2)
-  path: /var/lib/inferplane/keys.db
+key_store:                                     # `key_store` DOES ship (internal/config/config.go:344) — only
+  type: sqlite                                 # `path` is honored. `type` is parsed but IGNORED: gateway.go
+  path: /var/lib/inferplane/keys.db            # hardcodes OpenSQLite. Setting `postgres` here silently no-ops.
 ```
 
 *(Update: two config keys were added after this spec was written and are not

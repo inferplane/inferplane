@@ -55,6 +55,15 @@ Assets we already hold and must keep loud:
    gap we exist to fill; conflicts with CNCF-sandbox vendor-neutral posture.
 3. **UI-writable policy (parity with LiteLLM admin UI).** Rejected — converts
    our GitOps/no-drift advantage into their DB-state weakness.
+   **Unresolved as of 2026-08-14:** ADR-038 later shipped a UI-writable
+   Postgres policy store (`PUT/DELETE /v1alpha1/policies`) without a
+   superseding ADR reversing this rejection. A 3-AI consensus panel
+   (2026-08-14, two rounds) flagged the resulting gap — no write-authorization
+   tier, no per-change audit on that path — as an enterprise security-review
+   blocker in both directions tested (walking the write back, and doubling
+   down on it). A superseding ADR is pending; until it lands, treat this
+   rejection as still the documented position and ADR-038's write endpoint as
+   the open exception to it.
 
 ## Consequences
 
