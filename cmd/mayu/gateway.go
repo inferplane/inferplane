@@ -74,6 +74,7 @@ type gateway struct {
 	polStore         *policy.Store               // nil unless policies/control_plane is configured (ADR-033/034); file mode watched in serve
 	syncer           *proxy.Syncer               // nil unless control_plane is configured (ADR-034); heartbeats in serve
 	usagePusher      *proxy.UsagePusher          // nil unless control_plane is configured; drains the collector every minute
+	credSrc          providers.CredentialSource  // nil unless a bedrock provider opted into auth.mode "broker" (ADR-040); reused across rebuilds
 	reloadMu         sync.Mutex                  // serializes reloads AND UI writes (concurrent SIGHUPs/triggers)
 	dataLn           net.Listener
 	adminLn          net.Listener
@@ -273,10 +274,44 @@ func newGateway(cfgPath string) (*gateway, error) {
 		pgstoreAgg = pgstore.NewAggregator(pgstoreQ, aggCfg)
 	}
 
+	// Dataplane id, resolved ONCE here rather than at the syncer site below,
+	// so the credential fetcher and the heartbeat report the SAME id: CloudTrail
+	// session attribution (ADR-040) and the control plane's lease ledger
+	// (ADR-034) must not disagree about which data plane called. The default is
+	// still per-boot (host + ULID); operators who want a stable CloudTrail trail
+	// across restarts set control_plane.dataplane explicitly.
+	var dataplaneID string
+	if raw.ControlPlane != nil {
+		dataplaneID = raw.ControlPlane.Dataplane
+		if dataplaneID == "" {
+			dataplaneID = instanceID()
+		}
+	}
+
+	// Credential brokering (ADR-040): built only when a bedrock provider opted
+	// in with auth.mode "broker". Config load already guaranteed a
+	// control_plane block, a broker_token_ref, and an https-or-loopback URL, so
+	// there is nothing left to check here. ONE fetcher is built for the process
+	// and reused across every rebuild — the ADR explicitly permits caching it
+	// to damp BuildState churn, and the eager-validation property is preserved
+	// because each rebuild's bedrock client still performs its own initial
+	// Retrieve. Declared as the INTERFACE type: assigning a nil
+	// *CredentialFetcher into it would produce a non-nil interface holding a
+	// nil pointer, which would defeat the provider's nil check and panic on
+	// first use instead of failing construction.
+	var credSrc providers.CredentialSource
+	if brokerAuthConfigured(cfg) {
+		credSrc = &proxy.CredentialFetcher{
+			URL:         raw.ControlPlane.URL,
+			BrokerToken: raw.ControlPlane.BrokerToken,
+			Dataplane:   dataplaneID,
+		}
+	}
+
 	// Topology generation (providers + routes + pricing) — built by the
 	// topology-only builder so the same path serves boot and hot reload
 	// (ADR-006). Published behind an atomic holder the router reads.
-	st, _, err := live.BuildState(cfg)
+	st, _, err := live.BuildStateWith(cfg, live.Deps{Credentials: credSrc})
 	if err != nil {
 		closeAll(pstore, pgstoreQ, store, aud)
 		return nil, err
@@ -427,10 +462,8 @@ func newGateway(cfgPath string) (*gateway, error) {
 				fmt.Fprintf(os.Stderr, "inferplane: WARNING: control_plane.url %q is not loopback and control_plane.token_ref is unset — heartbeats will be UNAUTHENTICATED (an inferplaned with INFERPLANED_TOKEN set will refuse them)\n", raw.ControlPlane.URL)
 			}
 		}
-		dataplaneID := raw.ControlPlane.Dataplane
-		if dataplaneID == "" {
-			dataplaneID = instanceID()
-		}
+		// dataplaneID was resolved above (before BuildState) so the credential
+		// fetcher and this heartbeat report the same id — see the comment there.
 		// Usage telemetry (T4): every settle folds into this collector; the
 		// pusher (T5) drains it to the control plane. Only in control-plane
 		// mode — standalone stays byte-identical.
@@ -639,6 +672,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		polStore:         polStore,
 		syncer:           syncer,
 		usagePusher:      usagePusher,
+		credSrc:          credSrc,
 		dataLn:           dataLn,
 		adminLn:          adminLn,
 	}
@@ -826,7 +860,7 @@ func (g *gateway) reloadLocked() error {
 	if err != nil {
 		return fmt.Errorf("reload: %w", err)
 	}
-	st, identities, err := live.BuildState(cfg)
+	st, identities, err := live.BuildStateWith(cfg, live.Deps{Credentials: g.credSrc})
 	if err != nil {
 		return fmt.Errorf("reload: %w", err)
 	}
@@ -887,7 +921,14 @@ func (g *gateway) writeMutation(ctx context.Context, persist func(context.Contex
 		fmt.Fprintln(os.Stderr, "inferplane: rejected UI write (resolve):", err)
 		return configapi.ErrInvalidTopology
 	}
-	st, identities, err := live.BuildState(eff)
+	// g.credSrc is nil unless a broker-mode provider existed at BOOT. A UI write
+	// that newly sets auth.mode "broker" therefore fails the candidate build
+	// (ADR-040 invariant #1) and is rejected with 400 rather than silently
+	// deployed signing with node IAM — correct, and unavoidable: the fetcher's
+	// URL and broker token come from the file-only control_plane block, so
+	// enabling brokering is a config change plus a restart, never a console
+	// toggle.
+	st, identities, err := live.BuildStateWith(eff, live.Deps{Credentials: g.credSrc})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "inferplane: rejected UI write (build):", err)
 		return configapi.ErrInvalidTopology
@@ -1398,6 +1439,20 @@ func oidcMapping(cfg *config.Config) adminauth.MappingConfig {
 		mc.GroupMappings = append(mc.GroupMappings, adminauth.GroupMapping{Group: gm.Group, Teams: gm.Teams})
 	}
 	return mc
+}
+
+// brokerAuthConfigured reports whether any EFFECTIVE bedrock provider opted
+// into credential brokering (ADR-040). It reads the effective config (file plus
+// DB overlay), because that is the provider set BuildState actually constructs.
+// Only bedrock is checked: auth.mode is wired into provider Settings for that
+// type alone, and internal/config rejects "broker" anywhere it would be a lie.
+func brokerAuthConfigured(cfg *config.Config) bool {
+	for _, pc := range cfg.Providers {
+		if pc.Type == "bedrock" && pc.Auth.Mode == "broker" {
+			return true
+		}
+	}
+	return false
 }
 
 // instanceID names this gateway instance for the audit hash chain. Each process
