@@ -288,6 +288,33 @@ func TestBrokerRetriesWithoutSourceIdentity(t *testing.T) {
 	}
 }
 
+// TestBrokerLatchesSourceIdentitySkip: inheritance is a per-boot environment
+// fact, not a per-request one — after the first SourceIdentity refusal the
+// broker latches and later mints go straight to the tags-only shape instead
+// of re-paying the doomed first AssumeRole on every request.
+func TestBrokerLatchesSourceIdentitySkip(t *testing.T) {
+	f := &fakeSTS{
+		errs: []error{errors.New("AccessDenied: Cannot set a new SourceIdentity when one is already set")},
+		out:  okCreds(time.Now().Add(time.Hour)),
+	}
+	mux := brokerMux(f) // ONE server across both requests — the latch lives on it
+	if rec := postCredentials(mux, "Bearer "+brokerTestToken, `{"dataplane":"host-01JABC"}`); rec.Code != 200 {
+		t.Fatalf("first mint: status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if rec := postCredentials(mux, "Bearer "+brokerTestToken, `{"dataplane":"host-01JABC"}`); rec.Code != 200 {
+		t.Fatalf("second mint: status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if len(f.calls) != 3 {
+		t.Fatalf("AssumeRole calls = %d, want 3 (2 for the first mint's retry, 1 for the latched second)", len(f.calls))
+	}
+	if f.calls[2].SourceIdentity != nil {
+		t.Error("call 3: SourceIdentity is non-nil — the latch did not stick")
+	}
+	if len(f.calls[2].Tags) != 1 || *f.calls[2].Tags[0].Value != "host-01JABC" {
+		t.Errorf("call 3 tags = %+v, want the dataplane tag kept", f.calls[2].Tags)
+	}
+}
+
 func TestBrokerDoesNotRetryOtherErrors(t *testing.T) {
 	f := &fakeSTS{err: errors.New("AccessDenied: not authorized to perform sts:AssumeRole")}
 	rec := postCredentials(brokerMux(f), "Bearer "+brokerTestToken, `{"dataplane":"d"}`)

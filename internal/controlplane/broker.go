@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -51,6 +52,11 @@ type BrokerServer struct {
 	token   string // INFERPLANED_BROKER_TOKEN — NEVER INFERPLANED_TOKEN
 	roleARN string
 	sts     stsAPI
+	// skipSourceIdentity latches once an AssumeRole is refused specifically
+	// for SourceIdentity (inherited from the task-role session — a per-boot,
+	// per-environment fact, not per-request): later mints skip the doomed
+	// first attempt instead of paying an extra STS round trip every time.
+	skipSourceIdentity atomic.Bool
 	// OnError is an optional server-side error sink (log). It receives STS
 	// failures WITHOUT any credential material; nil ⇒ silent.
 	OnError func(error)
@@ -190,24 +196,29 @@ func (s *BrokerServer) handleCredentials(w http.ResponseWriter, r *http.Request)
 // task-role session ALREADY carries a SourceIdentity, AWS forbids setting a
 // different one on the next hop and fails the whole AssumeRole. Retry once
 // without it — the session TAG still carries the dataplane axis, so
-// attribution degrades rather than breaking the feature.
+// attribution degrades rather than breaking the feature — and latch
+// skipSourceIdentity so later mints go straight to the tags-only shape
+// instead of re-paying the doomed first call on every request.
 func (s *BrokerServer) assumeRole(ctx context.Context, sessionID string) (*sts.AssumeRoleOutput, error) {
 	in := &sts.AssumeRoleInput{
 		RoleArn:         aws.String(s.roleARN),
 		RoleSessionName: aws.String(sessionID),
-		SourceIdentity:  aws.String(sessionID),
 		DurationSeconds: aws.Int32(brokerSessionSeconds),
 		Tags:            []ststypes.Tag{{Key: aws.String("dataplane"), Value: aws.String(sessionID)}},
+	}
+	if !s.skipSourceIdentity.Load() {
+		in.SourceIdentity = aws.String(sessionID)
 	}
 	out, err := s.sts.AssumeRole(ctx, in)
 	if err == nil {
 		return out, nil
 	}
-	if !isSourceIdentityError(err) {
+	if in.SourceIdentity == nil || !isSourceIdentityError(err) {
 		return nil, err
 	}
+	s.skipSourceIdentity.Store(true)
 	if s.OnError != nil {
-		s.OnError(fmt.Errorf("controlplane: credential broker: SourceIdentity refused (likely inherited from the task-role session); retrying with session tags only: %w", err))
+		s.OnError(fmt.Errorf("controlplane: credential broker: SourceIdentity refused (likely inherited from the task-role session); continuing with session tags only: %w", err))
 	}
 	in.SourceIdentity = nil
 	return s.sts.AssumeRole(ctx, in)
