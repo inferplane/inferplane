@@ -20,6 +20,7 @@ are non-negotiable invariants (see CLAUDE.md → Security mandates).
 | Key hashing | `internal/keystore/sqlite.go` | SHA-256 at rest; plaintext shown once (or, for a declaratively-bootstrapped key, ADR-023, referenced via `virtual_keys[].key_ref` — never inline, same §7 posture as a provider's `api_key_ref`) |
 | TLS validation | `internal/server/tls.go` | rejects half-specified cert/key pairs |
 | Secret refs | `internal/config/config.go` | `env:`/`file:`/`secret:` only; inline `api_key` rejected |
+| Credential brokering | `internal/controlplane/broker.go`, `internal/proxy/credentials.go`, `providers/bedrock/client.go` | ADR-040: inferplaned vends ≤1h STS Bedrock sessions to mayu so node IAM can hold ZERO Bedrock permissions — enforcement moves from convention to IAM, **on hosts where mayu's env is not readable by its users** (a developer-owned machine can read `broker_token_ref` and mint directly; there brokering is IAM hygiene, not a bypass control). Machine channel only: a dedicated `INFERPLANED_BROKER_TOKEN`, distinct from `INFERPLANED_TOKEN` and rejected at boot if equal, with a JWT-shaped bearer 403'd unverified so a console SSO session can never mint credentials. FAIL-CLOSED: `auth.mode: "broker"` with no injected source is a construction error (never the node's default credential chain), the first fetch is EAGER so a bad broker fails BuildState instead of user traffic, an unknown `auth.mode` is a load error, and a non-loopback plain-`http` control-plane URL is rejected. SECRET HYGIENE: no credential field is ever logged; the fetcher's non-2xx/decode errors carry a status code and fixed strings only (no `%w` on JSON errors — `time.Time`'s parse error echoes the value), and an STS failure returns a fixed 502 body. **v1 limitation:** the dataplane id is caller-chosen, so CloudTrail attribution is "which id was claimed", never "which machine called", and brokered sessions carry unrestricted `bedrock:Invoke*` — condition the broker role on `aws:SourceIp`/`aws:SourceVpce` (runbook, not enforceable here) |
 | Metrics safety | `internal/metrics/metrics.go` | no `key_id`/secret labels; `_rejected` sentinel bounds cardinality |
 
 ### 3. Key Decisions
@@ -27,6 +28,7 @@ are non-negotiable invariants (see CLAUDE.md → Security mandates).
 - `/metrics` is unauthenticated but carries no secret or `key_id` and bounds label cardinality.
 - Pre-resolution 403/404 paths use a sentinel model label so attacker-supplied model strings can't explode Prometheus series.
 - ADR-029 model-level fallback fails closed on RBAC: a key allowed only the requested (unconfigured) model name is 403'd, never silently served by its fallback model; a cross-model fallback target appended after the allow-list check is re-checked via `FilterModelAllowed`.
+- ADR-040 credential brokering fails closed in both directions: a brokered provider that cannot obtain credentials errors rather than falling back to the node's own AWS identity, and the credential endpoint has no OIDC branch at all rather than one that could be mis-routed into. Both are pinned by mutation-checked tests, not just by review.
 
 ### 4. Code Pointers
 - `internal/server/auth.go` — virtual-key auth, empty-key bypass guard
@@ -35,5 +37,5 @@ are non-negotiable invariants (see CLAUDE.md → Security mandates).
 
 ### 5. Cross-references
 - Related modules: `internal/keystore`, `internal/audit`, `internal/metrics`
-- Related ADRs: docs/decisions/ADR-004-oidc-admin-authz.md, docs/decisions/ADR-026-console-sso-login.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md
+- Related ADRs: docs/decisions/ADR-004-oidc-admin-authz.md, docs/decisions/ADR-026-console-sso-login.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md, docs/decisions/ADR-040-credential-brokering.md
 - Related runbooks: docs/runbooks/ ; docs/runbooks/cli-login.md ; policy in `SECURITY.md`
