@@ -1,4 +1,4 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: c42dd007fb98 · generated-at: 2026-08-14 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 3a78f6741052 · generated-at: 2026-08-18 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
 > from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
 > per-AI copy).
@@ -23,7 +23,8 @@ routing, auth, governance, audit; runs standalone, no control plane required).
 **`cmd/inferplaned`** is the control plane (ADR-034) — distributes
 `GovernancePolicy` documents and issues budget leases over one heartbeat; it
 never carries inference traffic. Credential brokering from the control plane
-is not yet implemented — don't assume it exists when reviewing a diff.
+is designed (ADR-040, Proposed) but not implemented — don't assume it exists
+when reviewing a diff.
 
 ## Build · test · lint
 
