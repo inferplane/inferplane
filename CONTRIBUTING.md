@@ -2,7 +2,8 @@
 
 - All commits MUST be signed off (`git commit -s`) — [DCO](https://developercertificate.org/).
   CI rejects unsigned commits.
-- Provider PRs touch only `providers/<name>/`, `providers/register.go`,
-  and `docs/providers/` — zero core diff (design doc §8).
+- Provider PRs touch only `providers/<name>/`, the blank-import line in
+  `cmd/mayu/main.go`, and provider docs — zero core diff.
 - Run `go test ./...` before submitting.
-- Design doc: `docs/specs/2026-06-10-inferplane-gateway-design.md`.
+- Architecture: `docs/architecture.md`. Historical design rationale:
+  `docs/specs/2026-06-10-inferplane-gateway-design.md`.

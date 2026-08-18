@@ -91,7 +91,7 @@ func normalizeModel(model string) string {
 
 // HasRate reports whether a rate exists for this (provider, model), following
 // the same two-stage lookup CostUSDMicros uses. This is the single predicate
-// behind boot-time validation and `inferplane pricing check`, so neither can
+// behind boot-time validation and `mayu pricing check`, so neither can
 // drift from what actually gets billed.
 func (t *Table) HasRate(provider, model string) bool {
 	if _, ok := t.rates[Key{provider, model}]; ok {

@@ -2,12 +2,13 @@ package schema
 
 import "encoding/json"
 
-// Usage — budget 정산의 입력 (§5.3). cache 토큰은 TTL별 단가가 다르므로
-// (5m=1.25x, 1h=2x) 반드시 구분 보존한다.
-// 모든 수치는 *int64: upstream이 보낸 키만 재방출한다. message_delta
-// usage는 output_tokens만 싣는 경우가 있고(no-omitempty면 키 추가 발생),
-// 명시적 0("cache_creation_input_tokens":0)은 보존해야 한다(omitempty
-// 값 타입이면 드랍) — 48d412d/3d5e050과 동일한 결함 계열의 선제 차단.
+// Usage — input to budget settlement. Cache tokens are priced per TTL tier
+// (5m=1.25x, 1h=2x), so the tiers must be kept separate rather than collapsed.
+// Every field is *int64: only re-emit keys the upstream actually sent. A
+// message_delta's usage sometimes carries only output_tokens (a non-omitempty
+// field would add a key that wasn't there), and an explicit 0
+// (`"cache_creation_input_tokens":0`) must survive (an omitempty value type
+// would drop it) — this preempts the same bug class fixed in 48d412d/3d5e050.
 type Usage struct {
 	InputTokens              *int64                     `json:"input_tokens,omitempty"`
 	OutputTokens             *int64                     `json:"output_tokens,omitempty"`
@@ -50,15 +51,16 @@ func (c CacheCreation) MarshalJSON() ([]byte, error) {
 	return marshalWithExtra(plain(c), c.Extra)
 }
 
-// ChatResponse — canonical 비스트리밍 응답 (스트리밍 message_start의
-// 골격이기도 하다). stop_reason/stop_sequence는 null 유의미 → 포인터.
+// ChatResponse — canonical non-streaming response (also the skeleton of a
+// streaming message_start). stop_reason/stop_sequence are pointers because
+// null is meaningful, not absent.
 type ChatResponse struct {
 	ID    string `json:"id"`
 	Type  string `json:"type"`
 	Role  string `json:"role"`
 	Model string `json:"model"`
-	// Content: 호출자는 nil 대신 []ContentBlock{}을 설정할 것 — nil은
-	// "content":null로 방출되며 실제 API 형태는 항상 배열이다.
+	// Content: callers should set []ContentBlock{} rather than nil — nil
+	// marshals as "content":null, but the real API shape is always an array.
 	Content      []ContentBlock             `json:"content"`
 	StopReason   *string                    `json:"stop_reason"`
 	StopSequence *string                    `json:"stop_sequence"`

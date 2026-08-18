@@ -13,7 +13,6 @@
 package controlplane
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -23,6 +22,7 @@ import (
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
 	"github.com/inferplane/inferplane/internal/policy"
+	"github.com/inferplane/inferplane/internal/policystore"
 )
 
 // staleAfter is how long after its last heartbeat a data plane is still
@@ -42,8 +42,9 @@ const maxRejections = 100
 
 // Server is the control-plane distribution state and its HTTP handlers.
 type Server struct {
-	paths []string
-	token string // shared bearer token; "" = no auth (loopback-only deployments)
+	paths    []string
+	token    string // shared bearer token; "" = no auth (loopback-only deployments)
+	authOpts authOptions
 
 	mu         sync.Mutex
 	wire       []v1alpha1.GovernancePolicy
@@ -53,6 +54,9 @@ type Server struct {
 	dataplanes map[string]*dpInfo
 	files      map[string]time.Time
 	now        func() time.Time // injectable clock for tests
+
+	policyStore policystore.Store    // nil ⇒ file-authoritative; PUT/DELETE ⇒ 405
+	updated     map[string]time.Time // policy name → store updated_at (nil on the file path)
 }
 
 type ruleKey struct{ policy, rule string }
@@ -80,11 +84,12 @@ type dpInfo struct {
 // NewServer loads the policy documents (wire form — the control plane may
 // hold rules some data planes can't enforce; per-dataplane rejections
 // surface that) and builds the ledger. token, when non-empty, is required as
-// a Bearer token on every endpoint.
-func NewServer(token string, paths ...string) (*Server, error) {
+// a Bearer token on every endpoint (see WithOIDC for the SSO alternative).
+func NewServer(token, path string, opts ...Option) (*Server, error) {
 	s := &Server{
-		paths:      paths,
+		paths:      []string{path},
 		token:      token,
+		authOpts:   newAuthOptions(opts),
 		ledger:     map[ruleKey]*ruleLedger{},
 		dataplanes: map[string]*dpInfo{},
 		now:        time.Now,
@@ -103,7 +108,22 @@ func (s *Server) Reload() error {
 	if err != nil {
 		return err
 	}
+	mtimes := make(map[string]time.Time, len(files))
+	for _, f := range files {
+		if info, err := os.Stat(f); err == nil {
+			mtimes[f] = info.ModTime()
+		}
+	}
+	return s.applyWire(wire, mtimes)
+}
 
+// applyWire installs a document set: it rebuilds the lease ledger (carrying
+// spend/allowance forward for every rule whose policy+rule name pair still
+// exists), recomputes the heartbeat interval, and swaps in the new set and
+// generation. The ONE path both the file loader (Reload) and the policy store
+// (ReloadFromStore) go through, so a DB-sourced document set can never get
+// different ledger semantics from a file-sourced one.
+func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ledger := map[ruleKey]*ruleLedger{}
@@ -116,6 +136,15 @@ func (s *Server) Reload() error {
 		}
 		for _, r := range internal.Rules {
 			if r.Budget == nil || internal.Subject.Team == "" {
+				continue
+			}
+			// An explicit "no cap" declaration has nothing to lease — a
+			// lease exists to bound local overspend against a real limit,
+			// and this rule's LimitMicroUSD/LeaseRenewInterval are both the
+			// zero value, not real ones. Leaving it in would let a rule
+			// processed after a real budget rule reset minRenew back to 0
+			// (any "== 0" rule always wins the minRenew comparison below).
+			if r.Budget.Unlimited {
 				continue
 			}
 			k := ruleKey{policy: internal.Name, rule: r.Name}
@@ -145,12 +174,6 @@ func (s *Server) Reload() error {
 		interval = 1
 	}
 
-	mtimes := make(map[string]time.Time, len(files))
-	for _, f := range files {
-		if info, err := os.Stat(f); err == nil {
-			mtimes[f] = info.ModTime()
-		}
-	}
 	s.wire, s.generation = wire, policy.GenerationOf(wire)
 	s.ledger, s.interval, s.files = ledger, interval, mtimes
 	return nil
@@ -187,6 +210,10 @@ func (s *Server) Watch(ctx interface{ Done() <-chan struct{} }, onErr func(error
 
 func (s *Server) changed() bool {
 	s.mu.Lock()
+	if s.policyStore != nil {
+		s.mu.Unlock()
+		return false // DB-authoritative: file mtimes must never reload over a store write
+	}
 	known := make(map[string]time.Time, len(s.files))
 	for f, m := range s.files {
 		known[f] = m
@@ -212,25 +239,10 @@ func (s *Server) changed() bool {
 
 // Mount registers the control-plane endpoints on mux.
 func (s *Server) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1alpha1/sync", s.auth(s.handleSync))
-	mux.HandleFunc("GET /v1alpha1/dataplanes", s.auth(s.handleDataplanes))
-	s.mountExport(mux) // GET /v1alpha1/config/export (export.go)
-}
-
-// auth enforces the shared bearer token when one is configured. Comparison
-// is constant-time; the token itself is never logged.
-func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if s.token != "" {
-			got := r.Header.Get("Authorization")
-			want := "Bearer " + s.token
-			if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-				return
-			}
-		}
-		next(w, r)
-	}
+	mux.HandleFunc("POST /v1alpha1/sync", authn(s.token, s.authOpts, s.handleSync))
+	mux.HandleFunc("GET /v1alpha1/dataplanes", authn(s.token, s.authOpts, s.handleDataplanes))
+	s.mountExport(mux)   // GET /v1alpha1/config/export (export.go)
+	s.mountPolicies(mux) // GET/PUT/DELETE /v1alpha1/policies (policies.go)
 }
 
 // handleSync is the single data-plane heartbeat (ADR-034).

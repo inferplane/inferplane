@@ -48,6 +48,14 @@ func (h *CountTokensHandler) count(req *http.Request, raw []byte) int64 {
 	var parsed schema.ChatRequest
 	_ = json.Unmarshal(raw, &parsed) // best-effort; estimator works on raw bytes too
 	model, _ := h.r.ResolveModel(parsed.Model)
+	// RBAC: a key must not trigger a real upstream CountTokens call for a
+	// model outside its allow-list — fall back to the local estimate instead
+	// (still 200; the never-non-200 mandate holds, but the upstream never
+	// sees content the key isn't entitled to send it). Mirrors bedrockapi's
+	// CountTokensHandler.count.
+	if p, ok := principal.From(req.Context()); ok && !h.r.Allows(p, model) {
+		return estimateTokens(raw)
+	}
 	// PII masking (ADR-009): mask BEFORE forwarding to the upstream counter so the
 	// count reflects what is sent AND the upstream never sees unmasked PII. On a
 	// masker error, return a LOCAL estimate — never forward unmasked, never 500.

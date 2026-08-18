@@ -5,6 +5,9 @@
 // (SQLite default / Postgres for HA) share this file's contract; neither
 // needs a lease or fencing (unlike analytics Mode B) because every replica
 // mints its own collision-free ULID ref and purge deletes are idempotent.
+// Scope: this makes bodystore itself replica-safe -- it does not mean the
+// gateway as a whole is. keystore/limiter/budget are still single-replica
+// only (ADR-013, design-only).
 package bodystore
 
 import (

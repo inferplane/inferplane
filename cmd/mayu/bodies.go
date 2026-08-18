@@ -11,13 +11,13 @@ import (
 	"github.com/inferplane/inferplane/internal/config"
 )
 
-// bodiesCmd implements `inferplane bodies rewrap-key`, the ADR-018 deferred
+// bodiesCmd implements `mayu bodies rewrap-key`, the ADR-018 deferred
 // key-rotation item: re-wraps every row's data key from an old master key to
 // a new one, touching only the wrapped_key_* columns -- request/response
 // ciphertext is never read or rewritten. Returns the process exit code.
 func bodiesCmd(args []string) int {
 	if len(args) < 1 || args[0] != "rewrap-key" {
-		fmt.Fprintln(os.Stderr, "usage: inferplane bodies rewrap-key --store <path> --old-key-env <VAR>|--old-key-file <path> --new-key-env <VAR>|--new-key-file <path>")
+		fmt.Fprintln(os.Stderr, "usage: mayu bodies rewrap-key --store <path> --old-key-env <VAR>|--old-key-file <path> --new-key-env <VAR>|--new-key-file <path>")
 		return 2
 	}
 	return bodiesRewrapKey(args[1:])

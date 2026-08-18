@@ -1,20 +1,29 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 923ba8e33aaf · generated-at: 2026-08-01 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: c42dd007fb98 · generated-at: 2026-08-14 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
 > from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
 > per-AI copy).
 
 # inferplane — reviewer context
 
-LLM consumption-governance gateway: virtual keys, team RBAC, quotas/budgets,
-tamper-evident audit for Claude Code / OpenCode traffic → Anthropic / Bedrock /
-OpenAI-compatible upstreams. Go 1.25, single static binary (`CGO_ENABLED=0`,
-every dependency pure-Go), Kubernetes-native, Apache-2.0, CNCF Sandbox aspirant.
+Governance control plane + node-local data plane for LLM consumption: virtual
+keys, team RBAC, quotas/budgets, tamper-evident audit for Claude Code /
+OpenCode / Codex traffic → Anthropic / Bedrock / OpenAI-compatible upstreams.
+Go 1.25; each of the two binaries below is itself a single static binary
+(`CGO_ENABLED=0`, every dependency pure-Go),
+Kubernetes-native, Apache-2.0, CNCF Sandbox aspirant.
+
+**Core purpose (judge diffs against this):** (1) a single entry point for
+coding-assistant traffic, (2) per-user model choice, (3) cost-driven model
+substitution, (4) team/per-user budget control with visibility, (5) no SPOF.
+Known tension: (5)'s no-SPOF pulls against making (4)'s enforcement accurate
+under multi-replica — see the HA note below.
 
 Two binaries: **`cmd/mayu`** is the node-local data plane (the full gateway —
 routing, auth, governance, audit; runs standalone, no control plane required).
 **`cmd/inferplaned`** is the control plane (ADR-034) — distributes
 `GovernancePolicy` documents and issues budget leases over one heartbeat; it
-never carries inference traffic.
+never carries inference traffic. Credential brokering from the control plane
+is not yet implemented — don't assume it exists when reviewing a diff.
 
 ## Build · test · lint
 
@@ -45,6 +54,9 @@ credentials, or a real IdP (httptest fakes only).
 - A data plane's policy source is `policies` (local file, watched) XOR
   `control_plane` (ADR-034 heartbeat) — config load must reject both set at
   once.
+- `internal/cache` (VolatileStore, for cache-affinity routing) is an
+  unimplemented interface with no importers today — don't assume
+  cache-affinity is enforced anywhere yet.
 
 ## Banned patterns / security mandates (violations are CRITICAL)
 
@@ -80,6 +92,16 @@ credentials, or a real IdP (httptest fakes only).
 - Audit chain: records are hashed as exact line bytes — new fields are
   append-only with `omitempty`, proven by a mixed-version fixture test.
 - Fail closed: missing identity/lookup errors deny, never default-allow.
+- Data-plane multi-replica HA has a maintainer-stated direction, not yet an
+  ADR (Postgres-only shared state, narrower than ADR-013's original
+  Postgres+Redis design) — implementation is still deferred, ADR-013 itself
+  is not marked superseded,
+  and no implementation ADR exists yet. Rate-limit counters, budget/quota
+  stores, and the circuit breaker are all instance-local today. **Suppress**
+  "the in-memory limiter/budget won't scale past one replica" as a new
+  architecture finding — that's the known, tracked gap. **Do flag** any doc,
+  chart value, config comment, or code comment that implies multi-replica/HA
+  works *today* — that's a docs-accuracy bug, not the known gap.
 
 ## Review checklist
 
@@ -93,6 +115,7 @@ credentials, or a real IdP (httptest fakes only).
 6. Docs: ADR for decisions, reference docs synced for schema/endpoint changes.
 
 Known false-positives to suppress: `/metrics` being unauthenticated is by
-design (§5.5); the admin console's static assets being unauthenticated is by
-design (ADR-001/002 — they are data-free); key-existence signal on revoke 403
-is an accepted, documented trade-off.
+design (ADR-005); the admin console's static assets being unauthenticated is
+by design (ADR-001/002 — they are data-free); key-existence signal on revoke
+403 is an accepted, documented trade-off; single-replica-only enforcement
+(see ADR-013 note above) is known, not a new finding.

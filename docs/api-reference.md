@@ -43,13 +43,13 @@ GET  /v1/models
 ### CLI login (opt-in, ADR-028)
 
 Only mounted when `oidc.cli_login.enabled` is set — 404 otherwise. Lets
-`inferplane login` mint a short-lived virtual key instead of a human copying
+`mayu login` mint a short-lived virtual key instead of a human copying
 one out of the console. See [docs/runbooks/cli-login.md](runbooks/cli-login.md).
 
 ```
 GET    /v1/auth/config   # unauthenticated; {cli, issuer?, client_id?}
 POST   /v1/auth/key      # Authorization: Bearer <IdP ID token>; {"team"?: "..."} -> {key, key_id, team, expires_at}
-DELETE /v1/auth/key      # x-api-key: <the minted key>; self-revoke, used by `inferplane logout`
+DELETE /v1/auth/key      # x-api-key: <the minted key>; self-revoke, used by `mayu logout`
 ```
 
 `expires_at`/`owner` are always server-decided — a client cannot request a
@@ -90,13 +90,13 @@ Anthropic ingress; OpenAI error object on the OpenAI ingress).
 ## CLI
 
 ```
-inferplane serve  --config <path>
-inferplane keys   create --team <t> --models <csv> --store <path>
-inferplane keys   list   --store <path>
-inferplane keys   revoke --id <key_id> --store <path>
-inferplane audit  verify --file <path>
-inferplane pricing check --config <path>                                  # ADR-030, CI guard: exit 1 if any route has no rate
-inferplane login  --gateway <url> [--team <t>] [--id-token-command <cmd>]  # ADR-028
-inferplane token  [--export] [--raw]                                      # ADR-028, meant to run as apiKeyHelper
-inferplane logout                                                         # ADR-028
+mayu serve  --config <path>
+mayu keys   create --team <t> --models <csv> --store <path>
+mayu keys   list   --store <path>
+mayu keys   revoke --id <key_id> --store <path>
+mayu audit  verify --file <path>
+mayu pricing check --config <path>                                  # ADR-030, CI guard: exit 1 if any route has no rate
+mayu login  --gateway <url> [--team <t>] [--id-token-command <cmd>]  # ADR-028
+mayu token  [--export] [--raw]                                      # ADR-028, meant to run as apiKeyHelper
+mayu logout                                                         # ADR-028
 ```

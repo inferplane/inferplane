@@ -400,7 +400,7 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	var cost *audit.CostRef
 	if resp.Parsed != nil {
 		usage = usageRef(resp.Parsed.Usage)
-		cost = h.settle(p, providerName, model, upstream, resp.Parsed.Usage, table)
+		cost = h.settle(p, providerName, model, upstream, resp.Parsed.Usage, table, estimateTokens(pr.RawBody))
 		h.observeTokens(model, providerName, p.Team, resp.Parsed.Usage)
 	}
 	// Body capture (D4, ADR-018): copy-only, AFTER the response was already
@@ -486,7 +486,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 			// cost — bill them (ADR-030). Before this, a stream that broke
 			// mid-flight skipped settle() entirely and everything already
 			// streamed was free, with no pricing_missing flag to show it.
-			partialCost := h.settle(p, providerName, model, upstream, lastUsage, table)
+			partialCost := h.settle(p, providerName, model, upstream, lastUsage, table, estimateTokens(pr.RawBody))
 			h.auditCompletedPartial(p, model, upstream, usage, partialCost, tracing.TraceID(req.Context()))
 			recordSpanResponse(req, prov.Name(), upstream, usage, true) // committed (partial)
 			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 200, time.Since(start).Seconds(), ttft)
@@ -513,7 +513,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 			usage = usageRef(lastUsage)
 		}
 	}
-	cost := h.settle(p, providerName, model, upstream, lastUsage, table)
+	cost := h.settle(p, providerName, model, upstream, lastUsage, table, estimateTokens(pr.RawBody))
 	h.observeTokens(model, providerName, p.Team, lastUsage)
 	// Body capture (D4, ADR-018): REQUEST ONLY for streams — a streaming
 	// response exists only as per-event ev.Raw, never buffered as a whole
@@ -538,7 +538,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 // the two tiers are resolved separately via schema.Usage.CacheWriteTiers rather
 // than collapsed into the cheaper one (ADR-030 — the collapse under-billed 1h
 // writes by ~40%).
-func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table) *audit.CostRef {
+func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table, estimatedTokens int64) *audit.CostRef {
 	if h.gov == nil || u == nil {
 		return nil
 	}
@@ -550,7 +550,7 @@ func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upst
 		CacheWrite5m: write5m,
 		CacheWrite1h: write1h,
 	}
-	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table)
+	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table, estimatedTokens)
 	if h.usage != nil {
 		// Attribute to the UPSTREAM model — the name pricing billed.
 		h.usage.Record(p.Team, p.Owner, upstream, pu, cost)

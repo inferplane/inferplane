@@ -43,8 +43,8 @@ func TestChatResponseRoundTrip(t *testing.T) {
 }
 
 func TestUsagePinsPartialAndExplicitZero(t *testing.T) {
-	// message_delta는 output_tokens만 싣기도 하고(키 추가 금지),
-	// 명시적 cache_creation_input_tokens:0은 보존되어야 한다.
+	// A message_delta sometimes carries only output_tokens (must not add a
+	// key), and an explicit cache_creation_input_tokens:0 must be preserved.
 	for _, in := range []string{
 		`{"output_tokens":850}`,
 		`{"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":0}`,
@@ -62,8 +62,9 @@ func TestUsagePinsPartialAndExplicitZero(t *testing.T) {
 }
 
 func TestChatResponseSkeletonConstruction(t *testing.T) {
-	// M2가 message_start 골격을 코드로 만들 때의 계약: nil StopReason/
-	// StopSequence는 명시적 null로, 빈 Content는 []로 방출된다.
+	// The contract for building a message_start skeleton in code: nil
+	// StopReason/StopSequence marshal as explicit null, and empty Content
+	// marshals as [].
 	in := int64(4805)
 	out := int64(2)
 	r := ChatResponse{
@@ -81,7 +82,7 @@ func TestChatResponseSkeletonConstruction(t *testing.T) {
 }
 
 func TestUsageExtraRoundTrip(t *testing.T) {
-	// 정산 입력에서 미지의 과금 필드는 절대 드랍되면 안 된다.
+	// An unknown billing field must never be dropped from a settlement input.
 	for _, in := range []string{
 		`{"input_tokens":1,"output_tokens":2,"server_tool_use":{"web_search_requests":3}}`,
 		`{"output_tokens":2,"cache_creation":{"ephemeral_5m_input_tokens":1,"ephemeral_30m_input_tokens":7}}`,

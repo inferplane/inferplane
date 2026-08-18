@@ -30,6 +30,8 @@ CREATE INDEX IF NOT EXISTS bodies_expires ON bodies(expires_ts);`
 // writes only rows it minted (collision-free ULID refs) and Purge's deletes
 // are idempotent, so — unlike analytics Mode B — no lease/fencing is needed:
 // any number of replicas may run Purge concurrently without coordination.
+// Scope: this makes bodystore replica-safe, not the gateway -- keystore/
+// limiter/budget are still single-replica only (ADR-013, design-only).
 type PostgresStore struct {
 	db *pgxpool.Pool
 }

@@ -6,8 +6,9 @@ import (
 )
 
 func TestChatRequestRoundTrip(t *testing.T) {
-	// cache_control 멀티 breakpoint: system 블록 + 마지막 user 메시지.
-	// tools/system/thinking은 M1에서 raw 보존 (M5에서 타입 승격).
+	// Multiple cache_control breakpoints: a system block and the last user
+	// message. tools/system/thinking are kept as raw JSON here and promoted
+	// to typed shapes only during cross-protocol conversion.
 	in := `{
 	  "model": "claude-sonnet-4-6",
 	  "max_tokens": 8192,
@@ -38,8 +39,8 @@ func TestChatRequestRoundTrip(t *testing.T) {
 }
 
 func TestChatRequestPinsTypingDecisions(t *testing.T) {
-	// stream:false 명시값과 max_tokens:0 존재값이 왕복에서 살아남는다 —
-	// 이 두 필드의 타입 결정(*bool, *int64)을 핀.
+	// An explicit stream:false and a present max_tokens:0 must survive the
+	// round trip — pins the type choice (*bool, *int64) for both fields.
 	for _, in := range []string{
 		`{"model":"m","messages":[],"stream":false}`,
 		`{"model":"m","messages":[],"max_tokens":0}`,

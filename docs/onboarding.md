@@ -32,8 +32,8 @@ ANTHROPIC_API_KEY=sk-ant-... INFERPLANE_ADMIN_TOKEN=dev \
 
 ## Project Overview
 - Read `CLAUDE.md` for project context and conventions.
-- Read `docs/architecture.md` for system design.
-- Read `docs/specs/2026-06-10-inferplane-gateway-design.md` for the full design (source of truth).
+- Read `docs/architecture.md` for the current system design (source of truth).
+- Read `docs/specs/2026-06-10-inferplane-gateway-design.md` for the original v0.1 design rationale (historical).
 - Browse `docs/reference/INDEX.md` for per-layer implementation detail.
 - Review `docs/decisions/` for architectural decisions.
 
@@ -57,6 +57,7 @@ ANTHROPIC_API_KEY=sk-ant-... INFERPLANE_ADMIN_TOKEN=dev \
 - Audit verify reports a break: confirm you are verifying per-instance segments, not one continuous chain across restarts.
 
 ## Resources
-- Design doc: `docs/specs/2026-06-10-inferplane-gateway-design.md`
+- Architecture: `docs/architecture.md`
+- Historical design doc: `docs/specs/2026-06-10-inferplane-gateway-design.md`
 - Grafana dashboard: `deploy/grafana/inferplane.json`
 - Helm chart: `charts/inferplane`

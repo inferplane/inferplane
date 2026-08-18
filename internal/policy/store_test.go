@@ -83,6 +83,46 @@ func TestTeamLimitsMerge(t *testing.T) {
 	}
 }
 
+// An explicit unlimited: true rule must never narrow OR widen a binding
+// limit set by another rule for the same team — regardless of which rule
+// is processed first. Before the fix, an Unlimited budget rule (internally
+// LimitMicroUSD: 0) processed AFTER a real one satisfied the merge's
+// "0 or smaller wins" comparison and silently erased the real cap.
+func TestTeamLimitsMergeUnlimitedNeverErasesARealLimit(t *testing.T) {
+	real := &Policy{Name: "real", Subject: Subject{Team: "t"},
+		Rules: []Rule{{Name: "cap", Budget: &Budget{LimitMicroUSD: 5_000_000, HardCap: true}}}}
+	unlimited := &Policy{Name: "declared-unlimited", Subject: Subject{Team: "t"},
+		Rules: []Rule{{Name: "no-cap", Budget: &Budget{Unlimited: true}}}}
+
+	for _, order := range [][]*Policy{{real, unlimited}, {unlimited, real}} {
+		got := mergeTeamLimits(order)
+		tl, ok := got["t"]
+		if !ok {
+			t.Fatalf("order %v: team missing from merge result", order)
+		}
+		if tl.BudgetMicrosPerMonth != 5_000_000 || !tl.BudgetHard {
+			t.Fatalf("order %v: unlimited rule corrupted the real budget: %+v", order, tl)
+		}
+	}
+}
+
+// A team with ONLY an explicit unlimited declaration (no other budget/rate
+// rule) still gets a merge entry — the declaration itself is the policy
+// decision, and it must be able to shadow a config/DB default the same way
+// a real numeric rule would, rather than falling through to it.
+func TestTeamLimitsMergeUnlimitedOnlyStillContributes(t *testing.T) {
+	p := &Policy{Name: "declared-unlimited", Subject: Subject{Team: "t"},
+		Rules: []Rule{{Name: "no-cap", Budget: &Budget{Unlimited: true}}}}
+	got := mergeTeamLimits([]*Policy{p})
+	tl, ok := got["t"]
+	if !ok {
+		t.Fatal("an explicit unlimited declaration must still contribute a merge entry")
+	}
+	if tl.BudgetMicrosPerMonth != 0 || tl.BudgetHard {
+		t.Fatalf("unlimited-only merge should be all-zero: %+v", tl)
+	}
+}
+
 func TestModelAllowed(t *testing.T) {
 	dir := t.TempDir()
 	writePolicy(t, dir, "p.yaml", storeYAML)

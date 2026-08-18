@@ -22,7 +22,18 @@ type BudgetStore interface {
 	// Used for the budget-utilization gauge and alert threshold evaluation
 	// (D5b, ADR-017) — mirrors limiter.LimiterStore.QuotaUsed.
 	Spent(key string, window time.Duration) int64
+	// ResetsAt reports when the current window ends (creating one with no
+	// spend yet if none exists) — the client-facing "budget resets on ..."
+	// timestamp for a CalendarMonth window (or any other).
+	ResetsAt(key string, window time.Duration) time.Time
 }
+
+// CalendarMonth is a BudgetStore window sentinel: instead of a fixed rolling
+// duration from whenever spend first started, the window ends at the start
+// of the next calendar month (UTC). A monthly cap resetting on a rolling
+// N-day boundary reads as arbitrary to anyone checking spend against it; the
+// calendar-month anchor is what "resets on the 1st" actually means.
+const CalendarMonth time.Duration = -1
 
 type win struct {
 	spent     int64
@@ -62,14 +73,31 @@ func (b *Memory) Spent(key string, window time.Duration) int64 {
 	return b.cur(key, window).spent
 }
 
+func (b *Memory) ResetsAt(key string, window time.Duration) time.Time {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.cur(key, window).windowEnd
+}
+
 func (b *Memory) cur(key string, window time.Duration) *win {
 	t := b.now()
 	w := b.m[key]
 	if w == nil || !t.Before(w.windowEnd) {
-		w = &win{windowEnd: t.Add(window)}
+		w = &win{windowEnd: windowEnd(t, window)}
 		b.m[key] = w
 	}
 	return w
+}
+
+// windowEnd resolves a window's boundary from t: CalendarMonth anchors to
+// the first instant of next month (UTC), everything else is the plain
+// rolling t+window it always was.
+func windowEnd(t time.Time, window time.Duration) time.Time {
+	if window != CalendarMonth {
+		return t.Add(window)
+	}
+	u := t.UTC()
+	return time.Date(u.Year(), u.Month()+1, 1, 0, 0, 0, 0, time.UTC)
 }
 
 var _ BudgetStore = (*Memory)(nil)

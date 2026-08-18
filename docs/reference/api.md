@@ -1,10 +1,4 @@
-# API / API 구성 상세
-
-[![English](https://img.shields.io/badge/Language-English-blue)](#english)
-[![한국어](https://img.shields.io/badge/Language-한국어-red)](#korean)
-
-<a id="english"></a>
-## English
+# API
 
 ### 1. Overview
 The HTTP surface: a data plane with two ingresses (Anthropic Messages and OpenAI Chat
@@ -36,8 +30,9 @@ contract is in [docs/api-reference.md](../api-reference.md).
 | OpenAI conversion | `internal/openai/convert.go` | OpenAI ⇄ canonical request/response/chunk |
 | CP usage telemetry | `internal/controlplane/usage.go` | **inferplaned** (ADR-036): `POST /v1alpha1/usage` data-plane window batches (bearer; Validate→400 permanent, oversize→413, store-down→503 — the ack means stored, mayu's FIFO retries); `GET /v1alpha1/usage` grouped queries (`team`/`user`/`model` filters, `group_by`, integer µUSD, `degraded:true` on memory fallback); `GET /v1alpha1/usage/export` streamed CSV/JSON (required `since`/`until`, per-write deadline outlives the 30s WriteTimeout) |
 | CP config export | `internal/controlplane/export.go` | **inferplaned** (ADR-036): `GET /v1alpha1/config/export` — the distributed policy set as multi-doc GovernancePolicy YAML (round-trips through the policy loader; secret-free); import reserved until a policy store exists |
-| CP usage console | `internal/controlplane/ui/` | **inferplaned** `/ui/` read-only usage console (mayu ADR-001 posture: data-free unauthenticated shell, token in JS memory only, CSP `default-src 'self'`; degraded banner) |
-| CLI login API | `internal/server/authapi/` | **Data-plane**, opt-in (`oidc.cli_login.enabled`, ADR-028): `GET /v1/auth/config` unauthenticated secret-free `{cli, issuer?, client_id?}`; `POST /v1/auth/key` (OIDC bearer, DISTINCT `client_id`/`Verifier` from the console's) mints a short-lived key — server decides `expires_at`/`owner`, never the client; per-subject mint rate limit; `DELETE /v1/auth/key` (ordinary `KeyAuth`) self-revoke, used by `inferplane logout`. `inferplane login`/`token` are the CLI counterpart |
+| CP usage console | `internal/controlplane/ui/` | **inferplaned** `/ui/` read-only usage console (mayu ADR-001 posture: data-free unauthenticated shell, token in JS memory only, CSP `default-src 'self'`; degraded banner). SSO login button + browser-side OAuth2 Authorization Code + PKCE when `INFERPLANED_OIDC_LOGIN_ORIGINS` is set (ADR-037, ported from ADR-026 — inferplaned has no config file, so the opt-in switch is fixed env vars, not a config field) |
+| CP auth config | `internal/controlplane/authconfig.go` | **inferplaned** (ADR-037): `GET /ui/auth/config` unauthenticated, secret-free `{sso, issuer?, client_id?}` — mirrors `/admin/auth/config` (ADR-026); mounted only when `INFERPLANED_OIDC_ISSUER`/`INFERPLANED_OIDC_CLIENT_ID` are set, else 404 |
+| CLI login API | `internal/server/authapi/` | **Data-plane**, opt-in (`oidc.cli_login.enabled`, ADR-028): `GET /v1/auth/config` unauthenticated secret-free `{cli, issuer?, client_id?}`; `POST /v1/auth/key` (OIDC bearer, DISTINCT `client_id`/`Verifier` from the console's) mints a short-lived key — server decides `expires_at`/`owner`, never the client; per-subject mint rate limit; `DELETE /v1/auth/key` (ordinary `KeyAuth`) self-revoke, used by `mayu logout`. `mayu login`/`token` are the CLI counterpart |
 
 ### 3. Key Decisions
 - `count_tokens` must always return 200 — a non-200 crashes Claude Code (aliases are canonicalized here too, ADR-021).
@@ -54,52 +49,3 @@ contract is in [docs/api-reference.md](../api-reference.md).
 - Related modules: `internal/router`, `internal/governance`, `internal/alert`, `internal/bodystore`, `providers/`
 - Related ADRs: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md
 - Related runbooks: docs/runbooks/, docs/runbooks/cli-login.md
-
-<a id="korean"></a>
-## 한국어
-
-### 1. 개요
-HTTP 표면입니다. 두 인그레스(Anthropic Messages, OpenAI Chat Completions)를 갖춘
-데이터 플레인과 관리 플레인(헬스, 메트릭, 키 관리)으로 구성됩니다. 전체 엔드포인트
-계약은 [docs/api-reference.md](../api-reference.md)에 있습니다.
-
-### 2. 구성요소
-| 구성요소 | 경로 | 목적 |
-|---|---|---|
-| 데이터/관리 mux | `internal/server/server.go` | DataMux / AdminMux 배선(auth, governance, metrics) |
-| Anthropic 인그레스 | `internal/server/anthropicapi/` | `/v1/messages`, `/v1/messages/count_tokens`, `/v1/models`. 미등록 모델 404·미허용 모델 403은 키의 allow-필터된 사용 가능 모델 목록을 포함 (ADR-021) |
-| OpenAI 인그레스 | `internal/server/openaiapi/` | `/v1/chat/completions`, `/v1/models` (동일한 discoverable 404/403, ADR-021) |
-| Bedrock 인그레스 | `internal/server/bedrockapi/` | `POST /model/{modelId}/invoke`, `/invoke-with-response-stream`(AWS eventstream 프레이밍), `/count-tokens`(절대 non-200 금지, camelCase `inputTokens`) — Claude Code 네이티브 `CLAUDE_CODE_USE_BEDROCK=1` + `ANTHROPIC_BEDROCK_BASE_URL` + `CLAUDE_CODE_SKIP_BEDROCK_AUTH=1` 모드; bearer 자격증명은 동일한 KeyAuth로 해석; AWS 모양 에러(`{"message"}` + `X-Amzn-ErrorType`); bedrock 타깃 전용 (ADR-024) |
-| Usage API | `internal/server/usageapi/usage.go` | `GET /v1/usage` — 데이터 플레인, KeyAuth; 호출자 본인의 거버넌스 상태(키별+팀 예산/쿼터, 정수 µUSD, 무제한 차원은 null). `key_id` 절대 미노출 (ADR-021) |
-| 관리 키 API | `internal/server/adminapi/keys.go` | 가상 키 발급 / 목록 / 폐기 (팀별 권한 + 관리 감사, ADR-004) |
-| 관리 팀/유저 API | `internal/server/adminapi/teams.go` | `GET /admin/teams`(모든 AdminAuth 신원); `PUT`/`DELETE /admin/teams/{name}` 팀 거버넌스 레코드 upsert/삭제(**풀 어드민 전용**, ADR-016 D3) — `Governor.SetTeamLookup`으로 요청 hot path에서 재시작 없이 동적 적용; `GET /admin/users` 파생 읽기 전용 owner 프로젝션(유저 테이블 없음, 유저별 spend 없음) |
-| Whoami API | `internal/server/adminapi/whoami.go` | `GET /admin/whoami` 시크릿 무노출 신원(subject/teams/is_admin/auth_method) — 셀프서비스 키 발급용 (ADR-010) |
-| 관리 키 콘솔 | `internal/server/adminui/` | `/admin/ui/` 내장 정적 콘솔(데이터 없음·무인증, 데이터는 `/admin/keys` 경유, ADR-001). `oidc.login_origins` 설정 시 SSO 로그인 버튼 + 브라우저 측 OAuth2 Authorization Code + PKCE (ADR-026) |
-| Auth config | `internal/server/server.go` (`AuthConfigView`) | `GET /admin/auth/config` 무인증·시크릿 무노출 `{sso, issuer?, client_id?}` — 콘솔 SPA가 SSO 버튼 노출 여부 결정에 사용(ADR-026); OIDC 미설정 시 404, `login_origins` 미설정 시 `{sso:false}` |
-| Config 뷰/쓰기 API | `internal/server/configapi/` | `GET /admin/config` 읽기 전용 토폴로지 (ADR-005); `PUT`/`DELETE /admin/providers/{name}` + `PUT`/`DELETE /admin/models/{name}` UI 쓰기 (ADR-008; `provider_store` 미설정 시 405) — 모델 쓰기의 선택적 `aliases` 필드는 파싱 시 동일 요청 내 중복을 검증하고, 다른 모델과의 충돌은 어셈블리의 `writeMutation`에서 검증(ADR-021 후속: providerstore alias 지원); `GET /admin/config/export` 시크릿 무노출 Git export |
-| 연결 프로브 | `internal/server/configapi/probe.go` | `POST /admin/providers/test` — **드래프트** 프로바이더(ProviderWrite 본문, 참조만)를 서버에서 ref 해석 후 `HealthChecker`로 업스트림 연결 시험 (ADR-014). **풀 어드민 전용**; SSRF 가드(메타데이터 차단, 선택적 `probe.allowed_hosts`); 무상태(상태는 클라이언트 인메모리 캐시). `provider_store` 미설정 시 405. `{ok, latency_ms, detail}`(살균) 반환 |
-| 모델 카탈로그 | `internal/server/configapi/catalog.go` | `GET /admin/providers/catalog?type=<t>` — 콘솔 typeahead용 내장 모델 ID (ADR-014); 어드바이저리(미지 타입 ⇒ 빈 목록, 저장 차단 안 함) |
-| Provider 스토어 | `internal/providerstore/` | 옵트인 DB 권위 프로바이더/모델 토폴로지 (ADR-008); ref만 저장(시크릿 컬럼 없음), durable seed 마커, Postgres 이식 가능 DDL; 모델 alias는 폴백 체인 target이 아니라 모델 단위로 저장(`model_aliases`)되며 config 파일 alias와 동일한 `Router.Canonical`/RBAC-이전-정규화 경로를 탄다 (ADR-021 후속) |
-| Audit verify API | `internal/server/auditapi/` | `GET /admin/audit/verify` sink별 해시체인 검증 (ADR-003 #2); 완전 prefix, 16 MiB 캡 |
-| 예산 알림 API | `internal/server/adminapi/alerts.go` | `GET /admin/alerts/recent` (**풀 어드민 전용**, D5b/ADR-017) — 예산 알림 웹훅 발신기(`internal/alert.Notifier`)의 최근 발화(최대 50건) 링; 인스턴스별 상태 |
-| Provider 헬스 API | `internal/server/configapi/health.go` | `GET /admin/providers/health` (**풀 어드민 전용**, ADR-014 deferred item) — 주기적 백그라운드 프로버의 provider별 현재 상태 스냅샷(`configapi.HealthStore`); `provider_health_check` 미설정 시 nil; 온디맨드 `POST /admin/providers/test`(D2)는 영향 없음 |
-| 로그 + 본문 API | `internal/server/analyticsapi/logs.go`, `internal/server/adminapi/bodies.go` | `GET /admin/logs` (**풀 어드민 전용**, D4/ADR-018) 최근 요청 이벤트(id keyset 페이지네이션, `body_ref`는 본문 저장 표시); `GET`/`DELETE /admin/bodies/{ref}` (**풀 어드민 전용**) 저장 본문 조회/삭제 — GET은 `body_accessed`(뷰어별 5분 dedupe), DELETE는 `body_deleted` 발행, 둘 다 `record_ref`만 가지며 `body_ref`는 절대 없음; purge/삭제/복호불가 → **410 톰스톤**, 500 아님 |
-| 메트릭 엔드포인트 | `internal/server/metricsapi.go` | 무인증 Prometheus `/metrics` |
-| OpenAI 변환 | `internal/openai/convert.go` | OpenAI ⇄ canonical 요청/응답/청크 |
-| CLI 로그인 API | `internal/server/authapi/` | **데이터 플레인**, 옵트인(`oidc.cli_login.enabled`, ADR-028): `GET /v1/auth/config` 무인증·시크릿 무노출 `{cli, issuer?, client_id?}`; `POST /v1/auth/key`(OIDC bearer, 콘솔과 별개의 `client_id`/`Verifier`)는 단기 키를 발급 — `expires_at`/`owner`는 서버가 결정, 클라이언트는 절대 지정 불가; subject별 발급 rate limit; `DELETE /v1/auth/key`(일반 `KeyAuth`)는 자기 취소, `inferplane logout`이 사용. `inferplane login`/`token`이 CLI 짝 |
-
-### 3. 주요 결정
-- `count_tokens`는 항상 200 반환 — 비-200은 Claude Code를 크래시시킴 (여기서도 alias를 canonical로 정규화, ADR-021).
-- 프로토콜 일치 시 본문 verbatim 전달, 불일치 시에만 canonical 변환. 모델 **alias**(config `models.<name>.aliases`, ADR-021)는 RBAC/라우팅/감사/메트릭 이전에 canonical로 정규화; anthropic verbatim 경로의 유일한 본문 변경은 캐시 안전 top-level `model` 재작성(nested `cache_control` 보존, HTML 이스케이프 off).
-- 오류는 인그레스 프로토콜 고유의 오류 형태로 반환; 미등록/미허용 모델 메시지는 allow-필터된 사용 가능 모델 목록을 덧붙임 (ADR-021).
-- **모델 단위 폴백 (ADR-029, D5).** `model_fallbacks`(config, 요청 모델 → 서빙 모델, 1홉)와 기본 동일 패밀리 휴리스틱(`model_fallback_family`, 기본 켜짐: 미설정 `claude-opus-5`는 그 아래로 설정된 가장 높은 `claude-opus-*` 버전으로 폴백)은 allow-list 검사 **이전에** 미설정 요청 모델을 서빙 모델로 치환 — 요청한 이름만 허용된 키는 거부되며, 절대 조용히 다운그레이드되지 않음. 설정된 모델이라도 업스트림이 404(또는 Bedrock 400 `ValidationException`)를 반환하면 기존 우선순위 폴백 루프 내에서 폴백 모델로 전환; 이 크로스-모델 타깃은 원래 allow-list 검사 이후에 추가되었으므로 인그레스가 RBAC를 재검증(`router.FilterModelAllowed`)함. 두 경로 모두 응답에 `x-inferplane-model-fallback: <서빙 모델>`을 설정(기존 프로바이더 단위 `x-inferplane-fallback: <provider>`와 독립적).
-
-### 4. 코드 포인터
-- `internal/server/anthropicapi/messages.go` — Messages 핸들러, 스트리밍 tee, 카디널리티 안전 레이블
-- `internal/server/openaiapi/chat.go` — Chat Completions 핸들러
-- `internal/server/auth.go` — `KeyAuth` 가상 키 해석
-
-### 5. 상호 참조
-- 관련 모듈: `internal/router`, `internal/governance`, `internal/alert`, `internal/bodystore`, `providers/`
-- 관련 ADR: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md
-- 관련 런북: docs/runbooks/, docs/runbooks/cli-login.md

@@ -8,11 +8,11 @@ import (
 	"github.com/inferplane/inferplane/internal/audit"
 )
 
-// auditCmd implements `inferplane audit verify --file <path>`, checking the
+// auditCmd implements `mayu audit verify --file <path>`, checking the
 // tamper-evident hash chain. Returns the process exit code.
 func auditCmd(args []string) int {
 	if len(args) < 1 || args[0] != "verify" {
-		fmt.Fprintln(os.Stderr, "usage: inferplane audit verify --file <path>")
+		fmt.Fprintln(os.Stderr, "usage: mayu audit verify --file <path>")
 		return 2
 	}
 	fs := flag.NewFlagSet("audit verify", flag.ContinueOnError)

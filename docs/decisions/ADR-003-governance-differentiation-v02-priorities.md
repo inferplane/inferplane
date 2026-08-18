@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-12
 **Status:** Accepted
-**Related:** spec §1.2 (경쟁 분석), §9 (로드맵), ADR-001/002 (admin console)
+**Related:** spec §1.2 (competitive analysis), §9 (roadmap), ADR-001/002 (admin console)
 
 ## Context
 
@@ -19,7 +19,7 @@ does not win deals.
 
 ## Decision
 
-Double down on the spec's wedge — **"거버넌스 전부 무료 + tamper-evident
+Double down on the spec's wedge — **"all governance free + tamper-evident
 audit"** — expressed across the four adoption gates, and reorder the v0.2
 roadmap by enterprise-adoption impact:
 
@@ -32,8 +32,8 @@ roadmap by enterprise-adoption impact:
 | 5 | **S3 Object Lock audit anchoring** | Upgrades tamper-*evident* toward tamper-*resistant* (§5.4 wording discipline) |
 
 Standing positioning (marketing line):
-> "LiteLLM은 거버넌스를 팔고, inferplane은 거버넌스가 무료 코어다 — 게다가
-> 증명 가능하다 (tamper-evident)."
+> "LiteLLM sells governance; inferplane makes governance a free core feature —
+> and a provable one (tamper-evident)."
 
 Assets we already hold and must keep loud:
 
@@ -55,6 +55,15 @@ Assets we already hold and must keep loud:
    gap we exist to fill; conflicts with CNCF-sandbox vendor-neutral posture.
 3. **UI-writable policy (parity with LiteLLM admin UI).** Rejected — converts
    our GitOps/no-drift advantage into their DB-state weakness.
+   **Unresolved as of 2026-08-14:** ADR-038 later shipped a UI-writable
+   Postgres policy store (`PUT/DELETE /v1alpha1/policies`) without a
+   superseding ADR reversing this rejection. A 3-AI consensus panel
+   (2026-08-14, two rounds) flagged the resulting gap — no write-authorization
+   tier, no per-change audit on that path — as an enterprise security-review
+   blocker in both directions tested (walking the write back, and doubling
+   down on it). A superseding ADR is pending; until it lands, treat this
+   rejection as still the documented position and ADR-038's write endpoint as
+   the open exception to it.
 
 ## Consequences
 

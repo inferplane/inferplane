@@ -2,8 +2,7 @@
 
 **Date:** 2026-07-08
 **Status:** Accepted (implemented).
-**Related:** §4.2/§4.7/§6.3/§6.8/§8 D4 of `docs/superpowers/specs/2026-06-26-admin-console-litellm-ux-redesign-design.md`
-(the console UX spec's nominal ADR-017 slot — see numbering note); ADR-017
+**Related:** ADR-017
 (budget alerts — this repo's actual next-available slot, landed first);
 ADR-003 (the tamper-evident, content-free audit chain this feature
 deliberately does NOT put bodies into); ADR-009 (the PII-masking filter this
@@ -48,6 +47,14 @@ to run concurrently from every replica with no coordination. This is a
 materially simpler HA story than analytics Mode B's fenced aggregator, and is
 possible only because bodies have no cross-replica aggregation requirement
 (unlike rollups).
+
+**Scope note:** this makes `bodystore` itself safe to run multi-replica — it
+does not mean the gateway as a whole is. `internal/keystore` (SQLite-only)
+and `internal/limiter`/`internal/budget` (in-memory) are still single-replica
+today (ADR-013, design-only, deferred). Don't read "every replica" above as
+"multi-replica deployment is supported" — it means "if you're already
+capturing bodies via the Postgres backend, adding replicas doesn't break
+that specific store."
 
 ### 2. Bodies are captured, encrypted, and stored OUTSIDE the audit chain
 
@@ -164,8 +171,7 @@ overridable.
 ## Deferred
 
 - ~~Key-rotation rewrap CLI (format fixed now; manual procedure documented
-  above).~~ — **implemented** (2026-07-12,
-  `docs/superpowers/plans/2026-07-12-body-key-rotation-cli.md`): `inferplane
+  above).~~ — **implemented** (2026-07-12): `inferplane
   bodies rewrap-key --store <path>|--postgres-dsn-env <VAR> --old-key-env
   <VAR>|--old-key-file <path> --new-key-env <VAR>|--new-key-file <path>`
   rewraps every row's `wrapped_key_*` columns, never touching `req_*`/`resp_*`

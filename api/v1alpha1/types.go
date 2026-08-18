@@ -106,9 +106,17 @@ type Rule struct {
 // renew — ADR-032) keep that bound tight without putting the control plane
 // on the request path.
 type BudgetRule struct {
+	// Unlimited declares, explicitly and auditably, that this dimension has
+	// no cap — the alternative to simply omitting the rule (which reads as
+	// "no policy decision was made" rather than "we decided not to cap
+	// this"). When true, LimitMilliUSD/HardCap/Lease/AdminContact must all
+	// be unset; the rule exists only to be enforced=false in an observation
+	// sense — its presence is itself the record.
+	Unlimited bool `json:"unlimited,omitempty"`
 	// LimitMilliUSD is the global limit this rule enforces across all
-	// data planes for the budget window. 1000 = $1.
-	LimitMilliUSD int64 `json:"limitMilliUSD"`
+	// data planes for the budget window. 1000 = $1. Required unless
+	// Unlimited is true.
+	LimitMilliUSD int64 `json:"limitMilliUSD,omitempty"`
 	// HardCap marks the limit as inviolable. A hard-cap rule MUST carry
 	// FailurePolicy=FailClosed: when its lease expires and the control
 	// plane is unreachable, serving stops. Soft budgets fail open.
@@ -116,6 +124,11 @@ type BudgetRule struct {
 	// Lease tunes the local-enforcement grant. Optional — zero values take
 	// the ADR-032 defaults.
 	Lease LeaseSpec `json:"lease,omitempty"`
+	// AdminContact is an opaque string surfaced verbatim in the 402 response
+	// and GET /v1/usage once this rule is the binding budget (e.g. an email
+	// or a Slack channel) — where to go when a hard cap blocks. Optional;
+	// empty means the error carries no contact hint.
+	AdminContact string `json:"adminContact,omitempty"`
 }
 
 // LeaseSpec sizes a budget lease. Both fields are optional; defaults are
@@ -140,6 +153,10 @@ type ModelAccessRule struct {
 // RateRule limits request and token throughput for the subject. At least one
 // of the two must be positive; 0 means "not limited on this dimension".
 type RateRule struct {
+	// Unlimited declares, explicitly and auditably, that this dimension has
+	// no cap — see BudgetRule.Unlimited for the rationale. When true, RPM
+	// and TPM must both be unset.
+	Unlimited bool `json:"unlimited,omitempty"`
 	// RPM is requests per minute.
 	RPM int64 `json:"rpm,omitempty"`
 	// TPM is tokens per minute.

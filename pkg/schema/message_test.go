@@ -7,7 +7,8 @@ import (
 
 func TestMessageRoundTrip(t *testing.T) {
 	cases := map[string]string{
-		// Anthropic은 content에 string과 블록 배열 양형을 허용 — 원형 보존 필수
+		// Anthropic allows content to be either a string or a block array — the
+		// original shape must be preserved verbatim.
 		"string_content": `{"role":"user","content":"plain text"}`,
 		"block_content":  `{"role":"assistant","content":[{"type":"text","text":"hi"},{"type":"tool_use","id":"t1","name":"grep","input":{"q":"x"}}]}`,
 		"block_order":    `{"role":"assistant","content":[{"type":"thinking","thinking":"...","signature":"sig"},{"type":"text","text":"answer"}]}`,

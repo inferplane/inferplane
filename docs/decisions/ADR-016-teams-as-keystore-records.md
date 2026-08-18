@@ -2,8 +2,7 @@
 
 **Date:** 2026-07-08
 **Status:** Accepted (implemented).
-**Related:** §6.5/§8 D3 of `docs/superpowers/specs/2026-06-26-admin-console-litellm-ux-redesign-design.md`
-(the console UX spec naming D3); ADR-013 (multi-replica HA — the per-instance
+**Related:** ADR-013 (multi-replica HA — the per-instance
 counter caveat this ADR's console surface must repeat); `internal/keystore/`
 (extended here); `internal/governance/` (the enforcement pipeline this ADR
 wires a second policy source into).

@@ -1,11 +1,11 @@
 // Package authapi implements the data-plane CLI login endpoints (ADR-028):
 // GET /v1/auth/config (unauthenticated, secret-free discovery for
-// `inferplane login`), POST /v1/auth/key (OIDC-authenticated mint of a
+// `mayu login`), POST /v1/auth/key (OIDC-authenticated mint of a
 // short-lived virtual key), and DELETE /v1/auth/key (virtual-key-authenticated
-// self-revoke, for `inferplane logout`). All three are opt-in — mounted only
+// self-revoke, for `mayu logout`). All three are opt-in — mounted only
 // when oidc.cli_login is configured — and exist so a developer never copies a
 // long-lived ik_... key by hand; CI/service-account provisioning keeps using
-// `inferplane keys create` / POST /admin/keys unchanged.
+// `mayu keys create` / POST /admin/keys unchanged.
 package authapi
 
 import (
@@ -20,7 +20,7 @@ import (
 	"github.com/inferplane/inferplane/pkg/ulid"
 )
 
-// ConfigView is the secret-free bootstrap payload `inferplane login` reads to
+// ConfigView is the secret-free bootstrap payload `mayu login` reads to
 // discover the CLI OAuth client (mirrors server.AuthConfigView for the
 // console SPA, ADR-026). Issuer and ClientID are public identifiers of a PKCE
 // public client, never a secret.
@@ -159,7 +159,7 @@ func MintHandler(store keystore.Store, ttl time.Duration, mint limiter.LimiterSt
 }
 
 // RevokeHandler serves DELETE /v1/auth/key: a virtual key revokes ITSELF, for
-// `inferplane logout`. Mounted behind KeyAuth (the data-plane Principal, not
+// `mayu logout`. Mounted behind KeyAuth (the data-plane Principal, not
 // AdminIdentity) — no refresh token is cached client-side (ADR-028), so the
 // key currently in hand is the only credential logout can authenticate with.
 // Self-revoke needs no entitlement check beyond "this is a valid, live key".

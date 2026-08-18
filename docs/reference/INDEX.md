@@ -1,9 +1,10 @@
 # Implementation Reference Index
 
 Per-layer implementation detail for inferplane. Each layer doc lists its components,
-key decisions, and code pointers. The design source of truth remains
-[docs/specs/2026-06-10-inferplane-gateway-design.md](../specs/2026-06-10-inferplane-gateway-design.md);
-the high-level view is [docs/architecture.md](../architecture.md).
+key decisions, and code pointers. The current architecture overview is
+[docs/architecture.md](../architecture.md); the original v0.1 design rationale
+(historical, translated and annotated against what shipped) is
+[docs/specs/2026-06-10-inferplane-gateway-design.md](../specs/2026-06-10-inferplane-gateway-design.md).
 
 <!-- AUTO-MANAGED:reference-index -->
 | Layer | Document | Scope |

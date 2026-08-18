@@ -406,7 +406,7 @@ func TestTokenRun_notLoggedIn(t *testing.T) {
 	if stdout.String() != "" {
 		t.Fatalf("stdout must be empty on error, got %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "inferplane login") {
+	if !strings.Contains(stderr.String(), "mayu login") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
@@ -425,7 +425,7 @@ func TestTokenRun_expiredWithoutIDTokenCommandFails(t *testing.T) {
 	if stdout.String() != "" {
 		t.Fatalf("stdout must be empty on error, got %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "inferplane login") {
+	if !strings.Contains(stderr.String(), "mayu login") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
 }

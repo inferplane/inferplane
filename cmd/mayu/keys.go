@@ -12,10 +12,10 @@ import (
 )
 
 // keysCmd implements the local virtual-key bootstrap CLI (server-not-running):
-// `inferplane keys create|list|revoke`, writing directly to the SQLite store.
+// `mayu keys create|list|revoke`, writing directly to the SQLite store.
 func keysCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: inferplane keys create|list|revoke ...")
+		return fmt.Errorf("usage: mayu keys create|list|revoke ...")
 	}
 	switch args[0] {
 	case "create":

@@ -40,6 +40,15 @@ func parseWireDocs(data []byte) ([]v1alpha1.GovernancePolicy, error) {
 	return out, nil
 }
 
+// ParseWireDocs parses a YAML/JSON stream into wire documents (see
+// parseWireDocs for the strictness stance) without converting to the
+// internal form. Exported for a write path that needs the wire shape itself
+// (to persist verbatim and read metadata.name) but must still share this
+// package's single validation path — never a hand-rolled parse-and-check.
+func ParseWireDocs(data []byte) ([]v1alpha1.GovernancePolicy, error) {
+	return parseWireDocs(data)
+}
+
 // ParseDocs parses a YAML/JSON stream of GovernancePolicy documents into the
 // internal form (see parseWireDocs for the strictness stance).
 func ParseDocs(data []byte) ([]*Policy, error) {

@@ -390,8 +390,14 @@ func newGateway(cfgPath string) (*gateway, error) {
 			}
 		}
 		// No quota rule kind yet — tokens/day always comes from the base.
-		return governance.PolicyFromLimits(rpm, tpm, base.TokensPerDay,
-			base.QuotaExceeded, budgetMicros, budgetExceeded), true
+		tp := governance.PolicyFromLimits(rpm, tpm, base.TokensPerDay,
+			base.QuotaExceeded, budgetMicros, budgetExceeded)
+		// AdminContact rides with the binding budget rule (from the policy
+		// document, never the lease clamp — a lease grant carries no
+		// contact info of its own); tl is the policy-file/control-plane
+		// layer, the only one that can currently declare it.
+		tp.AdminContact = tl.AdminContact
+		return tp, true
 	})
 	// modelAccess rules narrow every ingress RBAC decision through the router's
 	// policy gate (key allow-list must pass AND the policy must allow); team-
@@ -1293,7 +1299,7 @@ func cliVerifier(cfg *config.Config) server.OIDCVerifier {
 }
 
 // cliAuthConfigView builds the secret-free /v1/auth/config payload closure
-// (ADR-028) that `inferplane login` reads to discover the CLI's issuer and
+// (ADR-028) that `mayu login` reads to discover the CLI's issuer and
 // client_id. Only called when cliVerifier(cfg) is non-nil (server.DataMux
 // gates the mount on that), so CLI is always true here.
 func cliAuthConfigView(cfg *config.Config) func() authapi.ConfigView {

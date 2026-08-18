@@ -2,14 +2,47 @@
 
 ## Overview
 
-**inferplane** is an LLM consumption governance gateway: virtual keys, team RBAC,
-quotas, budgets, and tamper-evident audit logging for Claude Code / OpenCode
-traffic to Anthropic, Amazon Bedrock, and self-hosted vLLM/Ollama. Single static
-binary, Kubernetes-native, Apache-2.0, no external SaaS dependency. The project
-aspires to CNCF Sandbox.
+**inferplane** is a governance control plane + node-local data plane for LLM
+consumption: virtual keys, team RBAC, quotas, budgets, and tamper-evident audit
+logging for Claude Code / OpenCode / Codex traffic to Anthropic, Amazon Bedrock,
+and self-hosted vLLM/Ollama. Each of the two binaries (`mayu`, `inferplaned`)
+is itself a single static binary, Kubernetes-native, Apache-2.0, no external
+SaaS dependency. The project aspires to CNCF Sandbox.
 
-Design source of truth: [docs/specs/2026-06-10-inferplane-gateway-design.md](docs/specs/2026-06-10-inferplane-gateway-design.md).
 Architecture overview: [docs/architecture.md](docs/architecture.md).
+Design history / decisions: [docs/decisions/](docs/decisions/).
+
+## Core Purpose
+
+Every design decision, ADR, and scope call is judged against these five goals.
+If a change doesn't serve one of them, it needs a reason that isn't "seemed
+useful" — and if it weakens one to serve another, that trade-off must be
+stated explicitly (see the HA vs. rate-limit-accuracy tension below).
+
+1. **A single entry point for coding-assistant traffic** — Claude Code,
+   OpenCode, and Codex users route through inferplane to reach Anthropic,
+   Amazon Bedrock, and OpenAI-compatible (vLLM/Ollama/etc.) providers.
+   Codex support is the goal, not yet verified — no Codex-specific code or
+   test exists (`docs/roadmap.md` Purpose alignment).
+2. **Per-user model choice** — each user can pick which model they talk to.
+3. **Cost-driven model substitution** — swap to a cheaper model (e.g.
+   Sonnet → GLM) when cost, not just capability, is the deciding factor.
+4. **Budget control with visibility** — set spend limits per team and per
+   individual, block on breach, and always be able to answer "how much have
+   we spent."
+5. **No SPOF** — control plane and data plane are separate processes; a
+   control-plane outage must never stop inference-path request traffic. This
+   is specifically about the control plane, not about any one `mayu`
+   instance's own availability — see "Current limits" in README for that.
+
+**Known tension:** #5 (no SPOF) pulls against making enforcement accurate.
+Running N node-local data planes removes the SPOF, but in-memory
+per-instance counters mean rate limits and quotas become up to N× the
+configured value unless enforcement is made globally accurate — as ADR-034
+did (with bounded, not exact, overshoot) for team budget in control-plane
+mode, but not yet for rate/quota or standalone budget — see
+`docs/roadmap.md`. Any HA or multi-replica work must close this gap for #4,
+not just add replicas.
 
 ## Tech Stack
 
@@ -24,27 +57,37 @@ Architecture overview: [docs/architecture.md](docs/architecture.md).
 ## Project Structure
 
 ```
-cmd/mayu/          - Data plane binary (node-local proxy): serve / keys / audit / report / pricing / login / token / logout
+cmd/mayu/          - Data plane binary (node-local proxy): serve / keys / audit / report / bodies / pricing / login / token / logout
 cmd/inferplaned/   - Control plane binary: policy distribution + budget leases (ADR-034); credential broker TBD
 api/v1alpha1/      - Versioned config API wire types (CRD-style shape, gRPC/HTTP delivery)
 internal/          - Private packages (gateway internals)
   policy/          - Rule + lease schema shared by both binaries (the single truth, ADR-031); loader/store + sync wire types (ADR-033/034)
+  policystore/     - Postgres-authoritative GovernancePolicy store for inferplaned (ADR-038)
   controlplane/    - inferplaned distribution core: sync heartbeat, lease ledger, dataplane view (ADR-034)
-  proxy/ cache/ telemetry/ - proxy/ owns the control-plane Syncer + LeaseTable (ADR-034) and the UsagePusher (ADR-036); telemetry/ is live (ADR-036): usage wire types, window collector, memory/postgres/durable aggregators; cache/ owns VolatileStore (ADR-031 consolidation target)
+  proxy/ cache/ telemetry/ - proxy/ owns the control-plane Syncer + LeaseTable (ADR-034) and the UsagePusher (ADR-036); telemetry/ is live (ADR-036): usage wire types, window collector, memory/postgres/durable aggregators; cache/ owns VolatileStore (unimplemented, ADR-031 consolidation target)
   server/          - HTTP data plane + admin plane, ingress handlers
   router/          - Model→provider resolution, fallback chain, circuit breaker
   governance/      - Rate / quota / budget enforcement (PreCheck + Settle)
   keystore/        - Virtual-key store (SQLite), Principal + RBAC
+  providerstore/   - Opt-in DB-authoritative provider/model topology (ADR-008)
   audit/           - Tamper-evident hash-chain audit writer, WAL, verify
+  bodystore/       - Opt-in encrypted request/response body capture (ADR-018)
+  analytics/       - Derived usage read-model backing GET /admin/logs
+  alert/           - Budget-alert webhook emitter (ADR-017)
   pricing/         - microUSD cost computation (round-half-even)
   limiter/ budget/ - In-memory two-phase governance stores
   metrics/         - Prometheus registry + GenAI collectors
+  live/            - Reloadable topology generation behind an atomic pointer (ADR-006)
+  filter/          - Request-transform filter seam (ADR-009); concrete filters under plugins/
+  tracing/         - Opt-in OpenTelemetry seam, no-op default (ADR-011)
+  adminauth/       - Admin-plane OIDC identity leaf (ADR-004)
   openai/          - OpenAI ⇄ canonical conversion
   config/ principal/ - Config loading; request-scoped principal context
 providers/         - Upstream provider implementations (the extension surface)
   anthropic/ bedrock/ openaicompat/ - One package per provider; testing/ has mocks
 pkg/               - Public packages: schema/ (canonical types), ulid/
-docs/              - specs, decisions (ADRs), runbooks, reference, architecture
+plugins/           - Concrete filter implementations (piimask/, ADR-009)
+docs/              - decisions (ADRs), runbooks, reference, architecture
 charts/inferplane/ - Helm chart (incl. policies ConfigMap channel, ADR-035)
 deploy/crd/        - GovernancePolicy CustomResourceDefinition (ADR-035)
 deploy/grafana/    - Grafana dashboard
@@ -55,18 +98,18 @@ tests/             - Harness tests (hooks, secret patterns, structure) — bash,
 ## Conventions
 
 - **Go style:** `gofmt`-clean (tabs), `go vet`-clean. Package comments on exported packages. Errors wrapped with `%w`.
-- **Provider isolation (design §8):** a new provider adds **one package** under `providers/<name>/` plus a blank-import line in `cmd/mayu/main.go`. Provider PRs touch only `providers/<name>/` and provider docs — **zero core diff**.
-- **Canonical schema invariant (§2.2):** same-protocol round-trip is lossless. Pipeline-interpreted fields are typed; everything else is preserved verbatim (`Extra map[string]json.RawMessage`). Streaming-frame string fields are `*string` so empty values survive.
-- **Cache invariant (§4.4):** when provider protocol == ingress protocol, forward the request body **verbatim** (`RawBody`) so `cache_control` and prompt-cache hits are never corrupted.
+- **Provider isolation:** a new provider adds **one package** under `providers/<name>/` plus a blank-import line in `cmd/mayu/main.go`. Provider PRs touch only `providers/<name>/` and provider docs — **zero core diff**.
+- **Canonical schema invariant:** same-protocol round-trip is lossless. Pipeline-interpreted fields are typed; everything else is preserved verbatim (`Extra map[string]json.RawMessage`). Streaming-frame string fields are `*string` so empty values survive.
+- **Cache invariant:** when provider protocol == ingress protocol, forward the request body **verbatim** (`RawBody`) so `cache_control` and prompt-cache hits are never corrupted.
 - **Two-phase governance:** pre-check BEFORE billing, settle AFTER. `on_exceeded` is `block` | `warn` (block wins on tie).
 - **Cost is integer microUSD** — never float. Round-half-even via `math/big`.
 - **`mayu` runs standalone by design** — a control plane is optional. `policies` (local file channel) and `control_plane` (ADR-034 heartbeat to `inferplaned`) are mutually exclusive config: one policy source at a time.
 
 ### Security mandates (non-negotiable)
 
-- Secrets are referenced only via `env:` / `file:` / `secret:` refs — **never inline** in config (config rejects inline `api_key`, §7).
+- Secrets are referenced only via `env:` / `file:` / `secret:` refs — **never inline** in config (config rejects inline `api_key`).
 - Virtual keys are SHA-256 hashed at rest; the plaintext `ik_...` is shown **once** and is never recoverable.
-- The client never sees the gateway's upstream provider key; the gateway never forwards the client's key (§5.2).
+- The client never sees the gateway's upstream provider key; the gateway never forwards the client's key.
 - `/metrics` is unauthenticated but must leak **no** secret or `key_id` (cardinality-bounded labels only).
 - `count_tokens` must **never** return a non-200 (a non-200 crashes Claude Code).
 - Every commit is DCO signed off (`git commit -s`). License: Apache-2.0.
@@ -114,28 +157,6 @@ Per-layer implementation detail lives in [docs/reference/](docs/reference/INDEX.
 | Agent · LLM | [docs/reference/agent-llm.md](docs/reference/agent-llm.md) |
 <!-- /AUTO-MANAGED:references -->
 
----
-
-## Auto-Sync Rules
-
-Rules below are applied automatically after Plan mode exit and on major code changes.
-
-### Post-Plan Mode Actions
-After exiting Plan mode (`/plan`), before starting implementation:
-
-1. **Architecture decision made** -> Update `docs/architecture.md`
-2. **Technical choice/trade-off made** -> Create `docs/decisions/ADR-NNN-title.md`
-3. **New module added** -> Create `CLAUDE.md` in that module directory
-4. **Operational procedure defined** -> Create runbook in `docs/runbooks/`
-5. **Changes needed in this file** -> Update relevant sections above
-
-### Code Change Sync Rules
-- New top-level package under `internal/`, `providers/`, or `pkg/` -> update that area's `CLAUDE.md`
-- New provider added -> update `providers/CLAUDE.md` and `docs/reference/agent-llm.md`
-- Ingress endpoint added/changed -> update `internal/CLAUDE.md` and `docs/reference/api.md`
-- Key store / audit schema changed -> update `docs/reference/data.md`
-- Infrastructure changed (Dockerfile, charts) -> update `docs/architecture.md` and `docs/reference/infrastructure.md`
-
-### ADR Numbering
-Find the highest number in `docs/decisions/ADR-*.md` and increment by 1.
-Format: `ADR-NNN-concise-title.md`
+When a change touches a layer above, update its reference doc and the
+matching module `CLAUDE.md` in the same commit — that's the whole sync
+rule; there is no separate ceremony to follow.

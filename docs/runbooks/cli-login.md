@@ -1,8 +1,8 @@
-# Runbook: `inferplane login` (CLI OIDC login, ADR-028)
+# Runbook: `mayu login` (CLI OIDC login, ADR-028)
 
 Lets a developer authenticate against the company IdP and get a short-lived,
 auto-renewing gateway virtual key — no hand-copied `ik_...` key. CI/service
-accounts are unaffected: keep using `inferplane keys create` or declarative
+accounts are unaffected: keep using `mayu keys create` or declarative
 `virtual_keys` (ADR-023).
 
 ## Enable it (operator)
@@ -63,16 +63,16 @@ before turning this on in anything but a scratch/dev environment.
 Cognito rejects `http://127.0.0.1:<any-port>/callback` — it requires an exact
 redirect match, no wildcard port. Either:
 
-- Register the CLI's fixed port and always pass `inferplane login --port
+- Register the CLI's fixed port and always pass `mayu login --port
   <that port>`, or
-- Skip the browser flow entirely: `inferplane login --id-token-command
+- Skip the browser flow entirely: `mayu login --id-token-command
   "aws sso login ... && aws sts get-caller-identity ..."`-style wrapper that
   prints a valid ID token to stdout (see below).
 
 ## Use it (developer)
 
 ```bash
-inferplane login --gateway https://gateway.example.com
+mayu login --gateway https://gateway.example.com
 ```
 
 - If entitled to exactly one team, that team is used automatically.
@@ -84,9 +84,9 @@ inferplane login --gateway https://gateway.example.com
 logged in as team alpha; key ik_1a2b3c4d5e6f expires 2026-07-28T20:00:00Z
 
 Claude Code — add to ~/.claude/settings.json (use an ABSOLUTE path to the binary):
-  { "apiKeyHelper": "/usr/local/bin/inferplane token",
+  { "apiKeyHelper": "/usr/local/bin/mayu token",
     "env": { "ANTHROPIC_BASE_URL": "https://gateway.example.com", "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "3600000" } }
-OpenCode / scripts:  eval "$(inferplane token --export)"
+OpenCode / scripts:  eval "$(mayu token --export)"
 ```
 
 Paste the `apiKeyHelper` block into `~/.claude/settings.json`. Use an
@@ -100,7 +100,7 @@ match, or Claude Code will cache a key past its `expires_at` and eat 401s
 until the next scheduled helper call (it does retry immediately on a 401, so
 this is self-healing, just noisier than necessary).
 
-### `inferplane token`
+### `mayu token`
 
 Prints the cached key (bare, for `apiKeyHelper`) with zero network calls when
 it still has more than 5 minutes of life left. On a real terminal it prints
@@ -110,11 +110,11 @@ or `--export` for `export ANTHROPIC_BASE_URL=... ANTHROPIC_AUTH_TOKEN=...`
 
 Past expiry: if `login` was run with `--id-token-command`, `token` re-runs it
 and mints a fresh key with no browser interaction. Otherwise it fails with
-`session expired; run: inferplane login` — there is no IdP refresh token
+`session expired; run: mayu login` — there is no IdP refresh token
 cached (ADR-028), so an interactive re-login is required at most once per
 `key_ttl`.
 
-### `inferplane logout`
+### `mayu logout`
 
 Revokes the cached key (best-effort — succeeds even offline) and always
 deletes the local credential file. Safe to run when already logged out.
@@ -124,7 +124,7 @@ deletes the local credential file. Safe to run when already logged out.
 | Symptom | Cause / fix |
 |---|---|
 | `gateway has no CLI-discoverable login config` | `oidc.cli_login.enabled` is false/absent. Pass `--issuer`/`--client-id` explicitly, or ask an operator to enable it. |
-| `entitled to multiple teams; specify --team` | Your IdP groups map to more than one team. `inferplane login --team <name>`. |
+| `entitled to multiple teams; specify --team` | Your IdP groups map to more than one team. `mayu login --team <name>`. |
 | `your identity maps to no gateway team` | No `group_mappings`/`admin_groups` entry matches your groups. Ask an admin to add one — the gateway never grants a default team. |
 | `gateway ... OIDC identity changed (issuer/client_id); pass --reset` | TOFU pin mismatch — the gateway's issuer/client_id differs from what you logged in with last time at this URL. If this is expected (gateway reconfigured on purpose), rerun with `--reset`. If NOT expected, stop — this could mean the gateway URL now points somewhere else. |
 | `timed out waiting for the browser callback` | Nothing completed the IdP flow within 3 minutes — check the browser actually opened, or copy the printed URL manually. |

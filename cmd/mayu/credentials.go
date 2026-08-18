@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// credentials is `inferplane login`'s on-disk session (ADR-028). It holds NO
+// credentials is `mayu login`'s on-disk session (ADR-028). It holds NO
 // IdP refresh token — only the currently-minted, short-lived gateway virtual
 // key plus the TOFU-pinned issuer/client_id used to detect a gateway swap.
 // Losing this file to disk theft costs an attacker one short-lived,
@@ -21,7 +21,7 @@ type credentials struct {
 	// IDTokenCommand, when non-empty, is the `--id-token-command` used at
 	// login — the ONLY way `token` can silently renew past expiry: there is
 	// no IdP refresh token cached here (see the type doc above), so without
-	// this a renewal needs another interactive `inferplane login`.
+	// this a renewal needs another interactive `mayu login`.
 	IDTokenCommand string    `json:"id_token_command,omitempty"`
 	Team           string    `json:"team"`
 	Key            string    `json:"key"` // plaintext ik_...
@@ -30,9 +30,9 @@ type credentials struct {
 }
 
 // errNotLoggedIn is returned by loadCredentials when no credential file
-// exists, so callers can print a distinct "run inferplane login" hint rather
+// exists, so callers can print a distinct "run mayu login" hint rather
 // than a raw os.ErrNotExist.
-var errNotLoggedIn = errors.New("not logged in; run: inferplane login --gateway <url>")
+var errNotLoggedIn = errors.New("not logged in; run: mayu login --gateway <url>")
 
 // credentialsPath resolves the on-disk location: INFERPLANE_HOME, if set, IS
 // the directory credentials.json lives in directly — no "/inferplane" suffix
@@ -125,7 +125,7 @@ func (c credentials) save() error {
 }
 
 // deleteCredentials removes the credential file. Missing-file is not an
-// error — `inferplane logout` on an already-logged-out machine is a no-op,
+// error — `mayu logout` on an already-logged-out machine is a no-op,
 // not a failure.
 func deleteCredentials() error {
 	path, err := credentialsPath()

@@ -1,244 +1,276 @@
-# inferplane — LLM Consumption Governance Gateway 설계 문서
+# inferplane — LLM Consumption Governance Gateway Design
 
-- 상태: Draft (승인 대기)
-- 날짜: 2026-06-10 (r3 — 멀티 AI consensus 2라운드 12건 반영)
-- 라이선스: Apache 2.0
-- 언어: Go
-- 대상 릴리스: v0.1
+- Status: Historical design record (v0.1). The two-plane split (`mayu` data
+  plane + `inferplaned` control plane, ADR-031) and most of the v0.2 items
+  below have since shipped — see [docs/architecture.md](../architecture.md)
+  for the current architecture and [docs/decisions/](../decisions/) for the
+  ADRs that superseded or extended this document. Section numbers below are
+  kept stable because ADRs and code comments cite them (`§4.4`, `§5.2`,
+  `§5.3`, `§7`, `§8`, `Appendix A`); this revision translates the original
+  Korean draft to English and updates content to match what actually shipped,
+  without renumbering.
+- Date: 2026-06-10 (r3 — second round of multi-model consensus review, 12 items incorporated)
+- License: Apache 2.0
+- Language: Go
+- Original target release: v0.1
 
 ---
 
-## 1. 포지셔닝 및 비전
+## 1. Positioning and Vision
 
-### 1.1 한 문장 정의
+### 1.1 One-sentence definition
 
-> Envoy 계열 게이트웨이는 플랫폼팀의 인프라 프로젝트를 요구하고,
-> LiteLLM/Bifrost는 거버넌스 핵심을 유료화했다.
-> **inferplane은 AI팀이 5분 안에 띄우는 단일 바이너리에
-> RBAC·quota·budget·변조감지(tamper-evident) audit를 전부 무료로 담는다.**
+> Envoy-family gateways require a platform team's own infrastructure project;
+> LiteLLM/Bifrost paywall the governance core.
+> **inferplane puts RBAC, quota, budget, and tamper-evident audit — all of
+> it, free — into a single binary an AI team can stand up in five minutes.**
 
-inferplane은 데이터 플레인 성능이나 추론 최적화로 경쟁하지 않는다.
-**LLM 소비(consumption)의 거버넌스** — 누가, 어떤 모델을, 얼마나,
-얼마의 비용으로 쓰는지 통제하고 기록하는 레이어 — 가 본체다.
+inferplane does not compete on data-plane performance or inference
+optimization. Its core is **governance of LLM consumption** — controlling
+and recording who uses which model, how much, and at what cost.
 
-### 1.2 경쟁 분석 요약 (2026-06 기준)
+### 1.2 Competitive analysis summary (as of 2026-06)
 
-| 프로젝트 | 포지션 | 거버넌스 기능의 한계 |
+| Project | Position | Governance limitation |
 |---|---|---|
-| LiteLLM | Python LLM 프록시, 사실상 표준 | SSO·audit log·project-level RBAC가 Enterprise 유료 |
-| Bifrost | Go LLM 게이트웨이, 가장 직접적 경쟁자 | virtual key/budget은 무료, RBAC·SSO·immutable audit는 Enterprise-gated |
-| Higress | CNCF Sandbox (2026-03), 엔터프라이즈 AI Gateway | standalone 버전은 공식적으로 "프로덕션 미검증, 로컬/테스트용" 명시 |
-| kgateway | CNCF Sandbox, Envoy 기반 | Envoy 제어 평면 도입이 전제 — 플랫폼팀 단위 인프라 프로젝트 필요 |
-| Envoy AI Gateway | Envoy Gateway 공식 AI 확장 | 동일 — Envoy 운영 역량 전제 |
-| llm-d | CNCF Sandbox (2026-03), 분산 추론 프레임워크 | 경쟁이 아닌 **백엔드** — inferplane의 self-hosted upstream 후보 |
-| Inference Gateway | Sandbox 심사 중 (cncf/sandbox#486) | 멀티 프로바이더 통합 중심, 거버넌스 깊이 없음 |
+| LiteLLM | Python LLM proxy, de-facto standard | SSO, audit log, and project-level RBAC are Enterprise-paid |
+| Bifrost | Go LLM gateway, the most direct competitor | Virtual keys/budget are free; RBAC, SSO, and immutable audit are Enterprise-gated |
+| Higress | CNCF Sandbox (2026-03), enterprise AI gateway | The standalone edition is officially documented as "not production-validated, for local/test use" |
+| kgateway | CNCF Sandbox, Envoy-based | Presupposes adopting an Envoy control plane — a platform-team-scale infrastructure project |
+| Envoy AI Gateway | Official Envoy Gateway AI extension | Same — presupposes Envoy operational capability |
+| llm-d | CNCF Sandbox (2026-03), distributed inference framework | Not a competitor — a **backend** candidate: a self-hosted upstream for inferplane |
+| Inference Gateway | Under Sandbox review (cncf/sandbox#486) | Focused on multi-provider integration, no governance depth |
 
-**시장 관찰:** Envoy 계열은 기능 매트릭스상 강하지만 시장 가시성이
-낮다. 구매자가 다르기 때문이다 — LLM gateway 수요의 대부분은 AI팀의
-"오늘 오후에 팀 키 묶기" bottom-up 수요이고, 경쟁 기준은 Envoy가
-아니라 **LiteLLM/Bifrost의 도입 경험**이다. 따라서 단일 바이너리는
-차별화 포인트가 아니라 **시장 진입의 전제조건**으로 취급한다.
+**Market observation:** the Envoy family is strong on a feature matrix but has
+low market visibility, because the buyer is different — most LLM gateway
+demand is an AI team's bottom-up "wire up my team's keys this afternoon"
+need, and the comparison baseline is the **LiteLLM/Bifrost onboarding
+experience**, not Envoy. A single binary is therefore treated not as a
+differentiator but as a **precondition for market entry**.
 
-**비어 있는 자리:** "거버넌스 전부 무료 + 변조감지(tamper-evident) audit."
-이것이 inferplane의 승부처다. (용어 주의: 검증 주체가 같은 노드에
-있는 한 변조 "방지"는 성립하지 않는다 — 해시 체인이 제공하는 것은
-변조 **감지**이며, 외부 앵커링(v0.2)이 보증을 상향한다. §5.4)
+**The empty slot:** "all governance free + tamper-evident audit." This is
+inferplane's wedge. (Terminology discipline: as long as the verifier runs on
+the same node, "tamper-*prevention*" does not hold — a hash chain provides
+tamper-*evidence*; external anchoring, v0.2, raises the guarantee. See §5.4.)
 
-### 1.3 CNCF 전략
+### 1.3 CNCF strategy
 
-- 최종 목표: CNCF Sandbox (현실적 타임라인: 첫 릴리스 후 12~18개월).
-- 포지션은 기존 Sandbox 프로젝트와 **보완 관계**로 명시한다:
-  "kgateway/Higress는 추론 트래픽을 라우팅하고, inferplane은 LLM
-  소비를 거버닝한다. llm-d/vLLM은 inferplane의 백엔드다."
-- 첫 커밋부터: DCO 강제, Apache 2.0, GOVERNANCE.md(벤더 중립,
-  특정 회사 언급 없음), MAINTAINERS.md, SECURITY.md,
-  CODE_OF_CONDUCT.md, OTel GenAI semantic conventions 네이밍.
-- 공개 시점: 법무/정책 확인 완료 전까지 public 공개 및 외부 홍보
-  보류. 설계와 코드는 공개 가능한 상태로 유지한다.
+- End goal: CNCF Sandbox (a realistic timeline is roughly 8–14 months after first release).
+- Position explicitly as **complementary** to existing Sandbox projects:
+  "kgateway/Higress route inference traffic; inferplane governs LLM
+  consumption. llm-d/vLLM are inferplane's backends."
+- From the first commit: DCO enforced, Apache 2.0, a vendor-neutral
+  GOVERNANCE.md (no company named), MAINTAINERS.md, SECURITY.md,
+  CODE_OF_CONDUCT.md, OTel GenAI semantic-convention naming.
+- Public release: hold public release and external promotion until
+  legal/policy review completes. Design and code are kept in a publishable
+  state in the meantime.
 
-### 1.4 타깃 클라이언트와 v0.1 성공 기준
+### 1.4 Target clients and v0.1 success criteria
 
-1차 타깃은 AI 코딩 툴 트래픽이다:
+The initial target is AI coding-tool traffic:
 
-- **Claude Code**: Anthropic Messages API만 사용 (`ANTHROPIC_BASE_URL`은
-  호스트만 교체, 본문은 Anthropic Messages 그대로). OpenAI 포맷 미지원.
-- **OpenCode 등**: openai-compatible (`/v1/chat/completions`)이 가장 안정적.
+- **Claude Code**: uses only the Anthropic Messages API (`ANTHROPIC_BASE_URL`
+  swaps the host only; the body stays Anthropic Messages as-is). No OpenAI
+  format support.
+- **OpenCode and similar**: openai-compatible (`/v1/chat/completions`) is the
+  most stable target.
 
-**v0.1 성공 기준:** Claude Code와 OpenCode가 inferplane을 통해
-가상 키로 인증하고, 팀 쿼터가 집계되고, 모든 요청이 감사로그에
-남으며, **prompt cache hit율이 직결 대비 저하되지 않는** 것.
+**v0.1 success criterion:** Claude Code and OpenCode authenticate through
+inferplane with a virtual key, team quotas aggregate correctly, every request
+lands in the audit log, and **prompt-cache hit rate does not degrade versus a
+direct connection.**
 
 ---
 
-## 2. 아키텍처 개요
+## 2. Architecture Overview
 
-### 2.1 요청 흐름
+### 2.1 Request flow
+
+*(Historical note: this diagram describes the single-binary v0.1 shape. The
+current system splits this into a node-local data plane, `mayu`, and a
+control plane, `inferplaned`, that distributes policy and budget leases but
+never sits on the request path — see [docs/architecture.md](../architecture.md)
+and ADR-031. The pipeline steps below still describe `mayu`'s internal
+request handling.)*
 
 ```
  Claude Code                OpenCode
      │ Anthropic Messages       │ OpenAI Chat Completions
      ▼                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Ingress Adapters                                            │
+│ Ingress Adapters                                             │
 │   /v1/messages, count_tokens, /v1/models    /v1/chat/...,   │
 │   (Anthropic shape)                         /v1/models      │
-│   → canonical 변환 (무손실 불변식, §2.2)                      │
+│   → canonical conversion (lossless invariant, §2.2)          │
 ├─────────────────────────────────────────────────────────────┤
-│ Governance Pipeline (타입드 Filter 체인)                     │
-│   ① 요청ID 부여                                              │
-│   ② 인증: virtual key → principal(team) 해석                 │
-│   ③ 모델 해석: 모델명 → 타깃 체인 (allow-list 검사 포함)      │
-│   ④ rate limit (TPM/RPM, 로컬 카운터, 사전 차단)             │
-│   ⑤ quota 사전 체크 (낙관적)                                 │
-│   ⑥ (v0.2+) 플러그인 필터: PII 마스킹 등                     │
+│ Governance Pipeline (typed filter chain)                      │
+│   ① assign a request ID                                       │
+│   ② auth: resolve virtual key → principal (team)               │
+│   ③ model resolution: model name → target chain (incl. allow-list check) │
+│   ④ rate limit (TPM/RPM, local counters, pre-block)            │
+│   ⑤ optimistic quota pre-check                                 │
+│   ⑥ (v0.2+) plugin filters: e.g. PII masking                   │
 ├─────────────────────────────────────────────────────────────┤
-│ Router                                                      │
-│   우선순위 폴백 체인 + circuit breaker (패시브 헬스체크)     │
+│ Router                                                         │
+│   priority fallback chain + circuit breaker (passive health check) │
 ├─────────────────────────────────────────────────────────────┤
-│ Provider Layer                                              │
-│   anthropic │ bedrock (invoke/converse/mantle) │ openai_compat│
-│   → canonical 청크 iterator 반환, SSE 직렬화는 코어가 담당   │
+│ Provider Layer                                                 │
+│   anthropic │ bedrock (invoke/converse/mantle) │ openai_compat │
+│   → returns a canonical chunk iterator; SSE serialization is core's job │
 ├─────────────────────────────────────────────────────────────┤
-│ 응답 경로 (스트림 중계와 동시에)                              │
-│   ⑦ egress: canonical → ingress 프로토콜 형식으로 직렬화     │
-│   ⑧ usage 확정 → quota 사후 차감, budget 집계                │
-│   ⑨ audit record 기록 (응답 완료 후)                         │
-│   ⑩ 메트릭 갱신                                              │
+│ Response path (concurrent with stream relay)                    │
+│   ⑦ egress: serialize canonical → the ingress protocol's shape │
+│   ⑧ finalize usage → post-debit quota, aggregate budget         │
+│   ⑨ write the audit record (after the response completes)       │
+│   ⑩ update metrics                                              │
 └─────────────────────────────────────────────────────────────┘
      │                    │                    │
      ▼                    ▼                    ▼
  Anthropic API      Amazon Bedrock      vLLM / Ollama / llm-d
 ```
 
-핵심 설계 원칙:
+Core design principles:
 
-- **쿼터는 2단계**: 사전 낙관 체크 + 응답 후 실제 토큰으로 사후 차감.
-- **감사로그는 2단계**: 인가 결정 직후 `request_started`(거부 포함),
-  응답 완료 후 `request_completed`(usage 확정) — crash가 나도 인증을
-  통과한 요청의 흔적이 남는다 (§5.4).
-- **세션 무상태**: 요청 간 세션 친화성(affinity) 없음 — 어느
-  레플리카가 받아도 동일하게 처리. 영속 상태는 quota 스토어와
-  키/팀 메타데이터 스토어에 둔다. 단, rate limit 카운터·circuit
-  breaker·audit 체인 헤드·WAL 버퍼는 **인스턴스-로컬**이며, 재시작
-  시 리셋과 다중 레플리카 한계는 §5.3·§4.5·§5.4에 명시한다.
+- **Quota is two-phase**: an optimistic pre-check, then a post-debit against
+  actual tokens once the response completes.
+- **Audit is two-phase**: `request_started` right after the authorization
+  decision (denials included), `request_completed` after usage settles — a
+  crash still leaves a trace of any request that passed auth (§5.4).
+- **Stateless across requests (design intent, not yet built)**: the design
+  called for no session affinity, so any replica could handle any request.
+  Persistent state was meant to live in the quota store and the key/team
+  metadata store. **As shipped, this is not the case**: the key/team store
+  (`internal/keystore`) is SQLite-only, so a key issued on one replica 401s
+  on another. Rate-limit counters, the circuit breaker, the audit chain head,
+  and the WAL buffer are **instance-local**, as documented in §5.3, §4.5, and
+  §5.4. The shared-store backend this section assumes is ADR-013 (design
+  only, implementation deferred) — see `docs/roadmap.md` for status.
 
-### 2.2 Canonical 스키마 — 결정 사항
+### 2.2 Canonical schema — decision
 
-초기 전제는 "canonical = OpenAI 형식"이었으나, 다음 요구사항과
-양립하지 않아 수정한다:
+The initial premise, "canonical = the OpenAI shape," was incompatible with
+the following requirements and was revised:
 
-- thinking / redacted_thinking / tool_use / tool_result 블록 보존
-- `cache_control` 블록 무변형 통과 (§4.4)
-- `anthropic-beta` 등 프로토콜 고유 메타데이터 보존
+- Preserve thinking / redacted_thinking / tool_use / tool_result blocks
+- Pass `cache_control` blocks through unmodified (§4.4)
+- Preserve protocol-specific metadata such as `anthropic-beta`
 
-**결정:** canonical 스키마는 `pkg/schema`의 독자 Go 타입으로,
-OpenAI와 Anthropic 양쪽 프로토콜을 덮는 **프로토콜 중립 superset**이다.
+**Decision:** the canonical schema is a bespoke Go type set in `pkg/schema` —
+a **protocol-neutral superset** covering both OpenAI and Anthropic.
 
-불변식:
+Invariants:
 
-1. **동일 프로토콜 왕복 무손실**: Anthropic ingress → Anthropic 계열
-   provider 경로에서 content 블록·블록 순서·cache_control은
-   의미적으로 동일하게 재직렬화된다. (Claude Code 경로의 생명선)
-2. **교차 프로토콜 변환은 best-effort**: OpenAI ingress → Claude
-   provider 등은 매핑 가능한 범위만 변환하고, 손실 항목은 문서화한다
-   (§3.3 변환 충실도 매트릭스).
-3. 알 수 없는 provider 필드는 버리지 않고 `x_provider_extensions`
-   네임스페이스로 보존한다.
+1. **Same-protocol round-trip is lossless**: on the Anthropic-ingress →
+   Anthropic-family-provider path, content blocks, block order, and
+   `cache_control` are re-serialized as semantically identical. (This is the
+   lifeline of the Claude Code path.)
+2. **Cross-protocol conversion is best-effort**: a path such as OpenAI
+   ingress → a Claude provider converts only what is mappable, and lossy
+   spots are documented (§3.3's conversion-fidelity matrix).
+3. Unknown provider fields are never dropped — they are preserved under an
+   `x_provider_extensions` namespace.
 
-### 2.3 HTTP 스택
+### 2.3 HTTP stack
 
-- 표준 `net/http` + Go 1.22+ 내장 `ServeMux`. 프레임워크 없음.
-  (Fiber 금지 — fasthttp는 `http.Flusher` 기반 SSE, net/http
-  미들웨어 생태계와 비호환.)
-- 데이터 평면(`:8080`)과 관리 평면(`:9090` — 관리 API, `/metrics`,
-  헬스체크) 리스너 분리.
-- **TLS**: `server.tls`(cert/key ref)로 자체 종단을 지원한다.
-  Kubernetes에서는 ingress/서비스 메시 종단을 권장하되, 비-K8s
-  단일 바이너리 실행 시 자체 TLS 활성화를 운영 요구사항으로
-  명시한다 — virtual key가 평문 HTTP로 흐르는 구성을 기본으로
-  두지 않는다.
+- Standard `net/http` + Go 1.22+'s built-in `ServeMux`. No framework. (Fiber
+  is banned — fasthttp is incompatible with `http.Flusher`-based SSE and the
+  net/http middleware ecosystem.)
+- Separate listeners for the data plane (`:8080`) and the admin plane
+  (`:9090` — admin API, `/metrics`, health checks).
+- **TLS**: `server.tls` (cert/key ref) supports self-termination. On
+  Kubernetes, terminating at the ingress or service mesh is recommended, but
+  for a non-K8s single-binary deployment, enabling self-TLS is called out as
+  an operational requirement — a plaintext-HTTP configuration for virtual
+  keys is not the default posture.
 
-### 2.4 Filter 체인 인터페이스
+### 2.4 Filter chain interface
 
-플러그인과 내장 거버넌스 단계가 공유하는 확장점. raw HTTP가 아닌
-**파싱된 canonical 요청/응답 위에서** 동작한다.
+*(Historical note: this shipped as `internal/filter`'s `RequestFilter`
+interface plus concrete filters under `plugins/<name>/` — ADR-009 — rather
+than as a `pkg/plugin` public package. The design intent below is preserved
+for context.)*
+
+The shared extension point between plugins and built-in governance steps.
+Operates **on the parsed canonical request/response**, not raw HTTP.
 
 ```go
-// pkg/plugin
+// pkg/plugin (design intent; shipped as internal/filter.RequestFilter)
 type Filter interface {
     Name() string
-    // 변형 또는 거부. 거부 시 typed error 반환.
+    // Transform or reject. On rejection, return a typed error.
     OnRequest(ctx *RequestContext, req *schema.ChatRequest) error
-    // 스트리밍 청크 검사/변형. cache 안전성 주의: 요청 prefix는 불변.
+    // Inspect/transform a streaming chunk. Cache-safety note: the request prefix is immutable.
     OnResponseChunk(ctx *RequestContext, chunk *schema.ChatChunk) error
-    // usage 확정 후 호출. 차감/집계/로깅용.
+    // Called after usage is finalized. For debiting/aggregation/logging.
     OnComplete(ctx *RequestContext, usage *schema.Usage)
 }
 ```
 
-- 플러그인은 컴파일드인 Go 인터페이스 + 레지스트리 (CoreDNS 패턴).
-  `plugins/<name>/` + `init()` 등록.
-- 플러그인 ABI(외부 프로세스/Wasm) 동결은 v1.0까지 보류.
+- Plugins are compiled-in Go interfaces plus a registry (the CoreDNS
+  pattern). `plugins/<name>/` + registration via `init()`.
+- Freezing a plugin ABI (external process / Wasm) is deferred until v1.0.
 
 ---
 
-## 3. Ingress 스펙
+## 3. Ingress Specification
 
-전체 스펙 호환은 목표가 아니다. **타깃 클라이언트가 실제로 쓰는
-범위를 충실하게** 구현한다.
+Full spec compatibility is not the goal. The aim is to **faithfully
+implement the surface target clients actually use.**
 
-### 3.1 Anthropic ingress — v0.1 필수 범위
+### 3.1 Anthropic ingress — v0.1 required scope
 
-| 엔드포인트 | 요구사항 |
+| Endpoint | Requirement |
 |---|---|
-| `POST /v1/messages` | 비스트리밍 + SSE 스트리밍. Anthropic SSE 이벤트 구조 (`message_start`, `content_block_start/delta/stop`, `message_delta`, `message_stop`, `ping`, `error`) 그대로 재현 |
-| `POST /v1/messages/count_tokens` | **반드시 정상 응답.** 단순 501/403 반환 시 Claude Code가 크래시한 버그 이력 있음 (truncated JSON 크래시). 절대 5xx/501로 끝내지 않는다 |
-| `GET /v1/models` | Claude Code v2.1.129+의 게이트웨이 모델 디스커버리(`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`)가 호출. 해당 virtual key의 **allow-list 모델만**, Anthropic 모델 리스트 응답 형식으로 반환 |
+| `POST /v1/messages` | Non-streaming + SSE streaming. Reproduce the Anthropic SSE event structure exactly (`message_start`, `content_block_start/delta/stop`, `message_delta`, `message_stop`, `ping`, `error`) |
+| `POST /v1/messages/count_tokens` | **Must always return a valid response.** There is a known history of a bare 501/403 crashing Claude Code (a truncated-JSON crash). Never terminate with a 5xx/501 |
+| `GET /v1/models` | Called by Claude Code v2.1.129+'s gateway model-discovery feature (`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`). Return only the virtual key's **allow-listed models**, in the Anthropic model-list response shape |
 
-count_tokens 처리 전략:
+count_tokens handling strategy:
 
-- 해석된 타깃이 Anthropic Direct → upstream count_tokens로 전달.
-- 타깃이 Bedrock → Bedrock CountTokens API 사용 (가용 시).
-- 그 외 / upstream 실패 → 보수적 추정값으로 응답 (전략은 §10
-  미해결 질문). 어떤 경우에도 유효한 JSON 응답을 반환한다.
+- Target resolves to Anthropic Direct → forward to the upstream count_tokens.
+- Target is Bedrock → use the Bedrock CountTokens API (when available).
+- Otherwise / upstream failure → respond with a conservative estimate (the
+  exact strategy was an open question — see §10). In every case, return a
+  valid JSON response.
 
-콘텐츠 보존 (불변식 §2.2-1에 의해 보장):
+Content preservation (guaranteed by invariant §2.2-1):
 
-- `tool_use` / `tool_result` / `thinking` / `redacted_thinking`
-  블록을 순서 포함 무손실 보존.
-- `cache_control` 블록 무변형 통과 (§4.4 설계 제약).
+- Preserve `tool_use` / `tool_result` / `thinking` / `redacted_thinking`
+  blocks losslessly, including order.
+- Pass `cache_control` blocks through unmodified (§4.4 design constraint).
 
-헤더 처리:
+Header handling:
 
-- `anthropic-version`, `anthropic-beta`: Anthropic Direct는 헤더
-  패스스루. Bedrock 경로는 헤더가 그대로 전달되는 프로토콜이
-  아니므로 §4.3의 변환 표를 따른다.
-- `x-api-key` / `Authorization`: 게이트웨이 virtual key로 해석
-  (upstream에는 게이트웨이 소유 자격증명 사용, §5.2).
+- `anthropic-version`, `anthropic-beta`: Anthropic Direct passes headers
+  through as-is. The Bedrock path is not a protocol that carries headers
+  through verbatim, so it follows the conversion table in §4.3.
+- `x-api-key` / `Authorization`: resolved as the gateway's virtual key (the
+  gateway's own credential is used upstream, §5.2).
 
-### 3.2 OpenAI ingress — v0.1 범위
+### 3.2 OpenAI ingress — v0.1 scope
 
-| 엔드포인트 | 요구사항 |
+| Endpoint | Requirement |
 |---|---|
-| `POST /v1/chat/completions` | 비스트리밍 + SSE 스트리밍 (`data: {...}` / `data: [DONE]`), tool calling 포함 |
-| `GET /v1/models` | 해당 virtual key의 **allow-list에 있는 모델만** 반환 — OpenCode 모델 피커가 사용 |
+| `POST /v1/chat/completions` | Non-streaming + SSE streaming (`data: {...}` / `data: [DONE]`), including tool calling |
+| `GET /v1/models` | Return only the models on the virtual key's **allow-list** — used by OpenCode's model picker |
 
-### 3.3 교차 프로토콜 변환 충실도
+### 3.3 Cross-protocol conversion fidelity
 
-| 경로 | 충실도 |
+| Path | Fidelity |
 |---|---|
-| Anthropic ingress → Anthropic 계열 provider (Direct, Bedrock invoke/mantle) | 무손실 (불변식) |
-| OpenAI ingress → openai_compatible provider | 무손실 |
-| OpenAI ingress → Anthropic 계열 | best-effort: messages/tools 매핑, thinking 미노출 |
-| Anthropic ingress → openai_compatible | best-effort: thinking 블록 drop을 문서화, cache_control 무시(경고 로그) |
+| Anthropic ingress → an Anthropic-family provider (Direct, Bedrock invoke/mantle) | Lossless (invariant) |
+| OpenAI ingress → an openai_compatible provider | Lossless |
+| OpenAI ingress → an Anthropic-family provider | Best-effort: messages/tools mapping, thinking not exposed |
+| Anthropic ingress → an openai_compatible provider | Best-effort: thinking-block drop is documented, cache_control is ignored (with a warning log) |
 
-v0.1 문서에 이 매트릭스를 그대로 게재한다.
+This matrix is published verbatim in the v0.1 docs.
 
 ---
 
-## 4. Provider 레이어
+## 4. Provider Layer
 
-### 4.1 Provider 인터페이스
+### 4.1 Provider interface
 
 ```go
 // providers
@@ -246,243 +278,274 @@ type Provider interface {
     Name() string
     Models() []schema.ModelInfo
     Complete(ctx context.Context, req *schema.ChatRequest) (*schema.ChatResponse, error)
-    // canonical 청크 iterator. SSE 직렬화는 코어(egress)가 담당.
+    // A canonical chunk iterator. SSE serialization is core's (egress's) job.
     Stream(ctx context.Context, req *schema.ChatRequest) (iter.Seq2[*schema.ChatChunk, error], error)
 }
 
-// 선택적 capability: 구현한 provider는 count_tokens가 이 경로를 쓰고,
-// 미구현이면 게이트웨이 추정기로 폴백한다 (§3.1).
+// Optional capability: a provider that implements this gets count_tokens via
+// this path; otherwise the gateway falls back to its own estimator (§3.1).
 type TokenCounter interface {
     CountTokens(ctx context.Context, req *schema.ChatRequest) (int64, error)
 }
 ```
 
-- `iter.Seq2` (Go 1.23+)로 고루틴/채널 누수를 언어 차원에서 차단.
-- 인터페이스에서 raw SSE(`io.Reader`)를 노출하지 않는다 — 토큰
-  카운팅·감사로그·필터가 전부 canonical 청크 위에서 동작한다.
-- 새 프로바이더 추가 = `providers/<name>/` 패키지 +
-  `providers/register.go` blank import 1줄 + 문서. **코어 diff 0.**
+- `iter.Seq2` (Go 1.23+) makes goroutine/channel leaks impossible at the
+  language level.
+- The interface never exposes raw SSE (`io.Reader`) — token counting, audit
+  logging, and filters all operate on canonical chunks.
+- Adding a new provider = a `providers/<name>/` package + one blank-import
+  line in `providers/register.go` + docs. **Zero core diff.**
 
-### 4.2 v0.1 프로바이더 3종
+### 4.2 The three v0.1 providers
 
 1. `anthropic` — Anthropic API Direct.
 2. `bedrock` — Amazon Bedrock (§4.3).
-3. `openai_compatible` — vLLM / Ollama / llm-d 등 OpenAI 호환 서버.
+3. `openai_compatible` — vLLM / Ollama / llm-d and other OpenAI-compatible servers.
 
-### 4.3 Bedrock 전략 — "Claude는 native, 나머지는 Converse"
+*(A fourth ingress-side addition shipped later: `bedrockapi`, a Bedrock
+InvokeModel-shaped passthrough ingress for Claude Code's native
+`CLAUDE_CODE_USE_BEDROCK=1` mode — ADR-024. It is an ingress, not a fourth
+outbound provider.)*
 
-| 모델군 | 기본 경로 | 근거 |
+### 4.3 Bedrock strategy — "Claude native, everything else via Converse"
+
+| Model family | Default path | Rationale |
 |---|---|---|
-| Claude | **InvokeModel** (native Anthropic Messages shape) | ① Claude Code 자체가 Bedrock에서 Invoke만 사용 (공식 문서 명시) ② Converse가 thinking block 순서를 깨뜨린 사례 존재 (LiteLLM #21128 — Anthropic 프로토콜 위반) ③ `anthropic_beta` 필드 보존이 native 경로에서 안전 |
-| Claude (대안) | **Bedrock Mantle** (`bedrock-mantle.{region}.api.aws/anthropic/v1/messages`, 표준 Anthropic Messages shape) | 변환 자체가 사라지는 우선 검토 옵션. 리전 가용성/기능 패리티 검증 필요 (§10) |
-| 비-Claude (Kimi, GLM, Nova 등) | **Converse** | 단일 스키마로 N개 모델 커버. 모델 고유 파라미터는 `additionalModelRequestFields`로 전달 |
+| Claude | **InvokeModel** (native Anthropic Messages shape) | ① Claude Code itself only uses Invoke on Bedrock (documented officially) ② Converse has broken thinking-block order in the wild (LiteLLM #21128 — an Anthropic-protocol violation) ③ preserving `anthropic_beta` is safe on the native path |
+| Claude (alternative) | **Bedrock Mantle** (`bedrock-mantle.{region}.api.aws/anthropic/v1/messages`, standard Anthropic Messages shape) | The option to evaluate first since it eliminates conversion entirely. Needs region-availability/feature-parity verification (§10) |
+| Non-Claude (Kimi, GLM, Nova, etc.) | **Converse** | One schema covers N models; model-specific parameters go through `additionalModelRequestFields` |
 
-config에서 모델 단위 오버라이드:
-`api: invoke_model | converse | mantle`.
+Per-model override in config: `api: invoke_model | converse | mantle`.
 
-`anthropic-version` / `anthropic-beta` 변환 표 (헤더 "패스스루"는
-Anthropic Direct에만 성립):
+`anthropic-version` / `anthropic-beta` conversion table (header "passthrough"
+only holds for Anthropic Direct):
 
-| 경로 | 처리 |
+| Path | Handling |
 |---|---|
-| Anthropic Direct | 헤더 패스스루 |
-| Bedrock InvokeModel | body의 `anthropic_version` · `anthropic_beta` 필드로 변환 |
-| Bedrock Converse | `additionalModelRequestFields`로 전달 시도, 미지원 beta는 **명시적 4xx 거부** (침묵 다운그레이드 금지) |
-| Bedrock Mantle | 헤더 패스스루 (패리티 검증 — §10 #2) |
+| Anthropic Direct | Header passthrough |
+| Bedrock InvokeModel | Converted into the body's `anthropic_version` / `anthropic_beta` fields |
+| Bedrock Converse | Attempted via `additionalModelRequestFields`; an unsupported beta gets an **explicit 4xx rejection** (silent downgrade is forbidden) |
+| Bedrock Mantle | Header passthrough (parity unverified — §10 #2) |
 
-인증: IRSA / Pod Identity / static credentials / profile.
-클라이언트 IAM identity는 Bedrock으로 전파하지 않는다 (§5.2).
+Auth: IRSA / Pod Identity / static credentials / profile. The client's IAM
+identity is never propagated to Bedrock (§5.2).
 
-### 4.4 Prompt caching pass-through — 설계 제약 (v0.1 필수)
+### 4.4 Prompt-cache pass-through — design constraint (v0.1 mandatory)
 
-**게이트웨이는 프롬프트 prefix를 변형하지 않는다.**
+**The gateway does not modify the prompt prefix.**
 
-- `cache_control` (Anthropic) / `cachePoint` (Bedrock Converse)
-  블록 무변형 통과.
-- 금지 사항: 메시지 재정렬, system prompt 수정/주입, 요청 본문에
-  영향을 주는 메타데이터 삽입. (HTTP 헤더 추가는 무방 — 캐시 키는
-  본문 prefix 기준.)
-- 근거: Claude Code 트래픽은 cache hit율 ~96%. 캐시가 깨지면
-  사용자 비용이 최대 10배 폭증한다 (cache read = base input의 10%,
-  5분 write = 1.25배).
-- 이 제약은 Filter 체인에도 적용된다: v0.2+ PII 마스킹 등 요청
-  변형 플러그인은 캐시 파괴를 명시 opt-in으로만 허용하고 문서에
-  비용 영향을 경고한다.
+- `cache_control` (Anthropic) / `cachePoint` (Bedrock Converse) blocks pass
+  through unmodified.
+- Forbidden: reordering messages, modifying/injecting the system prompt,
+  inserting any metadata that affects the request body. (Adding HTTP headers
+  is fine — the cache key is based on the body prefix.)
+- Rationale: Claude Code traffic runs at roughly a 96% cache-hit rate. A
+  broken cache can spike user cost up to 10× (a cache read is 10% of base
+  input price; a 5-minute write is 1.25×).
+- This constraint also applies to the filter chain: v0.2+ request-mutating
+  plugins (e.g. PII masking) may only break the cache as an explicit opt-in,
+  with the cost impact called out in the docs.
 
-### 4.5 라우팅 / 폴백 / 서킷브레이커
+### 4.5 Routing / fallback / circuit breaker
 
-- 모델 매핑은 **정적 config + 명시적 우선순위 폴백 체인**.
-  자동 디스커버리·스마트 라우팅 없음 — 디버깅 가능성이 우선.
-- 패시브 헬스체크: 연속 N회 실패 (기본 5) → circuit open →
-  지수 백오프 half-open.
-- 폴백 트리거: config로 지정 (`rate_limited`, `server_error`,
+- Model mapping is **static config plus an explicit priority fallback
+  chain**. No automatic discovery or smart routing — debuggability comes
+  first.
+- Passive health check: N consecutive failures (default 5) → circuit open →
+  exponential-backoff half-open.
+- Fallback triggers: specified in config (`rate_limited`, `server_error`,
   `timeout`).
-- **스트리밍 폴백 한계**: 폴백은 첫 청크 전송 전(pre-TTFT,
-  connection-level)에만 동작한다. 첫 청크 이후의 upstream 오류는
-  다른 provider로 투명 폴백이 불가능하므로(HTTP 200 + partial
-  body 기전송), ingress 형식의 표준 에러 이벤트로 스트림을
-  종료하고 부분 usage를 정산한다 (감사로그 `outcome.partial: true`).
-- 폴백 발생 시: 응답 헤더(`x-inferplane-fallback`) + 감사로그 +
-  메트릭에 기록.
+- **Streaming fallback limit**: fallback only works pre-TTFT (before the
+  first chunk is sent, at the connection level). An upstream error after the
+  first chunk cannot transparently fail over to another provider (HTTP 200
+  plus partial body already sent), so the stream is terminated with a
+  standard ingress-format error event and partial usage is settled (recorded
+  in the audit log as `outcome.partial: true`).
+- On fallback: recorded in the response header (`x-inferplane-fallback`),
+  the audit log, and metrics.
 
 ---
 
-## 5. 거버넌스 레이어
+## 5. Governance Layer
 
-### 5.1 RBAC — Identity / Principal / Policy 3계층
+### 5.1 RBAC — three layers: Identity / Principal / Policy
 
-| 계층 | 정의 | 소유 |
+| Layer | Definition | Owner |
 |---|---|---|
-| **Identity** (누구인가) | 사람의 신원. 직접 만들지 않는다 — OIDC 위임 (Dex/Keycloak/Okta). v0.2 | 외부 IdP |
-| **Principal** (게이트웨이 내부 주체) | `user` / `team` / `virtual key`(service account). OIDC `groups` claim → team 매핑 규칙만 게이트웨이가 소유 | inferplane |
-| **Policy** (무엇을 할 수 있나) | team × model × action 매트릭스. v0.1은 model allow-list. OPA 연동은 로드맵 | inferplane |
+| **Identity** (who) | A human's identity. Not created directly — delegated via OIDC (Dex/Keycloak/Okta). v0.2 | external IdP |
+| **Principal** (the gateway's internal subject) | `user` / `team` / a virtual key (service account). Only the mapping rule from an OIDC `groups` claim to a team belongs to the gateway | inferplane |
+| **Policy** (what is allowed) | A team × model × action matrix. v0.1 is a model allow-list. OPA integration is on the roadmap | inferplane |
 
-v0.1 구현 범위:
+v0.1 implementation scope:
 
-- Virtual API key 발급/폐기 + CLI (`inferplane keys create --team x`).
-- 키 → team 바인딩, team → model allow-list + quota/budget.
-- 키는 해시로만 저장 (생성 시 1회 표시).
+- Issue/revoke virtual API keys + CLI (`inferplane keys create --team x`).
+- Key → team binding; team → model allow-list + quota/budget.
+- Keys are stored only as a hash (shown once at creation).
 
-### 5.2 Upstream 인증과 client 인증의 분리 원칙
+### 5.2 Separation of upstream auth from client auth
 
-- 클라이언트는 **게이트웨이 virtual key로만** 인증한다. 실제
-  프로바이더 자격증명은 클라이언트에 절대 노출되지 않는다.
-- Bedrock 호출은 게이트웨이 자신의 자격(IRSA/Pod Identity)으로
-  수행한다. 클라이언트 IAM identity의 SigV4 전파는 하지 않는다.
-- 책임추적성은 감사로그의 `principal → virtual key → upstream call`
-  체인으로 확보한다.
-- 운영 노트 — **noisy neighbor**: 전 팀이 게이트웨이의 단일 AWS
-  자격으로 Bedrock을 호출하므로 계정 단위 모델 쿼터를 공유한다.
-  한 팀의 폭주는 게이트웨이 rate limit으로 1차 방어하고, AWS
-  Service Quota 상향 가이드를 운영 문서에 포함한다. 팀별 upstream
-  자격 오버라이드(Role ARN)는 v0.2 로드맵.
+- A client authenticates **only with a gateway virtual key.** The real
+  provider credential is never exposed to the client.
+- Bedrock calls are made with the gateway's own credential
+  (IRSA/Pod Identity). The client's IAM identity's SigV4 is never propagated.
+- Accountability is established via the audit log's
+  `principal → virtual key → upstream call` chain.
+- Operational note — **noisy neighbor**: every team calls Bedrock with the
+  gateway's single AWS credential, so they share an account-level model
+  quota. One team's burst is defended first by the gateway's own rate limit;
+  the operational docs include a guide for raising AWS Service Quotas.
+  Per-team upstream credential override (a Role ARN) is on the v0.2 roadmap.
 
-### 5.3 Rate limit / Quota / Budget — 3분리
+### 5.3 Rate limit / quota / budget — three separate concepts
 
-비슷해 보이지만 시간 축과 목적이 다르므로 **별도 개념으로 설계**한다.
+These look similar but differ in time axis and purpose, so they are
+**designed as separate concepts**.
 
-| 개념 | 시간 축 | 목적 | 집행 방식 |
+| Concept | Time axis | Purpose | Enforcement |
 |---|---|---|---|
-| **rate limit** | 초/분 (TPM/RPM) | 보호 | 사전 차단, 로컬 카운터 |
-| **quota** | 일/월 (tokens/day 등) | 정책 | 사전 낙관 체크 + 사후 차감 (2단계) |
-| **budget** | 비용($) | 재무 | 토큰 × 모델별 단가 테이블로 집계 |
+| **rate limit** | seconds/minutes (TPM/RPM) | protection | pre-block, local counter |
+| **quota** | days/months (tokens/day, etc.) | policy | optimistic pre-check + post-debit (two-phase) |
+| **budget** | cost ($) | finance | aggregated via tokens × a per-model rate table |
 
-quota와 budget은 대칭으로 `on_exceeded: block | warn`을 명시한다
-(기본 `block`) — 초과 시 동작을 암묵에 두지 않는다. 둘이 동시에
-초과되면 **block이 warn에 우선**한다 (하나라도 block이면 차단).
+Quota and budget both symmetrically declare `on_exceeded: block | warn`
+(default `block`) — the on-exceeded behavior is never left implicit. If both
+trip at once, **block wins over warn** (block if either says block).
 
-rate limit 집행 의미론: RPM은 진정한 사전 차단. TPM은 요청 시점에
-출력 토큰을 알 수 없으므로 **직전 윈도우 실측 + 현재 요청 input
-추정으로 사전 차단하고, 응답 후 실측으로 윈도우 카운터를 갱신**한다.
-카운터는 인스턴스-로컬이며 — 레플리카 N개면 실효 한도가 최대 N배가
-된다는 사실을 문서에 명시한다. 다중 레플리카 합산 집행(분산 rate
-limit, Redis 재사용)은 v0.2.
+Rate-limit enforcement semantics: RPM is a true pre-block. TPM cannot know
+the output token count at request time, so it **pre-blocks on the prior
+window's actuals plus the current request's input estimate, then updates the
+window counter from actuals after the response completes.** The counter is
+instance-local — with N replicas, the effective limit can be up to N× the
+configured value; this is documented rather than hidden. Summed enforcement
+across replicas (distributed rate limiting via a shared store) is on the
+v0.2 roadmap.
 
-스토어 추상화:
+*(Update: for **budget**, the mechanism that actually shipped to bound
+multi-instance overspend is different from a shared rate-limit store — it is
+the **lease pattern** of ADR-034. Each data-plane instance holds only its own
+usage view, so rule propagation alone cannot enforce a global budget; the
+control plane instead grants each instance a bounded lease — "this much
+budget for this interval" — that it enforces locally with zero network round
+trips, then reports consumption and renews asynchronously. This bounds
+worst-case budget overshoot to roughly `lease grant × connected instances`,
+which is a materially different (and tighter) guarantee than the "N× on N
+replicas" framing above. Rate-limit counters themselves remain
+instance-local as described, since ADR-013's shared-store HA design has not
+been implemented.)*
+
+Store abstraction:
 
 ```go
 // internal/quota
 type LimiterStore interface {
-    // 사전 체크 (낙관적). 분산 환경에서 수 % 오버슈트 허용.
+    // Optimistic pre-check. A few percent of overshoot is acceptable in a distributed setting.
     Check(ctx context.Context, key string, estimated int64) (Decision, error)
-    // 응답 후 실제 사용량 차감 (비동기 허용).
+    // Post-debit against actual usage after the response completes (may be async).
     Debit(ctx context.Context, key string, actual int64) error
 }
 ```
 
-- 기본 구현: 인메모리 (단일 레플리카).
-- HA: Redis/Valkey opt-in. 사전 체크는 로컬 캐시 + 주기 동기화,
-  사후 차감은 비동기. **정확한 전역 일관성은 보장하지 않으며
-  수 % 오버슈트가 가능함을 문서에 명시한다** — 토큰 쿼터는
-  응답 후에야 확정되므로 본질적 한계다.
-- **스토어 장애 정책** (`quota_store.failure_mode`): 기본
-  `fail_open` — 스토어 장애 중에는 로컬 캐시 기반으로 집행을
-  지속(degraded local enforcement)하고
-  `inferplane_quota_store_errors_total`로 알림. `fail_closed`는
-  opt-in (스토어 장애 = 전면 차단을 감수하는 조직용). 비동기
-  Debit은 멱등 키(요청 ULID)로 재시도해 중복 차감을 방지한다.
-- 후회 방지: DB 트랜잭션/분산 락 기반 정확한 전역 쿼터는
-  핫패스 레이턴시를 파괴하므로 채택하지 않는다.
+- Default implementation: in-memory (single replica).
+- HA: Redis/Valkey, opt-in. Pre-check via a local cache with periodic sync;
+  post-debit is async. **Exact global consistency is not guaranteed, and a
+  few percent of overshoot is documented as possible** — an inherent limit,
+  since a token quota is only known after the response completes.
+- **Store-failure policy** (`quota_store.failure_mode`): default
+  `fail_open` — during a store outage, keep enforcing locally from cache
+  (degraded local enforcement) and alert via
+  `inferplane_quota_store_errors_total`. `fail_closed` is opt-in (for
+  organizations that accept a store outage as a full stop). An async
+  `Debit` retries under an idempotency key (the request ULID) to avoid
+  double-debiting.
+- Rejected alternative: exact global quota via a DB transaction or a
+  distributed lock — the hot-path synchronous round trip would destroy
+  latency.
 
-Budget 구현 제약:
+Budget implementation constraints:
 
-- **비용은 처음부터 끝까지 정수 마이크로달러(int64, µUSD)로 다룬다.**
-  float 누적은 부동소수점 오차가 쌓여 월말 정산 불일치를 만든다 —
-  budget이 핵심 기능인 제품에서 신뢰 붕괴다. 내부 집계 타입,
-  감사로그(`amount_usd_micros`), budget 스토어 모두 동일하며,
-  config의 `usd_per_month` 등 사람용 표기는 로드 시 µUSD로 변환한다.
-- **정산은 요청 단위 1회, 반올림 규칙 고정**: 단가는 µUSD/MTok
-  정수로 보관하고, 비용은 스트리밍 청크 단위가 아니라 요청 완료
-  시점의 최종 토큰 합계로 1회 계산한다 (`tokens × price / 10^6`,
-  round-half-even). 청크 단위 절사를 반복하면 저단가 모델에서
-  체계적 과소계상이 생긴다. 오차 상한: 요청당 1µUSD 미만.
-- **집행은 µUSD 단위 `BudgetStore`로 닫는다** — quota와 동일한
-  2단계 패턴(낙관 Check + 사후 Debit)의 별도 스토어 인터페이스.
-  집계만으로는 `on_exceeded: block`을 구현할 수 없다.
-- **단가 해석 순서**: 번들 테이블 → config `pricing.overrides`
-  ((provider, model) 키). self-hosted(vLLM/Ollama/llm-d) 모델은
-  운영자가 config로 자체 단가(GPU 상각 chargeback 등)를 정의하는
-  것이 1급 사용 사례다.
-- **단가 미등록 시** (`pricing.on_missing`): 기본 `allow` — 비용 0
-  집계 + 감사로그 `pricing_missing: true` +
-  `inferplane_pricing_miss_total` 메트릭으로 가시화. `block`은
-  opt-in (엄격 통제 조직용).
-- **단가 테이블의 키는 `(provider, model)` 쌍**이다. 같은 Claude
-  모델이라도 Anthropic Direct와 Bedrock의 단가가 다르고, Bedrock은
-  리전별 차이가 있다 (provider 인스턴스가 리전을 인코딩하므로
-  provider 키로 자연 해소). 단가 테이블은 게이트웨이가 소유 —
-  번들 YAML + 사용자 오버라이드, `pricing_version` 필드로 추적.
-- **cache write 단가는 TTL별 구분**: 5분 write = 1.25×, 1시간
-  write = 2×. `cache_write_1h` 누락 시 Claude Code가 1h 캐시를
-  쓰는 경우 비용이 과소계상된다. TTL 판별은 upstream usage의
-  `cache_creation` TTL별 상세(있으면) 우선, 없으면 요청의
-  `cache_control.ttl` 기준.
-- usage의 `cache_read_input_tokens`를 **반드시 구분 집계**한다.
-  base input 단가로 계산하면 비용이 10배 과대계상된다.
-- 스트리밍 중단 시: 클라이언트가 먼저 끊어도 upstream 스트림을
-  **grace period(`server.drain_grace`, 기본 10s) 동안 백그라운드로
-  드레인**해 마지막 usage 청크를 수신한 뒤 확정 정산한다 — 조기
-  종료 반복으로 quota/budget을 과소계상시키는 우회를 막는다.
-  드레인 실패 시에만 출력 청크 기반 추정 + 감사로그에
-  `estimated: true`.
-  **트레이드오프**: 드레인은 취소 전파를 포기하는 것이다 —
-  클라이언트 중단 후 최대 grace 시간만큼 upstream 유료 생성이
-  계속된다. `drain_grace: 0`이면 즉시 취소하고 `estimated`로
-  정산한다 (비용 절감 우선 조직용 opt-in).
+- **Cost is handled end-to-end as an integer number of micro-dollars (int64,
+  µUSD).** Float accumulation drifts, and in a product where budget is a
+  core feature that drift becomes a trust problem at month-end
+  reconciliation. The internal aggregation types, the audit log
+  (`amount_usd_micros`), and the budget store are all µUSD; human-facing
+  config (e.g. `usd_per_month`) is converted to µUSD at load time.
+- **Settlement happens once per request, with a fixed rounding rule**: rates
+  are stored as an integer µUSD/MTok, and cost is computed once, at the
+  final token totals when the request completes — not per streaming chunk
+  (`tokens × price / 10^6`, round-half-even). Truncating per chunk
+  systematically under-bills low-price models. Target error bound: under 1
+  µUSD per request.
+- **Enforcement closes through a µUSD `BudgetStore`** — a separate store
+  interface using the same two-phase pattern as quota (optimistic check +
+  post-debit). Aggregation alone cannot implement `on_exceeded: block`.
+- **Rate resolution order**: the bundled table, then config
+  `pricing.overrides` (keyed by `(provider, model)`). A self-hosted model
+  (vLLM/Ollama/llm-d) defining its own rate (GPU-amortization chargeback,
+  etc.) is a first-class use case.
+- **When a rate is missing** (`pricing.on_missing`): default `allow` —
+  aggregate cost as 0, flag `pricing_missing: true` in the audit record, and
+  surface it via the `inferplane_pricing_miss_total` metric. `block` is
+  opt-in (for tightly controlled organizations).
+- **The rate table's key is the `(provider, model)` pair.** The same Claude
+  model costs differently on Anthropic Direct versus Bedrock, and Bedrock
+  differs by region (the provider instance encodes the region, so a
+  provider-scoped key resolves this naturally). The rate table is owned by
+  the gateway — a bundled YAML plus user overrides, tracked with a
+  `pricing_version` field.
+- **Cache-write rates are TTL-tiered**: a 5-minute write is 1.25× the input
+  rate, a 1-hour write is 2×. Omitting `cache_write_1h` under-bills a team
+  using 1-hour caches with Claude Code. TTL is determined from the upstream
+  usage's per-TTL `cache_creation` detail when present, else from the
+  request's `cache_control.ttl`.
+- Usage's `cache_read_input_tokens` **must be aggregated separately**.
+  Billing it at the base input rate over-bills by 10×.
+- On a streaming abort: even if the client disconnects first, the upstream
+  stream is **drained in the background for a grace period**
+  (`server.drain_grace`, default 10s) to receive the final usage chunk before
+  settling — this closes off a bypass where repeated early termination
+  under-reports quota/budget. Only when draining fails does the gateway fall
+  back to an estimate from output chunks, flagged `estimated: true` in the
+  audit log. **Trade-off**: draining gives up cancellation propagation — paid
+  upstream generation continues for up to the grace period after the client
+  disconnects. `drain_grace: 0` cancels immediately and settles as
+  `estimated` (an opt-in for cost-conscious organizations).
 
-### 5.4 감사로그
+### 5.4 Audit log
 
-v0.1 범위: **append-only JSONL + 구조화 레코드 + 최소 해시 체인.**
-각 레코드의 `prev_hash` = 직전 레코드의 SHA-256 (인스턴스별 독립
-체인 — 체인 시작은 인스턴스 기동 레코드, 레코드의 `instance` 필드로
-체인 식별). `inferplane audit verify`로 체인 무결성 검증.
-외부 앵커링(S3 Object Lock)은 v0.2 — 앵커 전의 보증 수준은
-"변조감지(tamper-evident)"이며 변조 차단이 아님을 문서에 명시한다.
+v0.1 scope: **append-only JSONL + structured records + a minimal hash
+chain.** Each record's `prev_hash` is the SHA-256 of the previous record
+(an independent chain per instance — the chain starts at the instance's boot
+record, identified by the record's `instance` field). `inferplane audit
+verify` checks chain integrity. External anchoring (S3 Object Lock) is v0.2
+— the guarantee before anchoring is documented explicitly as
+"tamper-evident," not tamper-preventing.
 
-레코드는 **2단계로 기록**한다: 인가 결정 직후 `request_started`
-(principal·model·인가 결과까지 — 거부도 기록), 완료 시
-`request_completed`(usage·cost 정산 포함). crash가 나도 인증을
-통과한 요청의 흔적이 남는다.
+Records are written in **two phases**: `request_started` right after the
+authorization decision (including principal, model, and the authorization
+outcome — denials recorded too), and `request_completed` on completion
+(including settled usage and cost). A crash still leaves a trace of any
+request that passed auth.
 
-구현 노트: 해시 체인 기록은 **단일 writer 고루틴으로 직렬화**한다 —
-동시 요청의 `request_started`/`request_completed`가 인터리빙될 때
-`prev_hash` 경합을 막는 유일하게 안전한 구조다. 체인이 기록 순서를
-정의하고, 그 순서는 writer 큐가 정한다 (요청 핸들러는 큐에 적재만,
-fsync·체인 해시는 writer가 담당).
+Implementation note: hash-chain writing is **serialized through a single
+writer goroutine** — the only safe structure when concurrent requests'
+`request_started`/`request_completed` records could otherwise interleave and
+race on `prev_hash`. The chain defines write order, and that order is
+defined by the writer's queue (request handlers only enqueue; the writer
+owns fsync and chain hashing).
 
-레코드 스키마 (v0.1):
+Record schema (v0.1):
 
 ```json
 {
   "schema_version": 1,
   "event": "request_completed",        // request_started | request_completed
-  "id": "01J...",                      // ULID, 시간순 정렬 가능
+  "id": "01J...",                      // ULID, sortable by time
   "ts": "2026-06-10T12:34:56.789Z",
-  "instance": "inferplane-7d4f-abc12", // 다중 레플리카 식별
+  "instance": "inferplane-7d4f-abc12", // identifies the replica
   "principal": {
-    "key_id": "ik_5f2...",             // 키 해시 prefix, 원문 금지
+    "key_id": "ik_5f2...",             // a hash prefix of the key, never the plaintext
     "team": "platform-eng",
-    "user": null                       // OIDC 도입(v0.2) 후 채움
+    "user": null                       // filled in once OIDC lands (v0.2)
   },
   "request": {
     "ingress": "anthropic",            // anthropic | openai
@@ -496,109 +559,122 @@ fsync·체인 해시는 writer가 담당).
     "status": 200,
     "fallback_used": false,
     "fallback_chain": [],
-    "partial": false,                  // 스트림 중단으로 부분 응답이면 true
-    "error": null                      // null 또는 아래 닫힌 taxonomy 문자열 중 하나 (ADR-020,
-                                        // internal/audit.DenyReason): model_not_allowed |
+    "partial": false,                  // true if the stream was cut short
+    "error": null                      // null, or one of the closed taxonomy strings below
+                                        // (internal/audit.DenyReason): model_not_allowed |
                                         // team_rate_limited | team_token_rate_limited |
                                         // team_quota_exceeded | key_rate_limited |
                                         // key_token_rate_limited | team_budget_exceeded |
-                                        // key_budget_exceeded | region_blocked — 자유 텍스트 아님
+                                        // key_budget_exceeded | region_blocked — never free text
   },
   "usage": {
     "input_tokens": 1200,
     "output_tokens": 850,
     "cache_read_input_tokens": 45000,
-    "cache_creation_input_tokens": 1024,     // 합계
-    "cache_creation_5m_input_tokens": 1024,  // TTL별 — 단가 상이 (1.25× vs 2×)
+    "cache_creation_input_tokens": 1024,     // total
+    "cache_creation_5m_input_tokens": 1024,  // per TTL — priced differently (1.25× vs 2×)
     "cache_creation_1h_input_tokens": 0,
     "estimated": false
   },
   "cost": {
-    "amount_usd_micros": 31000,          // 정수 µUSD — float 금지 (오차 누적 방지)
-    "pricing_missing": false,            // 단가 미등록 모델이면 true (비용 0 집계)
+    "amount_usd_micros": 31000,          // integer µUSD — never float (no accumulated drift)
+    "pricing_missing": false,            // true if the model had no registered rate (cost aggregated as 0)
     "pricing_version": "2026-06-01"
   },
   "latency": { "ttft_ms": 420, "total_ms": 9800 },
-  "trace_id": null,                    // 예약. v0.2: OTel trace 상관관계 (W3C trace-id)
-  "prev_hash": "sha256:9f2c..."        // 직전 레코드 해시 — 인스턴스별 체인 (v0.1)
+  "trace_id": null,                    // reserved. v0.2: OTel trace correlation (W3C trace-id)
+  "prev_hash": "sha256:9f2c..."        // hash of the previous record — per-instance chain (v0.1)
 }
 ```
 
-- 프롬프트/응답 본문은 기본 미기록 (메타데이터만). 본문 로깅은
-  v0.2+ 플러그인(`prompt-log`)의 명시 opt-in.
-- 싱크: `stdout` (K8s 표준 — Fluent Bit/Loki 수거) / `file` / `s3`
-  / `webhook`. 포맷 옵션: raw JSONL 또는 CloudEvents 봉투.
+- Prompt/response bodies are not recorded by default (metadata only). Body
+  logging is an explicit opt-in v0.2+ plugin (`prompt-log`).
+- Sinks: `stdout` (the K8s-idiomatic choice — collected by Fluent Bit/Loki) /
+  `file` / `s3` / `webhook`. Format options: raw JSONL or a CloudEvents
+  envelope.
 
-**Sink 실패 정책** — "변조감지 audit가 차별점"인 제품이 audit 유실을
-조용히 허용하면 주장이 무너지고, 무조건 fail-closed면 S3 장애가 LLM
-전면 장애가 된다. config로 위임하되 기본값을 정한다:
+**Sink failure policy** — a product whose differentiator is "tamper-evident
+audit" cannot quietly tolerate audit loss, but an unconditional fail-closed
+turns an S3 outage into a full LLM outage. This is delegated to config, with
+a default:
 
 ```yaml
 audit:
-  failure_mode: buffer_then_block   # fail_open | fail_closed | buffer_then_block (기본)
+  failure_mode: buffer_then_block   # fail_open | fail_closed | buffer_then_block (default)
   buffer: { path: /var/lib/inferplane/audit-wal, max_records: 100000, max_age: 5m }
 ```
 
-- `buffer_then_block` (기본): required sink 실패 시 **로컬 디스크
-  WAL**(append-only 파일)에 적재하고 요청은 계속 처리. 재기동 시
-  WAL을 재전송하므로 crash/OOM/pod eviction이 레코드를 잃지 않는다
-  — 인메모리 버퍼는 crash 시 유실이 fail_open과 동치가 되므로
-  채택하지 않는다. 버퍼가 차거나 `max_age` 초과 시 신규 요청
-  차단으로 전환.
-- sink별 `required` 플래그 (기본 `true`): 실패 정책은 required
-  sink에만 적용. `stdout` 같은 관측용 sink는 `required: false`로
-  best-effort 처리.
-- block 전환은 반드시 관측 가능해야 한다:
-  `inferplane_audit_write_failures_total{sink}` +
-  `inferplane_audit_buffer_utilization_ratio` (§6.2)에 알림 연결.
+- `buffer_then_block` (default): on a required sink's failure, buffer into a
+  **local disk WAL** (an append-only file) and keep serving requests. The
+  WAL replays on restart, so a crash/OOM/pod eviction never loses a record —
+  an in-memory buffer is rejected because loss on crash is equivalent to
+  fail-open. Once the buffer fills or `max_age` is exceeded, switch to
+  blocking new requests.
+- Per-sink `required` flag (default `true`): the failure policy applies only
+  to required sinks. An observability sink such as `stdout` can be marked
+  `required: false` for best-effort delivery.
+- A transition to blocking must be observable:
+  `inferplane_audit_write_failures_total{sink}` and
+  `inferplane_audit_buffer_utilization_ratio` (§6.2) are wired to alerts.
 
-- v0.2: N분 주기 체인 헤드 **외부 앵커링** (S3 Object Lock 등) —
-  v0.1 해시 체인의 보증을 "노드 침해 시에도 사후 감지 가능"으로 상향.
-- 정직한 한계를 문서에 명시: 같은 디스크에 쓰는 한 완전한 변조
-  불가는 없다. 해시 체인 + 외부 앵커가 소프트웨어 레벨의 상한이다.
+- v0.2: periodic external **anchoring** of the chain head (e.g. S3 Object
+  Lock) — raises the v0.1 hash chain's guarantee to "detectable even after a
+  node compromise."
+- Honest limit, stated in the docs: as long as writes land on the same disk,
+  tamper-*prevention* does not exist. The hash chain plus an external anchor
+  is the software-level ceiling.
 
-### 5.5 Admin API 인증과 부트스트랩
+### 5.5 Admin API auth and bootstrapping
 
-키를 발급하는 admin API 자체의 인증과 "첫 키" 닭-달걀 문제를 푼다.
+Solves both the auth of the admin API that issues keys, and the "first key"
+chicken-and-egg problem.
 
-- **Admin API 인증**: 관리 리스너(`:9090`)의 admin API는 별도
-  **admin token**으로 보호한다. 토큰은 config의
-  `server.admin_auth.token_ref` (env/file/secret ref)로 주입 —
-  데이터 평면 virtual key와 완전히 분리된 자격 체계. 토큰은 해시로
-  보관·constant-time 비교하며, `token_ref`는 복수 지정 가능
-  (rotation 중 신구 병행 유효). `/metrics`와 헬스체크는 admin token
-  없이 접근 가능 — 스크레이핑 경로와 관리 경로의 인증을 분리한다.
-- **부트스트랩 (첫 키)**: CLI가 admin API를 거치지 않고 **key
-  store(SQLite)에 직접 쓰는 로컬 모드**를 지원한다.
-  `inferplane keys create --team x`는
-  (1) 로컬 모드 (`--store <path>`): 스토어 파일에 직접 기록 —
-  서버 기동 전/정지 중에도 가능, 부트스트랩용.
-  (2) 원격 모드 (기본): admin API + admin token 경유.
-  로컬 모드 제약: **서버 기동 전 부트스트랩 전용**이며, 키 발급
-  감사 레코드를 동일 경로의 audit WAL에 강제 기록한다 (로컬 모드가
-  감사를 우회하면 "모든 거버넌스 이벤트 기록" 성공 기준과 모순).
-  key store가 Postgres(HA)인 구성에서는 로컬 모드를 비활성화하고
-  admin API로 일원화한다 (split-brain 방지).
-- admin API 호출 자체도 감사로그 대상이다 (키 발급/폐기 =
-  거버넌스 이벤트).
-- v0.2: OIDC 연동 시 admin API를 IdP 그룹 기반 권한으로 승격,
-  admin token은 비상용(break-glass)으로 유지.
+- **Admin API auth**: the admin listener's (`:9090`) admin API is protected
+  by a separate **admin token**, injected via config's
+  `server.admin_auth.token_ref` (an env/file/secret ref) — a credential
+  system fully disjoint from data-plane virtual keys. The token is stored
+  hashed and compared in constant time; `token_ref` may be specified
+  multiple times (old and new both valid during rotation). `/metrics` and
+  health checks are reachable without the admin token — the scrape path and
+  the management path have separate auth.
+- **Bootstrapping (the first key)**: the CLI supports a **local mode that
+  writes directly to the key store (SQLite)**, bypassing the admin API.
+  `inferplane keys create --team x`:
+  (1) local mode (`--store <path>`): writes directly to the store file —
+  works before the server starts or while it is stopped, for bootstrapping.
+  (2) remote mode (default): goes through the admin API + admin token.
+  Local-mode constraint: **restricted to pre-boot bootstrapping**, and it
+  forces the key-issuance record into the same-path audit WAL (otherwise
+  local mode would bypass audit, contradicting the "every governance event
+  is recorded" success criterion). When the key store is Postgres (HA —
+  **design intent; no Postgres key-store backend exists today, only SQLite**),
+  local mode is disabled and everything goes through the admin API (to
+  avoid split-brain).
+- Admin API calls are themselves audit events (key issuance/revocation are
+  governance events).
+- v0.2: once OIDC is wired up, promote the admin API to IdP-group-based
+  authorization; the admin token remains as a break-glass credential.
+
+*(Update: OIDC admin authorization shipped as ADR-004 — the admin API now
+accepts either the static admin token or an OIDC ID token on the same Bearer
+header, resource-server-only, with the static token kept exactly as the
+break-glass path this section anticipated.)*
 
 ---
 
-## 6. 관측가능성
+## 6. Observability
 
-### 6.1 원칙
+### 6.1 Principles
 
-- v0.1: **Prometheus 메트릭만.** OTel trace는 v0.2.
-- 단, 메트릭/속성 네이밍은 **첫 커밋부터 OTel GenAI semantic
-  conventions를 따른다** (`gen_ai.request.model`,
-  `gen_ai.usage.input_tokens` 등) — 나중에 trace를 추가해도
-  속성 체계가 일치하도록.
+- v0.1: **Prometheus metrics only.** OTel tracing was slated for v0.2 (it has
+  since shipped as an opt-in, no-op-by-default seam — ADR-011).
+- Metric/attribute naming follows **OTel GenAI semantic conventions from the
+  first commit** (`gen_ai.request.model`, `gen_ai.usage.input_tokens`, etc.)
+  — so that adding tracing later keeps the same attribute vocabulary.
 
-### 6.2 v0.1 메트릭 목록
+### 6.2 v0.1 metrics list
 
-| 메트릭 (Prometheus) | 타입 | 레이블 | GenAI 컨벤션 매핑 |
+| Metric (Prometheus) | Type | Labels | GenAI convention mapping |
 |---|---|---|---|
 | `gen_ai_client_token_usage_total` | counter | `type`(input\|output\|cache_read\|cache_write_5m\|cache_write_1h), `model`, `provider`, `team` | `gen_ai.usage.{input,output}_tokens` |
 | `gen_ai_server_request_duration_seconds` | histogram | `model`, `provider`, `ingress`, `status` | `gen_ai.server.request.duration` |
@@ -609,42 +685,48 @@ audit:
 | `inferplane_quota_utilization_ratio` | gauge | `team`, `window` | — |
 | `inferplane_budget_spend_usd_total` | counter | `team`, `model`, `cost_type` | — |
 | `inferplane_audit_write_failures_total` | counter | `sink` | — |
-| `inferplane_audit_buffer_utilization_ratio` | gauge | — (전역) | — |
+| `inferplane_audit_buffer_utilization_ratio` | gauge | — (global) | — |
 | `inferplane_pricing_miss_total` | counter | `provider`, `model` | — |
 | `inferplane_quota_store_errors_total` | counter | `op`(check\|debit) | — |
 
-- 카디널리티 가드: `team`·`model` 레이블은 config에 선언된 값만
-  허용 (요청 입력값을 레이블로 직접 사용하지 않음).
-- `inferplane_budget_spend_usd_total`은 관측용 근사치다 (Prometheus
-  float). **정산의 진실원은 budget 스토어/감사로그의 정수 µUSD
-  집계** (§5.3) — 메트릭을 정산에 쓰지 않는다.
-- `inferplane_audit_buffer_utilization_ratio`가 1.0에 접근하면
-  block 전환 임박 (§5.4 sink 실패 정책) — 알림 룰을 대시보드에 동봉.
-- Grafana 대시보드 JSON을 레포에 동봉 (`deploy/grafana/`).
+- Cardinality guard: `team`/`model` labels are only ever values declared in
+  config (never raw request input used directly as a label).
+- `inferplane_budget_spend_usd_total` is an observational approximation only
+  (Prometheus is float). **The settlement source of truth is the integer
+  µUSD aggregate in the budget store / audit log** (§5.3) — metrics are
+  never used for settlement.
+- `inferplane_audit_buffer_utilization_ratio` approaching 1.0 signals an
+  imminent transition to blocking (§5.4's sink failure policy) — an alert
+  rule ships with the dashboard.
+- A Grafana dashboard JSON ships in the repo (`deploy/grafana/`).
 
-### 6.3 v0.2 trace 스팬 구조 (예고)
+### 6.3 v0.2 trace span shape (preview)
 
-`ingress 변환 → 거버넌스 파이프라인 → 라우팅/폴백 → upstream 호출`
-단위로 스팬 분리, GenAI conventions 속성 부착.
+Spans split by `ingress conversion → governance pipeline → routing/fallback →
+upstream call`, with GenAI-convention attributes attached.
+
+*(Update: this shipped as ADR-011's opt-in tracing seam — one span per
+generative request, W3C trace-context propagation, GenAI-semconv attributes,
+and a `trace_id` written into the audit chain; a no-op tracer by default.)*
 
 ---
 
-## 7. Config 스키마 전체 예시
+## 7. Full Config Schema Example
 
 ```yaml
 server:
   listen: :8080
-  drain_grace: 10s             # 스트림 중단 시 upstream 드레인 시간 — 0 = 즉시 취소 (§5.3)
+  drain_grace: 10s             # upstream drain time on a mid-stream abort — 0 = cancel immediately (§5.3)
   # tls: { cert_ref: { file: /etc/tls/cert.pem }, key_ref: { file: /etc/tls/key.pem } }
-  #   ↑ 자체 TLS 종단 (§2.3) — 비-K8s 단일 바이너리 실행 시 활성화 권장
-  admin_listen: :9090          # 관리 API + /metrics + 헬스체크 (/metrics는 무인증 — §5.5)
+  #   ↑ self-terminated TLS (§2.3) — recommended when running as a non-K8s single binary
+  admin_listen: :9090          # admin API + /metrics + health checks (/metrics is unauthenticated — §5.5)
   admin_auth:
-    token_ref: { env: INFERPLANE_ADMIN_TOKEN }   # admin API 보호 (§5.5, 복수 지정 = rotation)
+    token_ref: { env: INFERPLANE_ADMIN_TOKEN }   # protects the admin API (§5.5; multiple entries = rotation)
 
 providers:
   anthropic-direct:
     type: anthropic
-    api_key_ref: { env: ANTHROPIC_API_KEY }    # env: | file: | secret: 만 허용
+    api_key_ref: { env: ANTHROPIC_API_KEY }    # env: | file: | secret: only
   bedrock-us:
     type: bedrock
     region: us-west-2
@@ -656,14 +738,14 @@ providers:
 
 models:
   claude-sonnet-4-6:
-    targets:                                   # 우선순위 = 배열 순서
+    targets:                                   # priority = array order
       - provider: anthropic-direct
         model: claude-sonnet-4-6
       - provider: bedrock-us
         model: anthropic.claude-sonnet-4-6-v1:0
         api: invoke_model                      # invoke_model | converse | mantle
     fallback:
-      triggers: [rate_limited, server_error, timeout]  # 키명 'on'은 YAML 1.1 부울 함정 → 회피
+      triggers: [rate_limited, server_error, timeout]  # named `triggers`, not `on`, to dodge the YAML 1.1 boolean trap
       circuit_break_after: 5
   kimi-k2:
     targets:
@@ -679,237 +761,276 @@ teams:
   platform-eng:
     allowed_models: ["claude-sonnet-4-6", "qwen-coder"]
     rate_limit:  { requests_per_minute: 300, tokens_per_minute: 2000000 }
-    quota:       { tokens_per_day: 50000000, on_exceeded: block }  # block | warn (기본 block)
-    budget:      { usd_per_month: 5000, on_exceeded: block }       # 내부 집계는 정수 µUSD (§5.3)
+    quota:       { tokens_per_day: 50000000, on_exceeded: block }  # block | warn (default block)
+    budget:      { usd_per_month: 5000, on_exceeded: block }       # aggregated internally as integer µUSD (§5.3)
   data-science:
     allowed_models: ["*"]
     quota: { tokens_per_day: 200000000, on_exceeded: block }
 
 pricing:
-  source: bundled                              # 번들 단가 테이블
-  on_missing: allow                            # allow (기본: 비용 0 + pricing_missing 마킹) | block
-  overrides:                                   # 키 = (provider, model) 쌍 — §5.3
+  source: bundled                              # the bundled rate table
+  on_missing: allow                            # allow (default: cost 0 + pricing_missing flag) | block
+  overrides:                                   # keyed by (provider, model) — §5.3
     anthropic-direct:
       claude-sonnet-4-6:
         input_per_mtok: 3.00
         output_per_mtok: 15.00
         cache_read_per_mtok: 0.30
         cache_write_5m_per_mtok: 3.75          # 1.25×
-        cache_write_1h_per_mtok: 6.00          # 2× — 누락 시 1h 캐시 과소계상
-    bedrock-us:                                # provider가 리전 인코딩 → 리전별 단가 자연 해소
+        cache_write_1h_per_mtok: 6.00          # 2× — omitting this under-bills 1h caches
+    bedrock-us:                                # the provider encodes the region → regional rates resolve naturally
       "anthropic.claude-sonnet-4-6-v1:0":
         input_per_mtok: 3.00
         output_per_mtok: 15.00
         cache_read_per_mtok: 0.30
         cache_write_5m_per_mtok: 3.75
         cache_write_1h_per_mtok: 6.00
-    local-vllm:                                # self-hosted: 자체 단가(GPU 상각 chargeback) 정의
+    local-vllm:                                # self-hosted: define your own rate (e.g. GPU-amortization chargeback)
       "Qwen/Qwen2.5-Coder-32B":
         input_per_mtok: 0.20
         output_per_mtok: 0.60
 
-plugins: []                                    # v0.1: 내장 거버넌스만. v0.2: pii-mask 등
+plugins: []                                    # v0.1: built-in governance only. v0.2: pii-mask, etc.
 
 audit:
   failure_mode: buffer_then_block              # fail_open | fail_closed | buffer_then_block
   buffer: { path: /var/lib/inferplane/audit-wal, max_records: 100000, max_age: 5m }  # disk-backed WAL (§5.4)
   sinks:
-    - { type: stdout, format: jsonl, required: false }   # 관측용 best-effort
-    - { type: s3, bucket: llm-audit, prefix: gw/, format: jsonl }   # required 기본 true
-  # 해시 체인: v0.1 기본 활성 — 토글 아님 (§5.4). v0.2: anchor: { type: s3_object_lock, interval: 5m }
+    - { type: stdout, format: jsonl, required: false }   # best-effort, for observability
+    - { type: s3, bucket: llm-audit, prefix: gw/, format: jsonl }   # required defaults to true
+  # hash chain: on by default in v0.1 — not a toggle (§5.4). v0.2: anchor: { type: s3_object_lock, interval: 5m }
 
-quota_store:                                   # 생략 시 in-memory (단일 레플리카)
-  type: redis
-  addr: redis.infra.svc:6379
-  failure_mode: fail_open                      # fail_open (기본, 로컬 지속) | fail_closed (§5.3)
+quota_store:                                   # DESIGN ONLY — this key does not exist in shipped config.
+  type: redis                                  # No redis/valkey driver exists in the tree today (ADR-013, deferred).
+  addr: redis.infra.svc:6379                   # Quota/rate is in-memory, single-replica only, as shipped.
+  failure_mode: fail_open                      # fail_open (default, keeps enforcing locally) | fail_closed (§5.3)
 
-key_store:                                     # virtual key / team 메타데이터
-  type: sqlite                                 # sqlite = 단일 레플리카 전용 | postgres = 다중 레플리카(HA) 필수 (v0.2)
-  path: /var/lib/inferplane/keys.db
+key_store:                                     # `key_store` DOES ship (internal/config/config.go:344) — only
+  type: sqlite                                 # `path` is honored. `type` is parsed but IGNORED: gateway.go
+  path: /var/lib/inferplane/keys.db            # hardcodes OpenSQLite. Setting `postgres` here silently no-ops.
 ```
 
-제약:
+*(Update: two config keys were added after this spec was written and are not
+shown above — `policies` (the local GovernancePolicy file channel, ADR-033)
+and `control_plane` (the ADR-034 heartbeat to `inferplaned`). They are
+mutually exclusive: a data-plane instance has exactly one policy source.)*
 
-- **비밀값 직접 기입 금지.** `api_key: sk-...` 형태는 config 파싱
-  단계에서 거부한다. `env:` / `file:` / `secret:`(K8s) ref만 허용.
-- Helm: `values.yaml`에는 비밀이 아닌 설정만. 인증은 전부
-  `existingSecret` 참조. Bedrock은 IRSA 경로를 1급 지원.
+Constraints:
+
+- **Inline secrets are forbidden.** A value like `api_key: sk-...` is
+  rejected at the config-parsing stage. Only `env:` / `file:` /
+  `secret:` (K8s) refs are allowed.
+- Helm: `values.yaml` carries only non-secret settings. Auth always goes
+  through an `existingSecret` reference. Bedrock supports the IRSA path as
+  first-class.
 
 ---
 
-## 8. 프로젝트 구조
+## 8. Project Structure
+
+*(Historical note: the layout below is the original single-binary sketch.
+The actual structure that shipped splits into two binaries under one Go
+module — `cmd/mayu` (data plane) and `cmd/inferplaned` (control plane) — per
+ADR-031, with `internal/policy` shared by both so a schema mismatch between
+them is a compile error. See [CLAUDE.md](../../CLAUDE.md)'s Project
+Structure section and [docs/architecture.md](../architecture.md) for the
+current, accurate layout; only `pkg/schema` and `pkg/ulid` promise import
+stability today — the `pkg/plugin` package sketched below did not ship as a
+separate public package.)*
 
 ```
-cmd/mayu/main.go           # 단일 바이너리 (serve / keys / audit 서브커맨드)
-api/                             # (예약) CRD 타입 — config 스키마 안정 후 v1alpha1
-pkg/                             # ★ 공개 API는 이 두 패키지뿐
-  schema/                        #   canonical 타입 (ChatRequest/Chunk/Usage...)
-  plugin/                        #   Filter 인터페이스
+cmd/mayu/main.go           # single binary (serve / keys / audit subcommands)
+api/                             # (reserved) CRD types — promoted to v1alpha1 once the config schema stabilizes
+pkg/                             # ★ only these two packages are public API
+  schema/                        #   canonical types (ChatRequest/Chunk/Usage...)
+  plugin/                        #   the Filter interface
 internal/
   server/
     anthropicapi/                # /v1/messages, count_tokens, /v1/models ingress
     openaiapi/                   # /v1/chat/completions, /v1/models ingress
-    adminapi/                    # 키 관리 API (관리 리스너)
-  pipeline/                      # 거버넌스 Filter 체인 실행기
-  router/                        # 모델 해석, 폴백, 서킷브레이커
-  auth/                          # virtual key, principal 해석
-  quota/                         # LimiterStore + inmemory/redis 구현
-  budget/                        # 단가 테이블, 비용 집계
-  pricing/                       # 번들 단가 데이터 + 오버라이드 병합
-  audit/                         # 레코드 빌더 + sinks (stdout/file/s3/webhook)
-  config/                        # 로딩, 검증, secret ref 해석
-providers/                       # ★ 코어 밖 — 프로바이더 PR은 여기만
+    adminapi/                    # key-management API (admin listener)
+  pipeline/                      # governance filter-chain executor
+  router/                        # model resolution, fallback, circuit breaker
+  auth/                          # virtual key, principal resolution
+  quota/                         # LimiterStore + in-memory/redis implementations
+  budget/                        # rate table, cost aggregation
+  pricing/                       # bundled rate data + override merging
+  audit/                         # record builder + sinks (stdout/file/s3/webhook)
+  config/                        # loading, validation, secret-ref resolution
+providers/                       # ★ outside core — provider PRs touch only here
   registry.go                    #   Register(name, factory)
   anthropic/
-  bedrock/                       #   invoke_model / converse / mantle 경로
+  bedrock/                       #   invoke_model / converse / mantle paths
   openaicompat/
-  testing/mockprovider/          #   결정적 mock (테스트 전용)
-plugins/                         # 내장 플러그인 (v0.2: piimask/, promptlog/)
+  testing/mockprovider/          #   a deterministic mock (test-only)
+plugins/                         # built-in plugins (v0.2: piimask/, promptlog/)
 charts/inferplane/               # Helm chart
-deploy/grafana/                  # 대시보드 JSON
+deploy/grafana/                  # dashboard JSON
 docs/
-  specs/                         # 본 문서
-  providers/                     # 프로바이더별 문서
-hack/                            # 개발 스크립트
+  specs/                         # this document
+  providers/                     # per-provider docs
+hack/                            # dev scripts
 ```
 
-원칙:
+Principles:
 
-- `pkg/schema`와 `pkg/plugin`만 import 안정성을 약속. 나머지는
-  전부 `internal/`. (전부 `pkg/`에 두면 외부 의존 → SemVer 부채.)
-- 프로바이더 PR이 건드리는 곳: `providers/<name>/` +
-  `providers/register.go` 1줄 + `docs/providers/<name>.md` +
-  config 예시. CI에서 "프로바이더 PR은 코어 diff 0" 검사.
+- Only `pkg/schema` and `pkg/plugin` promise import stability; everything
+  else is `internal/`. (Putting everything under `pkg/` accumulates external
+  dependents → SemVer debt.)
+- What a provider PR touches: `providers/<name>/` + one line in
+  `providers/register.go` + `docs/providers/<name>.md` + a config example.
+  CI checks that "a provider PR has zero core diff."
 
-테스트 전략 (3층):
+Test strategy (three layers):
 
-1. **골든 파일 변환 테스트**: 프로토콜 변환별 req/resp 페어를
-   `testdata/`에. 무손실 불변식(§2.2-1)을 골든 파일로 검증 —
-   특히 thinking 블록 순서, cache_control 위치.
-2. **httptest 가짜 upstream**: 프로바이더 통합 테스트.
-   실 API 키 없이 CI 통과 필수.
-3. **mockprovider E2E**: 라우팅·폴백·쿼터·감사로그 시나리오.
-
----
-
-## 9. 로드맵
-
-### v0.1 — "Claude Code가 5분 안에 붙는다"
-
-기본기 (없으면 신뢰 상실, 차별화 아님):
-
-- [ ] 이중 ingress (§3 범위: messages + count_tokens + chat/completions + models)
-- [ ] Provider 3종: anthropic / bedrock / openai_compatible
-- [ ] Virtual key 발급/폐기 + CLI (`inferplane keys create --team x`)
-      — admin token 인증 + 로컬 부트스트랩 (§5.5)
-- [ ] 팀 기반 토큰 quota (2단계 집행)
-- [ ] Provider failover (명시적 우선순위 + circuit breaker)
-- [ ] Prometheus 메트릭 (GenAI conventions 네이밍) + Grafana 대시보드 JSON
-- [ ] 단일 바이너리 + Helm chart + 자체 TLS 리스너 옵션
-- [ ] Prompt caching pass-through 보장 (골든 테스트 포함)
-
-차별화 기능 (여기에 승부):
-
-- [ ] 감사로그: append-only JSONL + 2단계 레코드(started/completed)
-      + 최소 해시 체인 + `audit verify` CLI + disk-backed WAL 버퍼
-      + sink 실패 정책 (기본 `buffer_then_block`, `trace_id` 예약)
-- [ ] RBAC: team × model allow-list
-- [ ] rate limit / quota / budget 3분리 + BudgetStore + (provider,
-      model) 단가 테이블 + TTL별 cache write 구분 + 정수 µUSD 집계
-      + `pricing.on_missing` (self-hosted 자체 단가 지원)
-
-거버넌스 파일 (첫 커밋부터): DCO, GOVERNANCE.md(벤더 중립),
-MAINTAINERS.md, SECURITY.md, CODE_OF_CONDUCT.md, 공개 로드맵.
-
-### v0.2 — 거버넌스 완성
-
-엔터프라이즈 채택 임팩트 기준 우선순위 (2026-06-12, ADR-003 —
-경쟁사 유료벽의 정중앙부터 친다):
-
-1. OIDC SSO **무료** (Dex/Keycloak/Okta) — Identity 계층 연결, groups → team 매핑
-2. 콘솔 거버넌스 뷰 — 팀별 쿼터/예산 게이지(기존 `quota_utilization`/`budget_spend`
-   메트릭 재활용) + 원클릭 audit verify 버튼 (변조감지 시연)
-3. 차지백 리포트 — `inferplane report` 서브커맨드: audit의 팀·모델·µUSD에서
-   월별 CSV 생성 (재무팀 락인)
-4. PII 마스킹 플러그인 (캐시 파괴 명시 opt-in + 비용 경고)
-5. 감사로그 외부 앵커링 (S3 Object Lock) — v0.1 해시 체인의 보증 상향
-
-후순위 (순서 무관):
-
-- OTel trace (GenAI conventions)
-- 키 발급 셀프서비스 페이지 (최소 UI — 로그인 → 내 키 발급; ADR-002 콘솔 위에 구축)
-- Redis/Valkey quota 스토어 HA 검증, Postgres key store (다중 레플리카 필수 경로)
-- 분산 rate limit (Redis/Valkey — 다중 레플리카 합산 집행)
-- 팀별 upstream 자격 오버라이드 (Role ARN — Bedrock noisy-neighbor 분산)
-- OpenSSF Best Practices 배지
-
-### Phase 3 — CNCF Sandbox 신청 (첫 릴리스 후 8~14개월)
-
-- CRD v1alpha1 (`ModelRoute`, `TeamQuota`, `Provider`) — config
-  스키마 안정 후 동일 스키마 승격
-- 보안 셀프 어세스먼트
-- OPA 연동 (Policy 계층 외부화 옵션)
-- Wasm 플러그인: **검토만** (wazero 기반, ABI 동결 비용 vs 수요 평가)
-- Sandbox 신청서: kgateway/Higress/llm-d와의 보완 관계 1문단,
-  cncf/sandbox#486 심사 코멘트 추적 반영
-- 제외 유지: MCP 게이트웨이 (Higress/Envoy AI GW가 강한 영역,
-  차별점 아님)
-
-커뮤니티 트랙 (공개 시점 이후):
-
-- CNCF Slack 채널, TAG Workloads Foundation 발표, KubeCon CFP
-- ADOPTERS.md — 외부 사용자 확보 전략 (조직 internal adopter 가정
-  없음), good-first-issue 운영, 타 조직 메인테이너 1명 목표
-
-### Sandbox 신청 시 핵심 메시지
-
-> "kgateway/Higress는 추론 트래픽을 라우팅하고, inferplane은 LLM
-> 소비를 거버닝한다. llm-d/vLLM은 inferplane의 백엔드다."
+1. **Golden-file conversion tests**: request/response pairs per protocol
+   conversion, under `testdata/`. The lossless invariant (§2.2-1) is
+   verified via golden files — especially thinking-block order and
+   `cache_control` position.
+2. **httptest fake upstreams**: provider integration tests. CI must pass
+   with no real API keys.
+3. **mockprovider E2E**: routing/fallback/quota/audit-log scenarios.
 
 ---
 
-## 10. 미해결 질문
+## 9. Roadmap
 
-| # | 질문 | 결정 시한 |
+*(Update: nearly everything below has shipped, and the project has since
+undergone the ADR-031 control-plane/data-plane split, which this original
+roadmap does not mention at all. Checkboxes are marked against what actually
+exists in the codebase today; see the linked ADRs for what shipped, when,
+and why.)*
+
+### v0.1 — "Claude Code attaches in 5 minutes"
+
+Table stakes (their absence loses trust; they are not the differentiator):
+
+- [x] Dual ingress (§3 scope: messages + count_tokens + chat/completions + models); a third, Bedrock InvokeModel passthrough, was added later (ADR-024)
+- [x] Three providers: anthropic / bedrock / openai_compatible
+- [x] Virtual key issuance/revocation + CLI (`inferplane keys create --team x`) — admin-token auth + local bootstrap (§5.5)
+- [x] Team-based token quota (two-phase enforcement)
+- [x] Provider failover (explicit priority + circuit breaker)
+- [x] Prometheus metrics (GenAI-convention naming) + Grafana dashboard JSON
+- [x] Single binary + Helm chart + optional self-TLS listener
+- [x] Prompt-cache pass-through guarantee (with golden tests)
+
+Differentiating features (the actual wedge):
+
+- [x] Audit log: append-only JSONL + two-phase records (started/completed) + a minimal hash chain + the `audit verify` CLI + a disk-backed WAL buffer + a sink-failure policy (default `buffer_then_block`, `trace_id` reserved)
+- [x] RBAC: team × model allow-list
+- [x] rate limit / quota / budget kept as three separate concepts + a `BudgetStore` + a `(provider, model)` rate table + TTL-tiered cache-write pricing + integer-µUSD aggregation + `pricing.on_missing` (supporting self-hosted custom rates)
+
+Governance files (from the first commit): DCO, a vendor-neutral
+GOVERNANCE.md, MAINTAINERS.md, SECURITY.md, CODE_OF_CONDUCT.md, a public
+roadmap.
+
+### v0.2 — completing governance
+
+Priority ordered by enterprise-adoption impact (2026-06-12, ADR-003 — strike
+dead center of the competitors' paywall first):
+
+1. [x] **Free OIDC SSO** (Dex/Keycloak/Okta) — connects the Identity layer, maps `groups` → team (ADR-004)
+2. [x] Console governance views — per-team quota/budget gauges (reusing the existing `quota_utilization`/`budget_spend` metrics) + a one-click audit-verify button (a tamper-evidence demo) (ADR-002/003)
+3. [x] Chargeback report — the `inferplane report` subcommand: generates a monthly CSV from the audit log's team/model/µUSD data (finance-team lock-in) (ADR-007)
+4. [x] PII masking plugin (explicit opt-in for cache destruction + a cost warning) (ADR-009)
+5. [x] External audit-log anchoring (S3 Object Lock) — raises the v0.1 hash chain's guarantee (ADR-012)
+
+Lower priority (order not significant):
+
+- [x] OTel tracing (GenAI conventions) (ADR-011)
+- [x] Key-issuance self-service page (minimal UI — log in → issue my own key; built on the ADR-002 console) (ADR-010)
+- [ ] Redis/Valkey quota-store HA validation, Postgres key store (the required path for multi-replica HA) — designed in ADR-013, not yet implemented
+- [ ] Distributed rate limiting (Redis/Valkey — summed enforcement across replicas) — not yet implemented; budget's equivalent problem was instead solved by the ADR-034 lease pattern, which does not require a shared rate-limit store
+- [ ] Per-team upstream credential override (a Role ARN — to spread Bedrock noisy-neighbor load)
+- [ ] OpenSSF Best Practices badge
+
+### The control-plane split (not in the original roadmap)
+
+Not anticipated by this document at all: the repository was restructured
+into two binaries — `cmd/mayu` (the node-local data plane; everything above
+that shipped) and `cmd/inferplaned` (a control plane distributing
+`GovernancePolicy` documents and issuing budget leases, never on the
+inference path) — because a central hop taxes every streamed chunk and
+because a central outage should not stop every developer at once (ADR-031).
+Follow-on work: policy units/subjects/cadence (ADR-032), three policy
+delivery channels — a local file channel (ADR-033), the control-plane push
+protocol (ADR-034), and a Kubernetes ConfigMap/CRD channel (ADR-035) — usage
+telemetry pushed up from the data plane (ADR-036), console SSO on
+`inferplaned` (ADR-037), and a Postgres-backed policy store for the control
+plane (ADR-038).
+
+### Phase 3 — applying to CNCF Sandbox (roughly 8–14 months after first release)
+
+- [ ] CRD v1alpha1 (`ModelRoute`, `TeamQuota`, `Provider`) — promoting the
+      same schema once the config schema stabilizes (a `GovernancePolicy`
+      CRD shipped earlier than this phase envisioned — ADR-035 — but the
+      broader CRD set here has not)
+- [ ] Security self-assessment
+- [ ] OPA integration (an optional externalized Policy layer)
+- [ ] Wasm plugins: **evaluation only** (wazero-based; weigh ABI-freeze cost against demand)
+- [ ] A Sandbox application naming the complementary relationship with
+      kgateway/Higress/llm-d, tracking review comments on cncf/sandbox#486
+- [ ] Deliberately out of scope: an MCP gateway (an area where Higress/Envoy
+      AI Gateway are already strong — not a differentiator here)
+
+Community track (after public release):
+
+- CNCF Slack channel, a TAG Workloads Foundation talk, a KubeCon CFP
+- ADOPTERS.md — a strategy for winning external users (assumes no captive
+  internal adopter), running good-first-issue, a goal of one maintainer from
+  another organization
+
+### The core Sandbox-application message
+
+> "kgateway/Higress route inference traffic; inferplane governs LLM
+> consumption. llm-d/vLLM are inferplane's backends."
+
+---
+
+## 10. Open Questions (as of the original 2026-06-10 draft)
+
+| # | Question | Decision deadline | Resolution |
+|---|---|---|---|
+| 1 | **count_tokens estimation strategy for non-Anthropic targets**: a conservative heuristic (chars/4, etc.) vs. bundling a local tokenizer (binary-size impact) — fallback accuracy for a provider without `TokenCounter` | v0.1 first spike | Resolved: a conservative chars/4-style estimator, no bundled tokenizer |
+| 2 | **Bedrock path verification spike**: Mantle region availability / beta parity / IRSA auth, and whether the Bedrock CountTokens API accepts InvokeModel-shaped input | during v0.1 | InvokeModel chosen as the default Claude path (§4.3); Mantle parity remains unverified |
+| 3 | **Bundled rate-table refresh cadence**: ship with releases vs. separate data releases (the missing-rate behavior itself was resolved via `pricing.on_missing`) | before v0.1 implementation | Resolved: bundled with releases, overridable via config |
+| 4 | **Streaming-abort cost-estimation accuracy**: the acceptable error band when a grace-period drain fails, and how an `estimated` record feeds budget | during v0.1 | Resolved: drain-then-estimate per §5.3; `estimated: true` is audited, not silently folded into a hard budget decision |
+| 5 | **Trademark/collision check for the project name "inferplane"**: required before a CNCF submission | before public release | Open |
+| 6 | **OpenAI-ingress → Claude-provider tool-calling mapping detail**: parallel tool calls, per-`tool_choice` conversion rules | during v0.1 | Resolved as part of the OpenAI ⇄ canonical conversion (`internal/openai`) |
+| 7 | **Company legal/policy sign-off**: when public release and external promotion become possible | external dependency | Open |
+
+(Two questions from the original numbering were already resolved by the time
+of this draft: the former #4, multi-replica chain handling → resolved as a
+per-instance independent chain; the former #9, audit buffer durability →
+resolved as a disk-backed WAL. See §5.4 and Appendix A.)
+
+---
+
+## Appendix A. Explicit "Regret-Prevention" Decision Log
+
+| Decision | Rejected alternative | Reason |
 |---|---|---|
-| 1 | **count_tokens 비-Anthropic 타깃 추정 전략**: 보수적 휴리스틱(문자수/4 등) vs 로컬 토크나이저 동봉(바이너리 크기 영향) — `TokenCounter` 미구현 provider의 폴백 정확도 | v0.1 첫 spike |
-| 2 | **Bedrock 경로 검증 spike**: Mantle 리전 가용성·beta 패리티·IRSA 인증 + Bedrock CountTokens API의 InvokeModel 형식 입력 지원 여부 | v0.1 중 spike |
-| 3 | **번들 단가 테이블 갱신 주기**: 릴리스 동봉 vs 별도 데이터 릴리스 (미등록 시 동작은 `pricing.on_missing`으로 결정 완료) | v0.1 구현 전 |
-| 4 | **스트리밍 중단 비용 추정 정확도**: grace-period 드레인 실패 시 추정 오차 허용 범위와 `estimated` 레코드의 budget 반영 방식 | v0.1 구현 중 |
-| 5 | **프로젝트명 "inferplane" 상표/중복 검사**: CNCF 제출 전 필수 (기존 프로젝트·상표 충돌 확인) | 공개 전 |
-| 6 | **OpenAI ingress → Claude provider의 tool calling 매핑 상세**: parallel tool calls, tool_choice 옵션별 변환 규칙 | v0.1 구현 중 |
-| 7 | **회사 법무/정책 확인**: public 공개 및 외부 홍보 가능 시점 | 외부 의존 |
-
-(구 #4 다중 레플리카 체인 → 인스턴스별 독립 체인으로 결정,
-구 #9 audit 버퍼 내구성 → disk-backed WAL로 결정 — §5.4·부록 A 참조.)
-
----
-
-## 부록 A. 명시적 "후회 방지" 결정 기록
-
-| 결정 | 기각한 대안 | 이유 |
-|---|---|---|
-| net/http + ServeMux | Fiber | fasthttp의 SSE/h2/미들웨어 비호환, CNCF 기여자 이질감 |
-| 타입드 Filter 체인 | raw http.Handler 미들웨어 | 플러그인마다 body 재파싱, 스트림 buffering 지옥 |
-| iter.Seq2 청크 iterator | io.Reader (raw SSE) | SSE 방언이 코어로 누출, 필터/집계 불가 |
-| Claude = InvokeModel | Converse 통일 | thinking 순서 파괴 사례, anthropic_beta 손실, Claude Code 관행과 불일치 |
-| 비-Claude = Converse | 모델별 InvokeModel 변환기 N개 | LiteLLM의 변환 지옥 재현 |
-| 정적 라우팅 + 명시 폴백 | 자동 디스커버리/스마트 라우팅 | 디버깅 불가능한 라우팅은 운영팀의 적 |
-| 쿼터 오버슈트 허용 | 분산 락 정확 집행 | 핫패스 동기 라운드트립이 레이턴시 파괴 |
-| 컴파일드인 플러그인 | v0.x에서 Wasm/gRPC ABI 공개 | 스키마 유동기에 ABI 동결 = 진화 차단 |
-| 비밀값 ref 강제 | config 평문 허용 | ConfigMap 평문 키 유출 사고 + 보안 감사 평판 |
-| pkg 2개만 공개 | 전부 pkg/ | 외부 의존 누적 → SemVer 부채 (k8s staging 반면교사) |
-| 파일 config 먼저 | CRD 먼저 | 스키마 유동기 API 마이그레이션 비용 |
-| Gateway API 독립+호환 | GatewayClass 구현체 | conformance 유지가 풀타임 업무, kgateway와 정면 경쟁 구도 |
-| UI 분리 (셀프서비스만 v0.2) | 코어에 풀 UI | 소수 인원 프로젝트의 프론트 유지보수 세금 |
-| 비용 = 정수 µUSD (int64) | float 누적 | 부동소수점 오차 누적 → 월말 정산 불일치 = budget 제품의 신뢰 붕괴 |
-| 단가 키 = (provider, model) | 모델명 단독 키 | 같은 모델도 provider/리전별 단가 상이 → Bedrock 과금 오차 |
-| audit 기본 buffer_then_block | 무조건 fail-open / fail-closed | 조용한 유실은 차별점 붕괴, hard fail은 S3 장애 = LLM 전면 장애 |
-| admin token + 로컬 부트스트랩 | admin API 무인증 / 첫 키 수동 DB 조작 | 키 발급 경로 무방비 또는 닭-달걀 미해결 |
-| 최소 해시 체인 v0.1 + "변조감지" 용어 | 문구 하향 / "변조방지" 유지 | 차별점 주장 vs v0.1 실체 모순 — 4개 모델 패널 합의 (CRITICAL) |
-| audit 버퍼 = disk-backed WAL | 인메모리 버퍼 | crash 시 유실 = fail_open과 동치, 6/6 패널 지적 |
-| 2단계 audit (started/completed) | 완료 후 단일 기록 | crash·거부 요청이 감사에서 증발 |
-| 정산 = 요청 단위 1회 + round-half-even | 청크 단위 절사 누적 | 저단가 모델 체계적 과소계상 |
-| pricing.on_missing 기본 allow + 마킹 | 무조건 차단 | self-hosted(vLLM) 자체 단가/chargeback이 1급 사용 사례 — block은 opt-in |
-| quota store 기본 fail_open (로컬 지속) | fail_closed 전면 차단 | 스토어 장애가 LLM 전면 장애로 번지는 것 방지 — fail_closed는 opt-in |
-| 폴백 = pre-TTFT 한정 + 드레인 정산 | mid-stream 투명 폴백 | HTTP/SSE 특성상 불가능 + 조기종료 정산 우회 방지 |
+| net/http + ServeMux | Fiber | fasthttp is incompatible with SSE/h2/the middleware ecosystem; unfamiliar to CNCF contributors |
+| A typed filter chain | raw http.Handler middleware | Every plugin re-parsing the body; streaming-buffer hell |
+| An `iter.Seq2` chunk iterator | io.Reader (raw SSE) | SSE dialect would leak into core; filtering/aggregation becomes impossible |
+| Claude = InvokeModel | Unify on Converse | A real case of broken thinking-block order; loss of `anthropic_beta`; mismatch with Claude Code's own practice |
+| Non-Claude = Converse | N per-model InvokeModel converters | Would reproduce LiteLLM's conversion hell |
+| Static routing + explicit fallback | Automatic discovery / smart routing | Undebuggable routing is the ops team's enemy |
+| Allow quota overshoot | Exact enforcement via a distributed lock | A synchronous hot-path round trip would destroy latency |
+| Compiled-in plugins | Exposing a Wasm/gRPC ABI in v0.x | Freezing an ABI while the schema is still moving blocks evolution |
+| Mandatory secret refs | Allow plaintext in config | Plaintext keys leaking via a ConfigMap is a real incident class, and a reputational security-audit risk |
+| Only two public `pkg/` packages | Put everything under `pkg/` | Accumulating external dependents → SemVer debt (k8s's `staging/` as the cautionary tale) |
+| File config first | CRD first | API migration cost is high while the schema is still moving |
+| Independent-and-compatible with Gateway API | Implement `GatewayClass` | Conformance upkeep is a full-time job, and a head-on competitive posture against kgateway |
+| Keep UI out of core (self-service only in v0.2) | A full UI in core | A frontend-maintenance tax on a small-maintainer project |
+| Cost = integer µUSD (int64) | Float accumulation | Accumulated floating-point drift causing month-end reconciliation mismatches — a trust failure for a budget product |
+| Rate key = (provider, model) | The model name alone as the key | The same model is priced differently by provider/region — a real source of Bedrock billing error |
+| Audit defaults to `buffer_then_block` | Unconditional fail-open / fail-closed | Silent loss undermines the differentiator; a hard fail turns an S3 outage into a full LLM outage |
+| Admin token + local bootstrap | An unauthenticated admin API / manual DB surgery for the first key | Either an unprotected key-issuance path, or an unsolved chicken-and-egg problem |
+| A minimal hash chain in v0.1 + the term "tamper-evident" | Softening the wording, or keeping "tamper-prevention" | Claiming prevention would contradict v0.1's actual guarantee — a 4-model panel consensus flagged this as CRITICAL |
+| Audit buffer = a disk-backed WAL | An in-memory buffer | Loss on crash is equivalent to fail-open — flagged by 6 of 6 review models |
+| Two-phase audit (started/completed) | A single record after completion | A crashed or denied request would otherwise vanish from the audit trail |
+| Settlement = once per request + round-half-even | Cumulative per-chunk truncation | Systematically under-bills low-price models |
+| `pricing.on_missing` defaults to `allow` + flagged | Unconditional block | A self-hosted model's (vLLM) own rate/chargeback is a first-class use case — `block` is opt-in |
+| Quota store defaults to `fail_open` (keep enforcing locally) | `fail_closed` across the board | Prevents a store outage from becoming a full LLM outage — `fail_closed` is opt-in |
+| Fallback limited to pre-TTFT + drain-then-settle | Transparent mid-stream fallover | Impossible given HTTP/SSE semantics, and closes off an early-termination settlement bypass |

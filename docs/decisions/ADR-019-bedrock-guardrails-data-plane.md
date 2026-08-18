@@ -2,8 +2,7 @@
 
 **Date:** 2026-07-08
 **Status:** Accepted (implemented).
-**Related:** §6.7/§8 D6 of `docs/superpowers/specs/2026-06-26-admin-console-litellm-ux-redesign-design.md`;
-ADR-016 (teams as keystore records — this ADR extends the `teams` table and
+**Related:** ADR-016 (teams as keystore records — this ADR extends the `teams` table and
 reuses its fresh-per-request lookup posture); ADR-009 (the PII-masking filter
 seam — the only other content-policy mechanism in the repo, and the thing
 this ADR is explicitly NOT reusing, since Guardrails are provider-side, not a
@@ -112,7 +111,7 @@ silently left inconsistent with the spec's eventual shape.
 ## Deferred
 
 - ~~`providerstore` (UI-registered providers) guardrail columns / provider-form
-  fields~~ — **implemented** (2026-07-11, `docs/superpowers/plans/2026-07-11-providerstore-guardrail.md`):
+  fields~~ — **implemented** (2026-07-11):
   `providerstore.ProviderRow` carries `GuardrailID`/`GuardrailVersion` (TEXT
   columns, ALTER-TABLE migration mirroring `auth_header`); `overlay.go`'s
   `providerConfigFromRow`/`rowFromProviderConfig` thread both fields (this also

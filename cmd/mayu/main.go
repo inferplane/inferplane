@@ -1,4 +1,4 @@
-// Command inferplane is the gateway binary. Subcommands: `serve` (run the
+// Command mayu is the data-plane binary. Subcommands: `serve` (run the
 // gateway), `keys` (local virtual-key bootstrap CRUD), `audit` (verify the
 // tamper-evident log chain), and `login`/`token`/`logout` (ADR-028 — OIDC
 // login for humans, trading an IdP session for an automatically-renewing
@@ -69,17 +69,17 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
-	fmt.Fprintln(os.Stderr, "  inferplane serve --config <path>")
-	fmt.Fprintln(os.Stderr, "  inferplane keys create --team <t> --models <csv> --store <path>")
-	fmt.Fprintln(os.Stderr, "  inferplane keys list --store <path>")
-	fmt.Fprintln(os.Stderr, "  inferplane keys revoke --id <key_id> --store <path>")
-	fmt.Fprintln(os.Stderr, "  inferplane audit verify --file <path>")
-	fmt.Fprintln(os.Stderr, "  inferplane bodies rewrap-key --store <path> --old-key-env <VAR>|--old-key-file <path> --new-key-env <VAR>|--new-key-file <path>")
-	fmt.Fprintln(os.Stderr, "  inferplane report --file <path> [--since <RFC3339>] [--until <RFC3339>] [--by team|team,model]")
-	fmt.Fprintln(os.Stderr, "  inferplane pricing check --config <path>")
-	fmt.Fprintln(os.Stderr, "  inferplane login --gateway <url> [--team <t>] [--issuer <url> --client-id <id>] [--id-token-command <cmd>]")
-	fmt.Fprintln(os.Stderr, "  inferplane token [--export] [--raw]")
-	fmt.Fprintln(os.Stderr, "  inferplane logout")
+	fmt.Fprintln(os.Stderr, "  mayu serve --config <path>")
+	fmt.Fprintln(os.Stderr, "  mayu keys create --team <t> --models <csv> --store <path>")
+	fmt.Fprintln(os.Stderr, "  mayu keys list --store <path>")
+	fmt.Fprintln(os.Stderr, "  mayu keys revoke --id <key_id> --store <path>")
+	fmt.Fprintln(os.Stderr, "  mayu audit verify --file <path>")
+	fmt.Fprintln(os.Stderr, "  mayu bodies rewrap-key --store <path> --old-key-env <VAR>|--old-key-file <path> --new-key-env <VAR>|--new-key-file <path>")
+	fmt.Fprintln(os.Stderr, "  mayu report --file <path> [--since <RFC3339>] [--until <RFC3339>] [--by team|team,model]")
+	fmt.Fprintln(os.Stderr, "  mayu pricing check --config <path>")
+	fmt.Fprintln(os.Stderr, "  mayu login --gateway <url> [--team <t>] [--issuer <url> --client-id <id>] [--id-token-command <cmd>]")
+	fmt.Fprintln(os.Stderr, "  mayu token [--export] [--raw]")
+	fmt.Fprintln(os.Stderr, "  mayu logout")
 }
 
 // run assembles the gateway (gateway.go) and serves until SIGINT/SIGTERM.

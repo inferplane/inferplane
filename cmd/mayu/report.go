@@ -173,7 +173,7 @@ func formatUSDFromMicros(micros int64) string {
 	return fmt.Sprintf("%s$%d.%06d", sign, mag/1_000_000, mag%1_000_000)
 }
 
-// reportCmd implements `inferplane report --file <path> [--since] [--until]
+// reportCmd implements `mayu report --file <path> [--since] [--until]
 // [--by team|team,model]`. Returns the process exit code.
 func reportCmd(args []string) int {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)

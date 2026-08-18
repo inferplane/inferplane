@@ -8,7 +8,9 @@ during implementation; chair verified every code-level claim before accepting.
 **Related:** ADR-031 (control/data plane split — this is the "telemetry
 aggregation" half), ADR-034 (sync heartbeat; this channel is deliberately
 separate), ADR-030 (cache-tier billing — tiers preserved end to end), ADR-008
-(export posture), spec: `docs/superpowers/specs/2026-08-04-control-plane-usage-telemetry-design.md`.
+(export posture), ADR-037 (console SSO — replaces this ADR's single shared
+`INFERPLANED_TOKEN` console login with per-human OIDC identity, on the same
+`/ui/` console this ADR shipped).
 
 ## Context
 
@@ -87,6 +89,8 @@ will — the container must stay stateless.
 - Accepted limitation (recorded, not fixed): no batch splitting for >4 MiB
   pathological-cardinality windows — dropped and counted.
 - Known deferral: per-rule spend in consumption reports (ADR-034 known
-  limits) and inferplaned HA are unchanged by this ADR.
+  limits) and inferplaned HA are unchanged by this ADR — see ADR-038
+  §Consequences for why "stateless container" here does not mean
+  horizontally scalable: the budget-lease ledger is still per-process.
 - `internal/telemetry` is now live code (was an ADR-031 placeholder): wire
   types, collector, aggregators shared by both binaries.

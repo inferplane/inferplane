@@ -10,16 +10,24 @@ spec:
   subject:
     team: demo
   rules:
-  - name: monthly-hard-cap
-    failurePolicy: FailClosed
+  # Explicit "no cap" (ADR-039) rather than simply omitting the rule: the
+  # declaration itself is auditable, and the rule keeps its place in the
+  # document instead of disappearing from the diff. Re-add limitMilliUSD
+  # (see git history for the $50 monthly-hard-cap shape) to reinstate a cap.
+  - name: budget
+    failurePolicy: FailOpen
     budget:
-      limitMilliUSD: 50000
-      hardCap: true
+      unlimited: true
+  # The previous fixed 2M tpm choked Claude Code's cache-creation bursts
+  # (150k+ tokens per request) with team_token_rate_limited 429s, because
+  # PreCheck's estimate counted the full cached prefix even on a cache hit —
+  # ADR-039 now trues TPM up against real usage post-response, but this demo
+  # still declares no cap explicitly rather than guessing a number without
+  # live traffic to validate it against.
   - name: throughput
     failurePolicy: FailOpen
     rate:
-      rpm: 300
-      tpm: 2000000
+      unlimited: true
   - name: models
     failurePolicy: FailOpen
     modelAccess:

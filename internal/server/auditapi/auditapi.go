@@ -2,7 +2,7 @@
 // (ADR-003 #2): GET /admin/audit/verify runs the tamper-evident hash-chain
 // check over each configured file sink and returns a secret-free per-sink
 // result. It is mounted behind AdminAuth (read-only, no record contents
-// returned). The chain is verified offline by `inferplane audit verify` too;
+// returned). The chain is verified offline by `mayu audit verify` too;
 // this is the one-click operator view.
 package auditapi
 
@@ -18,7 +18,7 @@ import (
 
 // maxVerifyBytes caps synchronous on-demand verification. A larger file is not
 // scanned in-request (AdminAuth is not a DoS control) — the operator uses the
-// offline `inferplane audit verify` CLI instead.
+// offline `mayu audit verify` CLI instead.
 const maxVerifyBytes = 16 << 20 // 16 MiB
 
 // SinkResult is the verification outcome for one file sink. No record contents,
@@ -86,7 +86,7 @@ func verifyFile(path string) SinkResult {
 		return res
 	}
 	if len(data) > maxVerifyBytes {
-		res.Reason = "too large for online verify; use `inferplane audit verify`"
+		res.Reason = "too large for online verify; use `mayu audit verify`"
 		return res
 	}
 	// Verify only the complete, newline-terminated prefix. Anything after the

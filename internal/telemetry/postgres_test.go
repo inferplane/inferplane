@@ -116,10 +116,11 @@ func (f *failingPG) Rows(context.Context, time.Time, time.Time, func(StoredRow) 
 func TestDurableUpsertNeverAcksWithoutPG(t *testing.T) {
 	ctx := context.Background()
 	mem := NewMemoryAggregator(24 * time.Hour)
+	w0 := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	mem.now = func() time.Time { return w0 } // pin retention's anchor to w0 (see aggregate_test.go)
 	pg := &failingPG{fail: true}
 	d := NewDurableAggregator(mem, pg)
 
-	w0 := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	b := &UsageBatch{Dataplane: "dp", WindowStart: w0, WindowEnd: w0.Add(time.Minute),
 		Entries: []UsageEntry{{Team: "t", Model: "m", SpentMicroUSD: 5}}}
 	if err := d.Upsert(ctx, b); err == nil {
@@ -136,10 +137,11 @@ func TestDurableUpsertNeverAcksWithoutPG(t *testing.T) {
 func TestDurableQueryFallsBackDegraded(t *testing.T) {
 	ctx := context.Background()
 	mem := NewMemoryAggregator(24 * time.Hour)
+	w0 := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	mem.now = func() time.Time { return w0 } // pin retention's anchor to w0 (see aggregate_test.go)
 	pg := &failingPG{}
 	d := NewDurableAggregator(mem, pg)
 
-	w0 := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	b := &UsageBatch{Dataplane: "dp", WindowStart: w0, WindowEnd: w0.Add(time.Minute),
 		Entries: []UsageEntry{{Team: "t", Model: "m", SpentMicroUSD: 7}}}
 	if err := d.Upsert(ctx, b); err != nil {

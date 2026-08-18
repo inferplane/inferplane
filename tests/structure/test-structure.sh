@@ -42,7 +42,7 @@ for agent in code-reviewer security-auditor; do
 done
 
 # --- Root CLAUDE.md required sections ---
-SECTIONS=("Overview" "Tech Stack" "Project Structure" "Conventions" "Key Commands" "Auto-Sync Rules")
+SECTIONS=("Overview" "Tech Stack" "Project Structure" "Conventions" "Key Commands" "Implementation References")
 for section in "${SECTIONS[@]}"; do
     grep -qF "## $section" CLAUDE.md && pass "CLAUDE.md: has $section" || fail "CLAUDE.md: has $section" "not found"
 done

@@ -107,11 +107,18 @@ type Rule struct {
 
 // Budget is the internal form of a budget rule. All amounts are integer
 // microUSD (converted ×1000 from the wire's milliUSD, defaults applied).
+// Unlimited mirrors the wire field: when true, LimitMicroUSD is always 0
+// (the pre-existing "no cap" sentinel every consumer already understands)
+// and every other field is zero-value — the flag exists purely so a policy
+// diff/audit can distinguish "explicitly declared unlimited" from
+// "no budget rule was ever written for this dimension".
 type Budget struct {
+	Unlimited          bool
 	LimitMicroUSD      int64
 	HardCap            bool
 	LeaseGrantMicroUSD int64
 	LeaseRenewInterval time.Duration
+	AdminContact       string
 }
 
 // ModelAccess is the internal form of a model allow-list rule. Entries match
@@ -120,10 +127,13 @@ type ModelAccess struct {
 	Allow []string
 }
 
-// Rate is the internal form of a throughput rule. 0 = unlimited dimension.
+// Rate is the internal form of a throughput rule. 0 = unlimited dimension
+// (both when Unlimited is explicitly set and, pre-existing, whenever a
+// dimension simply wasn't given a limit).
 type Rate struct {
-	RPM int64
-	TPM int64
+	Unlimited bool
+	RPM       int64
+	TPM       int64
 }
 
 // Routing is the internal form of a cache-affinity routing rule.
@@ -231,8 +241,15 @@ func FromV1Alpha1(doc *v1alpha1.GovernancePolicy) (*Policy, error) {
 			if wr.Rate.RPM < 0 || wr.Rate.TPM < 0 {
 				return nil, reject(wr.Name, "rate.rpm and rate.tpm must be >= 0")
 			}
+			if wr.Rate.Unlimited {
+				if wr.Rate.RPM != 0 || wr.Rate.TPM != 0 {
+					return nil, reject(wr.Name, "rate.unlimited must not be combined with rpm or tpm")
+				}
+				r.Rate = &Rate{Unlimited: true}
+				break
+			}
 			if wr.Rate.RPM == 0 && wr.Rate.TPM == 0 {
-				return nil, reject(wr.Name, "rate rule must limit at least one of rpm or tpm")
+				return nil, reject(wr.Name, "rate rule must limit at least one of rpm or tpm (or set unlimited: true to declare no cap deliberately)")
 			}
 			r.Rate = &Rate{RPM: wr.Rate.RPM, TPM: wr.Rate.TPM}
 		}
@@ -252,8 +269,14 @@ const maxWireMilliUSD = math.MaxInt64 / microPerMilli
 
 func budgetFromV1Alpha1(wr v1alpha1.Rule, reject func(rule, reason string) *UnsupportedError) (*Budget, error) {
 	wb := wr.Budget
+	if wb.Unlimited {
+		if wb.LimitMilliUSD != 0 || wb.HardCap || wb.Lease != (v1alpha1.LeaseSpec{}) || wb.AdminContact != "" {
+			return nil, reject(wr.Name, "budget.unlimited must not be combined with limitMilliUSD, hardCap, lease, or adminContact")
+		}
+		return &Budget{Unlimited: true}, nil
+	}
 	if wb.LimitMilliUSD <= 0 || wb.LimitMilliUSD > maxWireMilliUSD {
-		return nil, reject(wr.Name, fmt.Sprintf("budget.limitMilliUSD must be in (0, %d] (1000 = $1)", int64(maxWireMilliUSD)))
+		return nil, reject(wr.Name, fmt.Sprintf("budget.limitMilliUSD must be in (0, %d] (1000 = $1) (or set unlimited: true to declare no cap deliberately)", int64(maxWireMilliUSD)))
 	}
 	if wb.HardCap && wr.FailurePolicy != v1alpha1.FailClosed {
 		return nil, reject(wr.Name, "a hard-cap budget rule must be FailClosed: fail-open on lease expiry voids the cap")
@@ -288,5 +311,6 @@ func budgetFromV1Alpha1(wr v1alpha1.Rule, reject func(rule, reason string) *Unsu
 		HardCap:            wb.HardCap,
 		LeaseGrantMicroUSD: grantMilli * microPerMilli,
 		LeaseRenewInterval: iv,
+		AdminContact:       wb.AdminContact,
 	}, nil
 }

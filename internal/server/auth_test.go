@@ -78,7 +78,7 @@ func TestKeyAuthResolvesPrincipal(t *testing.T) {
 
 // TestKeyAuthDistinguishesExpiredKey (ADR-028): an expired key still 401s
 // (never reveal a key exists via status code) but carries a distinct message
-// so a human holding a CLI-minted key knows to re-run `inferplane login`
+// so a human holding a CLI-minted key knows to re-run `mayu login`
 // rather than suspect a typo.
 func TestKeyAuthDistinguishesExpiredKey(t *testing.T) {
 	store := stubStore{key: "ik_good", expiredKey: "ik_stale"}

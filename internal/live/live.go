@@ -362,7 +362,7 @@ func BuildState(cfg *config.Config) (*State, map[string]string, error) {
 
 // UnpricedTargets returns every (provider, upstream-model) pair a configured
 // model routes to that has no rate in the table, sorted for stable output.
-// Exported so `inferplane pricing check` reports exactly what boot validation
+// Exported so `mayu pricing check` reports exactly what boot validation
 // would reject — one predicate, no drift.
 func UnpricedTargets(cfg *config.Config, tbl *pricing.Table) []string {
 	seen := map[string]bool{}
@@ -398,7 +398,7 @@ func UnpricedTargets(cfg *config.Config, tbl *pricing.Table) []string {
 //     a legitimate posture: a self-hosted vLLM deployment may genuinely have no
 //     meaningful per-token price. Silence was the bug, not permissiveness.
 //
-// Either way `inferplane pricing check` reports the same list for CI, so a
+// Either way `mayu pricing check` reports the same list for CI, so a
 // newly-added model surfaces at deploy time instead of in next month's
 // chargeback.
 //
@@ -468,7 +468,7 @@ func pricingFromConfig(cfg *config.Config) *pricing.Table {
 }
 
 // PricingTableFor builds the rate table this config would run with, without
-// constructing providers. Exported so `inferplane pricing check` reports against
+// constructing providers. Exported so `mayu pricing check` reports against
 // exactly the table BuildState validates — including the derived cache rates and
 // the Bedrock region-prefix fallback — rather than reimplementing the assembly.
 func PricingTableFor(cfg *config.Config) *pricing.Table { return pricingFromConfig(cfg) }

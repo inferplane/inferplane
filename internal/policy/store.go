@@ -28,6 +28,9 @@ type TeamLimits struct {
 	// BudgetHard reports whether the binding budget rule is a hard cap:
 	// the caller maps it to on_exceeded=block (else warn).
 	BudgetHard bool
+	// AdminContact carries the binding budget rule's contact hint through
+	// verbatim (see api/v1alpha1.BudgetRule.AdminContact); empty if unset.
+	AdminContact string
 }
 
 // Store holds the data plane's currently-loaded local policy set behind an
@@ -315,11 +318,24 @@ func mergeTeamLimits(policies []*Policy) map[string]TeamLimits {
 			if r.Budget != nil {
 				contributed = true
 				switch {
+				case r.Budget.Unlimited:
+					// An explicit "no cap" declaration must never narrow OR
+					// widen a binding limit set by another rule — it only
+					// prevents this team from implicitly falling through to
+					// a config/DB default when it's the ONLY budget rule
+					// (handled below: LimitMicroUSD stays 0 in that case,
+					// same "no rule" sentinel every consumer already
+					// understands). Unlike the branches below, it never
+					// compares against or overwrites tl.BudgetMicrosPerMonth.
 				case tl.BudgetMicrosPerMonth == 0 || r.Budget.LimitMicroUSD < tl.BudgetMicrosPerMonth:
 					tl.BudgetMicrosPerMonth = r.Budget.LimitMicroUSD
 					tl.BudgetHard = r.Budget.HardCap
+					tl.AdminContact = r.Budget.AdminContact
 				case r.Budget.LimitMicroUSD == tl.BudgetMicrosPerMonth && r.Budget.HardCap:
 					tl.BudgetHard = true
+					if tl.AdminContact == "" {
+						tl.AdminContact = r.Budget.AdminContact
+					}
 				}
 			}
 		}

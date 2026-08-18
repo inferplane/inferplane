@@ -2,7 +2,12 @@ image:
   repository: inferplane
   tag: "0.2.0"
   pullPolicy: IfNotPresent
-replicaCount: 1   # single replica: SQLite key store + instance-local governance (multi-replica HA = Postgres, v0.2)
+replicaCount: 1   # MUST stay 1 — SQLite key store + in-memory limiter/budget are per-instance: N
+                  # replicas means N x the configured rate/quota limits, and any key issued via
+                  # the admin console/CLI (not this file's config.virtual_keys, which every
+                  # replica reproduces identically at boot) 401s on the replica that didn't
+                  # issue it. Multi-replica HA is design-only (ADR-013), not implemented — this
+                  # is not a knob to raise yet.
 service:
   dataPort: 8080
   adminPort: 9090

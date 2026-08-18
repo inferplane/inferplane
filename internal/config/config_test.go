@@ -329,7 +329,7 @@ func TestOIDCConfigRejectsDuplicateGroupKeys(t *testing.T) {
 	}
 }
 
-// ADR-028: `inferplane login` CLI. cli_login opts a data-plane endpoint into
+// ADR-028: `mayu login` CLI. cli_login opts a data-plane endpoint into
 // trading a verified ID token for a short-lived gateway virtual key. Its
 // client_id must differ from the console's — the console's public client is
 // secretless and a shared client_id would let any local process complete a

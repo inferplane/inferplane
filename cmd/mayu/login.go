@@ -1,9 +1,9 @@
-// Command inferplane login/token/logout implement `inferplane login` (ADR-028):
+// Command mayu login/token/logout implement `mayu login` (ADR-028):
 // a developer authenticates once against the company IdP and gets a
 // short-lived gateway virtual key minted and cached automatically, instead of
 // copying a long-lived ik_... key by hand. `token` is meant to run as Claude
 // Code's apiKeyHelper; `logout` revokes the cached key and clears the file.
-// CI/service-account provisioning is unaffected — `inferplane keys create`
+// CI/service-account provisioning is unaffected — `mayu keys create`
 // and POST /admin/keys keep working exactly as before.
 package main
 
@@ -301,9 +301,9 @@ func loginRun(args []string, stdout, stderr io.Writer) error {
 
 	fmt.Fprintf(stdout, "logged in as team %s; key %s expires %s\n\n", minted.Team, minted.KeyID, minted.ExpiresAt)
 	fmt.Fprintln(stdout, `Claude Code — add to ~/.claude/settings.json (use an ABSOLUTE path to the binary):`)
-	fmt.Fprintln(stdout, `  { "apiKeyHelper": "/usr/local/bin/inferplane token",`)
+	fmt.Fprintln(stdout, `  { "apiKeyHelper": "/usr/local/bin/mayu token",`)
 	fmt.Fprintf(stdout, "    \"env\": { \"ANTHROPIC_BASE_URL\": %q, \"CLAUDE_CODE_API_KEY_HELPER_TTL_MS\": \"3600000\" } }\n", gw)
-	fmt.Fprintln(stdout, `OpenCode / scripts:  eval "$(inferplane token --export)"`)
+	fmt.Fprintln(stdout, `OpenCode / scripts:  eval "$(mayu token --export)"`)
 	return nil
 }
 
@@ -466,7 +466,7 @@ func tokenRun(args []string, stdout, stderr io.Writer) error {
 
 	if needsRenewal(creds.KeyExpiresAt, time.Now().UTC()) {
 		if creds.IDTokenCommand == "" {
-			fmt.Fprintln(stderr, "inferplane: session expired; run: inferplane login")
+			fmt.Fprintln(stderr, "mayu: session expired; run: mayu login")
 			return errors.New("session expired")
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), httpClientTimeout)
@@ -535,7 +535,7 @@ func logoutRun(args []string, stdout, stderr io.Writer) error {
 	}
 	if revokeErr != nil {
 		fmt.Fprintf(stderr, "inferplane: warning: could not revoke %s (%v); it expires at %s\n", creds.KeyID, revokeErr, creds.KeyExpiresAt.Format(time.RFC3339))
-		fmt.Fprintf(stderr, "  an operator can revoke it directly: inferplane keys revoke --id %s --store <path>\n", creds.KeyID)
+		fmt.Fprintf(stderr, "  an operator can revoke it directly: mayu keys revoke --id %s --store <path>\n", creds.KeyID)
 		return revokeErr
 	}
 	fmt.Fprintln(stdout, "logged out")

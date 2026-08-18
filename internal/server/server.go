@@ -68,7 +68,7 @@ func WithUsageCollector(c *telemetry.Collector) DataMuxOption {
 // the opt-in body-capture recorder (D4, ADR-018); nil disables it.
 //
 // cliVerifier + cliMapping + cliConfig wire the opt-in CLI login endpoints
-// (ADR-028, `inferplane login`): GET /v1/auth/config (unauthenticated
+// (ADR-028, `mayu login`): GET /v1/auth/config (unauthenticated
 // discovery), POST /v1/auth/key (mints a short-lived virtual key from a
 // verified ID token — same OIDC-verify + groups→team middleware as the admin
 // plane, keyed to the CLI's own client_id so a console-audience token is
@@ -128,7 +128,7 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 		emit = aud.Append
 	}
 	if cliVerifier != nil {
-		// Self-revoke (ADR-028 `inferplane logout`) authenticates with the
+		// Self-revoke (ADR-028 `mayu logout`) authenticates with the
 		// virtual key itself — same posture as every other data-plane route,
 		// so it belongs on the INNER mux, behind KeyAuth.
 		mux.Handle("DELETE /v1/auth/key", authapi.RevokeHandler(store, emit))

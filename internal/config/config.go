@@ -121,7 +121,7 @@ type OIDCConfig struct {
 	CLILogin      *CLILoginConfig `json:"cli_login,omitempty"`
 }
 
-// CLILoginConfig opts in to `inferplane login` (ADR-028): a data-plane
+// CLILoginConfig opts in to `mayu login` (ADR-028): a data-plane
 // endpoint that trades a verified ID token for a short-lived gateway virtual
 // key, so a developer never copies a long-lived ik_... key by hand. ClientID
 // MUST differ from OIDCConfig.ClientID — the console SPA's public client is
@@ -171,8 +171,10 @@ type ServerConfig struct {
 	TLS         TLSConfig `json:"tls"`
 }
 
-// KeyStoreConfig selects the virtual-key backend. M3 ships "sqlite";
-// "postgres" is the HA path (v0.2).
+// KeyStoreConfig selects the virtual-key backend. Only "sqlite" exists — Type
+// is parsed but currently IGNORED (gateway.go always calls OpenSQLite); a
+// Postgres backend is design-only (ADR-013), not implemented. Setting
+// "postgres" today silently yields SQLite with no error.
 type KeyStoreConfig struct {
 	Type string `json:"type"`
 	Path string `json:"path"`

@@ -5,15 +5,72 @@
 [![Status](https://img.shields.io/badge/Status-alpha-orange.svg)](#status)
 
 **inferplane** — a control plane for LLM consumption governance.
-Policy, budget, and credentials are distributed from the center; **`mayu`**, the
+Policy and budget are distributed from the center; **`mayu`**, the
 node-local data plane, enforces them without sitting in anyone's critical path.
 
 `mayu` is a component name, not a project name — it holds the same position in
 inferplane that ztunnel/waypoint hold in Istio. It runs on localhost or on each
 Kubernetes node, speaks your coding agent's native protocol (Anthropic Messages,
 OpenAI Chat Completions, Bedrock InvokeModel), and enforces the rules the control
-plane (`inferplaned`) hands it: per-user attribution, budget cutoffs, model-tier
-routing, cache-affinity, and OTel instrumentation.
+plane (`inferplaned`) hands it: per-user attribution, budget cutoffs, and model
+routing.
+
+## Goals
+
+1. Give Claude Code, OpenCode, and Codex[^codex] users a single entry point
+   to Anthropic, Amazon Bedrock, and OpenAI-compatible (vLLM/Ollama/etc.)
+   providers.
+
+[^codex]: Codex support is a goal, not yet a verified capability — no
+   Codex-specific code, fixture, or test exists in the tree; see the
+   Purpose alignment table in `docs/roadmap.md`.
+2. Let each user choose which model they talk to.
+3. Support cost-driven model substitution — swap to a cheaper model (e.g.
+   Sonnet → GLM) when cost, not just capability, decides.
+4. Set spend limits per team and per individual, block on breach, and always
+   show how much has been spent.
+5. Keep the control plane off the inference path, so a control-plane outage
+   never stops request traffic (no SPOF).
+
+Goal 5 pulls against making goal 4 accurate under horizontal scale — see
+[Current limits](#current-limits) below and `docs/roadmap.md`.
+
+## Target users
+
+Enterprise platform/SRE teams governing coding-assistant LLM traffic across
+many developers and teams. The on-ramp stays bottom-up — a single team can
+run `mayu` standalone in minutes with no control plane (see [Quick
+start](#quick-start--mayu-standalone)) — but the intended growth path is a
+platform team adopting `inferplaned` to govern that traffic fleet-wide once
+more than one team is on it.
+
+## Non-goals
+
+- **Not an MCP gateway.** Routing MCP traffic is already well served by
+  Envoy AI Gateway / Higress; that's not where inferplane differentiates.
+- **Not competing on data-plane inference performance.** The core is
+  governance — attribution, budget, audit — not inference optimization.
+- **No embeddings, image, audio, or rerank support in v1.** Chat/completions
+  traffic only until that lane is proven (see `docs/roadmap.md`).
+
+## Current limits
+
+**Single-replica `mayu` only, today.** `internal/keystore` is SQLite-only and
+`internal/limiter`/`internal/budget` are in-memory — running more than one
+`mayu` replica lets each enforce its own copy of every counter, so rate,
+token quota, and (in standalone mode) budget ceilings can each reach up to
+N× the configured value, and key resolution splits across replicas
+(ADR-013, design-only, not yet implemented). Budget is only *partially*
+better: when a control plane is attached, ADR-034's lease pattern bounds
+team-level overspend across data planes (worst case is the sum of
+outstanding grants, not exact) — but per-key budgets and standalone `mayu`
+get no lease at all. Making rate/quota equally accurate, and closing budget's
+remaining gaps, is the tracked next step — see `docs/roadmap.md`.
+
+**Goals 3 and 4 are partially unenforced today.** Per-user *model choice*
+(goal 2) is enforced. Per-user *budget/rate* and policy-driven cost
+substitution (goal 3, routing rules) are not yet — see the purpose-alignment
+table in `docs/roadmap.md` for exact status and code references.
 
 ## Why not a central gateway?
 
@@ -30,16 +87,16 @@ because that is the wrong place to stand:
    keep working (fail-open within lease validity; only hard budget caps fail
    closed when their lease expires — per-rule `failurePolicy`, never global).
 
-The control plane never carries inference traffic. It distributes policy, issues
-budget leases, brokers short-lived credentials, and aggregates telemetry — all
-off the request path.
+The control plane never carries inference traffic. It distributes policy,
+issues budget leases, and aggregates usage telemetry — all off the request
+path. Short-lived credential brokering is on the roadmap (see [Status](#status)).
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     subgraph center["control plane (off the inference path)"]
-        CP["inferplaned<br/>policy & routing rules · budget leases<br/>short-lived credentials · telemetry aggregation"]
+        CP["inferplaned<br/>policy & routing rules · budget leases<br/>usage telemetry aggregation"]
     end
     subgraph node1["developer machine / K8s node"]
         A1[coding agent] -->|localhost| M1["mayu<br/>(data plane)"]
@@ -47,8 +104,10 @@ flowchart LR
     subgraph node2["developer machine / K8s node"]
         A2[coding agent] -->|localhost| M2["mayu<br/>(data plane)"]
     end
-    CP -.->|"rules · leases · creds"| M1
-    CP -.->|"rules · leases · creds"| M2
+    CP -.->|"rules · leases"| M1
+    CP -.->|"rules · leases"| M2
+    M1 -.->|usage| CP
+    M2 -.->|usage| CP
     M1 -->|direct| P["providers<br/>Anthropic · Amazon Bedrock · OpenAI-compatible<br/>(vLLM / Ollama / …)"]
     M2 -->|direct| P
 ```
@@ -58,7 +117,8 @@ flowchart LR
   inferplane's own HTTP channel — no Kubernetes required) and issues budget
   leases; each data plane heartbeat carries the policy pull, consumption
   report, lease renewal, and version-skew rejections in one round trip.
-  Credential brokering and telemetry aggregation are still to come.
+  Settled usage is pushed up separately into queryable windows. Short-lived
+  credential brokering is not yet implemented (see [Status](#status)).
 - **`mayu`** (data plane) — the full gateway: model→provider routing with
   fallback and circuit breakers, Anthropic⇄OpenAI schema translation,
   cache-safe verbatim forwarding, virtual keys with team RBAC, two-phase
@@ -78,15 +138,12 @@ reporting consumption and renewing asynchronously.
   team and per-key budgets/quotas, `block` or `warn`, hard caps that stay hard
   even when the control plane is down.
 - **Model-tier routing** — route by model to the right provider/region tier
-  (e.g. Opus for design work, Haiku for hooks and summaries, batch for
-  non-interactive), with priority fallback and per-provider circuit breakers.
-- **Cache-affinity** — pin a session/prefix to the same region/inference
-  profile so server-side prompt caches stay warm; the affinity-vs-fallback
-  conflict is an explicit per-rule choice, because failing over cold-starts
-  the server cache and can *raise* cost.
-- **Credential lifetime** — long-lived provider keys never rest on developer
-  machines; the control plane brokers short-lived credentials. (Standalone
-  mode uses local config refs — see below.)
+  (e.g. Opus for design work, Haiku for hooks and summaries), with priority
+  fallback and per-provider circuit breakers, plus model-level fallback for a
+  hardcoded client requesting a model the operator hasn't configured yet.
+- **Credential lifetime** — in standalone mode, provider keys are referenced
+  from local `env:`/`file:` secret refs, never inline in config. Short-lived
+  credential brokering from the control plane is planned, not yet built.
 - **Audit** — a tamper-evident hash-chain of every request, with chargeback
   reporting (`mayu report`).
 
@@ -94,9 +151,7 @@ reporting consumption and renewing asynchronously.
 
 `mayu` runs without a control plane: local config only, full gateway feature
 set. This is the supported first-touch path — you do not need to deploy
-`inferplaned` to try inferplane. (Standalone mode reads provider keys from
-local `env:`/`file:` refs; in the control-plane topology, credentials are
-brokered short-lived instead.)
+`inferplaned` to try inferplane.
 
 ```bash
 git clone https://github.com/inferplane/inferplane.git
@@ -142,45 +197,26 @@ config hot-reload, OIDC SSO, and `mayu login` short-lived keys, see
 | Component | State |
 |---|---|
 | `mayu` standalone (gateway, keys, RBAC, quotas/budgets, audit, console) | Working — the former inferplane gateway, moved intact |
-| `inferplaned` control plane | Policy distribution + budget-lease ledger working (in-memory); credential brokering TBD |
+| `inferplaned` control plane | Policy distribution + budget-lease ledger + usage telemetry working (ADR-034/036); credential brokering not yet implemented |
 | `api/v1alpha1` policy schema + delivery channels | Working — same document via local file, control-plane push, Helm ConfigMap; CRD manifest for kubectl-native validation ([`deploy/crd/`](deploy/crd/)) |
+| `inferplaned` policy store + console (ADR-038) | **Experimental, under review.** Opt-in Postgres store with a console Policies tab and `PUT`/`DELETE /v1alpha1/policies`; the write path has no per-rule-kind authorization tier or change audit yet — a superseding ADR is pending (see ADR-003 §Alternatives) |
 
-The project targets CNCF Sandbox. Design records live in
-[docs/decisions/](docs/decisions/) (start with
-[ADR-031](docs/decisions/ADR-031-monorepo-control-plane-data-plane-split.md),
-the control-plane/data-plane split); architecture detail in
-[docs/architecture.md](docs/architecture.md).
+The project targets CNCF Sandbox.
+
+## Documentation
+
+- [docs/architecture.md](docs/architecture.md) — component-level architecture
+- [docs/onboarding.md](docs/onboarding.md) — Docker/Kubernetes deployment, SSO, CLI login
+- [docs/reference/](docs/reference/INDEX.md) — per-layer implementation reference (API, data, security, infrastructure, agent/LLM)
+- [docs/runbooks/](docs/runbooks/) — operational procedures
+- [docs/decisions/](docs/decisions/) — design records (ADRs); start with
+  [ADR-031](docs/decisions/ADR-031-monorepo-control-plane-data-plane-split.md),
+  the control-plane/data-plane split
+- [docs/roadmap.md](docs/roadmap.md) — open gaps vs. central-proxy gateways (global rate limits, durable ledger, self-update, embeddings)
+- [CHANGELOG.md](CHANGELOG.md) · [GOVERNANCE.md](GOVERNANCE.md) · [MAINTAINERS.md](MAINTAINERS.md)
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Every commit must be DCO signed off
 (`git commit -s`). Security reports: [SECURITY.md](SECURITY.md).
 License: [Apache-2.0](LICENSE).
-
----
-
-<a id="korean"></a>
-
-## 한국어 요약
-
-**inferplane** — LLM 소비 거버넌스를 위한 control plane.
-정책·예산·크레덴셜은 중앙에서 배포되고, 노드 로컬 data plane인 **`mayu`**가
-누구의 critical path에도 끼어들지 않고 이를 집행합니다. `mayu`는 프로젝트명이
-아니라 컴포넌트 이름입니다 (Istio의 ztunnel/waypoint와 같은 위치).
-
-**왜 중앙 게이트웨이가 아닌가?**
-(1) 스트리밍 지연 — 중앙 홉은 모든 SSE 청크에 붙어 TTFT에 직접 영향을 주며,
-벤치마크로 즉시 증명됩니다. (2) 장애 격리 — 중앙 장애가 전체 개발자를 멈추지
-않습니다. 노드에 이미 내려온 규칙과 예산 리스는 컨트롤 플레인 장애 중에도
-동작합니다 (리스 유효기간 내 fail-open, hard budget cap만 리스 만료 시
-fail-closed — 실패 정책은 규칙 단위).
-
-**Quick start** — `mayu`는 컨트롤 플레인 없이 로컬 설정만으로 단독 실행되는
-완전한 게이트웨이입니다. 위 [Quick start](#quick-start--mayu-standalone) 4단계
-(빌드 → serve → 가상 키 발급 → `ANTHROPIC_BASE_URL` 지정)를 따르세요.
-
-**상태** — 알파. API·설정 스키마는 예고 없이 변경됩니다. `mayu` 단독 모드는
-기존 게이트웨이 전체 기능(가상 키, 팀 RBAC, 쿼터/예산, 변조 감지 감사, 콘솔)이
-동작하며, `inferplaned`는 아직 스캐폴드입니다. 상세 설계는
-[ADR-031](docs/decisions/ADR-031-monorepo-control-plane-data-plane-split.md)
-참고. 취약점 제보는 [SECURITY.md](SECURITY.md), 라이선스는 Apache-2.0.
