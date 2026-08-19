@@ -1,4 +1,6 @@
-# Project Context
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Overview
 
@@ -53,6 +55,44 @@ not just add replicas.
 - **Policy files:** `sigs.k8s.io/yaml` (pure Go) for CRD-style GovernancePolicy documents (`policies` config key, ADR-033)
 - **Observability:** `prometheus/client_golang`; OpenTelemetry GenAI semantic conventions for metric naming
 - **Packaging:** multi-stage Dockerfile → `distroless/static:nonroot`; Helm chart in `charts/inferplane`
+
+## Request Flow (the big picture across packages)
+
+One data-plane request touches, in order — this is the spine to keep in mind
+when a change spans packages:
+
+1. **KeyAuth** (`internal/server/auth.go`) — `x-api-key` OR `Authorization:
+   Bearer`, SHA-256 lookup in `keystore` → `Principal` on the request context.
+2. **Ingress parse** (`internal/server/{anthropicapi,openaiapi,bedrockapi}`) —
+   protocol-specific; the raw body is kept for verbatim forwarding.
+3. **Routing** (`internal/router`) — alias canonicalization → `ResolveModel`
+   (config `model_fallbacks` when the requested model has no route) →
+   `ResolveChain` (priority fallback + circuit breaker).
+4. **RBAC re-check** — `FilterModelAllowed`/`FilterRegions` MUST run after
+   routing in every ingress handler: a fallback target appended after the
+   original allow-list check is otherwise unchecked (see internal/CLAUDE.md
+   Invariants).
+5. **Governance PreCheck** (`internal/governance` + `internal/proxy.LeaseTable`)
+   — rate/quota/budget with estimated tokens, lease gate for hard caps;
+   deny BEFORE any counter is charged.
+6. **Filters** (`internal/filter` seam, `plugins/piimask`) — opt-in request
+   text transforms; a masker error fails closed.
+7. **Provider** (`providers/<name>`) — verbatim `RawBody` when protocols
+   match (the cache invariant); Bedrock routes Claude models via
+   InvokeModel and every other model family (GPT, GLM, …) via Converse
+   with schema translation.
+8. **Settle** (`internal/governance`) — actual usage debits quota (cache
+   tiers included), trues up TPM against the PreCheck estimate (ADR-039),
+   computes integer-µUSD cost.
+9. **Audit + analytics** (`internal/audit`, `internal/analytics`) —
+   hash-chained `request_started`/`request_completed` records; the
+   analytics index feeds `GET /admin/logs` and the console.
+
+Control-plane attach (optional): `internal/proxy.Syncer` heartbeats
+`/v1alpha1/sync` (policy + budget leases, ADR-034), `UsagePusher` pushes
+telemetry (ADR-036), and `CredentialFetcher` pulls short-lived Bedrock
+credentials (ADR-040) — three separate channels sharing only base URL and,
+except the broker, the bearer token.
 
 ## Project Structure
 
