@@ -149,7 +149,22 @@ Client -> KeyAuth(RBAC) -> Governor.PreCheck -> Router(fallback+breaker) -> Prov
   default** (no `otel` → no spans, deps inert, request path byte-identical). One
   span per request owned across the fallback loop (`defer End`, error-only-on-
   terminal); best-effort — never on the critical path. Pure-Go, exports to the
-  operator's own collector (no SaaS).
+  operator's own collector (no SaaS). Beyond the semconv token counts a span
+  carries the settled facts semconv has no name for — cache read / 5m / 1h write
+  tokens, integer-µUSD cost with its pricing-missing flag, and
+  `inferplane.response.partial` (+ status `Error`) for a stream truncated after
+  the 200 was already committed.
+
+- **OTel signal topography — traces are the only OTLP channel.** OTel standardizes
+  traces, metrics, and logs; inferplane emits exactly one of them over OTLP.
+  Metrics are Prometheus exposition on the admin plane (`:9090/metrics`) with
+  `internal/metrics` as the single registry — adding an OTLP metric exporter would
+  double-instrument the same counters and let the two drift. Logs are the
+  hash-chained audit JSONL (`internal/audit`) plus stdout, not OTLP: the audit
+  chain's value is that it is verifiable offline byte-for-byte, which a lossy
+  best-effort export cannot be. Control-plane usage windows are a third channel
+  (`POST /v1alpha1/usage`, ADR-036) on inferplane's own protocol. Collector
+  wiring: [docs/reference/infrastructure.md](reference/infrastructure.md).
 
 ## Key Design Decisions
 

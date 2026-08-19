@@ -17,7 +17,7 @@ client and upstream protocols without losing thinking blocks or `cache_control`.
 | Canonical schema | `pkg/schema/` | Anthropic-superset types, Extra preservation, SSE writer |
 | Filter chain | `internal/filter/` | `RequestFilter` interface + registry (the spec's filter chain ⑥, ADR-009) |
 | PII mask filter | `plugins/piimask/` | opt-in regex+Luhn PII masking → typed placeholders; one-way (no vault); masks messages text only |
-| Tracing | `internal/tracing/` | opt-in OTel: OTLP exporter + GenAI-semconv spans + W3C propagation + trace_id in audit; no-op default (ADR-011) |
+| Tracing | `internal/tracing/` | opt-in OTel: OTLP **trace** exporter + GenAI-semconv spans (+ `inferplane.*` cache-tier / cost / partial attributes) + W3C propagation + trace_id in audit; no-op default (ADR-011) |
 
 ### 3. Key Decisions
 - One package per provider; adding a provider is one package + a blank import (zero core diff, §8).
@@ -28,7 +28,26 @@ client and upstream protocols without losing thinking blocks or `cache_control`.
 - Bedrock upstream errors (e.g. a throttled model) are classified into their real HTTP status (`providers/bedrock/errors.go`) and returned as a `providers.UpstreamError`, so the client sees the actual 429/4xx/5xx instead of a generic 502 — applied on non-streaming calls and the pre-first-byte error of a stream open; a mid-stream error (after the first SSE event is already committed) cannot change the HTTP status and is left as-is (existing truncated-stream handling).
 - Newer Bedrock models (Opus 4.7/4.8, Fable 5, Sonnet 5, Mythos — an allow-list in `providers/bedrock/thinking.go`) reject the legacy extended-thinking shape Claude Code still sends (`thinking: {"type":"enabled","budget_tokens":N}`) with a 400; `toInvokeBody` rewrites it to `thinking: {"type":"adaptive"}` + top-level `output_config: {"effort":...}` for those models only, leaving every other model's `thinking` field untouched (ADR-022 — a compatibility shim for the CLI/model schema gap, not a permanent fix).
 
+- **A span reports the SETTLED numbers, not just the standard two.** GenAI semconv defines
+  only `gen_ai.usage.{input,output}_tokens`, which cannot express a prompt-cache request or
+  a cost, so the remaining facts go under an `inferplane.` prefix rather than an invented
+  `gen_ai.*` name the spec may later assign differently (that would leave a collector
+  double-reporting one number under two keys): `inferplane.usage.cache_read_input_tokens`,
+  `inferplane.usage.cache_write_{5m,1h}_input_tokens` (zero tiers omitted),
+  `inferplane.cost.amount_usd_micros` (integer µUSD — a span must not be the one place a
+  float rounding artifact appears) with `inferplane.cost.pricing_missing` always alongside
+  it, since a 0 with the flag means "no rate configured" and a 0 without it means "free".
+  `inferplane.response.partial` + span status `Error` mark a stream committed to the client
+  and then truncated upstream — the wire status was already 200, so without the attribute a
+  truncated stream is indistinguishable from a clean one. Span attributes never carry a
+  secret, a `key_id`, or raw client input; model/provider values are the config-bounded
+  post-routing ones.
+- Tracing (OTLP) is the ONLY signal mayu speaks over OTLP. Metrics are Prometheus
+  exposition on `:9090/metrics` and control-plane usage windows are `POST /v1alpha1/usage`
+  — see the Collector contract in [infrastructure.md](infrastructure.md).
+
 ### 4. Code Pointers
+- `internal/tracing/tracing.go` — `SetGenAIRequest`/`SetGenAIResponse` (semconv) + `SetUsageDetail`/`SetCost`/`SetPartial` (`inferplane.*`) + `SetStatus`
 - `providers/provider.go` — the interface every provider implements; `ProxyRequest.GuardrailID`/`GuardrailVersion` (D6) is the narrow provider-isolation exception carrying a per-team override
 - `providers/bedrock/invoke.go` — InvokeModel body build + SSE re-serialization
 - `providers/bedrock/client.go` — `Guardrail` type, `buildGuardrailConfig`/`buildGuardrailStreamConfig`

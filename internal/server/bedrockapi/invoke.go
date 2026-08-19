@@ -341,7 +341,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, resp.RawBody)
 	}
 	h.auditCompleted(recID, p, model, upstream, resp.StatusCode, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
-	recordSpanResponse(req, prov.Name(), upstream, usage, true)
+	recordSpanSettled(req, prov.Name(), upstream, usage, cost, true, false)
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, resp.StatusCode, time.Since(start).Seconds(), 0)
 	return false
 }
@@ -400,8 +400,12 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		// mid-flight skipped settle() entirely and everything already
 		// streamed was free, with no pricing_missing flag to show it.
 		partialCost := h.settle(p, providerName, model, upstream, lastUsage, table, estimateTokens(pr.RawBody))
+		// …and count them, on the same usage settle() just billed (see
+		// anthropicapi's twin: metering only the clean path left the token
+		// counters below the billed spend for every interrupted stream).
+		h.observeTokens(model, providerName, p.Team, lastUsage)
 		h.auditCompletedPartial(p, model, upstream, usage, partialCost, tracing.TraceID(req.Context()))
-		recordSpanResponse(req, prov.Name(), upstream, usage, true) // committed (partial)
+		recordSpanSettled(req, prov.Name(), upstream, usage, partialCost, false, true) // committed (partial)
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusOK, time.Since(start).Seconds(), ttft)
 		return false
 	}
@@ -446,7 +450,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, nil)
 	}
 	h.auditCompleted(recID, p, model, upstream, http.StatusOK, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
-	recordSpanResponse(req, prov.Name(), upstream, usage, true)
+	recordSpanSettled(req, prov.Name(), upstream, usage, cost, true, false)
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusOK, time.Since(start).Seconds(), ttft)
 	return false
 }
@@ -606,15 +610,52 @@ func recordSpanResponse(req *http.Request, system, upstream string, usage *audit
 	tracing.SetStatus(span, ok, "")
 }
 
+// partialSpanDesc is the fixed span-status description for an upstream-truncated
+// stream — fixed because the underlying AWS SDK error string can carry an
+// account id/ARN and a span export leaves the process.
+const partialSpanDesc = "upstream stream interrupted"
+
+// recordSpanSettled is recordSpanResponse for a response that reached
+// settlement: cache tiers + settled µUSD cost, and a truncated stream marked
+// both partial and errored (the wire status stayed 200, so the span is the only
+// place a trace consumer sees the truncation). Mirrors anthropicapi.
+func recordSpanSettled(req *http.Request, system, upstream string, usage *audit.UsageRef, cost *audit.CostRef, ok, partial bool) {
+	span := trace.SpanFromContext(req.Context())
+	var input, output, cacheRead, write5m, write1h int64
+	if usage != nil {
+		input, output = usage.InputTokens, usage.OutputTokens
+		cacheRead = usage.CacheReadInputTokens
+		write5m, write1h = usage.CacheCreation5mInputTokens, usage.CacheCreation1hInputTokens
+	}
+	tracing.SetGenAIResponse(span, system, upstream, input, output)
+	tracing.SetUsageDetail(span, cacheRead, write5m, write1h)
+	if cost != nil {
+		tracing.SetCost(span, cost.AmountUSDMicros, cost.PricingMissing)
+	}
+	if partial {
+		tracing.SetPartial(span)
+		tracing.SetStatus(span, false, partialSpanDesc)
+		return
+	}
+	tracing.SetStatus(span, ok, "")
+}
+
+// usageRef maps an observed schema.Usage to the audit UsageRef. Cache writes are
+// recorded both as the total and as the 1.25x/2x TTL split, from the same
+// CacheWriteTiers resolution settle() bills from — see anthropicapi's twin for
+// why reading the flat field alone recorded a zero.
 func usageRef(u *schema.Usage) *audit.UsageRef {
 	if u == nil {
 		return nil
 	}
+	write5m, write1h := u.CacheWriteTiers()
 	return &audit.UsageRef{
-		InputTokens:              deref(u.InputTokens),
-		OutputTokens:             deref(u.OutputTokens),
-		CacheReadInputTokens:     deref(u.CacheReadInputTokens),
-		CacheCreationInputTokens: deref(u.CacheCreationInputTokens),
+		InputTokens:                deref(u.InputTokens),
+		OutputTokens:               deref(u.OutputTokens),
+		CacheReadInputTokens:       deref(u.CacheReadInputTokens),
+		CacheCreationInputTokens:   write5m + write1h,
+		CacheCreation5mInputTokens: write5m,
+		CacheCreation1hInputTokens: write1h,
 	}
 }
 

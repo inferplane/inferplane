@@ -65,6 +65,17 @@ config:
   models:
     claude-sonnet-4-6:
       targets: [ { provider: anthropic-direct, model: claude-sonnet-4-6 } ]
+  # Opt-in OTLP TRACE export (ADR-011). Traces are the only signal mayu speaks
+  # OTLP: metrics stay Prometheus exposition on the admin port (scrape
+  # http://<svc>:9090/metrics — the Service's named `admin` port), and usage
+  # windows go to inferplaned over `POST /v1alpha1/usage`, not OTLP. Absent
+  # (the default) → no tracer, request path byte-identical.
+  # otel:
+  #   endpoint: otel-collector.observability.svc.cluster.local:4318
+  #   protocol: http        # or grpc (:4317)
+  #   insecure: true        # in-cluster plaintext to the collector
+  #   sample_ratio: 0.1     # omit for 1.0; explicit 0.0 samples none
+  #   service_name: inferplane
 resources: {}
 
 # GovernancePolicy documents (api/v1alpha1, ADR-033/035): filename → document
