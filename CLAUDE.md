@@ -58,7 +58,7 @@ not just add replicas.
 
 ```
 cmd/mayu/          - Data plane binary (node-local proxy): serve / keys / audit / report / bodies / pricing / login / token / logout
-cmd/inferplaned/   - Control plane binary: policy distribution + budget leases (ADR-034); credential broker designed (ADR-040), not implemented
+cmd/inferplaned/   - Control plane binary: policy distribution + budget leases (ADR-034); credential broker (ADR-040, opt-in via INFERPLANED_BROKER_ROLE_ARN)
 api/v1alpha1/      - Versioned config API wire types (CRD-style shape, gRPC/HTTP delivery)
 internal/          - Private packages (gateway internals)
   policy/          - Rule + lease schema shared by both binaries (the single truth, ADR-031); loader/store + sync wire types (ADR-033/034)
@@ -104,6 +104,7 @@ tests/             - Harness tests (hooks, secret patterns, structure) — bash,
 - **Two-phase governance:** pre-check BEFORE billing, settle AFTER. `on_exceeded` is `block` | `warn` (block wins on tie).
 - **Cost is integer microUSD** — never float. Round-half-even via `math/big`.
 - **`mayu` runs standalone by design** — a control plane is optional. `policies` (local file channel) and `control_plane` (ADR-034 heartbeat to `inferplaned`) are mutually exclusive config: one policy source at a time.
+- **`AGENTS.md` is generated** (marker in line 1, distilled from this file for the external AI review panel) — edit this file, then regenerate; a hand-edit without updating the `claude-md-sha` marker will be flagged stale and overwritten.
 
 ### Security mandates (non-negotiable)
 
@@ -130,6 +131,9 @@ go test ./internal/policy/... -run TestModelAllowed -v
 
 # Run the gateway (data plane :8080, admin plane + console :9090/admin/ui/)
 go run ./cmd/mayu serve --config examples/config.json
+
+# Run the control plane (health :7601; policy sync needs --policies; env-only config, no file)
+INFERPLANED_TOKEN=dev go run ./cmd/inferplaned --policies examples/policies/
 
 # Issue a virtual key / verify the audit chain
 go run ./cmd/mayu keys create --team demo --models '*' --store keys.db
