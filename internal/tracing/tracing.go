@@ -164,6 +164,45 @@ func SetGenAIResponse(span trace.Span, system, model string, inputTokens, output
 	}
 }
 
+// SetUsageDetail adds the cache-tier token counts that GenAI semconv does not
+// define. They go under an `inferplane.` prefix on purpose: inventing a
+// `gen_ai.*` name the spec may later assign differently would leave a collector
+// double-reporting the same number under two keys. A zero tier is omitted —
+// absence of a cache write is not a fact worth an attribute (SetGenAIResponse
+// applies the same rule to the token counts).
+func SetUsageDetail(span trace.Span, cacheReadTokens, cacheWrite5mTokens, cacheWrite1hTokens int64) {
+	if cacheReadTokens > 0 {
+		span.SetAttributes(attribute.Int64("inferplane.usage.cache_read_input_tokens", cacheReadTokens))
+	}
+	if cacheWrite5mTokens > 0 {
+		span.SetAttributes(attribute.Int64("inferplane.usage.cache_write_5m_input_tokens", cacheWrite5mTokens))
+	}
+	if cacheWrite1hTokens > 0 {
+		span.SetAttributes(attribute.Int64("inferplane.usage.cache_write_1h_input_tokens", cacheWrite1hTokens))
+	}
+}
+
+// SetCost adds the settled cost in integer µUSD (never a float — the audit and
+// budget paths are integer-only, and a span must not be the one place a
+// rounding artifact appears). pricingMissing is always set when a cost is
+// recorded: a 0 with the flag is "no rate configured", a 0 without it is
+// "genuinely free", and a consumer cannot tell them apart otherwise.
+func SetCost(span trace.Span, costUSDMicros int64, pricingMissing bool) {
+	span.SetAttributes(
+		attribute.Int64("inferplane.cost.amount_usd_micros", costUSDMicros),
+		attribute.Bool("inferplane.cost.pricing_missing", pricingMissing),
+	)
+}
+
+// SetPartial marks a response that was committed to the client and then
+// truncated by an upstream mid-stream failure. Without it a truncated stream is
+// indistinguishable from a clean one in traces, since the wire status was
+// already 200 before the break (the audit record distinguishes it via
+// Outcome.Partial).
+func SetPartial(span trace.Span) {
+	span.SetAttributes(attribute.Bool("inferplane.response.partial", true))
+}
+
 // SetStatus marks the span ok or error (set Error only on a terminal outcome).
 func SetStatus(span trace.Span, ok bool, desc string) {
 	if ok {

@@ -12,7 +12,7 @@ wires an optional IRSA ServiceAccount for Bedrock.
 | Docker ignore | `.dockerignore` | Excludes tests/docs/charts from the build context |
 | Helm chart | `charts/inferplane/` | Deployment, Service (data+admin), ServiceAccount, ConfigMap, optional policies ConfigMap (`/etc/inferplane/policies`, live-reloaded — ADR-035), optional Ingress, optional PVC (ADR-023), NOTES.txt |
 | GovernancePolicy CRD | `deploy/crd/` | kubectl-native schema validation for `inferplane.dev/v1alpha1` documents (structural schema + CEL, K8s 1.25+); controller-watch is a named follow-up (ADR-035) |
-| Chart values | `charts/inferplane/values.yaml` | Image, replicaCount (must stay 1, SQLite), existingSecret, IRSA annotation, ingress (data/admin hosts), persistence (opt-in PVC for the key store) |
+| Chart values | `charts/inferplane/values.yaml` | Image, replicaCount (must stay 1, SQLite), existingSecret, IRSA annotation, ingress (data/admin hosts), persistence (opt-in PVC for the key store), commented `config.otel` OTLP-trace example |
 | Grafana dashboard | `deploy/grafana/inferplane.json` | 9-panel Prometheus dashboard |
 
 ### 3. Key Decisions
@@ -26,6 +26,29 @@ wires an optional IRSA ServiceAccount for Bedrock.
   additionally requires `ingress.admin.enabled: true` to be routed — it carries
   key-issuance/governance actions, so exposing it is an explicit second opt-in, not
   a side effect of turning on the data-plane Ingress.
+- **OTel Collector contract — three channels, only one of them OTLP.** A collector
+  cannot pick up everything from one receiver, so the split is deliberate:
+  - **metrics** — a `prometheus` receiver scrapes `http://<svc>:9090/metrics` (the
+    Service's named `admin` port). The Prometheus registry (`internal/metrics`) is the
+    single source of truth for metrics; there is deliberately no OTLP metric exporter,
+    because a second SDK would double-instrument the same counters and let the two
+    drift. `gen_ai_*` names follow OTel GenAI semconv naming, but the transport is
+    Prometheus exposition, not OTLP.
+  - **traces** — an `otlp` receiver on `:4318` (http) or `:4317` (grpc), pushed by the
+    opt-in `config.otel` block (ADR-011). Spans carry GenAI request/response
+    attributes plus `inferplane.usage.cache_{read,write_5m,write_1h}_input_tokens`,
+    `inferplane.cost.amount_usd_micros` / `inferplane.cost.pricing_missing`, and
+    `inferplane.response.partial` on an interrupted stream (span status `Error` even
+    though the wire status was already 200).
+  - **usage windows** — `POST /v1alpha1/usage` to `inferplaned` (ADR-036). This is
+    inferplane's own protocol on its own channel; it is NOT OTLP and no collector
+    receiver consumes it.
+  Give the collector separate `metrics` and `traces` pipelines, each with a `batch`
+  processor. `/metrics` is unauthenticated by design and must stay cluster-internal
+  (it is on the admin port, which `ingress.admin.enabled` gates) — it is
+  cardinality-bounded and carries no secret or `key_id`, but it is still spend data.
+  The chart ships no ServiceMonitor/PodMonitor: those CRDs belong to the operator's
+  monitoring stack, and the named `admin` port is all a scrape config needs.
 - `NOTES.txt` is the "easy deploy" surface: it prints the actual reachable
   address (Ingress host or a ready-to-paste `kubectl port-forward`), the first-key
   command, and the Claude Code env vars — so `helm install` alone gets an operator
