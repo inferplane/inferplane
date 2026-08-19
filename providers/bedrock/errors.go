@@ -93,10 +93,13 @@ func upstreamError(err error) *providers.UpstreamError {
 			status = s
 		} else if credentialErrorCodes[code] {
 			status = 403
-		} else if errors.As(err, &re) {
+		} else if errors.As(err, &re) && validStatus(int32(re.HTTPStatusCode())) {
 			status = re.HTTPStatusCode()
 		}
-	case errors.As(err, &re):
+	case errors.As(err, &re) && validStatus(int32(re.HTTPStatusCode())):
+		// An out-of-range transport status (0 when smithy captured no real
+		// response) keeps the 502 default: teeing it verbatim panicked the
+		// ingress with "invalid WriteHeader code 0" (found live 2026-08-19).
 		status = re.HTTPStatusCode()
 	}
 

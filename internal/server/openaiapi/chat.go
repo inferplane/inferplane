@@ -308,11 +308,12 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 			if w.Header().Get("Content-Type") == "" {
 				w.Header().Set("Content-Type", "application/json")
 			}
-			w.WriteHeader(ue.StatusCode)
+			st := ue.HTTPStatus()
+			w.WriteHeader(st)
 			w.Write(ue.Body)
-			h.auditCompleted(ulid.New(), p, model, upstream, ue.StatusCode, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
+			h.auditCompleted(ulid.New(), p, model, upstream, st, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 			recordSpanResponse(req, prov.Name(), upstream, nil, false)
-			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, ue.StatusCode, time.Since(start).Seconds(), 0)
+			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, st, time.Since(start).Seconds(), 0)
 			return false
 		}
 		writeErr(w, 502, "api_error", "upstream error")
@@ -378,11 +379,12 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 			if w.Header().Get("Content-Type") == "" {
 				w.Header().Set("Content-Type", "application/json")
 			}
-			w.WriteHeader(ue.StatusCode)
+			st := ue.HTTPStatus()
+			w.WriteHeader(st)
 			w.Write(ue.Body)
-			h.auditCompleted(ulid.New(), p, model, upstream, ue.StatusCode, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
+			h.auditCompleted(ulid.New(), p, model, upstream, st, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 			recordSpanResponse(req, prov.Name(), upstream, nil, false)
-			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, ue.StatusCode, time.Since(start).Seconds(), 0)
+			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, st, time.Since(start).Seconds(), 0)
 			return false
 		}
 		writeErr(w, 502, "api_error", "upstream stream error")
