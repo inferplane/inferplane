@@ -19,3 +19,17 @@ type UpstreamError struct {
 func (e *UpstreamError) Error() string {
 	return fmt.Sprintf("upstream returned status %d", e.StatusCode)
 }
+
+// HTTPStatus returns StatusCode clamped to a writable HTTP status. Every
+// ingress that tees an UpstreamError verbatim MUST go through this: a
+// provider bug that leaves StatusCode 0 (or any out-of-range value) would
+// otherwise reach http.ResponseWriter.WriteHeader, which panics with
+// "invalid WriteHeader code 0" and resets the client's connection mid-request
+// (found live 2026-08-19 on the bedrock ConverseStream error path). An
+// unclassifiable status degrades to 502, the same fallback the providers use.
+func (e *UpstreamError) HTTPStatus() int {
+	if e.StatusCode < 100 || e.StatusCode > 599 {
+		return http.StatusBadGateway
+	}
+	return e.StatusCode
+}

@@ -276,10 +276,11 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 		}
 		var ue *providers.UpstreamError
 		if errors.As(err, &ue) {
-			writeErr(w, ue.StatusCode, "bedrock upstream error")
-			h.auditCompleted(ulid.New(), p, model, upstream, ue.StatusCode, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
+			st := ue.HTTPStatus()
+			writeErr(w, st, "bedrock upstream error")
+			h.auditCompleted(ulid.New(), p, model, upstream, st, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 			recordSpanResponse(req, prov.Name(), upstream, nil, false)
-			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, ue.StatusCode, time.Since(start).Seconds(), 0)
+			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, st, time.Since(start).Seconds(), 0)
 			return false
 		}
 		writeErr(w, http.StatusBadGateway, "bedrock upstream error")
@@ -353,10 +354,11 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		}
 		var ue *providers.UpstreamError
 		if errors.As(err, &ue) {
-			writeErr(w, ue.StatusCode, "bedrock upstream error")
-			h.auditCompleted(ulid.New(), p, model, upstream, ue.StatusCode, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
+			st := ue.HTTPStatus()
+			writeErr(w, st, "bedrock upstream error")
+			h.auditCompleted(ulid.New(), p, model, upstream, st, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 			recordSpanResponse(req, prov.Name(), upstream, nil, false)
-			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, ue.StatusCode, time.Since(start).Seconds(), 0)
+			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, st, time.Since(start).Seconds(), 0)
 			return false
 		}
 		writeErr(w, http.StatusBadGateway, "bedrock upstream error")

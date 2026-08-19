@@ -3,12 +3,14 @@ package bedrock
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	smithy "github.com/aws/smithy-go"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 // TestUpstreamErrorThrottling pins the bug fix: a Bedrock ThrottlingException
@@ -93,6 +95,38 @@ func TestUpstreamErrorWrappedMultipleTimes(t *testing.T) {
 	err := fmt.Errorf("bedrock: converse stream %q: %w", "claude-x", fmt.Errorf("bedrock: converse: %w", inner))
 	ue := upstreamError(err)
 	if ue.StatusCode != 503 {
+		t.Fatalf("status = %d, want 503", ue.StatusCode)
+	}
+}
+
+// TestUpstreamErrorInvalidTransportStatusFallsBackTo502 pins the live panic
+// found on 2026-08-19: a smithy ResponseError whose captured HTTP status is 0
+// (or any out-of-range value) flowed UNVALIDATED into UpstreamError.StatusCode,
+// and every ingress that tees that status verbatim (bedrockapi.writeErr,
+// openaiapi's WriteHeader) then panicked with "invalid WriteHeader code 0",
+// resetting the client's connection mid-request. An unclassifiable transport
+// status must degrade to 502, exactly like an unclassifiable error.
+func TestUpstreamErrorInvalidTransportStatusFallsBackTo502(t *testing.T) {
+	for _, status := range []int{0, -1, 99, 600} {
+		err := fmt.Errorf("bedrock: converse stream: %w", &smithyhttp.ResponseError{
+			Response: &smithyhttp.Response{Response: &http.Response{StatusCode: status}},
+			Err:      errors.New("stream open failed"),
+		})
+		ue := upstreamError(err)
+		if ue.StatusCode != 502 {
+			t.Fatalf("transport status %d: UpstreamError.StatusCode = %d, want 502", status, ue.StatusCode)
+		}
+	}
+}
+
+// TestUpstreamErrorValidTransportStatusStillWins: the fix must not break the
+// legitimate path — a real captured 503 still surfaces as 503.
+func TestUpstreamErrorValidTransportStatusStillWins(t *testing.T) {
+	err := fmt.Errorf("bedrock: invoke: %w", &smithyhttp.ResponseError{
+		Response: &smithyhttp.Response{Response: &http.Response{StatusCode: 503}},
+		Err:      errors.New("service unavailable"),
+	})
+	if ue := upstreamError(err); ue.StatusCode != 503 {
 		t.Fatalf("status = %d, want 503", ue.StatusCode)
 	}
 }
