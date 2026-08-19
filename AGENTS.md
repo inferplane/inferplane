@@ -1,4 +1,4 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 3a78f6741052 · generated-at: 2026-08-18 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 24fad1de8bc5 · generated-at: 2026-08-19 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
 > from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
 > per-AI copy).
@@ -22,9 +22,12 @@ Two binaries: **`cmd/mayu`** is the node-local data plane (the full gateway —
 routing, auth, governance, audit; runs standalone, no control plane required).
 **`cmd/inferplaned`** is the control plane (ADR-034) — distributes
 `GovernancePolicy` documents and issues budget leases over one heartbeat; it
-never carries inference traffic. Credential brokering from the control plane
-is designed (ADR-040, Proposed) but not implemented — don't assume it exists
-when reviewing a diff.
+never carries inference traffic. Credential brokering is live (ADR-040):
+with INFERPLANED_BROKER_ROLE_ARN set, inferplaned vends <=1h STS Bedrock
+sessions over POST /v1alpha1/credentials behind a DEDICATED broker token
+(never the heartbeat token, no OIDC branch); mayu opts in per provider with
+auth.mode "broker" — which must never fall back to the default credential
+chain.
 
 ## Build · test · lint
 
