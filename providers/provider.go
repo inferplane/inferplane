@@ -10,6 +10,7 @@ import (
 	"context"
 	"iter"
 	"net/http"
+	"time"
 
 	"github.com/inferplane/inferplane/pkg/schema"
 )
@@ -95,6 +96,14 @@ type HealthChecker interface {
 	HealthCheck(ctx context.Context) HealthResult
 }
 
+// CredentialSource supplies rotating upstream credentials to providers that
+// opt in (auth.mode "broker", ADR-040). Provider-neutral on purpose: no AWS
+// types cross the core/provider boundary, so a future GCP/Vertex provider can
+// use the same seam. Implemented by internal/proxy.CredentialFetcher.
+type CredentialSource interface {
+	Credentials(ctx context.Context) (id, secret, session string, expires time.Time, err error)
+}
+
 // Config is the per-provider settings slice the registry hands to a factory.
 // Kept minimal for M2; providers read what they need.
 type Config struct {
@@ -108,4 +117,11 @@ type Config struct {
 	// inject a client with an SSRF-guarded DialContext (ADR-014 D2). nil ⇒
 	// default client, so the data plane is unchanged. Ignored by bedrock (AWS SDK).
 	HTTPClient *http.Client
+	// Credentials, when non-nil, supplies rotating upstream credentials to a
+	// provider whose auth mode opts in (ADR-040 decision 3). The gateway
+	// injects it; nil ⇒ unchanged, and only providers/bedrock reads it today.
+	// A bedrock provider with auth_mode "broker" and a nil Credentials is a
+	// construction ERROR, never a fall-through to the node's local AWS
+	// identity (ADR-040 fail-closed invariant #1).
+	Credentials CredentialSource
 }

@@ -1,8 +1,12 @@
 package bedrock
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
@@ -121,5 +125,107 @@ func TestToolResultTextFlattensStringAndBlockArray(t *testing.T) {
 	}
 	if got := toolResultText(nil); got != "" {
 		t.Fatalf("nil: %q", got)
+	}
+}
+
+// fakeCredSource is a providers.CredentialSource that needs no network.
+type fakeCredSource struct {
+	id, secret, session string
+	expires             time.Time
+	err                 error
+	calls               int
+}
+
+func (f *fakeCredSource) Credentials(context.Context) (string, string, string, time.Time, error) {
+	f.calls++
+	if f.err != nil {
+		return "", "", "", time.Time{}, f.err
+	}
+	return f.id, f.secret, f.session, f.expires, nil
+}
+
+// TestBrokerModeRejectsNilCredentialSource is fail-closed invariant #1
+// (ADR-040): a nil source must be a construction ERROR — it must never
+// silently fall through to the default credential chain and sign with the
+// node's local, ungoverned IAM identity.
+func TestBrokerModeRejectsNilCredentialSource(t *testing.T) {
+	_, err := newAWSClient(context.Background(), "us-west-2", "broker", "", nil)
+	if err == nil {
+		t.Fatal("expected a construction error for broker mode with a nil credential source, got nil")
+	}
+	if !strings.Contains(err.Error(), "broker") {
+		t.Errorf("error %q does not mention broker", err)
+	}
+	if !strings.Contains(err.Error(), "default AWS credential chain") {
+		t.Errorf("error %q does not mention the default AWS credential chain", err)
+	}
+}
+
+// TestBrokerModeFailsConstructionOnFetchError is fail-closed invariant #4
+// (ADR-040): the first credential fetch is EAGER, so construction — not the
+// first user request — is what fails. Verified fact §0.3: LoadDefaultConfig
+// succeeds even when the injected provider always fails, so without the eager
+// Retrieve a bad broker token would "succeed" at boot and only fail on user
+// traffic. src.calls == 1 proves the eager fetch happened during construction.
+func TestBrokerModeFailsConstructionOnFetchError(t *testing.T) {
+	src := &fakeCredSource{err: errors.New("broker unreachable")}
+	_, err := newAWSClient(context.Background(), "us-west-2", "broker", "", src)
+	if err == nil {
+		t.Fatal("expected construction to fail when the credential source errors, got nil")
+	}
+	if !strings.Contains(err.Error(), "broker unreachable") {
+		t.Errorf("error %q does not contain the source's error", err)
+	}
+	if src.calls != 1 {
+		t.Errorf("expected exactly 1 eager fetch during construction, got %d", src.calls)
+	}
+}
+
+func TestBrokerModeCredentialsReachSigningConfig(t *testing.T) {
+	src := &fakeCredSource{id: "ASIAFAKE", secret: "shhh", session: "tok", expires: time.Now().Add(time.Hour)}
+	cache, err := brokerCredentials(context.Background(), src)
+	if err != nil {
+		t.Fatalf("brokerCredentials: %v", err)
+	}
+	creds, err := cache.Retrieve(context.Background())
+	if err != nil {
+		t.Fatalf("cache.Retrieve: %v", err)
+	}
+	if creds.AccessKeyID != "ASIAFAKE" {
+		t.Errorf("AccessKeyID = %q, want %q", creds.AccessKeyID, "ASIAFAKE")
+	}
+	if creds.SecretAccessKey != "shhh" {
+		t.Errorf("SecretAccessKey = %q, want %q", creds.SecretAccessKey, "shhh")
+	}
+	if creds.SessionToken != "tok" {
+		t.Errorf("SessionToken = %q, want %q", creds.SessionToken, "tok")
+	}
+	if !creds.CanExpire {
+		t.Error("CanExpire = false, want true")
+	}
+	if creds.Expires.IsZero() {
+		t.Error("Expires is zero, want the source's expiry")
+	}
+	// Verified fact §0.1: LoadDefaultConfig succeeds offline with an injected
+	// credentials provider, so full client construction must work with no AWS
+	// credentials and no network.
+	ac, err := newAWSClient(context.Background(), "us-west-2", "broker", "", &fakeCredSource{id: "ASIAFAKE", secret: "shhh", session: "tok", expires: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatalf("newAWSClient in broker mode with a working source: %v", err)
+	}
+	if ac == nil {
+		t.Fatal("newAWSClient returned a nil client")
+	}
+}
+
+func TestNonBrokerModesIgnoreCredentialSource(t *testing.T) {
+	// Tolerance: non-broker modes go through LoadDefaultConfig, which can
+	// legitimately fail in some environments — the assertion is only that
+	// they must never take the broker branch (no broker nil-source error).
+	for _, mode := range []string{"", "default", "irsa", "pod_identity", "static"} {
+		_, err := newAWSClient(context.Background(), "us-west-2", mode, "", nil)
+		if err != nil && strings.Contains(err.Error(), "broker") {
+			t.Errorf("mode %q: got broker error %q; non-broker modes must never take the broker branch", mode, err)
+		}
 	}
 }

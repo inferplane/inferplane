@@ -8,8 +8,9 @@
 // files/directories (watched — edits propagate on the next heartbeat), data
 // planes POST /v1alpha1/sync (policy pull + consumption report + lease
 // renewal + rejection report in one round trip), and GET /v1alpha1/dataplanes
-// shows the connected version distribution. Credential brokering and
-// telemetry aggregation are still to come (ADR-031).
+// shows the connected version distribution. Credential brokering (ADR-040)
+// is live behind INFERPLANED_BROKER_ROLE_ARN: when set, POST
+// /v1alpha1/credentials vends short-lived Bedrock credentials to data planes.
 package main
 
 import (
@@ -25,6 +26,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"github.com/inferplane/inferplane/internal/adminauth"
 	"github.com/inferplane/inferplane/internal/controlplane"
@@ -98,6 +102,32 @@ func validateBoot(listen, token string, oidc *oidcEnv) error {
 	return nil
 }
 
+// validateBrokerEnv checks the ADR-040 credential-broker env pair.
+// INFERPLANED_BROKER_ROLE_ARN unset ⇒ the endpoint is never mounted and this
+// is a no-op, so every existing deployment is unaffected.
+func validateBrokerEnv(token, brokerToken, roleARN string) error {
+	if roleARN == "" {
+		return nil
+	}
+	if brokerToken == "" {
+		return fmt.Errorf("INFERPLANED_BROKER_TOKEN must be set when INFERPLANED_BROKER_ROLE_ARN is set: POST /v1alpha1/credentials mints portable AWS credentials and must never be reachable unauthenticated")
+	}
+	// Same rejection validateBoot applies to INFERPLANED_TOKEN: a JWT-shaped
+	// secret is a console identity by shape, and the broker endpoint rejects
+	// those outright, so it could never authenticate.
+	if adminauth.IsOIDCBearerShape(brokerToken) {
+		return fmt.Errorf("INFERPLANED_BROKER_TOKEN must not be JWT-shaped (three dot-separated base64url segments) — the credential endpoint rejects console-shaped bearers and it could never authenticate")
+	}
+	// The ADR-028 distinct-client-id rule (ADR-040 decision 1): the heartbeat
+	// token is deployed to every node and grants policy reads. If the same
+	// value also minted AWS credentials, compromising any one node's env would
+	// yield Bedrock access WITHOUT mayu — the bypass this feature closes.
+	if brokerToken == token {
+		return fmt.Errorf("INFERPLANED_BROKER_TOKEN must differ from INFERPLANED_TOKEN — a heartbeat-token compromise must not also yield credential brokering")
+	}
+	return nil
+}
+
 // buildMux assembles every HTTP route inferplaned serves. Split out from
 // run() so Task 8's end-to-end test can drive the real mux (real
 // adminauth.Verifier, real controlplane wiring) through httptest without
@@ -149,6 +179,29 @@ func buildMux(policies, token string, oidc *oidcEnv) (mux *http.ServeMux, cp *co
 		log.Print("inferplaned: usage telemetry persisting to postgres (INFERPLANED_USAGE_DSN set)")
 	}
 	controlplane.NewUsageServer(token, agg, opts...).Mount(mux)
+	// Credential brokering (ADR-040) is opt-in on INFERPLANED_BROKER_ROLE_ARN
+	// — the INFERPLANED_POLICY_DSN pattern. Unset ⇒ POST /v1alpha1/credentials
+	// is not registered at all (404) and behavior is byte-identical. It is a
+	// MACHINE channel with its own token: the console's OIDC identities are
+	// rejected, never verified.
+	brokerRoleARN := os.Getenv("INFERPLANED_BROKER_ROLE_ARN")
+	brokerToken := os.Getenv("INFERPLANED_BROKER_TOKEN")
+	if err := validateBrokerEnv(token, brokerToken, brokerRoleARN); err != nil {
+		return nil, nil, closePG, err
+	}
+	if brokerRoleARN == "" && brokerToken != "" {
+		log.Print("inferplaned: INFERPLANED_BROKER_TOKEN is set but INFERPLANED_BROKER_ROLE_ARN is not — credential brokering is OFF and POST /v1alpha1/credentials is not mounted")
+	}
+	if brokerRoleARN != "" {
+		awsCfg, err := awsconfig.LoadDefaultConfig(context.Background())
+		if err != nil {
+			return nil, nil, closePG, fmt.Errorf("credential broker: aws config: %w", err)
+		}
+		bs := controlplane.NewBrokerServer(brokerToken, brokerRoleARN, sts.NewFromConfig(awsCfg))
+		bs.OnError = func(err error) { log.Print("inferplaned: ", err) }
+		bs.Mount(mux)
+		log.Print("inferplaned: credential brokering enabled (INFERPLANED_BROKER_ROLE_ARN set) — POST /v1alpha1/credentials vends short-lived Bedrock credentials to data planes")
+	}
 	// The read-only usage console (data-free static shell; data via the
 	// bearer-gated usage API — see internal/controlplane/ui). connectSrc is
 	// nil (byte-identical CSP) unless INFERPLANED_OIDC_LOGIN_ORIGINS is set.

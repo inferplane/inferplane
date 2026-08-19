@@ -17,6 +17,7 @@ import (
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
 	"github.com/inferplane/inferplane/pkg/schema"
+	"github.com/inferplane/inferplane/providers"
 )
 
 // invoker is the narrow interface the provider logic depends on for the raw
@@ -143,13 +144,26 @@ type awsClient struct {
 
 // newAWSClient loads the default AWS config (env, shared config, IMDS, ...)
 // scoped to region, optionally pinned to a named profile when authMode is
-// "profile", and returns an adapter over the bedrockruntime client. It is
-// exercised only at the manual gate (it needs real credentials); unit tests use
-// the fakes instead.
-func newAWSClient(ctx context.Context, region, authMode, profile string) (*awsClient, error) {
+// "profile", and returns an adapter over the bedrockruntime client. authMode
+// "broker" instead signs with credentials injected from the control plane
+// (ADR-040) and NEVER consults the default chain. Non-broker modes are
+// exercised only at the manual gate (they need real credentials); unit tests
+// use the fakes, or a fake CredentialSource for broker mode.
+func newAWSClient(ctx context.Context, region, authMode, profile string, credSrc providers.CredentialSource) (*awsClient, error) {
 	opts := []func(*config.LoadOptions) error{config.WithRegion(region)}
-	if authMode == "profile" && profile != "" {
-		opts = append(opts, config.WithSharedConfigProfile(profile))
+	switch authMode {
+	case "broker":
+		cache, err := brokerCredentials(ctx, credSrc)
+		if err != nil {
+			return nil, err
+		}
+		// An explicit credentials provider wins outright: LoadDefaultConfig
+		// resolves credentials from it and never walks env/shared-config/IMDS.
+		opts = append(opts, config.WithCredentialsProvider(cache))
+	case "profile":
+		if profile != "" {
+			opts = append(opts, config.WithSharedConfigProfile(profile))
+		}
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
@@ -157,6 +171,57 @@ func newAWSClient(ctx context.Context, region, authMode, profile string) (*awsCl
 	}
 	return &awsClient{rt: bedrockruntime.NewFromConfig(cfg)}, nil
 }
+
+// brokerCredentials wraps an injected providers.CredentialSource into the SDK
+// credentials provider used for auth.mode "broker" (ADR-040 decision 3), and
+// enforces the two fail-closed invariants the ADR states as testable
+// requirements:
+//
+//  1. A nil source is a CONSTRUCTION ERROR. Falling through to
+//     LoadDefaultConfig's chain would sign with the node's own ungoverned IAM
+//     identity — the exact bypass brokering exists to close — while the
+//     operator believed credentials were centralized.
+//  4. The first fetch is EAGER. aws.CredentialsCache alone defers the first
+//     Retrieve to request-signing time, so a BuildState with a bad broker
+//     token or an unreachable broker would "succeed" at boot/SIGHUP and fail
+//     only on user traffic. (Verified: LoadDefaultConfig succeeds even when
+//     the injected provider always fails.) Failing construction is the right
+//     posture — on reload that is ADR-006 rollback: the old topology stays
+//     live and the bad config is rejected loudly instead of half-applied.
+func brokerCredentials(ctx context.Context, credSrc providers.CredentialSource) (*aws.CredentialsCache, error) {
+	if credSrc == nil {
+		return nil, fmt.Errorf("bedrock: auth mode \"broker\" requires an injected credential source; refusing to fall back to the default AWS credential chain")
+	}
+	cache := aws.NewCredentialsCache(aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
+		id, secret, session, expires, err := credSrc.Credentials(ctx)
+		if err != nil {
+			// The source's error is wrapped as-is; the fetcher already
+			// guarantees it carries no credential material and no response
+			// body (ADR-040 decision 1 — secret hygiene).
+			return aws.Credentials{}, fmt.Errorf("bedrock: broker credentials: %w", err)
+		}
+		return aws.Credentials{
+			AccessKeyID:     id,
+			SecretAccessKey: secret,
+			SessionToken:    session,
+			Source:          brokerCredentialSource,
+			// CanExpire + Expires is what lets aws.CredentialsCache refresh
+			// shortly BEFORE expiry with no client re-construction, so the
+			// once-per-BuildState bedrockruntime client is untouched by
+			// rotation.
+			CanExpire: true,
+			Expires:   expires,
+		}, nil
+	}))
+	if _, err := cache.Retrieve(ctx); err != nil {
+		return nil, fmt.Errorf("bedrock: initial broker credential fetch: %w", err)
+	}
+	return cache, nil
+}
+
+// brokerCredentialSource labels brokered credentials in aws.Credentials.Source
+// (diagnostics only — it is never logged by this package).
+const brokerCredentialSource = "inferplane-broker"
 
 func (c *awsClient) Invoke(ctx context.Context, modelID string, body []byte, g Guardrail) ([]byte, error) {
 	in := &bedrockruntime.InvokeModelInput{

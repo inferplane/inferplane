@@ -24,7 +24,7 @@ func factory(cfg providers.Config) (providers.Provider, error) {
 	region := cfg.Settings["region"]
 	authMode := cfg.Settings["auth_mode"]
 	profile := cfg.Settings["profile"]
-	ac, err := newAWSClient(context.Background(), region, authMode, profile)
+	ac, err := newAWSClient(context.Background(), region, authMode, profile, cfg.Credentials)
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: aws config: %w", err)
 	}

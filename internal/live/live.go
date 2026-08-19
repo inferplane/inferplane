@@ -283,12 +283,32 @@ func identityOf(name string, pc config.ProviderConfig) string {
 	return pc.Type + "\x00" + pc.BaseURL
 }
 
-// BuildState constructs an immutable topology generation from config: it builds
-// every provider, builds the pricing table, validates that every model target
-// references a provider that exists, and computes provider identities. It
-// returns an error WITHOUT a State if anything fails, so callers (initial boot
-// and reload alike) can fail safely. It touches no stateful component.
+// Deps carries the optional cross-cutting dependencies provider construction
+// needs but the topology builder must not OWN — the gateway builds them and
+// live only passes them through, so this package's narrow import graph (config,
+// providers, pricing) is unchanged. The zero value injects nothing and is
+// byte-identical to the pre-ADR-040 behavior.
+type Deps struct {
+	// Credentials supplies rotating upstream credentials to a provider whose
+	// auth mode opts in (bedrock's auth.mode "broker", ADR-040). nil is not a
+	// silent downgrade: a broker-mode provider fails construction, which is
+	// exactly the fail-closed posture the ADR requires (invariant #1).
+	Credentials providers.CredentialSource
+}
+
+// BuildState constructs an immutable topology generation from config with no
+// injected dependencies. It is BuildStateWith(cfg, Deps{}) — kept as the
+// signature every existing caller and test uses.
 func BuildState(cfg *config.Config) (*State, map[string]string, error) {
+	return BuildStateWith(cfg, Deps{})
+}
+
+// BuildStateWith constructs an immutable topology generation from config: it
+// builds every provider, builds the pricing table, validates that every model
+// target references a provider that exists, and computes provider identities.
+// It returns an error WITHOUT a State if anything fails, so callers (initial
+// boot and reload alike) can fail safely. It touches no stateful component.
+func BuildStateWith(cfg *config.Config, deps Deps) (*State, map[string]string, error) {
 	// model_api[providerName] = {upstreamModelID: api} so the bedrock factory
 	// can override invoke/converse routing per upstream model.
 	modelAPIByProvider := map[string]map[string]string{}
@@ -323,7 +343,10 @@ func BuildState(cfg *config.Config) (*State, map[string]string, error) {
 				settings["model_api"] = string(b)
 			}
 		}
-		p, err := providers.New(providers.Config{Type: pc.Type, BaseURL: pc.BaseURL, APIKey: pc.APIKey, Settings: settings})
+		// Credentials rides along for every provider, the same way HTTPClient
+		// would: the field is documented as "nil ⇒ unchanged", and only
+		// providers/bedrock reads it today (and only in auth.mode "broker").
+		p, err := providers.New(providers.Config{Type: pc.Type, BaseURL: pc.BaseURL, APIKey: pc.APIKey, Settings: settings, Credentials: deps.Credentials})
 		if err != nil {
 			return nil, nil, fmt.Errorf("live: provider %q: %w", name, err)
 		}

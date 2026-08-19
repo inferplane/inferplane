@@ -58,7 +58,7 @@ not just add replicas.
 
 ```
 cmd/mayu/          - Data plane binary (node-local proxy): serve / keys / audit / report / bodies / pricing / login / token / logout
-cmd/inferplaned/   - Control plane binary: policy distribution + budget leases (ADR-034); credential broker TBD
+cmd/inferplaned/   - Control plane binary: policy distribution + budget leases (ADR-034); credential broker designed (ADR-040), not implemented
 api/v1alpha1/      - Versioned config API wire types (CRD-style shape, gRPC/HTTP delivery)
 internal/          - Private packages (gateway internals)
   policy/          - Rule + lease schema shared by both binaries (the single truth, ADR-031); loader/store + sync wire types (ADR-033/034)

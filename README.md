@@ -20,10 +20,6 @@ routing.
 1. Give Claude Code, OpenCode, and Codex[^codex] users a single entry point
    to Anthropic, Amazon Bedrock, and OpenAI-compatible (vLLM/Ollama/etc.)
    providers.
-
-[^codex]: Codex support is a goal, not yet a verified capability — no
-   Codex-specific code, fixture, or test exists in the tree; see the
-   Purpose alignment table in `docs/roadmap.md`.
 2. Let each user choose which model they talk to.
 3. Support cost-driven model substitution — swap to a cheaper model (e.g.
    Sonnet → GLM) when cost, not just capability, decides.
@@ -34,6 +30,10 @@ routing.
 
 Goal 5 pulls against making goal 4 accurate under horizontal scale — see
 [Current limits](#current-limits) below and `docs/roadmap.md`.
+
+[^codex]: Codex support is a goal, not yet a verified capability — no
+    Codex-specific code, fixture, or test exists in the tree; see the
+    Purpose alignment table in `docs/roadmap.md`.
 
 ## Target users
 
@@ -89,7 +89,7 @@ because that is the wrong place to stand:
 
 The control plane never carries inference traffic. It distributes policy,
 issues budget leases, and aggregates usage telemetry — all off the request
-path. Short-lived credential brokering is on the roadmap (see [Status](#status)).
+path. It also brokers short-lived Bedrock credentials on request (ADR-040, opt-in — see [Status](#status)).
 
 ## Architecture
 
@@ -117,8 +117,9 @@ flowchart LR
   inferplane's own HTTP channel — no Kubernetes required) and issues budget
   leases; each data plane heartbeat carries the policy pull, consumption
   report, lease renewal, and version-skew rejections in one round trip.
-  Settled usage is pushed up separately into queryable windows. Short-lived
-  credential brokering is not yet implemented (see [Status](#status)).
+  Settled usage is pushed up separately into queryable windows. With a broker
+  role configured it also vends ≤1h STS Bedrock credentials so nodes need no
+  Bedrock IAM of their own (ADR-040, opt-in — see [Status](#status)).
 - **`mayu`** (data plane) — the full gateway: model→provider routing with
   fallback and circuit breakers, Anthropic⇄OpenAI schema translation,
   cache-safe verbatim forwarding, virtual keys with team RBAC, two-phase
@@ -142,8 +143,12 @@ reporting consumption and renewing asynchronously.
   fallback and per-provider circuit breakers, plus model-level fallback for a
   hardcoded client requesting a model the operator hasn't configured yet.
 - **Credential lifetime** — in standalone mode, provider keys are referenced
-  from local `env:`/`file:` secret refs, never inline in config. Short-lived
-  credential brokering from the control plane is planned, not yet built.
+  from local `env:`/`file:` secret refs, never inline in config. With a control
+  plane, a bedrock provider can instead set `auth.mode: "broker"` and sign with
+  ≤1h STS sessions vended per request (ADR-040), so the node holds no Bedrock
+  credentials at all. Fail-closed: a broker that cannot be reached fails the
+  boot or reload rather than quietly falling back to the node's own AWS
+  identity.
 - **Audit** — a tamper-evident hash-chain of every request, with chargeback
   reporting (`mayu report`).
 
@@ -197,7 +202,8 @@ config hot-reload, OIDC SSO, and `mayu login` short-lived keys, see
 | Component | State |
 |---|---|
 | `mayu` standalone (gateway, keys, RBAC, quotas/budgets, audit, console) | Working — the former inferplane gateway, moved intact |
-| `inferplaned` control plane | Policy distribution + budget-lease ledger + usage telemetry working (ADR-034/036); credential brokering not yet implemented |
+| `inferplaned` control plane | Policy distribution + budget-lease ledger + usage telemetry + credential brokering working (ADR-034/036/040) |
+| Short-lived credential brokering (ADR-040) | Working, opt-in. `inferplaned` vends ≤1h STS Bedrock sessions over `POST /v1alpha1/credentials` when `INFERPLANED_BROKER_ROLE_ARN` is set; `mayu`'s bedrock provider opts in with `auth.mode: "broker"`. Bedrock only (1P Anthropic has no temporary-token mechanism). **v1 limitations, by design:** one shared broker token with caller-chosen dataplane ids, so CloudTrail attribution is the id *claimed*, not the machine; brokered sessions carry unrestricted `bedrock:Invoke*` (per-team session policies are the v2). Bypass prevention is real only where mayu's environment is not readable by its users — on a developer-owned machine it removes the standing node IAM grant but not the bypass |
 | `api/v1alpha1` policy schema + delivery channels | Working — same document via local file, control-plane push, Helm ConfigMap; CRD manifest for kubectl-native validation ([`deploy/crd/`](deploy/crd/)) |
 | `inferplaned` policy store + console (ADR-038) | **Experimental, under review.** Opt-in Postgres store with a console Policies tab and `PUT`/`DELETE /v1alpha1/policies`; the write path has no per-rule-kind authorization tier or change audit yet — a superseding ADR is pending (see ADR-003 §Alternatives) |
 

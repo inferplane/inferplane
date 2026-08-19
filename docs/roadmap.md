@@ -223,6 +223,12 @@ details are swappable.
 
 ## Explicitly deferred (so the list stays five)
 
+- **Credential brokering (ADR-040, Accepted — design gate passed)** — inferplaned vends
+  short-lived STS Bedrock credentials so `bedrock:Invoke*` leaves
+  developer/node IAM entirely (bypassing mayu then yields no credentials).
+  Accepted 2026-08-18 after a 3-round 3-AI design gate (10 findings fixed).
+  Requires a dedicated `INFERPLANED_BROKER_TOKEN` (never the heartbeat
+  token) and auth-mode validation in mayu's config loader.
 - Control-plane HA / Postgres ledger backend (interface prepared in ②) — see
   §"HA (multiple control-plane replicas) is explicitly out of scope here"
   above.

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -390,6 +391,16 @@ type ControlPlaneConfig struct {
 	TokenRef *SecretRef `json:"token_ref,omitempty"`
 	// Token is the resolved secret; never serialized.
 	Token string `json:"-"`
+	// BrokerTokenRef resolves the DEDICATED credential-broker bearer token
+	// (ADR-040 decision 1) — referenced, never inline (§7). Distinct from
+	// TokenRef on purpose: the heartbeat token sits in env on every node and
+	// grants policy reads, so if the SAME token also minted portable AWS
+	// credentials, compromising any one node's env would yield Bedrock access
+	// WITHOUT mayu — re-opening the exact bypass brokering exists to close.
+	// Required by a bedrock provider with auth.mode "broker".
+	BrokerTokenRef *SecretRef `json:"broker_token_ref,omitempty"`
+	// BrokerToken is the resolved broker secret; never serialized.
+	BrokerToken string `json:"-"`
 	// Dataplane is this proxy's stable instance id; defaults to the
 	// hostname plus a boot-time suffix when empty.
 	Dataplane string `json:"dataplane,omitempty"`
@@ -608,6 +619,22 @@ func validateControlPlane(cfg *Config) error {
 			return fmt.Errorf("config: control_plane.token_ref: %w", err)
 		}
 		cp.Token = tok
+	}
+	if cp.BrokerTokenRef != nil {
+		tok, err := ResolveSecretRef(cp.BrokerTokenRef)
+		if err != nil {
+			return fmt.Errorf("config: control_plane.broker_token_ref: %w", err)
+		}
+		cp.BrokerToken = tok
+	}
+	// The ADR-028 distinct-client-id rule, applied to tokens (ADR-040
+	// decision 1): a heartbeat-token compromise must stop at policy reads and
+	// must NOT also yield credential brokering. Checked unconditionally
+	// whenever both refs resolve, not only in broker mode — an operator who
+	// points both refs at one secret has already lost the separation the
+	// design depends on.
+	if cp.BrokerToken != "" && cp.BrokerToken == cp.Token {
+		return fmt.Errorf("config: control_plane.broker_token_ref must not resolve to the same value as control_plane.token_ref — a heartbeat-token compromise must not also yield credential brokering (ADR-040)")
 	}
 	return nil
 }
@@ -986,9 +1013,62 @@ func ResolveProviders(cfg *Config) error {
 			// validate but silently do nothing.
 			return fmt.Errorf("config: provider %q guardrail_id is only meaningful for type \"bedrock\", got type %q", name, p.Type)
 		}
+		// auth.mode is only wired into provider Settings for type "bedrock"
+		// (internal/live/live.go), so validate the closed set there. Before
+		// ADR-040 EVERY unrecognized value fell silently through to the AWS
+		// default credential chain, so a typo ("brokre") would have deployed
+		// the bypassable local-IAM posture brokering exists to remove —
+		// fail-closed invariant #2. Breaking change for typo'd configs only.
+		if p.Type == "bedrock" {
+			switch p.Auth.Mode {
+			case "", "default", "irsa", "pod_identity", "profile", "static", "broker":
+			default:
+				return fmt.Errorf("config: provider %q auth.mode %q is not a known mode (allowed: default, irsa, pod_identity, profile, static, broker; empty means default)", name, p.Auth.Mode)
+			}
+			if p.Auth.Mode == "broker" {
+				if err := validateBrokerMode(name, cfg.ControlPlane); err != nil {
+					return err
+				}
+			}
+		}
 		cfg.Providers[name] = p
 	}
 	return nil
+}
+
+// validateBrokerMode checks the preconditions a bedrock provider's
+// auth.mode "broker" has on the control-plane block (ADR-040 fail-closed
+// invariants #1/#3). It runs from ResolveProviders, i.e. AFTER
+// validateControlPlane has resolved the two tokens, so it can rely on
+// cp.BrokerToken being populated.
+func validateBrokerMode(provider string, cp *ControlPlaneConfig) error {
+	if cp == nil {
+		return fmt.Errorf("config: provider %q uses auth.mode \"broker\" but no control_plane block is configured — the credential fetcher would have no URL or token, and broker mode must never fall back to the node's own AWS identity (ADR-040)", provider)
+	}
+	if cp.BrokerTokenRef == nil {
+		return fmt.Errorf("config: provider %q uses auth.mode \"broker\" but control_plane.broker_token_ref is not set — credential brokering requires a bearer token distinct from control_plane.token_ref (ADR-040)", provider)
+	}
+	u, err := url.Parse(cp.URL)
+	if err != nil {
+		// validateControlPlane already rejected an unparseable URL; belt and
+		// braces so this never reads a zero-value scheme as loopback.
+		return fmt.Errorf("config: provider %q uses auth.mode \"broker\" but control_plane.url is not a valid URL", provider)
+	}
+	if u.Scheme != "https" && !isLoopbackHost(u.Hostname()) {
+		return fmt.Errorf("config: provider %q uses auth.mode \"broker\" but control_plane.url %q is plain http to a non-loopback host — an STS triplet on the wire in plaintext is a credential grant to the network path; use https (or a loopback control plane) (ADR-040)", provider, cp.URL)
+	}
+	return nil
+}
+
+// isLoopbackHost reports whether host is a loopback literal. "localhost" is
+// trusted without resolution, matching cmd/inferplaned's isLoopback and
+// cmd/mayu/gateway.go's isLoopbackHost.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // validateOIDC enforces the ADR-004 load-time rules when the oidc block is
