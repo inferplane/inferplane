@@ -26,6 +26,7 @@ type Metrics struct {
 	piiMask         *prometheus.CounterVec   // inferplane_pii_mask_redactions_total
 	anchorFail      prometheus.Counter       // inferplane_audit_anchor_failures_total
 	usageDropped    prometheus.Counter       // inferplane_usage_windows_dropped_total
+	substitution    *prometheus.CounterVec   // inferplane_model_substitution_total (ADR-041)
 }
 
 func New() *Metrics {
@@ -83,10 +84,18 @@ func New() *Metrics {
 		anchorFail: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "inferplane_audit_anchor_failures_total", Help: "Audit chain-head anchor (WORM) write failures (ADR-012).",
 		}),
+		substitution: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "inferplane_model_substitution_total",
+			Help: "ADR-041 budget-tier model substitutions applied at ingress.",
+			// Cardinality guard, same rule as fallbackTotal above: every
+			// label here comes from a GovernancePolicy document's own
+			// config-declared values (team, from/to model names) — never
+			// raw, unvalidated client input.
+		}, []string{"team", "from_model", "to_model"}),
 	}
 	reg.MustRegister(m.tokenUsage, m.requestDuration, m.ttft, m.requestsTotal,
 		m.fallbackTotal, m.circuitState, m.quotaUtil, m.budgetUtil, m.budgetSpend, m.pricingMiss,
-		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped)
+		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.substitution)
 	// Prometheus only emits a labeled metric family once it has at least one
 	// observed child series. Pre-initialize the token-usage family to zero so
 	// gen_ai_client_token_usage_total is always present in exposition (stable
@@ -155,6 +164,12 @@ func (m *Metrics) ObserveFallback(model, from, to, reason string) {
 		return
 	}
 	m.fallbackTotal.WithLabelValues(model, from, to, reason).Inc()
+}
+func (m *Metrics) ObserveModelSubstitution(team, from, to string) {
+	if m == nil {
+		return
+	}
+	m.substitution.WithLabelValues(team, from, to).Inc()
 }
 func (m *Metrics) SetCircuitState(provider string, state int) {
 	if m == nil {

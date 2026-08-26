@@ -29,6 +29,7 @@ stated explicitly (see the HA vs. rate-limit-accuracy tension below).
 2. **Per-user model choice** — each user can pick which model they talk to.
 3. **Cost-driven model substitution** — swap to a cheaper model (e.g.
    Sonnet → GLM) when cost, not just capability, is the deciding factor.
+   Enforceable today via `routing.budgetTiers` (ADR-041): `router.SubstituteTier`.
 4. **Budget control with visibility** — set spend limits per team and per
    individual, block on breach, and always be able to answer "how much have
    we spent."
@@ -67,6 +68,8 @@ when a change spans packages:
    protocol-specific; the raw body is kept for verbatim forwarding.
 3. **Routing** (`internal/router`) — alias canonicalization → `ResolveModel`
    (config `model_fallbacks` when the requested model has no route) →
+   `SubstituteTier` (ADR-041 budget-tier substitution of an ALREADY-routed
+   model; narrows-only, never denies — see internal/CLAUDE.md `router/`) →
    `ResolveChain` (priority fallback + circuit breaker).
 4. **RBAC re-check** — `FilterModelAllowed`/`FilterRegions` MUST run after
    routing in every ingress handler: a fallback target appended after the
@@ -106,7 +109,8 @@ internal/          - Private packages (gateway internals)
   controlplane/    - inferplaned distribution core: sync heartbeat, lease ledger, dataplane view (ADR-034)
   proxy/ cache/ telemetry/ - proxy/ owns the control-plane Syncer + LeaseTable (ADR-034) and the UsagePusher (ADR-036); telemetry/ is live (ADR-036): usage wire types, window collector, memory/postgres/durable aggregators; cache/ owns VolatileStore (unimplemented, ADR-031 consolidation target)
   server/          - HTTP data plane + admin plane, ingress handlers
-  router/          - Model→provider resolution, fallback chain, circuit breaker
+  router/          - Model→provider resolution, fallback chain, circuit breaker; SubstituteTier applies ADR-041 budget-tier substitution
+  tier/            - ADR-041 budget-tier substitution: per-team Table, window-latched activation, shared by controlplane/ and proxy/
   governance/      - Rate / quota / budget enforcement (PreCheck + Settle)
   keystore/        - Virtual-key store (SQLite), Principal + RBAC
   providerstore/   - Opt-in DB-authoritative provider/model topology (ADR-008)

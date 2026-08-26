@@ -3,6 +3,7 @@ package bedrockapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -103,14 +104,26 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if !resolved {
-		h.audit(p, urlID, "", &audit.OutcomeRef{Status: http.StatusNotFound}, false, traceID)
+		h.audit(req.Context(), p, urlID, "", &audit.OutcomeRef{Status: http.StatusNotFound}, false, traceID)
 		h.metrics.ObserveRequest(ingressName, rejectedModelLabel, "", p.Team, http.StatusNotFound, time.Since(start).Seconds(), 0)
 		tracing.SetStatus(span, false, "unknown model")
 		writeErr(w, http.StatusNotFound, "model not found")
 		return
 	}
+	// ADR-041: budget-tier substitution — see anthropicapi's identical seam
+	// for the full rationale. Native Bedrock ingress hand-rolls resolution
+	// (resolveModel above, not router.ResolveModel) so it needs its own call
+	// site, or it would be a cost-leak path around the same policy the other
+	// two ingresses enforce.
+	if served, tierSubstituted := h.r.SubstituteTier(p, model); tierSubstituted {
+		h.metrics.ObserveModelSubstitution(p.Team, model, served)
+		req = req.WithContext(audit.WithSubstitutedFrom(req.Context(), model))
+		model = served
+		tracing.SetGenAIRequest(span, model)
+		w.Header().Set("x-inferplane-substituted-model", model)
+	}
 	if !h.r.Allows(p, model) {
-		h.audit(p, model, "", &audit.OutcomeRef{Status: http.StatusForbidden, Error: audit.DenyModelNotAllowed.Ptr()}, false, traceID)
+		h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: http.StatusForbidden, Error: audit.DenyModelNotAllowed.Ptr()}, false, traceID)
 		h.metrics.ObserveRequest(ingressName, model, "", p.Team, http.StatusForbidden, time.Since(start).Seconds(), 0)
 		tracing.SetStatus(span, false, "model not allowed")
 		writeErr(w, http.StatusForbidden, "model not allowed for this key")
@@ -119,7 +132,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	chain, st, err := h.r.ResolveChain(model)
 	if err != nil {
-		h.audit(p, model, "", &audit.OutcomeRef{Status: http.StatusNotFound}, false, traceID)
+		h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: http.StatusNotFound}, false, traceID)
 		h.metrics.ObserveRequest(ingressName, rejectedModelLabel, "", p.Team, http.StatusNotFound, time.Since(start).Seconds(), 0)
 		tracing.SetStatus(span, false, "unknown model")
 		writeErr(w, http.StatusNotFound, "model not found")
@@ -137,7 +150,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	if len(filtered) == 0 {
-		h.audit(p, model, "", &audit.OutcomeRef{Status: http.StatusNotFound}, false, traceID)
+		h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: http.StatusNotFound}, false, traceID)
 		h.metrics.ObserveRequest(ingressName, model, "", p.Team, http.StatusNotFound, time.Since(start).Seconds(), 0)
 		tracing.SetStatus(span, false, "no bedrock target")
 		writeErr(w, http.StatusNotFound, "model not found")
@@ -153,7 +166,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	if len(teamRec.AllowedRegions) > 0 {
 		if filtered := router.FilterRegions(chain, teamRec.AllowedRegions); len(filtered) == 0 {
-			h.audit(p, model, "", &audit.OutcomeRef{Status: http.StatusForbidden, Error: audit.DenyRegionBlocked.Ptr()}, false, traceID)
+			h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: http.StatusForbidden, Error: audit.DenyRegionBlocked.Ptr()}, false, traceID)
 			h.metrics.ObserveRequest(ingressName, model, "", p.Team, http.StatusForbidden, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "region blocked")
 			writeErr(w, http.StatusForbidden, "no allowed-region target for model")
@@ -167,7 +180,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if h.mask.Enabled(p.Team) {
 		masked, n, err := maskBody(raw, h.mask.Filter)
 		if err != nil {
-			h.audit(p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
+			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "pii mask failed")
 			writeErr(w, http.StatusBadRequest, "request could not be PII-masked")
@@ -176,7 +189,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if n > 0 {
 			var reparsed schema.ChatRequest
 			if err := json.Unmarshal(masked, &reparsed); err != nil {
-				h.audit(p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
+				h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
 				h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
 				tracing.SetStatus(span, false, "pii mask failed")
 				writeErr(w, http.StatusBadRequest, "request could not be PII-masked")
@@ -197,7 +210,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// NOT gated on h.gov: on_missing "block" is a pricing setting, and a
 	// deployment with governance off would otherwise serve unpriced traffic free.
 	if dec := governance.PricingGuard(table, pricedTargets(chain)); !dec.Allowed {
-		h.audit(p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, false, traceID)
+		h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, false, traceID)
 		h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
 		tracing.SetStatus(span, false, "pricing missing")
 		writeErr(w, dec.Status, dec.Reason)
@@ -206,7 +219,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if h.gov != nil {
 		dec := h.gov.PreCheck(p.Team, p.KeyID, keyPolicyOf(p), estimateTokens(raw))
 		if !dec.Allowed {
-			h.audit(p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, piiMasked, traceID)
+			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, piiMasked, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "governance deny")
 			writeErr(w, dec.Status, dec.Reason)
@@ -214,7 +227,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	h.audit(p, model, chain[0].Upstream, nil, piiMasked, traceID)
+	h.audit(req.Context(), p, model, chain[0].Upstream, nil, piiMasked, traceID)
 
 	for i, ct := range chain {
 		upHeaders := req.Header.Clone()
@@ -278,13 +291,13 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 		if errors.As(err, &ue) {
 			st := ue.HTTPStatus()
 			writeErr(w, st, "bedrock upstream error")
-			h.auditCompleted(ulid.New(), p, model, upstream, st, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
+			h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, st, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 			recordSpanResponse(req, prov.Name(), upstream, nil, false)
 			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, st, time.Since(start).Seconds(), 0)
 			return false
 		}
 		writeErr(w, http.StatusBadGateway, "bedrock upstream error")
-		h.auditCompleted(ulid.New(), p, model, upstream, http.StatusBadGateway, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
+		h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, http.StatusBadGateway, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 		recordSpanResponse(req, prov.Name(), upstream, nil, false)
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusBadGateway, time.Since(start).Seconds(), 0)
 		return false
@@ -294,7 +307,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 			return true
 		}
 		writeErr(w, http.StatusBadGateway, "bedrock upstream error")
-		h.auditCompleted(ulid.New(), p, model, upstream, http.StatusBadGateway, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
+		h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, http.StatusBadGateway, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 		recordSpanResponse(req, prov.Name(), upstream, nil, false)
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusBadGateway, time.Since(start).Seconds(), 0)
 		return false
@@ -307,7 +320,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		writeErr(w, resp.StatusCode, "bedrock upstream error")
-		h.auditCompleted(ulid.New(), p, model, upstream, resp.StatusCode, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
+		h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, resp.StatusCode, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 		recordSpanResponse(req, prov.Name(), upstream, nil, false)
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, resp.StatusCode, time.Since(start).Seconds(), 0)
 		return false
@@ -340,7 +353,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 	if h.bodies != nil {
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, resp.RawBody)
 	}
-	h.auditCompleted(recID, p, model, upstream, resp.StatusCode, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
+	h.auditCompleted(req.Context(), recID, p, model, upstream, resp.StatusCode, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
 	recordSpanResponse(req, prov.Name(), upstream, usage, true)
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, resp.StatusCode, time.Since(start).Seconds(), 0)
 	return false
@@ -356,13 +369,13 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		if errors.As(err, &ue) {
 			st := ue.HTTPStatus()
 			writeErr(w, st, "bedrock upstream error")
-			h.auditCompleted(ulid.New(), p, model, upstream, st, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
+			h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, st, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 			recordSpanResponse(req, prov.Name(), upstream, nil, false)
 			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, st, time.Since(start).Seconds(), 0)
 			return false
 		}
 		writeErr(w, http.StatusBadGateway, "bedrock upstream error")
-		h.auditCompleted(ulid.New(), p, model, upstream, http.StatusBadGateway, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
+		h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, http.StatusBadGateway, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 		recordSpanResponse(req, prov.Name(), upstream, nil, false)
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusBadGateway, time.Since(start).Seconds(), 0)
 		return false
@@ -371,7 +384,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
-		h.auditCompleted(ulid.New(), p, model, upstream, http.StatusInternalServerError, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
+		h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, http.StatusInternalServerError, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 		recordSpanResponse(req, prov.Name(), upstream, nil, false)
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusInternalServerError, time.Since(start).Seconds(), 0)
 		return false
@@ -400,7 +413,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		// mid-flight skipped settle() entirely and everything already
 		// streamed was free, with no pricing_missing flag to show it.
 		partialCost := h.settle(p, providerName, model, upstream, lastUsage, table, estimateTokens(pr.RawBody))
-		h.auditCompletedPartial(p, model, upstream, usage, partialCost, tracing.TraceID(req.Context()))
+		h.auditCompletedPartial(req.Context(), p, model, upstream, usage, partialCost, tracing.TraceID(req.Context()))
 		recordSpanResponse(req, prov.Name(), upstream, usage, true) // committed (partial)
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusOK, time.Since(start).Seconds(), ttft)
 		return false
@@ -445,7 +458,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	if h.bodies != nil {
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, nil)
 	}
-	h.auditCompleted(recID, p, model, upstream, http.StatusOK, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
+	h.auditCompleted(req.Context(), recID, p, model, upstream, http.StatusOK, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
 	recordSpanResponse(req, prov.Name(), upstream, usage, true)
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusOK, time.Since(start).Seconds(), ttft)
 	return false
@@ -518,7 +531,7 @@ func copyUpstreamHeaders(dst http.Header, src http.Header) {
 	}
 }
 
-func (h *InvokeHandler) audit(p keystore.Principal, model, upstream string, outcome *audit.OutcomeRef, piiMasked bool, traceID string) {
+func (h *InvokeHandler) audit(ctx context.Context, p keystore.Principal, model, upstream string, outcome *audit.OutcomeRef, piiMasked bool, traceID string) {
 	if h.aud == nil {
 		return
 	}
@@ -530,7 +543,7 @@ func (h *InvokeHandler) audit(p keystore.Principal, model, upstream string, outc
 		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
 		Request: audit.RequestRef{
 			Ingress: "bedrock", ModelRequested: model, ModelResolved: upstream,
-			Stream: h.streaming, PIIMasked: piiMasked,
+			Stream: h.streaming, PIIMasked: piiMasked, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx),
 		},
 		Outcome: outcome,
 	}
@@ -540,7 +553,7 @@ func (h *InvokeHandler) audit(p keystore.Principal, model, upstream string, outc
 	h.aud.Append(rec)
 }
 
-func (h *InvokeHandler) auditCompleted(id string, p keystore.Principal, model, upstream string, status int, usage *audit.UsageRef, cost *audit.CostRef, traceID, bodyRef, guardrailID, guardrailVersion string) {
+func (h *InvokeHandler) auditCompleted(ctx context.Context, id string, p keystore.Principal, model, upstream string, status int, usage *audit.UsageRef, cost *audit.CostRef, traceID, bodyRef, guardrailID, guardrailVersion string) {
 	if h.aud == nil {
 		return
 	}
@@ -552,6 +565,7 @@ func (h *InvokeHandler) auditCompleted(id string, p keystore.Principal, model, u
 		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
 		Request: audit.RequestRef{
 			Ingress: "bedrock", ModelRequested: model, ModelResolved: upstream, Stream: h.streaming,
+			ModelSubstitutedFrom: audit.SubstitutedFrom(ctx),
 		},
 		Outcome: &audit.OutcomeRef{Status: status},
 		Usage:   usage,
@@ -575,7 +589,7 @@ func (h *InvokeHandler) auditCompleted(id string, p keystore.Principal, model, u
 // auditCompletedPartial records a stream that broke mid-flight: status 200 was
 // already sent to the client, but the response is partial (mirrors
 // anthropicapi's helper of the same name).
-func (h *InvokeHandler) auditCompletedPartial(p keystore.Principal, model, upstream string, usage *audit.UsageRef, cost *audit.CostRef, traceID string) {
+func (h *InvokeHandler) auditCompletedPartial(ctx context.Context, p keystore.Principal, model, upstream string, usage *audit.UsageRef, cost *audit.CostRef, traceID string) {
 	if h.aud == nil {
 		return
 	}
@@ -585,7 +599,7 @@ func (h *InvokeHandler) auditCompletedPartial(p keystore.Principal, model, upstr
 		ID:            ulid.New(),
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
-		Request:       audit.RequestRef{Ingress: "bedrock", ModelRequested: model, ModelResolved: upstream, Stream: h.streaming},
+		Request:       audit.RequestRef{Ingress: "bedrock", ModelRequested: model, ModelResolved: upstream, Stream: h.streaming, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx)},
 		Outcome:       &audit.OutcomeRef{Status: 200, Partial: true},
 		Usage:         usage,
 		Cost:          cost,

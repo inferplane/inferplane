@@ -23,6 +23,7 @@ import (
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
 	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/policystore"
+	"github.com/inferplane/inferplane/internal/tier"
 )
 
 // staleAfter is how long after its last heartbeat a data plane is still
@@ -51,6 +52,8 @@ type Server struct {
 	generation string
 	interval   int                     // heartbeat cadence handed to data planes, seconds
 	ledger     map[ruleKey]*ruleLedger // one per lease-managed budget rule
+	tiers      map[ruleKey]*tierRule   // one per budgetTiers routing rule (ADR-041)
+	tierLatch  *tier.Latch             // survives applyWire — NOT rebuilt there
 	dataplanes map[string]*dpInfo
 	files      map[string]time.Time
 	now        func() time.Time // injectable clock for tests
@@ -74,6 +77,45 @@ type ruleLedger struct {
 	allowance  map[string]int64 // dataplane → cumulative granted µUSD
 }
 
+// totals returns the ledger's global reported spend and outstanding
+// (granted-but-not-yet-reported-spent) allowance across data planes whose
+// lease could still be valid. excludeDataplane, when non-empty, is skipped
+// from the outstanding sum — the lease-grant loop excludes the requesting
+// data plane (its own grant is what that loop is computing this heartbeat);
+// the ADR-041 tier judgment passes "" to include every data plane, since it
+// is a GLOBAL judgment, not a per-dataplane grant. Extracted so the lease
+// grant and the tier judgment can never compute Σspent/Σoutstanding
+// differently by accident.
+func (l *ruleLedger) totals(now time.Time, dataplanes map[string]*dpInfo, excludeDataplane string) (spent, outstanding int64) {
+	for _, sp := range l.spent {
+		spent += sp
+	}
+	for d, al := range l.allowance {
+		if d == excludeDataplane {
+			continue
+		}
+		other, known := dataplanes[d]
+		if !known || now.Sub(other.LastSeen) > 3*l.renew {
+			continue // lease expired (or holder pruned): grant released
+		}
+		if extra := al - l.spent[d]; extra > 0 {
+			outstanding += extra
+		}
+	}
+	return spent, outstanding
+}
+
+// tierRule is the control plane's evaluation state for one ADR-041
+// budgetTiers routing rule: which budget rule's ledger it is judged
+// against, and the tier ladder (thresholds must be strictly increasing,
+// validated at FromV1Alpha1).
+type tierRule struct {
+	policy, rule  string
+	team          string
+	budgetRuleKey ruleKey
+	tiers         []policy.BudgetTier
+}
+
 type dpInfo struct {
 	APIVersions []string           `json:"apiVersions"`
 	Generation  string             `json:"generation"`
@@ -91,6 +133,8 @@ func NewServer(token, path string, opts ...Option) (*Server, error) {
 		token:      token,
 		authOpts:   newAuthOptions(opts),
 		ledger:     map[ruleKey]*ruleLedger{},
+		tiers:      map[ruleKey]*tierRule{},
+		tierLatch:  tier.NewLatch(),
 		dataplanes: map[string]*dpInfo{},
 		now:        time.Now,
 	}
@@ -127,6 +171,7 @@ func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]t
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ledger := map[ruleKey]*ruleLedger{}
+	tiers := map[ruleKey]*tierRule{}
 	minRenew := time.Duration(0)
 	for i := range wire {
 		doc := &wire[i]
@@ -135,6 +180,14 @@ func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]t
 			return err // unreachable: LoadWirePaths already validated
 		}
 		for _, r := range internal.Rules {
+			if r.Routing != nil && r.Routing.BudgetTiers != nil {
+				bt := r.Routing.BudgetTiers
+				tiers[ruleKey{policy: internal.Name, rule: r.Name}] = &tierRule{
+					policy: internal.Name, rule: r.Name, team: internal.Subject.Team,
+					budgetRuleKey: ruleKey{policy: internal.Name, rule: bt.BudgetRef},
+					tiers:         bt.Tiers,
+				}
+			}
 			if r.Budget == nil || internal.Subject.Team == "" {
 				continue
 			}
@@ -174,8 +227,19 @@ func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]t
 		interval = 1
 	}
 
+	// The latch itself (s.tierLatch) is NOT rebuilt here — it must survive a
+	// policy edit the same way ledger spend/allowance do (carried forward
+	// above by ruleKey match), or every reload would silently un-latch every
+	// team mid-window. Only forget state for rules that no longer exist, so
+	// the latch's map doesn't grow without bound across repeated edits.
+	for k := range s.tiers {
+		if _, stillExists := tiers[k]; !stillExists {
+			s.tierLatch.Forget(k.policy + "/" + k.rule)
+		}
+	}
+
 	s.wire, s.generation = wire, policy.GenerationOf(wire)
-	s.ledger, s.interval, s.files = ledger, interval, mtimes
+	s.ledger, s.tiers, s.interval, s.files = ledger, tiers, interval, mtimes
 	return nil
 }
 
@@ -311,26 +375,11 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	// permanently shrinking everyone's remaining budget.
 	resp := policy.SyncResponse{Generation: s.generation, SyncIntervalSeconds: s.interval}
 	for k, l := range s.ledger {
-		var globalSpent, outstanding int64
-		for _, sp := range l.spent {
-			globalSpent += sp
-		}
 		// Outstanding iterates the ALLOWANCE map, not the spent map: a
 		// freshly granted data plane that has never reported yet has no
 		// spent entry, and skipping its grant here would hand the same
 		// remaining budget to every newcomer at once.
-		for d, al := range l.allowance {
-			if d == req.Dataplane {
-				continue
-			}
-			other, known := s.dataplanes[d]
-			if !known || now.Sub(other.LastSeen) > 3*l.renew {
-				continue // lease expired (or holder pruned): grant released
-			}
-			if extra := al - l.spent[d]; extra > 0 {
-				outstanding += extra
-			}
-		}
+		globalSpent, outstanding := l.totals(now, s.dataplanes, req.Dataplane)
 		remaining := l.limitMicro - globalSpent - outstanding
 		if remaining < 0 {
 			remaining = 0
@@ -350,6 +399,37 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			HardCap:   l.hard,
 		})
 	}
+	// ADR-041: judge every budgetTiers rule's referenced budget rule at
+	// GLOBAL utilization (Σspent + Σoutstanding, the same conservative
+	// quantities the lease loop above used — excludeDataplane="" here since
+	// this is one global judgment, not a per-dataplane grant), latch the
+	// result monotone within the current budget window, and hand the active
+	// tier's substitution map to every data plane in this heartbeat.
+	for k, tr := range s.tiers {
+		l, ok := s.ledger[tr.budgetRuleKey]
+		if !ok {
+			continue // budgetRef's budget rule doesn't exist (e.g. unlimited, or removed)
+		}
+		spent, outstanding := l.totals(now, s.dataplanes, "")
+		utilizedPercent := 0
+		if l.limitMicro > 0 {
+			utilizedPercent = int(100 * float64(spent+outstanding) / float64(l.limitMicro))
+		}
+		thresholds := make([]int, len(tr.tiers))
+		for i, t := range tr.tiers {
+			thresholds[i] = t.ThresholdPercent
+		}
+		idx := s.tierLatch.Evaluate(k.policy+"/"+k.rule, tier.WindowKey(now), thresholds, utilizedPercent)
+		if idx < 0 {
+			continue
+		}
+		active := tr.tiers[idx]
+		resp.ActiveTiers = append(resp.ActiveTiers, policy.ActiveTier{
+			Policy: tr.policy, Rule: tr.rule, BudgetRef: tr.budgetRuleKey.rule, Team: tr.team,
+			ThresholdPercent: active.ThresholdPercent, Substitute: active.Substitute,
+		})
+	}
+
 	if req.Generation != s.generation {
 		resp.Policies = s.wire
 	}

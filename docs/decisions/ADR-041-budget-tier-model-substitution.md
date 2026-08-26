@@ -1,7 +1,8 @@
 # ADR-041: Budget-tier model substitution (routing.budgetTiers)
 
 **Date:** 2026-08-26
-**Status:** Proposed
+**Status:** Accepted (implemented — work items 1–5; item 6, providerstore/UI
+pricing fields, and item 7's full two-plane e2e are follow-ups)
 **Related:** ADR-008 (providerstore — the UI write path that registers a vLLM
 endpoint and its models), ADR-017 (budget alert webhooks — the utilization
 thresholds this ADR reuses as a routing trigger), ADR-029 (model-level
@@ -194,6 +195,51 @@ priority fallback and circuit breaker apply to that endpoint as to any
 other. The division of labor is deliberate: inferplane governs *who may
 spend what on which model*; the inference gateway optimizes *which pod
 serves the token*.
+
+## Implementation notes
+
+Work items 1–5 shipped as designed, with four deviations/narrowings worth
+recording:
+
+- **`budgetTiers` is the second half of the existing `routing` rule kind**
+  (`api/v1alpha1.RoutingRule.BudgetTiers`), not a new top-level rule kind —
+  `checkEnforceable` narrows to reject only the cache-affinity half
+  (`Routing.Affinity`); a `budgetTiers` rule is enforceable independent of
+  the unimplemented `internal/cache.VolatileStore`.
+- **The enforcement seam is `Router.SubstituteTier`, called at ingress right
+  after `principal.From` and before the `Allows` check — a distinct call
+  from `ResolveModel`.** `ResolveModel`'s documented contract ("a configured
+  model is never second-guessed") stays intact; `SubstituteTier` is the
+  ADR's cost-triggered sibling for an ALREADY-routed model, and it needs a
+  `Principal` in scope (for the RBAC-skip rule below) that `ResolveModel`
+  never had. It composes with D5 model-fallback substitution: an unrouted
+  model may first take its `model_fallbacks` target, and that result may
+  itself be tier-substituted (tested,
+  `TestMessagesModelFallbackThenBudgetTierChain`).
+- **Substitution can only narrow, never widen, never deny (D3), enforced as:
+  fires only when the ORIGINAL is already `Allows`-permitted; if the TARGET
+  fails RBAC or isn't routed on this data plane, the ORIGINAL is served —
+  substitution never turns into a denial and never rescues an
+  already-denied request.**
+- **Window identity is an interim calendar-month-UTC key
+  (`internal/tier.WindowKey`), not the control-plane-computed `windowID`**
+  roadmap item ② will eventually introduce. `internal/tier.Latch` makes
+  activation monotone within that key today; once item ② lands, the latch
+  should be re-keyed on the real `windowID` instead.
+- **The ADR-017 tier-activation alert event is emitted per data plane**, not
+  once per global activation — the same per-instance posture ADR-017's
+  existing budget-alert emission already has.
+- **Bedrock's native ingress** (`internal/server/bedrockapi`, which
+  hand-rolls model resolution rather than calling `router.ResolveModel`)
+  gets its own `SubstituteTier` call site so it isn't a cost-leak path
+  around the same policy the Anthropic/OpenAI ingresses enforce.
+
+Deferred to follow-up work: item 6 (providerstore/UI pricing fields
+alongside the `openai_compatible` endpoint write path, ADR-008 extension)
+and item 7's full two-data-plane + tool-calling-fidelity e2e (a
+control-plane-level "activates on the global sum, not any one plane's local
+view" test is covered today,
+`TestActiveTierFiresOnGlobalUtilizationNotPerPlane`).
 
 ## Explicitly not in this ADR
 

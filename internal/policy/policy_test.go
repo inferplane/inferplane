@@ -60,7 +60,7 @@ func TestFromV1Alpha1Valid(t *testing.T) {
 	if b == nil || !b.HardCap || b.LimitMicroUSD != 5_000_000_000 || b.LeaseGrantMicroUSD != 5_000_000 || b.LeaseRenewInterval != 30*time.Second {
 		t.Fatalf("budget rule mangled: %+v", b)
 	}
-	if r := p.Rules[1].Routing; r == nil || r.OnAffinityConflict != v1alpha1.PreferAffinity {
+	if r := p.Rules[1].Routing; r == nil || r.Affinity == nil || r.Affinity.OnAffinityConflict != v1alpha1.PreferAffinity {
 		t.Fatalf("routing rule mangled: %+v", r)
 	}
 	if m := p.Rules[2].ModelAccess; m == nil || len(m.Allow) != 2 {
@@ -158,6 +158,62 @@ func TestFromV1Alpha1Rejections(t *testing.T) {
 			d.Spec.Rules[0].Routing = &v1alpha1.RoutingRule{OnAffinityConflict: v1alpha1.PreferFallback}
 		}},
 		{"no kind on a rule", func(d *v1alpha1.GovernancePolicy) { d.Spec.Rules[0].Budget = nil }},
+		{"routing rule sets both affinity and budgetTiers", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules[1].Routing.BudgetTiers = validBudgetTiersRule(d).Routing.BudgetTiers
+		}},
+		{"budgetTiers missing budgetRef", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules = append(d.Spec.Rules, v1alpha1.Rule{
+				Name: "tiers", FailurePolicy: v1alpha1.FailOpen,
+				Routing: &v1alpha1.RoutingRule{BudgetTiers: &v1alpha1.BudgetTiersRule{
+					Tiers: []v1alpha1.BudgetTier{{ThresholdPercent: 80, Substitute: map[string]string{"a": "b"}}},
+				}},
+			})
+		}},
+		{"budgetTiers budgetRef not found", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules = append(d.Spec.Rules, budgetTiersRule("no-such-rule", []v1alpha1.BudgetTier{
+				{ThresholdPercent: 80, Substitute: map[string]string{"a": "b"}},
+			}))
+		}},
+		{"budgetTiers budgetRef names an unlimited budget", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules = append(d.Spec.Rules,
+				v1alpha1.Rule{Name: "unlimited-budget", FailurePolicy: v1alpha1.FailOpen, Budget: &v1alpha1.BudgetRule{Unlimited: true}},
+				budgetTiersRule("unlimited-budget", []v1alpha1.BudgetTier{{ThresholdPercent: 80, Substitute: map[string]string{"a": "b"}}}),
+			)
+		}},
+		{"budgetTiers empty tiers", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules = append(d.Spec.Rules, budgetTiersRule("monthly-hard-cap", nil))
+		}},
+		{"budgetTiers threshold out of range", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules = append(d.Spec.Rules, budgetTiersRule("monthly-hard-cap", []v1alpha1.BudgetTier{
+				{ThresholdPercent: 100, Substitute: map[string]string{"a": "b"}},
+			}))
+		}},
+		{"budgetTiers thresholds not strictly increasing", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules = append(d.Spec.Rules, budgetTiersRule("monthly-hard-cap", []v1alpha1.BudgetTier{
+				{ThresholdPercent: 80, Substitute: map[string]string{"a": "b"}},
+				{ThresholdPercent: 80, Substitute: map[string]string{"a": "c"}},
+			}))
+		}},
+		{"budgetTiers empty substitute", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules = append(d.Spec.Rules, budgetTiersRule("monthly-hard-cap", []v1alpha1.BudgetTier{
+				{ThresholdPercent: 80, Substitute: map[string]string{}},
+			}))
+		}},
+		{"budgetTiers substitute empty key", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules = append(d.Spec.Rules, budgetTiersRule("monthly-hard-cap", []v1alpha1.BudgetTier{
+				{ThresholdPercent: 80, Substitute: map[string]string{"": "b"}},
+			}))
+		}},
+		{"budgetTiers substitute maps a model to itself", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules = append(d.Spec.Rules, budgetTiersRule("monthly-hard-cap", []v1alpha1.BudgetTier{
+				{ThresholdPercent: 80, Substitute: map[string]string{"a": "a"}},
+			}))
+		}},
+		{"budgetTiers substitute has a chain (key also a value)", func(d *v1alpha1.GovernancePolicy) {
+			d.Spec.Rules = append(d.Spec.Rules, budgetTiersRule("monthly-hard-cap", []v1alpha1.BudgetTier{
+				{ThresholdPercent: 80, Substitute: map[string]string{"a": "b", "b": "c"}},
+			}))
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -169,6 +225,61 @@ func TestFromV1Alpha1Rejections(t *testing.T) {
 				t.Fatalf("want *UnsupportedError, got %v", err)
 			}
 		})
+	}
+}
+
+// budgetTiersRule builds a routing rule whose budgetTiers half references
+// budgetRef, for use alongside validDoc()'s "monthly-hard-cap" budget rule.
+func budgetTiersRule(budgetRef string, tiers []v1alpha1.BudgetTier) v1alpha1.Rule {
+	return v1alpha1.Rule{
+		Name:          "downgrade-subagents",
+		FailurePolicy: v1alpha1.FailOpen,
+		Routing: &v1alpha1.RoutingRule{
+			BudgetTiers: &v1alpha1.BudgetTiersRule{BudgetRef: budgetRef, Tiers: tiers},
+		},
+	}
+}
+
+// validBudgetTiersRule is a well-formed budgetTiers rule against d's
+// "monthly-hard-cap" budget rule.
+func validBudgetTiersRule(d *v1alpha1.GovernancePolicy) v1alpha1.Rule {
+	return budgetTiersRule("monthly-hard-cap", []v1alpha1.BudgetTier{
+		{ThresholdPercent: 80, Substitute: map[string]string{"claude-haiku-4-5": "glm-4.7-gpu"}},
+	})
+}
+
+// A budgetTiers routing rule (ADR-041) converts and validates independently
+// of the affinity half, and is NOT rejected by checkEnforceable the way
+// affinity rules are (see store_test.go TestUnenforceableRejected).
+func TestFromV1Alpha1BudgetTiersValid(t *testing.T) {
+	doc := validDoc()
+	doc.Spec.Rules = append(doc.Spec.Rules, v1alpha1.Rule{
+		Name:          "downgrade-subagents-at-80",
+		FailurePolicy: v1alpha1.FailOpen,
+		Routing: &v1alpha1.RoutingRule{
+			BudgetTiers: &v1alpha1.BudgetTiersRule{
+				BudgetRef: "monthly-hard-cap",
+				Tiers: []v1alpha1.BudgetTier{
+					{ThresholdPercent: 80, Substitute: map[string]string{"claude-haiku-4-5": "glm-4.7-gpu"}},
+					{ThresholdPercent: 95, Substitute: map[string]string{"claude-haiku-4-5": "glm-4.7-gpu", "claude-sonnet-4-6": "glm-4.7-gpu"}},
+				},
+			},
+		},
+	})
+	p, err := FromV1Alpha1(doc)
+	if err != nil {
+		t.Fatalf("FromV1Alpha1: %v", err)
+	}
+	r := p.Rules[len(p.Rules)-1]
+	bt := r.Routing.BudgetTiers
+	if bt == nil || bt.BudgetRef != "monthly-hard-cap" || len(bt.Tiers) != 2 {
+		t.Fatalf("budgetTiers rule mangled: %+v", r.Routing)
+	}
+	if bt.Tiers[0].ThresholdPercent != 80 || bt.Tiers[0].Substitute["claude-haiku-4-5"] != "glm-4.7-gpu" {
+		t.Fatalf("tier 0 mangled: %+v", bt.Tiers[0])
+	}
+	if bt.Tiers[1].ThresholdPercent != 95 || len(bt.Tiers[1].Substitute) != 2 {
+		t.Fatalf("tier 1 mangled: %+v", bt.Tiers[1])
 	}
 }
 

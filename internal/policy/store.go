@@ -47,6 +47,22 @@ type TeamLimits struct {
 type Store struct {
 	paths []string
 	snap  atomic.Pointer[snapshot]
+
+	// routedAndPriced validates a budgetTiers substitution TARGET model
+	// against this data plane's own topology (ADR-041 D1): the target must
+	// be routed (live.State.Route) and priced (pricing.HasRate). nil means
+	// skip the check — the control plane holds no topology of its own and
+	// deliberately does not apply it (LoadWirePaths), the same posture it
+	// already takes toward checkEnforceable.
+	routedAndPriced func(model string) error
+}
+
+// SetRoutedAndPriced installs the apply-time target check for budgetTiers
+// substitution rules. A data plane must call this before Reload/ApplyWire so
+// a rule naming an unrouted or unpriced target is rejected and reported
+// upstream instead of silently billing 0 (ADR-030) once it activates.
+func (s *Store) SetRoutedAndPriced(f func(model string) error) {
+	s.routedAndPriced = f
 }
 
 type snapshot struct {
@@ -96,7 +112,7 @@ func (s *Store) ApplyWire(docs []v1alpha1.GovernancePolicy) []Rejection {
 		seen[name] = true
 		p, err := FromV1Alpha1(&docs[i])
 		if err == nil {
-			err = checkEnforceable(p)
+			err = checkEnforceable(p, s.routedAndPriced)
 		}
 		if err != nil {
 			rej := Rejection{Policy: name, Reason: err.Error()}
@@ -132,7 +148,7 @@ func (s *Store) Reload() error {
 		return err
 	}
 	for _, p := range policies {
-		if err := checkEnforceable(p); err != nil {
+		if err := checkEnforceable(p, s.routedAndPriced); err != nil {
 			return err
 		}
 	}
@@ -152,13 +168,24 @@ func (s *Store) Reload() error {
 }
 
 // checkEnforceable rejects rules this data plane build cannot enforce yet.
-func checkEnforceable(p *Policy) error {
+// routedAndPriced is the ADR-041 apply-time target check for budgetTiers
+// substitution rules (nil skips it — see Store.routedAndPriced doc).
+func checkEnforceable(p *Policy, routedAndPriced func(model string) error) error {
 	reject := func(rule, reason string) error {
 		return &UnsupportedError{APIVersion: SupportedAPIVersions[0], Kind: "GovernancePolicy", Rule: rule, Reason: reason}
 	}
 	for _, r := range p.Rules {
-		if r.Routing != nil {
-			return reject(r.Name, "routing rules are not yet enforceable by this data plane build")
+		if r.Routing != nil && r.Routing.Affinity != nil {
+			return reject(r.Name, "cache-affinity routing rules are not yet enforceable by this data plane build")
+		}
+		if r.Routing != nil && r.Routing.BudgetTiers != nil && routedAndPriced != nil {
+			for _, tier := range r.Routing.BudgetTiers.Tiers {
+				for _, target := range tier.Substitute {
+					if err := routedAndPriced(target); err != nil {
+						return reject(r.Name, fmt.Sprintf("routing.budgetTiers substitution target %q: %v", target, err))
+					}
+				}
+			}
 		}
 		// Budget/rate enforcement windows are team-keyed today, so ANY
 		// user-scoped variant — user-only or (team, user) — must be refused,
