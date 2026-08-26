@@ -19,7 +19,7 @@ already met by earlier work (ADR-031) outside this roadmap.
 |---|---|---|
 | #1 A single entry point for Claude Code/OpenCode/Codex | 🔶 partial | No Codex-specific code, fixture, or test anywhere in the tree (`grep -ri codex internal/ providers/ tests/` → 0 hits, excluding this doc); the OpenAI-compat ingress (`internal/server/openaiapi/chat.go`) is the presumed path but has never been verified against a real Codex client |
 | #2 Per-user model choice | ✅ done | User-subject `modelAccess` rules are enforced: `internal/policy/store.go:252` `ModelAllowed`, wired at `cmd/mayu/gateway.go:407` into `router.FilterModelAllowed`. (Per-user *budget/rate* is a separate, still-blocked item — see #4b.) |
-| #3 Cost-driven model substitution via policy (routing) | ❌ blocked | `internal/policy/store.go:161` — `routing` rules rejected outright as "not yet enforceable by this data plane build," for every subject shape. Config-level `model_fallbacks` substitution exists (`internal/router/router.go:44`) but only fires when a requested model has no route at all — it's availability-triggered, not cost-triggered. |
+| #3 Cost-driven model substitution via policy (routing) | ❌ blocked (design accepted for review: ADR-041, proposed 2026-08-26) | `internal/policy/store.go:161` — `routing` rules rejected outright as "not yet enforceable by this data plane build," for every subject shape. Config-level `model_fallbacks` substitution exists (`internal/router/router.go:44`) but only fires when a requested model has no route at all — it's availability-triggered, not cost-triggered. ADR-041 proposes `routing.budgetTiers` (budget-utilization-triggered substitution, control-plane judged) as an enforceable sub-kind decoupled from the cache-affinity engine. |
 | #4a Team budget + block | ✅ done, with caveats | ADR-034 lease pattern bounds team-level overspend across data planes when a control plane is attached (worst case = Σ outstanding grants, not exact; window edges are approximate — ADR-034 §Known limits). Per-key budgets are not lease-managed. Standalone `mayu` (no control plane) gets no lease at all — budget is plain in-memory there, like rate. |
 | #4b Per-user budget/rate | ❌ blocked | `internal/policy/store.go:168-169` — any rule containing `budget` or `rate` is rejected unless the subject is team-only; user-only and (team,user) subjects are refused for those two rule kinds specifically |
 | #4c Rate/quota global accuracy under horizontal scale | ❌ blocked | item ① below — in-memory per-replica buckets; N replicas admit up to N× the configured rate/TPM/quota in aggregate |
@@ -246,4 +246,6 @@ details are swappable.
 - CRD-watch controller in inferplaned (ADR-035 follow-up).
 - User-subject budget/rate windows (needs per-user governance keys end to
   end; unblocks the ADR-033 gate).
-- Cache-affinity routing engine (`routing` rules stay rejected until then).
+- Cache-affinity routing engine (the `routing` rule's *affinity* half stays
+  rejected until then; the *budgetTiers* half is ADR-041, proposed — it does
+  not depend on the affinity engine).
