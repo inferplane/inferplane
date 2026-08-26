@@ -75,7 +75,8 @@ func TestChatGovernorKeyBudgetBlocks402EvenForUngovernedTeam(t *testing.T) {
 	// No TeamPolicy entry for "platform-eng" at all — the team is ungoverned;
 	// only the key's own budget (§8 D2) must still be enforced.
 	gov := governance.NewGovernor(nil, limiter.NewMemory(), bud, nil)
-	bud.Debit("budget:key:ik_over", 1_500_000, 30*24*time.Hour) // over the key's 1M cap
+	bud.Debit(budget.Key(budget.ScopeKey, "ik_over", budget.CalendarMonth), 1_500_000,
+		budget.Window{Kind: budget.Rolling, Dur: 30 * 24 * time.Hour}) // over the key's 1M cap
 
 	h := NewChatHandlerFull(testRouter(), nil, gov)
 	req := httptest.NewRequest("POST", "/v1/chat/completions",

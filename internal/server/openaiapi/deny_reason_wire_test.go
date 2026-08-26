@@ -76,7 +76,8 @@ func TestDenyReasonAudited_KeyBudgetExceeded(t *testing.T) {
 	}
 	bud := budget.NewMemory()
 	gov := governance.NewGovernor(nil, limiter.NewMemory(), bud, nil) // team ungoverned
-	bud.Debit("budget:key:ik_over", 1_500_000, 30*24*time.Hour)       // over the key's 1M cap
+	bud.Debit(budget.Key(budget.ScopeKey, "ik_over", budget.CalendarMonth), 1_500_000,
+		budget.Window{Kind: budget.Rolling, Dur: 30 * 24 * time.Hour}) // over the key's 1M cap
 
 	h := NewChatHandlerFull(testRouter(), w, gov)
 	req := httptest.NewRequest("POST", "/v1/chat/completions",

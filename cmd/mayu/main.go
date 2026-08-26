@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	_ "time/tzdata" // embed the IANA tz database: distroless/static ships no /usr/share/zoneinfo, so a named-zone LoadLocation would fail only in production
 
 	_ "github.com/inferplane/inferplane/plugins/piimask"        // register "pii-mask" filter (ADR-009)
 	_ "github.com/inferplane/inferplane/providers/anthropic"    // register "anthropic"

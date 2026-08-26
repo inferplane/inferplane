@@ -357,8 +357,14 @@ func newGateway(cfgPath string) (*gateway, error) {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "inferplane: team lookup:", err)
 		} else if ok {
-			return governance.PolicyFromLimits(rec.RPM, rec.TPM, rec.TokensPerDay,
-				rec.QuotaOnExceeded, rec.BudgetUSDMicros, rec.BudgetOnExceeded), true
+			return governance.PolicyFromLimits(governance.Limits{
+				RatePerMin:           rec.RPM,
+				TokensPerMinute:      rec.TPM,
+				TokensPerDay:         rec.TokensPerDay,
+				QuotaExceeded:        rec.QuotaOnExceeded,
+				BudgetMicrosPerMonth: rec.BudgetUSDMicros,
+				BudgetExceeded:       rec.BudgetOnExceeded,
+			}), true
 		}
 		tp, ok := policies[team]
 		return tp, ok
@@ -425,8 +431,14 @@ func newGateway(cfgPath string) (*gateway, error) {
 			}
 		}
 		// No quota rule kind yet — tokens/day always comes from the base.
-		tp := governance.PolicyFromLimits(rpm, tpm, base.TokensPerDay,
-			base.QuotaExceeded, budgetMicros, budgetExceeded)
+		tp := governance.PolicyFromLimits(governance.Limits{
+			RatePerMin:           rpm,
+			TokensPerMinute:      tpm,
+			TokensPerDay:         base.TokensPerDay,
+			QuotaExceeded:        base.QuotaExceeded,
+			BudgetMicrosPerMonth: budgetMicros,
+			BudgetExceeded:       budgetExceeded,
+		})
 		// AdminContact rides with the binding budget rule (from the policy
 		// document, never the lease clamp — a lease grant carries no
 		// contact info of its own); tl is the policy-file/control-plane

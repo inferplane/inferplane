@@ -26,3 +26,41 @@ func TestPoliciesFromConfig(t *testing.T) {
 		t.Fatalf("burst should default >0: %d", p.RateBurst)
 	}
 }
+
+// TestPolicyFromLimitsMapsEveryField pins the struct-argument form of
+// PolicyFromLimits: six positional arguments (including two adjacent int64
+// pairs) became one Limits value, and the risk that conversion carries is a
+// silently transposed field. Every number below is distinct so a swap fails.
+func TestPolicyFromLimitsMapsEveryField(t *testing.T) {
+	got := PolicyFromLimits(Limits{
+		RatePerMin:           11,
+		TokensPerMinute:      22,
+		TokensPerDay:         33,
+		QuotaExceeded:        "warn",
+		BudgetMicrosPerMonth: 44,
+		BudgetExceeded:       "block",
+	})
+	want := TeamPolicy{
+		RatePerMin:           11,
+		RateBurst:            11, // burst defaults to RatePerMin
+		TokensPerMinute:      22,
+		TokensPerDay:         33,
+		QuotaExceeded:        "warn",
+		BudgetMicrosPerMonth: 44,
+		BudgetExceeded:       "block",
+	}
+	if got != want {
+		t.Fatalf("PolicyFromLimits = %+v, want %+v", got, want)
+	}
+}
+
+// TestPolicyFromLimitsBurstFloor keeps the burst rule pinned through the
+// signature change: a zero or negative RatePerMin must still floor to 1, never
+// 0, because 0 means "unlimited" to the limiter.
+func TestPolicyFromLimitsBurstFloor(t *testing.T) {
+	for _, rpm := range []int64{0, -5} {
+		if got := PolicyFromLimits(Limits{RatePerMin: rpm}).RateBurst; got != 1 {
+			t.Fatalf("RatePerMin=%d gave RateBurst=%d, want 1", rpm, got)
+		}
+	}
+}

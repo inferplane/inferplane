@@ -211,9 +211,10 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 		// is the post-debit threshold; a single high-cost request can overshoot
 		// (accepted per §5.3).
 		if p.BudgetMicrosPerMonth > 0 {
-			if g.bud.Check("budget:"+team, 0, p.BudgetMicrosPerMonth, budget.CalendarMonth) == budget.Block {
+			tbk := budget.Key(budget.ScopeTeam, team, budget.CalendarMonth)
+			if g.bud.Check(tbk, 0, p.BudgetMicrosPerMonth, budget.CalendarMonth) == budget.Block {
 				if p.BudgetExceeded != "warn" {
-					resetsAt := g.bud.ResetsAt("budget:"+team, budget.CalendarMonth)
+					resetsAt := g.bud.ResetsAt(tbk, budget.CalendarMonth)
 					return GovDecision{Status: 402, Reason: budgetExceededMessage("budget", resetsAt, p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
 				}
 			}
@@ -226,9 +227,12 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 	if kp.TokensPerMinute > 0 && !g.lim.AllowRate("tpm:key:"+keyID, estimateTokens, kp.TokensPerMinute, kp.TokensPerMinute) {
 		return GovDecision{Status: 429, Reason: "key token rate limit exceeded", Code: audit.DenyKeyTokenRateLimited}
 	}
-	if kp.BudgetMicrosPerMonth > 0 && g.bud.Check("budget:key:"+keyID, 0, kp.BudgetMicrosPerMonth, budget.CalendarMonth) == budget.Block {
-		resetsAt := g.bud.ResetsAt("budget:key:"+keyID, budget.CalendarMonth)
-		return GovDecision{Status: 402, Reason: budgetExceededMessage("key budget", resetsAt, ""), Code: audit.DenyKeyBudgetExceeded}
+	if kp.BudgetMicrosPerMonth > 0 {
+		kbk := budget.Key(budget.ScopeKey, keyID, budget.CalendarMonth)
+		if g.bud.Check(kbk, 0, kp.BudgetMicrosPerMonth, budget.CalendarMonth) == budget.Block {
+			resetsAt := g.bud.ResetsAt(kbk, budget.CalendarMonth)
+			return GovDecision{Status: 402, Reason: budgetExceededMessage("key budget", resetsAt, ""), Code: audit.DenyKeyBudgetExceeded}
+		}
 	}
 	return GovDecision{Allowed: true}
 }
@@ -249,13 +253,14 @@ func (g *Governor) UsageOf(team, keyID string, kp KeyPolicy) UsageStatus {
 	u := UsageStatus{Team: team}
 	if p, ok := g.policyOf(team); ok {
 		if p.BudgetMicrosPerMonth > 0 {
-			spent := g.bud.Spent("budget:"+team, budget.CalendarMonth)
+			tbk := budget.Key(budget.ScopeTeam, team, budget.CalendarMonth)
+			spent := g.bud.Spent(tbk, budget.CalendarMonth)
 			u.TeamBudget = &BudgetUsage{
 				LimitUSDMicros:     p.BudgetMicrosPerMonth,
 				SpentUSDMicros:     spent,
 				RemainingUSDMicros: max64(0, p.BudgetMicrosPerMonth-spent),
 				Window:             "calendar-month",
-				ResetsAt:           g.bud.ResetsAt("budget:"+team, budget.CalendarMonth),
+				ResetsAt:           g.bud.ResetsAt(tbk, budget.CalendarMonth),
 			}
 		}
 		if p.TokensPerDay > 0 {
@@ -267,13 +272,14 @@ func (g *Governor) UsageOf(team, keyID string, kp KeyPolicy) UsageStatus {
 		}
 	}
 	if kp.BudgetMicrosPerMonth > 0 {
-		spent := g.bud.Spent("budget:key:"+keyID, budget.CalendarMonth)
+		kbk := budget.Key(budget.ScopeKey, keyID, budget.CalendarMonth)
+		spent := g.bud.Spent(kbk, budget.CalendarMonth)
 		u.KeyBudget = &BudgetUsage{
 			LimitUSDMicros:     kp.BudgetMicrosPerMonth,
 			SpentUSDMicros:     spent,
 			RemainingUSDMicros: max64(0, kp.BudgetMicrosPerMonth-spent),
 			Window:             "calendar-month",
-			ResetsAt:           g.bud.ResetsAt("budget:key:"+keyID, budget.CalendarMonth),
+			ResetsAt:           g.bud.ResetsAt(kbk, budget.CalendarMonth),
 		}
 	}
 	if kp.TokensPerMinute > 0 {
@@ -332,7 +338,8 @@ func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model stri
 		costMicros, pricingMissing = table.CostUSDMicros(provider, model, u)
 	}
 	if p.BudgetMicrosPerMonth > 0 {
-		g.bud.Debit("budget:"+team, costMicros, budget.CalendarMonth)
+		tbk := budget.Key(budget.ScopeTeam, team, budget.CalendarMonth)
+		g.bud.Debit(tbk, costMicros, budget.CalendarMonth)
 		// Debit and Spent are each individually mutex-protected but not one
 		// atomic operation: a concurrent Settle for the same team can debit
 		// between these two calls. Under concurrent load this can make the
@@ -342,20 +349,21 @@ func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model stri
 		// an earlier one). A tighter-scoped case of the per-instance/replica
 		// approximation ADR-017 §8 documents; ponytail: add
 		// BudgetStore.DebitAndRead if this needs to be exact.
-		spent := g.bud.Spent("budget:"+team, budget.CalendarMonth)
+		spent := g.bud.Spent(tbk, budget.CalendarMonth)
 		g.metrics.SetBudgetUtilization(team, float64(spent)/float64(p.BudgetMicrosPerMonth))
 		if g.notifyBudget != nil {
 			g.notifyBudget(team, spent, p.BudgetMicrosPerMonth)
 		}
 	}
 	if kp.BudgetMicrosPerMonth > 0 {
-		g.bud.Debit("budget:key:"+keyID, costMicros, budget.CalendarMonth)
+		kbk := budget.Key(budget.ScopeKey, keyID, budget.CalendarMonth)
+		g.bud.Debit(kbk, costMicros, budget.CalendarMonth)
 		// Unlike the team block above, this read has no other consumer (no
 		// per-key /metrics gauge) — skip it entirely when alerting is off,
 		// the common case, to avoid an extra store read on every keyed
 		// request (code-gate MINOR, opus).
 		if g.notifyKeyBudget != nil {
-			spent := g.bud.Spent("budget:key:"+keyID, budget.CalendarMonth)
+			spent := g.bud.Spent(kbk, budget.CalendarMonth)
 			g.notifyKeyBudget(team, keyID, spent, kp.BudgetMicrosPerMonth)
 		}
 	}
