@@ -6,7 +6,7 @@ func TestPoliciesFromConfig(t *testing.T) {
 	in := map[string]ConfigTeam{
 		"platform-eng": {
 			RatePerMin: 300, TokensPerMinute: 2_000_000, TokensPerDay: 50_000_000, QuotaExceeded: "block",
-			BudgetUSDPerMonth: 5000, BudgetExceeded: "warn",
+			BudgetUSDPerMonth: 5000, BudgetUSDPerDay: 250, BudgetExceeded: "warn",
 		},
 	}
 	pol := PoliciesFromConfig(in)
@@ -20,6 +20,14 @@ func TestPoliciesFromConfig(t *testing.T) {
 	}
 	if p.BudgetExceeded != "warn" {
 		t.Fatalf("budget exceeded policy: %q", p.BudgetExceeded)
+	}
+	// 250 USD/day → 250_000_000 µUSD, and the single on_exceeded knob feeds
+	// BOTH windows (design §D2).
+	if p.BudgetMicrosPerDay != 250_000_000 {
+		t.Fatalf("daily budget µUSD: %d", p.BudgetMicrosPerDay)
+	}
+	if p.BudgetDayExceeded != "warn" {
+		t.Fatalf("daily budget exceeded policy: %q", p.BudgetDayExceeded)
 	}
 	// burst defaults to RatePerMin when unset (so a full minute's worth can burst)
 	if p.RateBurst <= 0 {
@@ -39,6 +47,8 @@ func TestPolicyFromLimitsMapsEveryField(t *testing.T) {
 		QuotaExceeded:        "warn",
 		BudgetMicrosPerMonth: 44,
 		BudgetExceeded:       "block",
+		BudgetMicrosPerDay:   55,
+		BudgetDayExceeded:    "warn",
 	})
 	want := TeamPolicy{
 		RatePerMin:           11,
@@ -48,6 +58,8 @@ func TestPolicyFromLimitsMapsEveryField(t *testing.T) {
 		QuotaExceeded:        "warn",
 		BudgetMicrosPerMonth: 44,
 		BudgetExceeded:       "block",
+		BudgetMicrosPerDay:   55,
+		BudgetDayExceeded:    "warn",
 	}
 	if got != want {
 		t.Fatalf("PolicyFromLimits = %+v, want %+v", got, want)

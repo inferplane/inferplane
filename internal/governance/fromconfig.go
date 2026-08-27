@@ -11,7 +11,11 @@ type ConfigTeam struct {
 	TokensPerDay      int64
 	QuotaExceeded     string // block|warn
 	BudgetUSDPerMonth float64
-	BudgetExceeded    string // block|warn
+	// BudgetUSDPerDay is the calendar-day counterpart; there is deliberately
+	// no BudgetDayExceeded here because config.BudgetConfig carries a single
+	// on_exceeded knob that governs both windows (BudgetExceeded feeds both).
+	BudgetUSDPerDay float64
+	BudgetExceeded  string // block|warn
 }
 
 // Limits is PolicyFromLimits's already-resolved input, one field per governance
@@ -26,6 +30,8 @@ type Limits struct {
 	QuotaExceeded        string // block|warn
 	BudgetMicrosPerMonth int64
 	BudgetExceeded       string // block|warn
+	BudgetMicrosPerDay   int64
+	BudgetDayExceeded    string // block|warn
 }
 
 // PolicyFromLimits builds a TeamPolicy from already-resolved limits (budget in
@@ -48,6 +54,8 @@ func PolicyFromLimits(l Limits) TeamPolicy {
 		QuotaExceeded:        l.QuotaExceeded,
 		BudgetMicrosPerMonth: l.BudgetMicrosPerMonth,
 		BudgetExceeded:       l.BudgetExceeded,
+		BudgetMicrosPerDay:   l.BudgetMicrosPerDay,
+		BudgetDayExceeded:    l.BudgetDayExceeded,
 	}
 }
 
@@ -63,6 +71,8 @@ func PoliciesFromConfig(in map[string]ConfigTeam) map[string]TeamPolicy {
 			QuotaExceeded:        c.QuotaExceeded,
 			BudgetMicrosPerMonth: int64(c.BudgetUSDPerMonth * 1_000_000),
 			BudgetExceeded:       c.BudgetExceeded,
+			BudgetMicrosPerDay:   int64(c.BudgetUSDPerDay * 1_000_000),
+			BudgetDayExceeded:    c.BudgetExceeded,
 		})
 	}
 	return out

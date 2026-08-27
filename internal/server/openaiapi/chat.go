@@ -546,7 +546,7 @@ func (h *ChatHandler) settle(p keystore.Principal, providerName, upstream string
 // the governance package's KeyPolicy; governance stays a leaf and does not
 // import keystore.
 func keyPolicyOf(p keystore.Principal) governance.KeyPolicy {
-	return governance.KeyPolicy{RatePerMin: p.RPM, TokensPerMinute: p.TPM, BudgetMicrosPerMonth: p.BudgetUSDMicros}
+	return governance.KeyPolicy{RatePerMin: p.RPM, TokensPerMinute: p.TPM, BudgetMicrosPerMonth: p.BudgetUSDMicros, BudgetMicrosPerDay: p.BudgetUSDMicrosPerDay}
 }
 
 // observeTokens records the per-type token usage counters for one settled

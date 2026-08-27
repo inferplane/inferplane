@@ -73,8 +73,8 @@ func TestCalendarMonthStillAnchorsToNextUTCMonth(t *testing.T) {
 }
 
 // TestWindowKindBoundaries covers the two branches windowEnd gained. CalDay is
-// not USED anywhere outside this package in this phase — it is tested here so
-// the switch has no untested arm, not because anything consumes it yet.
+// now consumed by the governance daily budget window; this test remains the
+// boundary-arithmetic pin.
 func TestWindowKindBoundaries(t *testing.T) {
 	kst := time.FixedZone("KST", 9*60*60)
 	for _, tc := range []struct {

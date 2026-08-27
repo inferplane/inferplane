@@ -28,6 +28,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RatePerMin:           p.RPM,
 		TokensPerMinute:      p.TPM,
 		BudgetMicrosPerMonth: p.BudgetUSDMicros,
+		BudgetMicrosPerDay:   p.BudgetUSDMicrosPerDay,
 	}
 	if h.gov == nil {
 		_ = json.NewEncoder(w).Encode(governance.UsageStatus{Team: p.Team})

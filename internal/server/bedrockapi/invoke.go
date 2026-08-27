@@ -485,6 +485,7 @@ func (h *InvokeHandler) settle(p keystore.Principal, providerName, model, upstre
 func keyPolicyOf(p keystore.Principal) governance.KeyPolicy {
 	return governance.KeyPolicy{
 		RatePerMin: p.RPM, TokensPerMinute: p.TPM, BudgetMicrosPerMonth: p.BudgetUSDMicros,
+		BudgetMicrosPerDay: p.BudgetUSDMicrosPerDay,
 	}
 }
 

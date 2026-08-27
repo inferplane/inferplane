@@ -64,6 +64,15 @@ type Window struct {
 // it.
 var CalendarMonth = Window{Kind: CalMonth}
 
+// CalendarDayIn is CalendarMonth's daily counterpart: the counter ends at the
+// next midnight in loc (nil = UTC, the same default every Window carries). It
+// is a function, not a var, because the operator timezone is config-supplied
+// (budget_timezone) rather than a compile-time constant — one Window value per
+// caller, so nobody can mutate a shared one.
+func CalendarDayIn(loc *time.Location) Window {
+	return Window{Kind: CalDay, Loc: loc}
+}
+
 // Tag is the window's short, stable identifier for store-key namespacing:
 // "day", "month", or "r"+Dur for a rolling window. See Key (keys.go) for why
 // a window has to identify itself inside its own store key at all.

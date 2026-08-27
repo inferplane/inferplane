@@ -152,11 +152,16 @@ func newGateway(cfgPath string) (*gateway, error) {
 		}
 		metadata["managed_by"] = "config"
 		opts := keystore.KeyOptions{
-			RPM:             vk.RPM,
-			TPM:             vk.TPM,
-			BudgetUSDMicros: int64(math.Round(vk.BudgetUSDPerMonth * 1_000_000)),
-			Owner:           vk.Owner,
-			Metadata:        metadata,
+			RPM: vk.RPM,
+			TPM: vk.TPM,
+			// math.Round here, plain truncation in governance.PoliciesFromConfig:
+			// the two USD→µUSD sites have always disagreed and this phase mirrors
+			// each one's existing behavior rather than unifying them (that is its
+			// own change, with its own blast radius).
+			BudgetUSDMicros:       int64(math.Round(vk.BudgetUSDPerMonth * 1_000_000)),
+			BudgetUSDMicrosPerDay: int64(math.Round(vk.BudgetUSDPerDay * 1_000_000)),
+			Owner:                 vk.Owner,
+			Metadata:              metadata,
 		}
 		p, err := store.EnsureKey(context.Background(), vk.Key, vk.Team, vk.AllowedModels, opts)
 		if err != nil {
@@ -332,6 +337,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 			TokensPerDay:      tc.Quota.TokensPerDay,
 			QuotaExceeded:     tc.Quota.OnExceeded,
 			BudgetUSDPerMonth: tc.Budget.USDPerMonth,
+			BudgetUSDPerDay:   tc.Budget.USDPerDay,
 			BudgetExceeded:    tc.Budget.OnExceeded,
 		}
 	}
@@ -340,6 +346,15 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// is passed into Settle per request from the resolved snapshot, so the
 	// governor holds no pricing — only its persistent rate/budget counters.
 	gov := governance.NewGovernor(policies, limiter.NewMemory(), budget.NewMemory(), m) // budget_spend / pricing_miss
+	// Operator timezone for the CALENDAR-DAY budget window (config
+	// budget_timezone, default UTC). Read from raw rather than the effective
+	// config because it is a file-only key — the provider-store overlay has no
+	// opinion on it — and set once at assembly: the Governor's budget counters
+	// persist across hot-reloads, so a boundary a live counter already computed
+	// would not move anyway. The MONTH window stays UTC in this phase (see
+	// internal/governance §C8) because internal/proxy's lease reporting reads
+	// the same monthly counter and is out of this phase's scope.
+	gov.SetBudgetTimezone(raw.BudgetLocation())
 	// Team-policy layering (ADR-033 extends ADR-016). Base layer: keystore
 	// team RECORD (runtime console edits) wins wholesale over the static
 	// config map — D3's rule, checked fresh on every request (no restart, no
@@ -364,6 +379,10 @@ func newGateway(cfgPath string) (*gateway, error) {
 				QuotaExceeded:        rec.QuotaOnExceeded,
 				BudgetMicrosPerMonth: rec.BudgetUSDMicros,
 				BudgetExceeded:       rec.BudgetOnExceeded,
+				// keystore.TeamRecord carries ONE budget_on_exceeded column, so
+				// it governs both windows — same shape as config.BudgetConfig.
+				BudgetMicrosPerDay: rec.BudgetUSDMicrosPerDay,
+				BudgetDayExceeded:  rec.BudgetOnExceeded,
 			}), true
 		}
 		tp, ok := policies[team]
@@ -430,7 +449,12 @@ func newGateway(cfgPath string) (*gateway, error) {
 				}
 			}
 		}
-		// No quota rule kind yet — tokens/day always comes from the base.
+		// No quota rule kind yet — tokens/day always comes from the base. The
+		// DAILY budget is in the same position: a GovernancePolicy rule cannot
+		// express a window yet (that is the next phase's BudgetRule.period), so
+		// neither the policy overlay nor the lease clamp above can narrow or
+		// widen it, and it passes through from the base layer (config file or
+		// keystore team record) untouched.
 		tp := governance.PolicyFromLimits(governance.Limits{
 			RatePerMin:           rpm,
 			TokensPerMinute:      tpm,
@@ -438,6 +462,8 @@ func newGateway(cfgPath string) (*gateway, error) {
 			QuotaExceeded:        base.QuotaExceeded,
 			BudgetMicrosPerMonth: budgetMicros,
 			BudgetExceeded:       budgetExceeded,
+			BudgetMicrosPerDay:   base.BudgetMicrosPerDay,
+			BudgetDayExceeded:    base.BudgetDayExceeded,
 		})
 		// AdminContact rides with the binding budget rule (from the policy
 		// document, never the lease clamp — a lease grant carries no

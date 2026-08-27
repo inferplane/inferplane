@@ -29,6 +29,13 @@ type TeamPolicy struct {
 	QuotaExceeded        string // block|warn
 	BudgetMicrosPerMonth int64
 	BudgetExceeded       string
+	// BudgetMicrosPerDay/BudgetDayExceeded are the CALENDAR-DAY counterpart of
+	// the two fields above, enforced against a separate counter with its own
+	// store key (budget.Key's window tag). Both windows apply at once: a team
+	// can be capped at $50/day AND $1000/month, and either can deny. Zero =
+	// not limited on this dimension, same as the monthly pair.
+	BudgetMicrosPerDay int64
+	BudgetDayExceeded  string // block|warn
 	// AdminContact is surfaced verbatim in a 402 team-budget-exceeded
 	// response, when set (see policy.TeamLimits.AdminContact).
 	AdminContact string
@@ -50,6 +57,10 @@ type KeyPolicy struct {
 	RatePerMin           int64
 	TokensPerMinute      int64
 	BudgetMicrosPerMonth int64
+	// BudgetMicrosPerDay is the calendar-day counterpart. Like every per-key
+	// limit it always blocks — KeyOptions carries no on_exceeded knob, so
+	// there is deliberately no BudgetDayExceeded here.
+	BudgetMicrosPerDay int64
 }
 
 type BudgetUsage struct {
@@ -72,6 +83,12 @@ type UsageStatus struct {
 	TeamQuota  *QuotaUsage  `json:"team_quota,omitempty"`
 	KeyBudget  *BudgetUsage `json:"key_budget,omitempty"`
 	KeyQuota   *QuotaUsage  `json:"key_quota,omitempty"`
+	// TeamBudgetDay/KeyBudgetDay report the calendar-DAY counters. Appended,
+	// never folded into the fields above: repurposing team_budget's window
+	// string would silently change what every existing /v1/usage client
+	// believes it is reading.
+	TeamBudgetDay *BudgetUsage `json:"team_budget_day,omitempty"`
+	KeyBudgetDay  *BudgetUsage `json:"key_budget_day,omitempty"`
 }
 
 // Governor enforces rate/quota/budget and settles cost. Its stateful stores
@@ -89,6 +106,7 @@ type Governor struct {
 	leaseGate       func(team string) (blocked bool, reason string)          // ADR-034: optional budget-lease check, consulted first in PreCheck
 	lim             limiter.LimiterStore
 	bud             budget.BudgetStore
+	budgetLoc       *time.Location   // ADR-034-adjacent: budget_timezone; nil = UTC
 	metrics         *metrics.Metrics // nil-safe: no-op when nil
 }
 
@@ -142,6 +160,16 @@ func (g *Governor) SetLeaseGate(f func(team string) (blocked bool, reason string
 	g.leaseGate = f
 }
 
+// SetBudgetTimezone sets the timezone the CALENDAR-DAY budget window anchors its
+// midnight to (config budget_timezone). nil (the default) means UTC, which is
+// exactly what every budget window meant before this knob existed. Like
+// SetTeamLookup this is a startup-only assignment with no synchronization: the
+// window boundary of a counter that already exists does not move, so changing
+// the operator timezone takes a restart by design.
+func (g *Governor) SetBudgetTimezone(loc *time.Location) {
+	g.budgetLoc = loc
+}
+
 // policyOf resolves a team's policy: a dynamic-lookup hit wins over a config
 // entry of the same name (ADR-016 precedence — an admin console edit must not
 // be silently shadowed by the config file); a team present in neither is
@@ -154,6 +182,22 @@ func (g *Governor) policyOf(team string) (TeamPolicy, bool) {
 	}
 	p, ok := g.teams[team]
 	return p, ok
+}
+
+// dayWindow is the calendar-day budget window, built fresh per call from the
+// configured operator timezone. A method rather than a stored Window so a nil
+// Loc keeps meaning UTC and no caller can mutate a shared value.
+func (g *Governor) dayWindow() budget.Window {
+	return budget.CalendarDayIn(g.budgetLoc)
+}
+
+// budgetDayLoc resolves dayWindow's timezone for the 402 message's reset date,
+// defaulting to UTC exactly as budget.Window does for a nil Loc.
+func (g *Governor) budgetDayLoc() *time.Location {
+	if g.budgetLoc == nil {
+		return time.UTC
+	}
+	return g.budgetLoc
 }
 
 // PricingVersionOf returns the rate table version for the audit CostRef,
@@ -210,14 +254,44 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 		// because the per-request cost is unknown before the call. Real enforcement
 		// is the post-debit threshold; a single high-cost request can overshoot
 		// (accepted per §5.3).
+		//
+		// The daily window below is a SECOND, independent counter: its own store
+		// key (budget.Key's window tag), its own limit, its own on_exceeded knob.
+		// Both must allow. When both would deny we return whichever window resets
+		// SOONEST, so the 402's reset date is the earliest the caller can actually
+		// retry — and that really is a comparison, not "day always first": a
+		// non-UTC operator timezone can put the next daily midnight AFTER the UTC
+		// month boundary (KST midnight on Aug 31 is Sep 1 05:00 KST = Aug 31
+		// 20:00Z, past which the next daily reset is 2026-09-01T15:00Z while the
+		// monthly one is 2026-09-01T00:00Z).
+		var budgetDeny GovDecision
+		var budgetDenyResets time.Time
 		if p.BudgetMicrosPerMonth > 0 {
 			tbk := budget.Key(budget.ScopeTeam, team, budget.CalendarMonth)
 			if g.bud.Check(tbk, 0, p.BudgetMicrosPerMonth, budget.CalendarMonth) == budget.Block {
 				if p.BudgetExceeded != "warn" {
 					resetsAt := g.bud.ResetsAt(tbk, budget.CalendarMonth)
-					return GovDecision{Status: 402, Reason: budgetExceededMessage("budget", resetsAt, p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
+					budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("budget", resetsAt, time.UTC, p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
+					budgetDenyResets = resetsAt
 				}
 			}
+		}
+		if p.BudgetMicrosPerDay > 0 {
+			dw := g.dayWindow()
+			tbkDay := budget.Key(budget.ScopeTeam, team, dw)
+			if g.bud.Check(tbkDay, 0, p.BudgetMicrosPerDay, dw) == budget.Block {
+				if p.BudgetDayExceeded != "warn" {
+					resetsAt := g.bud.ResetsAt(tbkDay, dw)
+					// Block wins on tie: keep whichever window binds soonest.
+					if budgetDeny.Status == 0 || resetsAt.Before(budgetDenyResets) {
+						budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("daily budget", resetsAt, g.budgetDayLoc(), p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
+						budgetDenyResets = resetsAt
+					}
+				}
+			}
+		}
+		if budgetDeny.Status != 0 {
+			return budgetDeny
 		}
 	}
 	// Per-key limits (§8 D2) — independent of team governance, always block.
@@ -227,22 +301,42 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 	if kp.TokensPerMinute > 0 && !g.lim.AllowRate("tpm:key:"+keyID, estimateTokens, kp.TokensPerMinute, kp.TokensPerMinute) {
 		return GovDecision{Status: 429, Reason: "key token rate limit exceeded", Code: audit.DenyKeyTokenRateLimited}
 	}
+	// Per-key budget: same two-window shape as the team block above, minus the
+	// on_exceeded knob (a key limit always blocks).
+	var keyBudgetDeny GovDecision
+	var keyBudgetDenyResets time.Time
 	if kp.BudgetMicrosPerMonth > 0 {
 		kbk := budget.Key(budget.ScopeKey, keyID, budget.CalendarMonth)
 		if g.bud.Check(kbk, 0, kp.BudgetMicrosPerMonth, budget.CalendarMonth) == budget.Block {
 			resetsAt := g.bud.ResetsAt(kbk, budget.CalendarMonth)
-			return GovDecision{Status: 402, Reason: budgetExceededMessage("key budget", resetsAt, ""), Code: audit.DenyKeyBudgetExceeded}
+			keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key budget", resetsAt, time.UTC, ""), Code: audit.DenyKeyBudgetExceeded}
+			keyBudgetDenyResets = resetsAt
 		}
+	}
+	if kp.BudgetMicrosPerDay > 0 {
+		dw := g.dayWindow()
+		kbkDay := budget.Key(budget.ScopeKey, keyID, dw)
+		if g.bud.Check(kbkDay, 0, kp.BudgetMicrosPerDay, dw) == budget.Block {
+			resetsAt := g.bud.ResetsAt(kbkDay, dw)
+			if keyBudgetDeny.Status == 0 || resetsAt.Before(keyBudgetDenyResets) {
+				keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key daily budget", resetsAt, g.budgetDayLoc(), ""), Code: audit.DenyKeyBudgetExceeded}
+				keyBudgetDenyResets = resetsAt
+			}
+		}
+	}
+	if keyBudgetDeny.Status != 0 {
+		return keyBudgetDeny
 	}
 	return GovDecision{Allowed: true}
 }
 
-// budgetExceededMessage builds the 402 body: when it resets and, if the
-// binding budget rule carries one, where to go for a raise (an admin
-// contact hint, verbatim from the policy — never a default, since a wrong
-// guess at contact info is worse than no contact info).
-func budgetExceededMessage(kind string, resetsAt time.Time, adminContact string) string {
-	msg := fmt.Sprintf("%s exceeded — resets %s", kind, resetsAt.UTC().Format("2006-01-02"))
+// budgetExceededMessage builds the 402 body: when it resets — rendered in the
+// budget window's OWN timezone, so a KST-anchored daily window does not print
+// the previous UTC date — and, if the binding budget rule carries one, where to
+// go for a raise (an admin contact hint, verbatim from the policy — never a
+// default, since a wrong guess at contact info is worse than no contact info).
+func budgetExceededMessage(kind string, resetsAt time.Time, loc *time.Location, adminContact string) string {
+	msg := fmt.Sprintf("%s exceeded — resets %s", kind, resetsAt.In(loc).Format("2006-01-02"))
 	if adminContact != "" {
 		msg += ". Contact your admin: " + adminContact
 	}
@@ -263,6 +357,18 @@ func (g *Governor) UsageOf(team, keyID string, kp KeyPolicy) UsageStatus {
 				ResetsAt:           g.bud.ResetsAt(tbk, budget.CalendarMonth),
 			}
 		}
+		if p.BudgetMicrosPerDay > 0 {
+			dw := g.dayWindow()
+			tbkDay := budget.Key(budget.ScopeTeam, team, dw)
+			spent := g.bud.Spent(tbkDay, dw)
+			u.TeamBudgetDay = &BudgetUsage{
+				LimitUSDMicros:     p.BudgetMicrosPerDay,
+				SpentUSDMicros:     spent,
+				RemainingUSDMicros: max64(0, p.BudgetMicrosPerDay-spent),
+				Window:             "calendar-day",
+				ResetsAt:           g.bud.ResetsAt(tbkDay, dw),
+			}
+		}
 		if p.TokensPerDay > 0 {
 			u.TeamQuota = &QuotaUsage{
 				LimitTokens: p.TokensPerDay,
@@ -280,6 +386,18 @@ func (g *Governor) UsageOf(team, keyID string, kp KeyPolicy) UsageStatus {
 			RemainingUSDMicros: max64(0, kp.BudgetMicrosPerMonth-spent),
 			Window:             "calendar-month",
 			ResetsAt:           g.bud.ResetsAt(kbk, budget.CalendarMonth),
+		}
+	}
+	if kp.BudgetMicrosPerDay > 0 {
+		dw := g.dayWindow()
+		kbkDay := budget.Key(budget.ScopeKey, keyID, dw)
+		spent := g.bud.Spent(kbkDay, dw)
+		u.KeyBudgetDay = &BudgetUsage{
+			LimitUSDMicros:     kp.BudgetMicrosPerDay,
+			SpentUSDMicros:     spent,
+			RemainingUSDMicros: max64(0, kp.BudgetMicrosPerDay-spent),
+			Window:             "calendar-day",
+			ResetsAt:           g.bud.ResetsAt(kbkDay, dw),
 		}
 	}
 	if kp.TokensPerMinute > 0 {
@@ -355,6 +473,17 @@ func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model stri
 			g.notifyBudget(team, spent, p.BudgetMicrosPerMonth)
 		}
 	}
+	if p.BudgetMicrosPerDay > 0 {
+		dw := g.dayWindow()
+		g.bud.Debit(budget.Key(budget.ScopeTeam, team, dw), costMicros, dw)
+		// Deliberately no gauge write and no alert hook for the daily window in
+		// this phase, and that is CORRECTNESS, not an omission:
+		// metrics.SetBudgetUtilization(team, ratio) carries no window label, so
+		// a second write here would make one gauge series flap between the day
+		// and month ratios; alert.Notifier dedupes already-fired thresholds by
+		// team alone, so a day crossing would suppress the month crossing.
+		// Both need a window dimension first (internal/metrics, internal/alert).
+	}
 	if kp.BudgetMicrosPerMonth > 0 {
 		kbk := budget.Key(budget.ScopeKey, keyID, budget.CalendarMonth)
 		g.bud.Debit(kbk, costMicros, budget.CalendarMonth)
@@ -366,6 +495,12 @@ func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model stri
 			spent := g.bud.Spent(kbk, budget.CalendarMonth)
 			g.notifyKeyBudget(team, keyID, spent, kp.BudgetMicrosPerMonth)
 		}
+	}
+	if kp.BudgetMicrosPerDay > 0 {
+		dw := g.dayWindow()
+		g.bud.Debit(budget.Key(budget.ScopeKey, keyID, dw), costMicros, dw)
+		// Same reasoning as the team daily debit above: no per-key alert hook
+		// for the daily window until alert.Notifier's fired-set is window-keyed.
 	}
 	// Observability metrics (approximation; the µUSD budget store is the
 	// settlement source of truth). Recorded for every settled request, even an

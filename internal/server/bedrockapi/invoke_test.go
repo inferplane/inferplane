@@ -493,3 +493,18 @@ func TestInvokeRecordsUsageIntoCollector(t *testing.T) {
 		t.Fatalf("token counts wrong: %+v", e)
 	}
 }
+
+// TestKeyPolicyOfMapsAllFields guards keyPolicyOf against a future field added
+// to KeyOptions or KeyPolicy without updating the mapping. The sibling ingress
+// packages (anthropicapi, openaiapi) have carried this guard for their own copy
+// since §8 D2; this one was missing, so the third copy of the same three-line
+// mapping was the only unpinned one — added while extending all three for the
+// calendar-day budget.
+func TestKeyPolicyOfMapsAllFields(t *testing.T) {
+	p := keystore.Principal{KeyOptions: keystore.KeyOptions{RPM: 60, TPM: 1000, BudgetUSDMicros: 5_000_000, BudgetUSDMicrosPerDay: 250_000}}
+	got := keyPolicyOf(p)
+	want := governance.KeyPolicy{RatePerMin: 60, TokensPerMinute: 1000, BudgetMicrosPerMonth: 5_000_000, BudgetMicrosPerDay: 250_000}
+	if got != want {
+		t.Fatalf("keyPolicyOf(%+v) = %+v, want %+v", p.KeyOptions, got, want)
+	}
+}

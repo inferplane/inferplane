@@ -19,12 +19,13 @@ import (
 // Create() has none of these set. Budget/TPM/RPM are enforced in the request
 // hot path (internal/governance.Governor, layered on top of team policy).
 type KeyOptions struct {
-	BudgetUSDMicros int64             // 0 = unlimited; integer microUSD, never float
-	TPM             int64             // 0 = unlimited
-	RPM             int64             // 0 = unlimited
-	ExpiresAt       *time.Time        // nil = never; enforced in Resolve
-	Owner           string            // opaque identifier, optional — never use as a metric label (unbounded cardinality; CLAUDE.md forbids raw-input metric labels)
-	Metadata        map[string]string // optional key/value tags — same caution: never use as a metric label
+	BudgetUSDMicros       int64             // 0 = unlimited; integer microUSD, never float
+	BudgetUSDMicrosPerDay int64             // 0 = unlimited; the calendar-day counterpart of BudgetUSDMicros, also integer microUSD
+	TPM                   int64             // 0 = unlimited
+	RPM                   int64             // 0 = unlimited
+	ExpiresAt             *time.Time        // nil = never; enforced in Resolve
+	Owner                 string            // opaque identifier, optional — never use as a metric label (unbounded cardinality; CLAUDE.md forbids raw-input metric labels)
+	Metadata              map[string]string // optional key/value tags — same caution: never use as a metric label
 }
 
 // Principal is the resolved identity behind a virtual key (M3: service-account
@@ -60,14 +61,15 @@ type Store interface {
 // keystore row (D3, ADR-016). Zero value of a numeric field means "unlimited",
 // same convention as KeyOptions. Budget is integer microUSD, never float.
 type TeamRecord struct {
-	Name             string
-	AllowedModels    []string // default allow-list for keys created under this team; not itself hot-path enforced (ADR-016)
-	RPM              int64
-	TPM              int64
-	TokensPerDay     int64
-	QuotaOnExceeded  string // "" | "block" | "warn"
-	BudgetUSDMicros  int64
-	BudgetOnExceeded string // "" | "block" | "warn"
+	Name                  string
+	AllowedModels         []string // default allow-list for keys created under this team; not itself hot-path enforced (ADR-016)
+	RPM                   int64
+	TPM                   int64
+	TokensPerDay          int64
+	QuotaOnExceeded       string // "" | "block" | "warn"
+	BudgetUSDMicros       int64
+	BudgetUSDMicrosPerDay int64
+	BudgetOnExceeded      string // "" | "block" | "warn"
 	// GuardrailID/GuardrailVersion override the provider's default Bedrock
 	// Guardrail for this team (D6, ADR-019) — a different guardrail, never
 	// "none" (no per-team opt-out; the anti-bypass fix cannot be disabled by
