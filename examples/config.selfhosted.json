@@ -21,5 +21,7 @@
       "allowed_models": [ "llama3.3", "qwen2.5-coder" ],
       "rate_limit": { "requests_per_minute": 120 }
     }
-  }
+  },
+  "_comment_pricing": "Deliberately no bundled rate: a self-hosted deployment's per-token cost is specific to that deployment (ADR-030 §5). on_missing:\"allow\" bills 0 and records missing=true rather than refusing the request; declare real input_per_mtok/output_per_mtok under pricing.overrides to get chargeback. mayu pricing sync does NOT cover openai_compatible providers — it is Bedrock-only.",
+  "pricing": { "on_missing": "allow" }
 }

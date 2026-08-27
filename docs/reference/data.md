@@ -77,10 +77,19 @@ way to end up billing 0.
 | Cache rates | Derived from input: read **0.1x**, 5m write **1.25x**, 1h write **2.0x**. Declare `input_per_mtok` + `output_per_mtok` and the three follow. An explicit value wins; `0` means derive. |
 | `on_missing` | `block` → refuse to boot on an unpriced route AND deny at runtime (402 `pricing_missing`). `allow` (default) → log loudly, bill 0. An unrecognized value is a load error. |
 | `version` | Free-form label landing in every audit record's `cost.pricing_version`. Set it so a disputed invoice can be pinned to its rates. |
+| `free` | A `0/0` override needs an explicit `"free": true` — the ONLY way to declare a genuinely zero-cost model. That opt-in is what makes cost 0 + `missing=false` a deliberate statement instead of an accident. |
+| `0/0` | `input_per_mtok: 0` + `output_per_mtok: 0` without `free` is a LOAD ERROR — 0 means unpriced, not free. A single-sided zero is allowed. Enforced twice: at load, and again at table build, because `BuildState` is also reached by the UI-write overlay and by hot reload, which never see the file loader. |
+| `pricing sync` | `mayu pricing sync --config <p> [--out <f>]` generates `pricing.overrides` for the config's **bedrock** routes from the AWS Price List Query API. Offline, operator-run, never on the request path. Needs IAM `pricing:GetProducts`. Exits 1 naming any route it could not resolve — it never emits a placeholder. `openai_compatible` routes are skipped by design. |
 
 Adding a newly released model is therefore: read its two published figures, add
 `input_per_mtok` + `output_per_mtok`. With `on_missing: "block"` a forgotten rate
 fails the boot and names the route, so it cannot reach production silently.
+For a Bedrock route, `mayu pricing sync` fetches those two figures from the AWS
+Price List Query API — except Claude-on-Bedrock, which has no current Price List
+SKUs (verified against the live API, 2026-08-26: the `us-east-1` Bedrock price
+list carries only five legacy Anthropic rows — Claude 2.0, 2.1, Instant, 3
+Haiku, 3 Sonnet — each input-only with no output row), so those rates stay
+manual.
 
 ### 5. Cross-references
 - Related modules: `internal/governance`, `internal/server` (auth)

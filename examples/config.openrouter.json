@@ -30,5 +30,7 @@
       "allowed_models": [ "deepseek/deepseek-chat", "z-ai/glm-4.6", "qwen/qwen3-coder", "moonshotai/kimi-k2" ],
       "rate_limit": { "requests_per_minute": 120 }
     }
-  }
+  },
+  "_comment_pricing": "Deliberately no bundled rate here: a resold deployment's per-token cost is specific to that reseller (ADR-030 §5). on_missing:\"allow\" bills 0 and records missing=true rather than refusing the request; declare real input_per_mtok/output_per_mtok under pricing.overrides to get chargeback. mayu pricing sync does NOT cover this provider — it is Bedrock-only.",
+  "pricing": { "on_missing": "allow" }
 }
