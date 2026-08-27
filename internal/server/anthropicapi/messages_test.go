@@ -656,6 +656,35 @@ func TestKeyPolicyOfMapsAllFields(t *testing.T) {
 	}
 }
 
+// TestSubjectOfMapsAllFields guards subjectOf against dropping Owner: Owner is
+// the field that carries the individual's identity into per-user budget
+// enforcement, and a subjectOf that dropped it would silently disable the
+// whole feature — Subject.User == "" makes the Governor skip the user lookup
+// entirely, with no error anywhere (this function is duplicated in the sibling
+// ingress packages — governance stays a leaf and does not import keystore, so
+// each ingress package maps its own Principal → Subject; this test only proves
+// THIS copy is correct).
+func TestSubjectOfMapsAllFields(t *testing.T) {
+	p := keystore.Principal{Team: "team-a", KeyID: "key-b", KeyOptions: keystore.KeyOptions{Owner: "owner-c"}}
+	got := subjectOf(p)
+	want := governance.Subject{Team: "team-a", KeyID: "key-b", User: "owner-c"}
+	if got != want {
+		t.Fatalf("subjectOf(%+v) = %+v, want %+v", p, got, want)
+	}
+}
+
+// TestSubjectOfEmptyOwnerYieldsEmptyUser pins the byte-identical-to-Phase-2
+// path: a Principal with no Owner yields Subject.User == "" (no user lookup,
+// no user counter, no user_budget in /v1/usage).
+func TestSubjectOfEmptyOwnerYieldsEmptyUser(t *testing.T) {
+	p := keystore.Principal{Team: "team-a", KeyID: "key-b"}
+	got := subjectOf(p)
+	want := governance.Subject{Team: "team-a", KeyID: "key-b"}
+	if got != want {
+		t.Fatalf("subjectOf(%+v) = %+v, want %+v", p, got, want)
+	}
+}
+
 func TestMessagesGovernorKeyBudgetBlocks402EvenForUngovernedTeam(t *testing.T) {
 	bud := budget.NewMemory()
 	// No TeamPolicy entry for "platform-eng" at all — the team is ungoverned;
