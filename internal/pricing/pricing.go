@@ -89,6 +89,18 @@ func normalizeModel(model string) string {
 	return ""
 }
 
+// BaseModelID returns model with one leading Bedrock cross-region prefix
+// stripped, or model unchanged when it carries none. Exported so an offline
+// tool that has to correlate a configured upstream id with an external catalog
+// (`mayu pricing sync`) uses the SAME prefix list the rate lookup does, instead
+// of a second copy that can drift from bedrockRegionPrefixes.
+func BaseModelID(model string) string {
+	if base := normalizeModel(model); base != "" {
+		return base
+	}
+	return model
+}
+
 // HasRate reports whether a rate exists for this (provider, model), following
 // the same two-stage lookup CostUSDMicros uses. This is the single predicate
 // behind boot-time validation and `mayu pricing check`, so neither can
