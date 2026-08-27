@@ -115,21 +115,66 @@ type win struct {
 	windowEnd time.Time
 }
 
+// sweepEvery amortizes the expired-entry scan: every sweepEvery-th cur call
+// walks the map once and deletes what has already expired. Chosen over both a
+// probabilistic (rand) sweep and a secondary expiry-ordered heap. Against
+// rand: this is deterministic, so a test can pin it without seeding a RNG.
+// Against a heap: a heap is O(log n) on EVERY touch and is a second structure
+// that has to stay consistent with m, which is a whole new class of bug for a
+// money store — a full scan every 256 calls is amortized O(n/256) per call
+// and cannot disagree with m, because m is the only structure there is.
+const sweepEvery = 256
+
+// defaultMaxEntries caps live counters per store. ~100k live counters is
+// roughly 15 MB of map, and reaching it means 100k distinct (scope, id) pairs
+// spent money inside ONE window — see cur for what happens then.
+const defaultMaxEntries = 100_000
+
 type Memory struct {
-	mu  sync.Mutex
-	m   map[string]*win
-	now func() time.Time
+	mu         sync.Mutex
+	m          map[string]*win
+	now        func() time.Time
+	maxEntries int
+	sweepTick  int
+	rejected   int64
 }
 
-func NewMemory() *Memory { return &Memory{m: map[string]*win{}, now: time.Now} }
+func NewMemory() *Memory {
+	return &Memory{m: map[string]*win{}, now: time.Now, maxEntries: defaultMaxEntries}
+}
+
+// Rejections reports how many store OPERATIONS were refused because the
+// store was at capacity (not how many distinct keys). Non-zero means some
+// request was denied 402 by the capacity fail-safe rather than by a real
+// budget, which is an operator-visible condition — a metric with a user
+// dimension is forbidden (CLAUDE.md), so this counter is the seam.
+func (b *Memory) Rejections() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.rejected
+}
 
 func (b *Memory) Check(key string, estimateMicros, limitMicros int64, w Window) Decision {
 	if limitMicros <= 0 {
-		return Allow
+		return Allow // unlimited: no counter needed, so capacity cannot bite
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	bkt := b.cur(key, w)
+	if bkt == nil {
+		// At capacity with a REAL limit to enforce: fail closed. The three
+		// candidate failure modes and why this is the only safe one:
+		//   - Evicting a LIVE bucket would discard spend already debited
+		//     against a real cap; the counter restarts at 0 and the cap is
+		//     spent again — the store silently under-counts spend. Forbidden.
+		//   - Refusing the new key and returning Allow leaves that cap
+		//     unenforced — also silently under-counts. Forbidden.
+		//   - Refusing the new key and returning Block denies the request
+		//     instead of serving one the store cannot account for — the same
+		//     fail-closed posture SetLeaseGate takes when a hard-cap lease
+		//     expires. This is the choice.
+		return Block
+	}
 	if bkt.spent+estimateMicros > limitMicros {
 		return Block
 	}
@@ -139,29 +184,79 @@ func (b *Memory) Check(key string, estimateMicros, limitMicros int64, w Window) 
 func (b *Memory) Debit(key string, actualMicros int64, w Window) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.cur(key, w).spent += actualMicros
+	if bkt := b.cur(key, w); bkt != nil {
+		bkt.spent += actualMicros
+	}
 }
 
 func (b *Memory) Spent(key string, w Window) int64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.cur(key, w).spent
+	bkt := b.cur(key, w)
+	if bkt == nil {
+		return 0
+	}
+	return bkt.spent
 }
 
+// ResetsAt reports when the current window ends. When the store is at
+// capacity and cannot admit a new counter for key, the boundary is computed
+// from the clock without storing anything — an honest display value, since
+// windowEnd depends only on (now, w), never on the bucket.
 func (b *Memory) ResetsAt(key string, w Window) time.Time {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.cur(key, w).windowEnd
+	bkt := b.cur(key, w)
+	if bkt == nil {
+		return windowEnd(b.now(), w)
+	}
+	return bkt.windowEnd
 }
 
+// cur returns key's current bucket, creating or rolling it as needed, or NIL
+// when the store is at capacity and cannot admit a genuinely new counter.
+// Every caller must handle nil; see Check for the fail-closed rationale.
+//
+// Deleting an EXPIRED entry cannot lose spend, and that is the whole
+// correctness argument for the sweep: cur already discards an expired
+// bucket's spend on the next touch of that key (it builds a fresh &win{}),
+// so "delete now" and "leave it for cur to replace" are the same observable
+// behaviour. The sweep only reclaims memory.
 func (b *Memory) cur(key string, w Window) *win {
 	t := b.now()
-	bkt := b.m[key]
-	if bkt == nil || !t.Before(bkt.windowEnd) {
-		bkt = &win{windowEnd: windowEnd(t, w)}
-		b.m[key] = bkt
+	b.sweepTick++
+	if b.sweepTick >= sweepEvery {
+		b.sweepTick = 0
+		b.sweepExpired(t)
 	}
+	bkt := b.m[key]
+	if bkt != nil && t.Before(bkt.windowEnd) {
+		return bkt
+	}
+	// ROLLING AN EXISTING KEY MUST NEVER BE REFUSED. It replaces an entry
+	// rather than adding one, so it cannot grow the map — and refusing it
+	// would permanently block a team whose month simply turned over while
+	// the store happened to be full. Only bkt == nil is a new key.
+	if bkt == nil && len(b.m) >= b.maxEntries {
+		b.sweepExpired(t) // last chance: reclaim dead windows before refusing
+		if len(b.m) >= b.maxEntries {
+			b.rejected++
+			return nil
+		}
+	}
+	bkt = &win{windowEnd: windowEnd(t, w)}
+	b.m[key] = bkt
 	return bkt
+}
+
+// sweepExpired deletes every bucket whose window has ended, using cur's own
+// expiry predicate so there is exactly one definition of "expired".
+func (b *Memory) sweepExpired(t time.Time) {
+	for k, v := range b.m {
+		if !t.Before(v.windowEnd) {
+			delete(b.m, k)
+		}
+	}
 }
 
 // windowEnd resolves a window's boundary from t: CalDay anchors to the next
