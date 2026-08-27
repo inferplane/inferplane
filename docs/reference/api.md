@@ -41,6 +41,8 @@ contract is in [docs/api-reference.md](../api-reference.md).
 - Errors are returned in the ingress protocol's own error shape; the unknown/disallowed-model messages append the allow-filtered available-model list (ADR-021).
 - **Model-level fallback (ADR-029, D5).** `model_fallbacks` (config, requested → served model, one hop) plus a default same-family heuristic (`model_fallback_family`, default on: an unrouted `claude-opus-5` falls back to the highest configured `claude-opus-*` version below it) substitutes a served model for an unconfigured requested one BEFORE the allow-list check — a key allowed only the requested name is denied, never silently downgraded. A configured model whose upstream 404s (or Bedrock 400s `ValidationException`) also crosses to the fallback model within the existing priority-fallback loop; the ingress re-checks RBAC on that cross-model target (`router.FilterModelAllowed`) since it was appended after the original allow-list check. Either path sets `x-inferplane-model-fallback: <served model>` on the response (independent of the existing per-provider `x-inferplane-fallback: <provider>`).
 
+- **Budget windows (ADR-042).** A GovernancePolicy `budget` rule carries an optional `period` — `CalendarDay` or `CalendarMonth`; omitting it means `CalendarMonth`, so every existing document keeps its meaning. It must not be combined with `unlimited: true` ("no cap" has no window). A daily cap and a monthly cap are TWO rules in `spec.rules`, never two fields on one rule — `hardCap`/`failurePolicy`/`lease`/`adminContact` are per-rule, so each window carries its own.
+
 ### 4. Code Pointers
 - `internal/server/anthropicapi/messages.go` — Messages handler, streaming tee, cardinality-safe labels
 - `internal/server/openaiapi/chat.go` — Chat Completions handler
@@ -48,5 +50,5 @@ contract is in [docs/api-reference.md](../api-reference.md).
 
 ### 5. Cross-references
 - Related modules: `internal/router`, `internal/governance`, `internal/alert`, `internal/bodystore`, `providers/`
-- Related ADRs: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md, docs/decisions/ADR-040-credential-brokering.md
+- Related ADRs: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md, docs/decisions/ADR-040-credential-brokering.md, docs/decisions/ADR-042-budget-windows.md
 - Related runbooks: docs/runbooks/, docs/runbooks/cli-login.md
