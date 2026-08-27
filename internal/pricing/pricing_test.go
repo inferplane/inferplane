@@ -119,3 +119,28 @@ func TestHasRate_matchesCostLookup(t *testing.T) {
 		}
 	}
 }
+
+// BaseModelID strips exactly ONE leading cross-region prefix, matching
+// normalizeModel's single-pass contract. A future "helpful" loop that kept
+// stripping would break the CostUSDMicros lookup's semantics: a rate declared
+// on `us.anthropic.*` must not be found via the doubly-stripped bare id.
+func TestBaseModelID(t *testing.T) {
+	cases := []struct {
+		input, want string
+	}{
+		{"global.anthropic.claude-opus-5", "anthropic.claude-opus-5"},
+		{"us.anthropic.claude-opus-5", "anthropic.claude-opus-5"},
+		{"eu.anthropic.claude-opus-5", "anthropic.claude-opus-5"},
+		{"apac.zai.glm-5", "zai.glm-5"},
+		{"us-gov.anthropic.claude-opus-5", "anthropic.claude-opus-5"},
+		{"anthropic.claude-opus-5", "anthropic.claude-opus-5"}, // no prefix — unchanged
+		{"zai.glm-5", "zai.glm-5"},
+		{"us.us.anthropic.claude-opus-5", "us.anthropic.claude-opus-5"}, // ONE prefix only
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := BaseModelID(c.input); got != c.want {
+			t.Errorf("BaseModelID(%q) = %q, want %q", c.input, got, c.want)
+		}
+	}
+}
