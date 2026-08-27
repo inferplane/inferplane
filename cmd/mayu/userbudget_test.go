@@ -275,3 +275,49 @@ spec:
 		}
 	})
 }
+
+// TestUserLookupWiringHardDayRuleAloneStillBlocks kills the two surviving
+// wiring mutations (design §K): a HARD CalendarDay rule standing ALONE must
+// (6) collapse to "block" via ul.BudgetDayHard — every other fixture pairs a
+// hard MONTH rule, where ul.BudgetHard is already true and dropping
+// `|| ul.BudgetDayHard` changes nothing — and (8) surface the day rule's
+// adminContact through the AdminContactDay fallback, which only runs when
+// ul.AdminContact is empty.
+//
+// The ABSENCE of a month rule is load-bearing: adding one makes
+// ul.BudgetHard true and this test can no longer distinguish the mutation it
+// exists for. Do not "improve" the fixture with a month rule.
+func TestUserLookupWiringHardDayRuleAloneStillBlocks(t *testing.T) {
+	up := newAnthropicUpstream(t)
+	pol := `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: pol-user-hard-day }
+spec:
+  subject: { user: sub-hardday }
+  rules:
+  - name: user-day-cap
+    failurePolicy: FailClosed
+    budget:
+      period: CalendarDay
+      limitMilliUSD: 1
+      hardCap: true
+      adminContact: "ops@example.invalid"
+`
+	dataURL, adminURL := userBudgetGateway(t, up.srv.URL, pol, "pol-team")
+	_, key := createOwnedKey(t, adminURL, "pol-team", "sub-hardday", []string{"*"})
+
+	// Pre-check reads ACCUMULATED spend, so the first request always passes.
+	mustPost(t, dataURL, key, http.StatusOK, "first request under a hard day-only rule")
+	// Mutation 6: with no month rule, ul.BudgetHard == false and only
+	// ul.BudgetDayHard can flip the knob to "block" — the mutant warns and
+	// admits this request.
+	body := mustPost(t, dataURL, key, http.StatusPaymentRequired, "second request past the hard day-only cap")
+	if !strings.Contains(body, "user daily budget exceeded") {
+		t.Fatalf("402 must name the user DAILY budget: %s", body)
+	}
+	// Mutation 8: with no month rule, ul.AdminContact == "" and only the
+	// AdminContactDay fallback can supply the contact hint.
+	if !strings.Contains(body, "Contact your admin: ops@example.invalid") {
+		t.Fatalf("402 must carry the day rule's adminContact via the AdminContactDay fallback: %s", body)
+	}
+}
