@@ -15,7 +15,13 @@ const (
 	DenyKeyTokenRateLimited  DenyReason = "key_token_rate_limited"
 	DenyTeamBudgetExceeded   DenyReason = "team_budget_exceeded"
 	DenyKeyBudgetExceeded    DenyReason = "key_budget_exceeded"
-	DenyRegionBlocked        DenyReason = "region_blocked"
+	// DenyUserBudgetExceeded: a per-USER budget rule denied the request
+	// (ADR-042 Phase 3). Its own code rather than a reuse of
+	// team_budget_exceeded because the two say different things to whoever
+	// reads the audit log: the team still has headroom, this individual does
+	// not, and only one of those is fixed by raising the team's cap.
+	DenyUserBudgetExceeded DenyReason = "user_budget_exceeded"
+	DenyRegionBlocked      DenyReason = "region_blocked"
 	// DenyPricingMissing: pricing.on_missing is "block" and the resolved
 	// (provider, upstream) has no rate, so serving the request would bill 0
 	// (ADR-030). Distinct from a budget denial — nothing was exceeded; the
