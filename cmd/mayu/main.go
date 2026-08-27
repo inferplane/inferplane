@@ -77,6 +77,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  mayu bodies rewrap-key --store <path> --old-key-env <VAR>|--old-key-file <path> --new-key-env <VAR>|--new-key-file <path>")
 	fmt.Fprintln(os.Stderr, "  mayu report --file <path> [--since <RFC3339>] [--until <RFC3339>] [--by team|team,model]")
 	fmt.Fprintln(os.Stderr, "  mayu pricing check --config <path>")
+	fmt.Fprintln(os.Stderr, "  mayu pricing sync --config <path> [--out <path>]")
 	fmt.Fprintln(os.Stderr, "  mayu login --gateway <url> [--team <t>] [--issuer <url> --client-id <id>] [--id-token-command <cmd>]")
 	fmt.Fprintln(os.Stderr, "  mayu token [--export] [--raw]")
 	fmt.Fprintln(os.Stderr, "  mayu logout")
