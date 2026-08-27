@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
 )
 
 func writePolicy(t *testing.T, dir, name, body string) string {
@@ -120,6 +122,139 @@ func TestTeamLimitsMergeUnlimitedOnlyStillContributes(t *testing.T) {
 	}
 	if tl.BudgetMicrosPerMonth != 0 || tl.BudgetHard {
 		t.Fatalf("unlimited-only merge should be all-zero: %+v", tl)
+	}
+}
+
+// A day rule and a month rule in one policy land in one TeamLimits, each in
+// its own window: the day limit, hard flag, and contact never bleed into the
+// month fields, nor the reverse. The cross-window hard-flag assertions are
+// what stop the two flags being wired to one variable — a bug that would
+// make a soft daily cap block, or a hard monthly cap only warn.
+func TestTeamLimitsMergeDayAndMonthFoldIndependently(t *testing.T) {
+	p := &Policy{Name: "two-windows", Subject: Subject{Team: "t"},
+		Rules: []Rule{
+			{Name: "day-cap", Budget: &Budget{LimitMicroUSD: 50_000_000, HardCap: true, AdminContact: "day@ops", Period: v1alpha1.PeriodCalendarDay}},
+			{Name: "month-cap", Budget: &Budget{LimitMicroUSD: 1_000_000_000, AdminContact: "month@ops"}},
+		}}
+	got := mergeTeamLimits([]*Policy{p})
+	tl, ok := got["t"]
+	if !ok {
+		t.Fatal("team missing from merge result")
+	}
+	if tl.BudgetMicrosPerDay != 50_000_000 || tl.BudgetMicrosPerMonth != 1_000_000_000 {
+		t.Fatalf("day and month limits did not land independently: %+v", tl)
+	}
+	if !tl.BudgetDayHard || tl.BudgetHard {
+		t.Fatalf("hard day rule must set BudgetDayHard and leave BudgetHard false: %+v", tl)
+	}
+	if tl.AdminContactDay != "day@ops" || tl.AdminContact != "month@ops" {
+		t.Fatalf("adminContact landed in the wrong window: %+v", tl)
+	}
+}
+
+// The mirror of the above: a hard MONTH rule sets BudgetHard and must not
+// set BudgetDayHard, and its contact stays in the month field.
+func TestTeamLimitsMergeHardMonthDoesNotHardenDay(t *testing.T) {
+	p := &Policy{Name: "two-windows", Subject: Subject{Team: "t"},
+		Rules: []Rule{
+			{Name: "day-cap", Budget: &Budget{LimitMicroUSD: 50_000_000, AdminContact: "day@ops", Period: v1alpha1.PeriodCalendarDay}},
+			{Name: "month-cap", Budget: &Budget{LimitMicroUSD: 1_000_000_000, HardCap: true, AdminContact: "month@ops"}},
+		}}
+	tl, ok := mergeTeamLimits([]*Policy{p})["t"]
+	if !ok {
+		t.Fatal("team missing from merge result")
+	}
+	if !tl.BudgetHard || tl.BudgetDayHard {
+		t.Fatalf("hard month rule must set BudgetHard and leave BudgetDayHard false: %+v", tl)
+	}
+	if tl.AdminContact != "month@ops" || tl.AdminContactDay != "day@ops" {
+		t.Fatalf("adminContact landed in the wrong window: %+v", tl)
+	}
+}
+
+// Most-restrictive-wins is computed PER WINDOW: two day rules fold to the
+// smaller day limit without touching the month limit, and two month rules
+// the mirror.
+func TestTeamLimitsMergeMostRestrictivePerWindow(t *testing.T) {
+	twoDay := &Policy{Name: "two-day", Subject: Subject{Team: "t"},
+		Rules: []Rule{
+			{Name: "day-loose", Budget: &Budget{LimitMicroUSD: 80_000_000, Period: v1alpha1.PeriodCalendarDay}},
+			{Name: "day-tight", Budget: &Budget{LimitMicroUSD: 30_000_000, Period: v1alpha1.PeriodCalendarDay}},
+			{Name: "month-cap", Budget: &Budget{LimitMicroUSD: 1_000_000_000}},
+		}}
+	tl, ok := mergeTeamLimits([]*Policy{twoDay})["t"]
+	if !ok {
+		t.Fatal("team missing from merge result")
+	}
+	if tl.BudgetMicrosPerDay != 30_000_000 {
+		t.Fatalf("smaller day limit must bind: %+v", tl)
+	}
+	if tl.BudgetMicrosPerMonth != 1_000_000_000 {
+		t.Fatalf("month limit must be untouched by the day fold: %+v", tl)
+	}
+
+	twoMonth := &Policy{Name: "two-month", Subject: Subject{Team: "t"},
+		Rules: []Rule{
+			{Name: "month-loose", Budget: &Budget{LimitMicroUSD: 2_000_000_000}},
+			{Name: "month-tight", Budget: &Budget{LimitMicroUSD: 900_000_000}},
+			{Name: "day-cap", Budget: &Budget{LimitMicroUSD: 50_000_000, Period: v1alpha1.PeriodCalendarDay}},
+		}}
+	tl, ok = mergeTeamLimits([]*Policy{twoMonth})["t"]
+	if !ok {
+		t.Fatal("team missing from merge result")
+	}
+	if tl.BudgetMicrosPerMonth != 900_000_000 {
+		t.Fatalf("smaller month limit must bind: %+v", tl)
+	}
+	if tl.BudgetMicrosPerDay != 50_000_000 {
+		t.Fatalf("day limit must be untouched by the month fold: %+v", tl)
+	}
+}
+
+// The per-window twin of TestTeamLimitsMergeUnlimitedNeverErasesARealLimit:
+// an explicit unlimited rule is window-agnostic and must not erase, narrow
+// or widen a real DAY limit nor a real MONTH limit — regardless of which
+// rule is processed first.
+func TestTeamLimitsMergeUnlimitedTouchesNeitherWindow(t *testing.T) {
+	real := &Policy{Name: "real", Subject: Subject{Team: "t"},
+		Rules: []Rule{
+			{Name: "day-cap", Budget: &Budget{LimitMicroUSD: 50_000_000, HardCap: true, Period: v1alpha1.PeriodCalendarDay}},
+			{Name: "month-cap", Budget: &Budget{LimitMicroUSD: 1_000_000_000, HardCap: true}},
+		}}
+	unlimited := &Policy{Name: "declared-unlimited", Subject: Subject{Team: "t"},
+		Rules: []Rule{{Name: "no-cap", Budget: &Budget{Unlimited: true}}}}
+
+	for _, order := range [][]*Policy{{real, unlimited}, {unlimited, real}} {
+		got := mergeTeamLimits(order)
+		tl, ok := got["t"]
+		if !ok {
+			t.Fatalf("order %v: team missing from merge result", order)
+		}
+		if tl.BudgetMicrosPerDay != 50_000_000 || !tl.BudgetDayHard {
+			t.Fatalf("order %v: unlimited rule corrupted the real day budget: %+v", order, tl)
+		}
+		if tl.BudgetMicrosPerMonth != 1_000_000_000 || !tl.BudgetHard {
+			t.Fatalf("order %v: unlimited rule corrupted the real month budget: %+v", order, tl)
+		}
+	}
+}
+
+// A MONTH-only policy must leave the day window untouched (zero limit, soft)
+// — the fall-through the gateway relies on to keep an operator's
+// config/keystore daily cap binding when a policy document says nothing
+// about the day.
+func TestTeamLimitsMergeMonthOnlyLeavesDayWindowZero(t *testing.T) {
+	p := &Policy{Name: "month-only", Subject: Subject{Team: "t"},
+		Rules: []Rule{{Name: "month-cap", Budget: &Budget{LimitMicroUSD: 1_000_000_000, HardCap: true}}}}
+	tl, ok := mergeTeamLimits([]*Policy{p})["t"]
+	if !ok {
+		t.Fatal("team missing from merge result")
+	}
+	if tl.BudgetMicrosPerDay != 0 || tl.BudgetDayHard {
+		t.Fatalf("month-only policy must not manufacture a day limit: %+v", tl)
+	}
+	if tl.BudgetMicrosPerMonth != 1_000_000_000 || !tl.BudgetHard {
+		t.Fatalf("month limit lost: %+v", tl)
 	}
 }
 

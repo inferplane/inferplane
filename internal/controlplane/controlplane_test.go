@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
 	"github.com/inferplane/inferplane/internal/policy"
 )
 
@@ -100,6 +101,86 @@ func TestSyncDistributesPoliciesAndLeases(t *testing.T) {
 	}
 	if len(resp2.Leases) != 1 {
 		t.Fatal("leases must flow on every heartbeat")
+	}
+}
+
+// A day rule and a month rule are two ledger rows keyed per ruleKey{policy,
+// rule}: one heartbeat answers with TWO grants for the team, each stamped
+// with its own Period and each sized against its OWN limitMilliUSD. Two
+// different allowances is the point — one number would mean the ledger
+// merged the rules.
+func TestSyncGrantsOneLeasePerBudgetWindow(t *testing.T) {
+	const twoWindows = `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: team-two-windows }
+spec:
+  subject: { team: alpha }
+  rules:
+  - name: daily
+    failurePolicy: FailOpen
+    budget:
+      period: CalendarDay
+      limitMilliUSD: 50000        # $50/day; default grant = 0.1% = 50 milliUSD
+  - name: monthly
+    failurePolicy: FailClosed
+    budget:
+      limitMilliUSD: 1000000      # $1000/month; default grant = 1000 milliUSD
+      hardCap: true
+`
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "p.yaml"), []byte(twoWindows), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer("", dir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	mux := http.NewServeMux()
+	s.Mount(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	resp := doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp1"})
+	if len(resp.Leases) != 2 {
+		t.Fatalf("leases = %+v, want one grant per budget window", resp.Leases)
+	}
+	byRule := map[string]policy.LeaseGrant{}
+	for _, l := range resp.Leases {
+		byRule[l.Rule] = l
+	}
+	day := byRule["daily"]
+	if day.Period != v1alpha1.PeriodCalendarDay {
+		t.Errorf("daily grant period = %q, want %q", day.Period, v1alpha1.PeriodCalendarDay)
+	}
+	// Fresh dp, zero spend: allowance = one default grant, sized against the
+	// DAY rule's own $50 limit (0.1% = 50 milliUSD = 50,000 µUSD).
+	if day.AllowanceMicroUSD != 50_000 {
+		t.Errorf("daily allowance = %d, want 50000 (sized against the day rule's own limit)", day.AllowanceMicroUSD)
+	}
+	month := byRule["monthly"]
+	if month.Period != v1alpha1.PeriodCalendarMonth {
+		t.Errorf("monthly grant period = %q, want %q", month.Period, v1alpha1.PeriodCalendarMonth)
+	}
+	// Same sizing rule against the MONTH rule's own $1000 limit: 1000
+	// milliUSD = 1,000,000 µUSD — a different number from the day grant,
+	// which is what proves the two rules were never merged.
+	if month.AllowanceMicroUSD != 1_000_000 || !month.HardCap {
+		t.Errorf("monthly grant = %+v, want allowance 1000000 and HardCap true", month)
+	}
+}
+
+// The wire back-compat guarantee, asserted at the source: a budget rule that
+// declares NO period yields a grant stamped CalendarMonth, because
+// FromV1Alpha1 normalizes the empty wire value at conversion — an old
+// document keeps meaning exactly what it meant before periods existed.
+func TestSyncGrantPeriodDefaultsToCalendarMonth(t *testing.T) {
+	_, ts := newTestServer(t, "") // cpPolicyYAML's budget rule has no period
+	resp := doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp1"})
+	if len(resp.Leases) != 1 {
+		t.Fatalf("leases = %+v, want 1", resp.Leases)
+	}
+	if got := resp.Leases[0].Period; got != v1alpha1.PeriodCalendarMonth {
+		t.Fatalf("grant period = %q, want %q (a period-less rule means the month)", got, v1alpha1.PeriodCalendarMonth)
 	}
 }
 

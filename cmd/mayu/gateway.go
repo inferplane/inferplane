@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
 	"github.com/inferplane/inferplane/internal/adminauth"
 	"github.com/inferplane/inferplane/internal/alert"
 	"github.com/inferplane/inferplane/internal/analytics"
@@ -346,14 +347,14 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// is passed into Settle per request from the resolved snapshot, so the
 	// governor holds no pricing — only its persistent rate/budget counters.
 	gov := governance.NewGovernor(policies, limiter.NewMemory(), budget.NewMemory(), m) // budget_spend / pricing_miss
-	// Operator timezone for the CALENDAR-DAY budget window (config
-	// budget_timezone, default UTC). Read from raw rather than the effective
-	// config because it is a file-only key — the provider-store overlay has no
-	// opinion on it — and set once at assembly: the Governor's budget counters
-	// persist across hot-reloads, so a boundary a live counter already computed
-	// would not move anyway. The MONTH window stays UTC in this phase (see
-	// internal/governance §C8) because internal/proxy's lease reporting reads
-	// the same monthly counter and is out of this phase's scope.
+	// Operator timezone for BOTH calendar budget windows (config
+	// budget_timezone, default UTC): the day window anchors its midnight and
+	// the month window its first-of-month boundary to the same zone, so audit
+	// and billing reconciliation never straddle two anchors. Read from raw
+	// rather than the effective config because it is a file-only key — the
+	// provider-store overlay has no opinion on it — and set once at assembly:
+	// the Governor's budget counters persist across hot-reloads, so a boundary
+	// a live counter already computed would not move anyway.
 	gov.SetBudgetTimezone(raw.BudgetLocation())
 	// Team-policy layering (ADR-033 extends ADR-016). Base layer: keystore
 	// team RECORD (runtime console edits) wins wholesale over the static
@@ -423,6 +424,19 @@ func newGateway(cfgPath string) (*gateway, error) {
 				budgetExceeded = "warn"
 			}
 		}
+		budgetDayMicros, budgetDayExceeded := base.BudgetMicrosPerDay, base.BudgetDayExceeded
+		if tl.BudgetMicrosPerDay > 0 {
+			budgetDayMicros = tl.BudgetMicrosPerDay
+			// Same block-wins-on-tie rule as the month window above, resolved
+			// independently: the two windows are separate rules with separate
+			// hardCap flags, so a soft DAY rule must not soften a blocking
+			// month base and vice versa.
+			if tl.BudgetDayHard || base.BudgetDayExceeded == "block" {
+				budgetDayExceeded = "block"
+			} else {
+				budgetDayExceeded = "warn"
+			}
+		}
 		// Budget-lease clamp (ADR-034): within a lease the local limit is
 		// the granted allowance, so enforcement needs no network round
 		// trip. A zero/negative allowance (global budget exhausted) can't
@@ -431,30 +445,41 @@ func newGateway(cfgPath string) (*gateway, error) {
 		// settled (one request of overshoot, the same accepted §5.3
 		// posture; a HARD cap at zero allowance is blocked outright by the
 		// lease gate before this closure even matters).
+		//
+		// PER WINDOW, because a daily allowance and a monthly allowance are
+		// not comparable quantities: the lease table is keyed by (team,
+		// period) and each window gets its own floor and its own
+		// block-wins-on-tie resolution. Clamping one merged number to both
+		// would enforce whichever window happened to be tighter against the
+		// OTHER window's limit.
 		if leases != nil {
-			if l, ok := leases.Get(team); ok {
+			clamp := func(limit int64, exceeded string, period v1alpha1.BudgetPeriod) (int64, string) {
+				l, ok := leases.Get(team, period)
+				if !ok {
+					return limit, exceeded
+				}
 				allowance := l.AllowanceMicroUSD
 				if allowance < 1 {
 					allowance = 1
 				}
-				if budgetMicros == 0 || allowance < budgetMicros {
-					budgetMicros = allowance
-					// Same block-wins-on-tie rule as the overlay above: a
-					// soft lease clamping a blocking budget keeps block.
-					if l.HardCap || budgetExceeded == "block" {
-						budgetExceeded = "block"
-					} else {
-						budgetExceeded = "warn"
-					}
+				if limit != 0 && allowance >= limit {
+					return limit, exceeded
 				}
+				// Same block-wins-on-tie rule as the overlay above: a soft
+				// lease clamping a blocking budget keeps block.
+				if l.HardCap || exceeded == "block" {
+					return allowance, "block"
+				}
+				return allowance, "warn"
 			}
+			budgetMicros, budgetExceeded = clamp(budgetMicros, budgetExceeded, v1alpha1.PeriodCalendarMonth)
+			budgetDayMicros, budgetDayExceeded = clamp(budgetDayMicros, budgetDayExceeded, v1alpha1.PeriodCalendarDay)
 		}
-		// No quota rule kind yet — tokens/day always comes from the base. The
-		// DAILY budget is in the same position: a GovernancePolicy rule cannot
-		// express a window yet (that is the next phase's BudgetRule.period), so
-		// neither the policy overlay nor the lease clamp above can narrow or
-		// widen it, and it passes through from the base layer (config file or
-		// keystore team record) untouched.
+		// The daily budget is now a first-class policy window: a
+		// period: CalendarDay budget rule folds into tl.BudgetMicrosPerDay
+		// and clamps against its own daily lease, independently of the
+		// month. tokens/day (the token QUOTA) still has no rule kind and
+		// still comes from the base layer.
 		tp := governance.PolicyFromLimits(governance.Limits{
 			RatePerMin:           rpm,
 			TokensPerMinute:      tpm,
@@ -462,14 +487,19 @@ func newGateway(cfgPath string) (*gateway, error) {
 			QuotaExceeded:        base.QuotaExceeded,
 			BudgetMicrosPerMonth: budgetMicros,
 			BudgetExceeded:       budgetExceeded,
-			BudgetMicrosPerDay:   base.BudgetMicrosPerDay,
-			BudgetDayExceeded:    base.BudgetDayExceeded,
+			BudgetMicrosPerDay:   budgetDayMicros,
+			BudgetDayExceeded:    budgetDayExceeded,
 		})
 		// AdminContact rides with the binding budget rule (from the policy
 		// document, never the lease clamp — a lease grant carries no
 		// contact info of its own); tl is the policy-file/control-plane
-		// layer, the only one that can currently declare it.
+		// layer, the only one that can currently declare it. TeamPolicy has
+		// one contact for both windows, so the month rule's wins and the
+		// day rule's is the fallback — a day-only policy must not lose it.
 		tp.AdminContact = tl.AdminContact
+		if tp.AdminContact == "" {
+			tp.AdminContact = tl.AdminContactDay
+		}
 		return tp, true
 	})
 	// modelAccess rules narrow every ingress RBAC decision through the router's
@@ -519,8 +549,15 @@ func newGateway(cfgPath string) (*gateway, error) {
 			Dataplane: dataplaneID,
 			Store:     polStore,
 			Leases:    leases,
-			SpentOf: func(team string) int64 {
-				if u := gov.UsageOf(team, "", governance.KeyPolicy{}); u.TeamBudget != nil {
+			SpentOf: func(team string, period v1alpha1.BudgetPeriod) int64 {
+				u := gov.UsageOf(team, "", governance.KeyPolicy{})
+				if period == v1alpha1.PeriodCalendarDay {
+					if u.TeamBudgetDay != nil {
+						return u.TeamBudgetDay.SpentUSDMicros
+					}
+					return 0
+				}
+				if u.TeamBudget != nil {
 					return u.TeamBudget.SpentUSDMicros
 				}
 				return 0

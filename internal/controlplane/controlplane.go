@@ -70,6 +70,7 @@ type ruleLedger struct {
 	grantMicro int64
 	renew      time.Duration
 	hard       bool
+	period     v1alpha1.BudgetPeriod
 	spent      map[string]int64 // dataplane → cumulative reported µUSD (monotonic)
 	allowance  map[string]int64 // dataplane → cumulative granted µUSD
 }
@@ -154,6 +155,7 @@ func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]t
 				grantMicro: r.Budget.LeaseGrantMicroUSD,
 				renew:      r.Budget.LeaseRenewInterval,
 				hard:       r.Budget.HardCap,
+				period:     r.Budget.Period,
 				spent:      map[string]int64{},
 				allowance:  map[string]int64{},
 			}
@@ -348,6 +350,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			// rule's failurePolicy takes over.
 			ExpiresAt: now.Add(3 * l.renew),
 			HardCap:   l.hard,
+			Period:    l.period,
 		})
 	}
 	if req.Generation != s.generation {

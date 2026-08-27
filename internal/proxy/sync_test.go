@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
 	"github.com/inferplane/inferplane/internal/controlplane"
 	"github.com/inferplane/inferplane/internal/policy"
 )
@@ -65,7 +67,7 @@ func TestSyncerAppliesPoliciesLeasesAndReportsRejections(t *testing.T) {
 	s := &Syncer{
 		URL: ts.URL, Token: "tok", Dataplane: "dp1",
 		Store: store, Leases: leases,
-		SpentOf: func(team string) int64 { return spent },
+		SpentOf: func(team string, period v1alpha1.BudgetPeriod) int64 { return spent },
 	}
 
 	next, err := s.syncOnce(context.Background())
@@ -83,7 +85,7 @@ func TestSyncerAppliesPoliciesLeasesAndReportsRejections(t *testing.T) {
 		t.Fatalf("rejection not recorded: %+v", s.pending)
 	}
 	// Lease landed: fresh dp, zero spend → allowance = one grant.
-	l, ok := leases.Get("alpha")
+	l, ok := leases.Get("alpha", v1alpha1.PeriodCalendarMonth)
 	if !ok || l.AllowanceMicroUSD != 10_000 || !l.HardCap {
 		t.Fatalf("lease not applied: %+v", l)
 	}
@@ -100,7 +102,7 @@ func TestSyncerAppliesPoliciesLeasesAndReportsRejections(t *testing.T) {
 	if len(s.pending) != 0 {
 		t.Fatalf("rejections not cleared after delivery: %+v", s.pending)
 	}
-	l, _ = leases.Get("alpha")
+	l, _ = leases.Get("alpha", v1alpha1.PeriodCalendarMonth)
 	if l.AllowanceMicroUSD != 70_000 {
 		t.Fatalf("allowance after report = %d, want 70000", l.AllowanceMicroUSD)
 	}
@@ -134,7 +136,7 @@ func TestLeaseTableGate(t *testing.T) {
 		{Team: "m", AllowanceMicroUSD: 500, ExpiresAt: time.Now().Add(time.Hour), HardCap: false},
 		{Team: "m", AllowanceMicroUSD: 200, ExpiresAt: time.Now().Add(time.Minute), HardCap: true},
 	})
-	l, _ := lt.Get("m")
+	l, _ := lt.Get("m", v1alpha1.PeriodCalendarMonth)
 	if l.AllowanceMicroUSD != 200 || !l.HardCap {
 		t.Fatalf("merge not most-restrictive: %+v", l)
 	}
@@ -146,7 +148,7 @@ func TestSyncerOutageKeepsLastState(t *testing.T) {
 	ts := newControlPlane(t, "")
 	store := policy.NewEmptyStore()
 	leases := NewLeaseTable()
-	s := &Syncer{URL: ts.URL, Dataplane: "dp1", Store: store, Leases: leases, SpentOf: func(string) int64 { return 0 }}
+	s := &Syncer{URL: ts.URL, Dataplane: "dp1", Store: store, Leases: leases, SpentOf: func(string, v1alpha1.BudgetPeriod) int64 { return 0 }}
 	if _, err := s.syncOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +159,244 @@ func TestSyncerOutageKeepsLastState(t *testing.T) {
 	if _, ok := store.TeamLimits("alpha"); !ok {
 		t.Fatal("policy set lost on outage")
 	}
-	if _, ok := leases.Get("alpha"); !ok {
+	if _, ok := leases.Get("alpha", v1alpha1.PeriodCalendarMonth); !ok {
 		t.Fatal("leases lost on outage")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 (BudgetRule.period): the lease channel must be WINDOW-AWARE.
+// These tests are written against the NEW API and do not compile against the
+// old one — that is deliberate.
+// ---------------------------------------------------------------------------
+
+// twoWindowPolicyYAML declares the shape this whole phase exists for: one team,
+// a soft DAILY cap and a hard MONTHLY cap, as two budget rules.
+const twoWindowPolicyYAML = `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: team-two-windows }
+spec:
+  subject: { team: alpha }
+  rules:
+  - name: daily
+    failurePolicy: FailOpen
+    budget:
+      period: CalendarDay
+      limitMilliUSD: 50000
+      lease: { grantMilliUSD: 50, renewInterval: "5s" }
+  - name: monthly
+    failurePolicy: FailClosed
+    budget:
+      limitMilliUSD: 1000000
+      hardCap: true
+      lease: { grantMilliUSD: 1000, renewInterval: "5s" }
+`
+
+// recordingCP is a fake control plane that captures the decoded sync request and
+// answers with a canned response. It exists because the assertion here is about
+// what the DATA PLANE puts on the wire, which the real control plane's own
+// ledger would obscure.
+type recordingCP struct {
+	srv  *httptest.Server
+	last policy.SyncRequest
+	resp policy.SyncResponse
+}
+
+func newRecordingCP(t *testing.T) *recordingCP {
+	t.Helper()
+	cp := &recordingCP{resp: policy.SyncResponse{Generation: "g1", SyncIntervalSeconds: 5}}
+	cp.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&cp.last); err != nil {
+			t.Errorf("decode sync request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&cp.resp)
+	}))
+	t.Cleanup(cp.srv.Close)
+	return cp
+}
+
+// TestSyncOnceReportsDailyRuleAgainstDailySpend is the sharpest correctness trap
+// of this phase. SpentOf used to take only a team and always answered with the
+// MONTHLY counter, so adding a daily rule would report month-to-date spend
+// against the daily rule's ledger row — the control plane computes
+// remaining = dayLimit - reportedSpend, so a $50/day rule would be starved to a
+// zero grant within hours of the month's spend passing $50.
+//
+// This test fails against the old single-argument SpentOf (it does not compile)
+// AND against a window-blind implementation (both reports would carry the same
+// number).
+func TestSyncOnceReportsDailyRuleAgainstDailySpend(t *testing.T) {
+	cp := newRecordingCP(t)
+	store := policy.NewEmptyStore()
+	// Load the two-rule document through the same path the data plane uses, so
+	// the periods under test are the ones FromV1Alpha1 actually produces.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "p.yaml"), []byte(twoWindowPolicyYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wire, _, err := policy.LoadWirePaths(dir)
+	if err != nil {
+		t.Fatalf("LoadWirePaths: %v", err)
+	}
+	if rej := store.ApplyWire(wire); len(rej) != 0 {
+		t.Fatalf("two-window policy rejected: %+v", rej)
+	}
+
+	const daySpent, monthSpent = 7_000_000, 123_000_000
+	var asked []v1alpha1.BudgetPeriod
+	s := &Syncer{
+		URL: cp.srv.URL, Dataplane: "dp1", Store: store, Leases: NewLeaseTable(),
+		SpentOf: func(team string, period v1alpha1.BudgetPeriod) int64 {
+			if team != "alpha" {
+				t.Errorf("SpentOf team = %q, want alpha", team)
+			}
+			asked = append(asked, period)
+			if period == v1alpha1.PeriodCalendarDay {
+				return daySpent
+			}
+			return monthSpent
+		},
+	}
+	if _, err := s.syncOnce(context.Background()); err != nil {
+		t.Fatalf("syncOnce: %v", err)
+	}
+
+	byRule := map[string]policy.ConsumptionReport{}
+	for _, rep := range cp.last.Reports {
+		byRule[rep.Rule] = rep
+	}
+	if len(byRule) != 2 {
+		t.Fatalf("want one report per budget rule, got %+v", cp.last.Reports)
+	}
+	if got := byRule["daily"].SpentMicroUSD; got != daySpent {
+		t.Errorf("daily rule reported %d µUSD, want the DAY counter %d (reporting month spend against a day rule starves its grant)", got, daySpent)
+	}
+	if got := byRule["monthly"].SpentMicroUSD; got != monthSpent {
+		t.Errorf("monthly rule reported %d µUSD, want the MONTH counter %d", got, monthSpent)
+	}
+	// The report must also name the window it measured.
+	if got := byRule["daily"].Period; got != v1alpha1.PeriodCalendarDay {
+		t.Errorf("daily report period = %q, want %q", got, v1alpha1.PeriodCalendarDay)
+	}
+	if got := byRule["monthly"].Period; got != v1alpha1.PeriodCalendarMonth {
+		t.Errorf("monthly report period = %q, want %q (an omitted wire period is normalized to CalendarMonth at conversion)", got, v1alpha1.PeriodCalendarMonth)
+	}
+	// And SpentOf must have been consulted once per window, not twice for one.
+	seen := map[v1alpha1.BudgetPeriod]int{}
+	for _, p := range asked {
+		seen[p]++
+	}
+	if seen[v1alpha1.PeriodCalendarDay] != 1 || seen[v1alpha1.PeriodCalendarMonth] != 1 {
+		t.Errorf("SpentOf asked for %v, want exactly one day and one month query", asked)
+	}
+}
+
+// TestLeaseTableKeepsDayAndMonthAllowancesSeparate pins the re-keying. The old
+// table merged every grant for a team by min(AllowanceMicroUSD), so a $50/day
+// allowance and a $1000/month allowance collapsed into one meaningless number
+// that was then clamped onto BOTH windows.
+func TestLeaseTableKeepsDayAndMonthAllowancesSeparate(t *testing.T) {
+	lt := NewLeaseTable()
+	exp := time.Now().Add(time.Hour)
+	lt.set([]policy.LeaseGrant{
+		{Team: "t", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 50_000, ExpiresAt: exp},
+		{Team: "t", Period: v1alpha1.PeriodCalendarMonth, AllowanceMicroUSD: 900_000, ExpiresAt: exp, HardCap: true},
+	})
+
+	day, ok := lt.Get("t", v1alpha1.PeriodCalendarDay)
+	if !ok {
+		t.Fatal("no daily lease")
+	}
+	if day.AllowanceMicroUSD != 50_000 || day.HardCap {
+		t.Errorf("daily lease = %+v, want allowance 50000 and HardCap false", day)
+	}
+	month, ok := lt.Get("t", v1alpha1.PeriodCalendarMonth)
+	if !ok {
+		t.Fatal("no monthly lease")
+	}
+	if month.AllowanceMicroUSD != 900_000 || !month.HardCap {
+		t.Errorf("monthly lease = %+v, want allowance 900000 and HardCap true (the smaller DAILY allowance must not bind the month)", month)
+	}
+
+	// Merging still happens WITHIN a window, most-restrictive-first.
+	lt.set([]policy.LeaseGrant{
+		{Team: "m", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 500, ExpiresAt: exp},
+		{Team: "m", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 200, ExpiresAt: time.Now().Add(time.Minute), HardCap: true},
+		{Team: "m", Period: v1alpha1.PeriodCalendarMonth, AllowanceMicroUSD: 9_000, ExpiresAt: exp},
+	})
+	d, _ := lt.Get("m", v1alpha1.PeriodCalendarDay)
+	if d.AllowanceMicroUSD != 200 || !d.HardCap {
+		t.Errorf("within-window merge not most-restrictive: %+v", d)
+	}
+	if mo, _ := lt.Get("m", v1alpha1.PeriodCalendarMonth); mo.AllowanceMicroUSD != 9_000 {
+		t.Errorf("month allowance corrupted by the day merge: %+v", mo)
+	}
+}
+
+// TestLeaseTableEmptyPeriodIsCalendarMonth is the wire back-compat guarantee: a
+// control plane that predates BudgetRule.period sends no period at all, and that
+// must keep meaning exactly what it meant before — the monthly window.
+func TestLeaseTableEmptyPeriodIsCalendarMonth(t *testing.T) {
+	lt := NewLeaseTable()
+	lt.set([]policy.LeaseGrant{
+		{Team: "old", AllowanceMicroUSD: 4_242, ExpiresAt: time.Now().Add(time.Hour), HardCap: true},
+	})
+	l, ok := lt.Get("old", v1alpha1.PeriodCalendarMonth)
+	if !ok || l.AllowanceMicroUSD != 4_242 {
+		t.Fatalf("a period-less grant must land in the CalendarMonth window: %+v ok=%v", l, ok)
+	}
+	// Reading with an empty period must resolve to the same entry.
+	if l2, ok2 := lt.Get("old", ""); !ok2 || l2.AllowanceMicroUSD != 4_242 {
+		t.Fatalf(`Get(team, "") must read as CalendarMonth: %+v ok=%v`, l2, ok2)
+	}
+	if _, ok := lt.Get("old", v1alpha1.PeriodCalendarDay); ok {
+		t.Fatal("a period-less grant must NOT create a daily lease")
+	}
+}
+
+// TestLeaseTableBlockedIsTeamWideAcrossWindows: Blocked stays team-wide. A hard
+// cap on EITHER window that can no longer be verified locally blocks the team —
+// block wins on tie.
+func TestLeaseTableBlockedIsTeamWideAcrossWindows(t *testing.T) {
+	future := time.Now().Add(time.Hour)
+
+	// Healthy month lease, EXHAUSTED hard day lease → blocked.
+	lt := NewLeaseTable()
+	lt.set([]policy.LeaseGrant{
+		{Team: "t", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 0, ExpiresAt: future, HardCap: true},
+		{Team: "t", Period: v1alpha1.PeriodCalendarMonth, AllowanceMicroUSD: 900_000, ExpiresAt: future, HardCap: true},
+	})
+	if blocked, reason := lt.Blocked("t"); !blocked {
+		t.Errorf("an exhausted hard DAY lease must block the team even with a healthy month lease (reason=%q)", reason)
+	}
+
+	// Healthy day lease, EXPIRED hard month lease → blocked.
+	lt = NewLeaseTable()
+	lt.set([]policy.LeaseGrant{
+		{Team: "t", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 50_000, ExpiresAt: future, HardCap: true},
+		{Team: "t", Period: v1alpha1.PeriodCalendarMonth, AllowanceMicroUSD: 900_000, ExpiresAt: time.Now().Add(-time.Second), HardCap: true},
+	})
+	if blocked, _ := lt.Blocked("t"); !blocked {
+		t.Error("an expired hard MONTH lease must block the team")
+	}
+
+	// Both windows healthy → not blocked.
+	lt = NewLeaseTable()
+	lt.set([]policy.LeaseGrant{
+		{Team: "t", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 50_000, ExpiresAt: future, HardCap: true},
+		{Team: "t", Period: v1alpha1.PeriodCalendarMonth, AllowanceMicroUSD: 900_000, ExpiresAt: future, HardCap: true},
+	})
+	if blocked, reason := lt.Blocked("t"); blocked {
+		t.Errorf("two healthy hard leases must not block: %q", reason)
+	}
+
+	// A SOFT day lease, exhausted and expired, still fails open.
+	lt = NewLeaseTable()
+	lt.set([]policy.LeaseGrant{
+		{Team: "t", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 0, ExpiresAt: time.Now().Add(-time.Second)},
+	})
+	if blocked, _ := lt.Blocked("t"); blocked {
+		t.Error("a soft lease must fail open on either window")
 	}
 }

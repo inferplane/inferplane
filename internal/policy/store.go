@@ -17,10 +17,11 @@ import (
 // control-plane reconcile poll.
 const LocalWatchInterval = 2 * time.Second
 
-// TeamLimits is the merged, enforceable budget/rate view of every
-// team-subject policy matching one team, in the units the governance
-// pipeline consumes (µUSD). Zero means "unlimited" on that dimension,
-// mirroring governance.TeamPolicy.
+// TeamLimits is the merged, enforceable budget/rate view — covering both the
+// calendar-month and calendar-day budget windows — of every team-subject
+// policy matching one team, in the units the governance pipeline consumes
+// (µUSD). Zero means "unlimited" on that dimension, mirroring
+// governance.TeamPolicy.
 type TeamLimits struct {
 	RPM                  int64
 	TPM                  int64
@@ -31,6 +32,14 @@ type TeamLimits struct {
 	// AdminContact carries the binding budget rule's contact hint through
 	// verbatim (see api/v1alpha1.BudgetRule.AdminContact); empty if unset.
 	AdminContact string
+	// BudgetMicrosPerDay/BudgetDayHard/AdminContactDay are the CALENDAR-DAY
+	// counterparts, folded from period: CalendarDay rules. They are their own
+	// fields rather than a reuse of the month ones because the two windows are
+	// two independent RULES: each carries its own limit, its own hardCap and
+	// its own adminContact, and most-restrictive-wins is computed per window.
+	BudgetMicrosPerDay int64
+	BudgetDayHard      bool
+	AdminContactDay    string
 }
 
 // Store holds the data plane's currently-loaded local policy set behind an
@@ -292,9 +301,11 @@ func allowsModel(allow []string, model string, canon func(string) string) bool {
 }
 
 // mergeTeamLimits folds every team-subject budget/rate rule into one
-// TeamLimits per team, most-restrictive-wins: the smallest non-zero limit
-// binds each dimension, and the budget is hard if the binding (smallest)
-// budget rule — or any equal to it — is a hard cap.
+// TeamLimits per team, most-restrictive-wins PER WINDOW: the day and month
+// budget windows fold independently, the smallest non-zero limit binds each
+// dimension within its own window, and a window's budget is hard if the
+// binding (smallest) budget rule for that window — or any equal to it — is a
+// hard cap. An unlimited rule touches neither window.
 //
 // A team gets an entry ONLY when some rule actually contributed a budget or
 // rate: a modelAccess-only policy must not manufacture an all-zero (=
@@ -326,15 +337,36 @@ func mergeTeamLimits(policies []*Policy) map[string]TeamLimits {
 					// (handled below: LimitMicroUSD stays 0 in that case,
 					// same "no rule" sentinel every consumer already
 					// understands). Unlike the branches below, it never
-					// compares against or overwrites tl.BudgetMicrosPerMonth.
-				case tl.BudgetMicrosPerMonth == 0 || r.Budget.LimitMicroUSD < tl.BudgetMicrosPerMonth:
-					tl.BudgetMicrosPerMonth = r.Budget.LimitMicroUSD
-					tl.BudgetHard = r.Budget.HardCap
-					tl.AdminContact = r.Budget.AdminContact
-				case r.Budget.LimitMicroUSD == tl.BudgetMicrosPerMonth && r.Budget.HardCap:
-					tl.BudgetHard = true
-					if tl.AdminContact == "" {
+					// compares against or overwrites either window's limit.
+					// It carries no period, so it is window-agnostic: one
+					// unlimited rule cannot unlimit the day and leave the
+					// month capped, or vice versa.
+				case r.Budget.Period == v1alpha1.PeriodCalendarDay:
+					switch {
+					case tl.BudgetMicrosPerDay == 0 || r.Budget.LimitMicroUSD < tl.BudgetMicrosPerDay:
+						tl.BudgetMicrosPerDay = r.Budget.LimitMicroUSD
+						tl.BudgetDayHard = r.Budget.HardCap
+						tl.AdminContactDay = r.Budget.AdminContact
+					case r.Budget.LimitMicroUSD == tl.BudgetMicrosPerDay && r.Budget.HardCap:
+						tl.BudgetDayHard = true
+						if tl.AdminContactDay == "" {
+							tl.AdminContactDay = r.Budget.AdminContact
+						}
+					}
+				default:
+					// CalendarMonth, including a Budget built directly in a
+					// test with a zero-value Period — the month window is the
+					// meaning of "no period stated" everywhere in this schema.
+					switch {
+					case tl.BudgetMicrosPerMonth == 0 || r.Budget.LimitMicroUSD < tl.BudgetMicrosPerMonth:
+						tl.BudgetMicrosPerMonth = r.Budget.LimitMicroUSD
+						tl.BudgetHard = r.Budget.HardCap
 						tl.AdminContact = r.Budget.AdminContact
+					case r.Budget.LimitMicroUSD == tl.BudgetMicrosPerMonth && r.Budget.HardCap:
+						tl.BudgetHard = true
+						if tl.AdminContact == "" {
+							tl.AdminContact = r.Budget.AdminContact
+						}
 					}
 				}
 			}

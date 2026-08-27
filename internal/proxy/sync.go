@@ -16,34 +16,42 @@ import (
 	"sync"
 	"time"
 
+	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
 	"github.com/inferplane/inferplane/internal/policy"
 )
 
-// Lease is the data-plane view of one team's budget lease, merged across
-// rules most-restrictive-first.
+// Lease is the data-plane view of one team's budget lease for one window,
+// merged across that window's rules most-restrictive-first.
 type Lease struct {
 	AllowanceMicroUSD int64
 	ExpiresAt         time.Time
 	HardCap           bool
 }
 
-// LeaseTable is the request-path view of current leases. Reads are on the
-// hot path (governor team lookup + lease gate); writes happen once per
-// heartbeat.
+// LeaseTable is the request-path view of current leases, keyed by
+// (team, budget window). Reads are on the hot path (governor team lookup +
+// lease gate); writes happen once per heartbeat. The nested map keeps
+// Blocked to one hash lookup plus a walk of that team's ≤2 windows instead
+// of a scan of every team in the fleet on every request.
 type LeaseTable struct {
 	mu     sync.RWMutex
-	byTeam map[string]Lease
+	byTeam map[string]map[v1alpha1.BudgetPeriod]Lease
 }
 
 func NewLeaseTable() *LeaseTable {
-	return &LeaseTable{byTeam: map[string]Lease{}}
+	return &LeaseTable{byTeam: map[string]map[v1alpha1.BudgetPeriod]Lease{}}
 }
 
-// Get returns the merged lease for a team, if any.
-func (t *LeaseTable) Get(team string) (Lease, bool) {
+// Get returns the merged lease for one team's budget window, if any. An empty
+// period reads as CalendarMonth — what every grant meant before LeaseGrant
+// carried a window.
+func (t *LeaseTable) Get(team string, period v1alpha1.BudgetPeriod) (Lease, bool) {
+	if period == "" {
+		period = v1alpha1.PeriodCalendarMonth
+	}
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	l, ok := t.byTeam[team]
+	l, ok := t.byTeam[team][period]
 	return l, ok
 }
 
@@ -55,32 +63,57 @@ func (t *LeaseTable) Get(team string) (Lease, bool) {
 // allowance never blocks here — that bound is enforced by the budget check
 // itself (the team-lookup closure clamps the limit to the allowance). Soft
 // (non-hard-cap) leases never block: control-plane outage fails open for
-// them, per-rule failurePolicy.
+// them, per-rule failurePolicy. It is TEAM-WIDE across windows: if any one
+// window's hard-cap lease is expired or exhausted the team is blocked,
+// because a hard cap on either window is a cap the data plane can no longer
+// verify locally. The windows are walked in a fixed order (day, then month)
+// rather than by map range, so the reason string is deterministic.
 func (t *LeaseTable) Blocked(team string) (bool, string) {
 	t.mu.RLock()
-	l, ok := t.byTeam[team]
+	windows := t.byTeam[team]
+	day, dayOK := windows[v1alpha1.PeriodCalendarDay]
+	month, monthOK := windows[v1alpha1.PeriodCalendarMonth]
 	t.mu.RUnlock()
-	if !ok || !l.HardCap {
-		return false, ""
-	}
-	if time.Now().After(l.ExpiresAt) {
-		return true, "budget lease expired (control plane unreachable): hard cap fails closed"
-	}
-	if l.AllowanceMicroUSD <= 0 {
-		return true, "global hard budget exhausted: no lease allowance remaining"
+	now := time.Now()
+	for _, e := range [...]struct {
+		l  Lease
+		ok bool
+	}{{day, dayOK}, {month, monthOK}} {
+		if !e.ok || !e.l.HardCap {
+			continue
+		}
+		if now.After(e.l.ExpiresAt) {
+			return true, "budget lease expired (control plane unreachable): hard cap fails closed"
+		}
+		if e.l.AllowanceMicroUSD <= 0 {
+			return true, "global hard budget exhausted: no lease allowance remaining"
+		}
 	}
 	return false, ""
 }
 
-// set replaces the table from one heartbeat's grants, merging per team
-// most-restrictive-first: smallest allowance binds, hard if any rule is
-// hard, earliest expiry wins.
+// set replaces the table from one heartbeat's grants, merging per (team,
+// window) most-restrictive-first: smallest allowance binds, hard if any rule
+// is hard, earliest expiry wins. Merging never crosses windows — a daily
+// allowance and a monthly allowance are not comparable quantities.
 func (t *LeaseTable) set(grants []policy.LeaseGrant) {
-	byTeam := make(map[string]Lease, len(grants))
+	byTeam := make(map[string]map[v1alpha1.BudgetPeriod]Lease, len(grants))
 	for _, g := range grants {
-		l, ok := byTeam[g.Team]
+		// A control plane that predates BudgetRule.period sends no period at
+		// all; reading that as CalendarMonth is what keeps the existing wire
+		// meaning byte-identical.
+		period := g.Period
+		if period == "" {
+			period = v1alpha1.PeriodCalendarMonth
+		}
+		windows := byTeam[g.Team]
+		if windows == nil {
+			windows = map[v1alpha1.BudgetPeriod]Lease{}
+			byTeam[g.Team] = windows
+		}
+		l, ok := windows[period]
 		if !ok {
-			byTeam[g.Team] = Lease{AllowanceMicroUSD: g.AllowanceMicroUSD, ExpiresAt: g.ExpiresAt, HardCap: g.HardCap}
+			windows[period] = Lease{AllowanceMicroUSD: g.AllowanceMicroUSD, ExpiresAt: g.ExpiresAt, HardCap: g.HardCap}
 			continue
 		}
 		if g.AllowanceMicroUSD < l.AllowanceMicroUSD {
@@ -90,7 +123,7 @@ func (t *LeaseTable) set(grants []policy.LeaseGrant) {
 			l.ExpiresAt = g.ExpiresAt
 		}
 		l.HardCap = l.HardCap || g.HardCap
-		byTeam[g.Team] = l
+		windows[period] = l
 	}
 	t.mu.Lock()
 	t.byTeam = byTeam
@@ -104,9 +137,12 @@ type Syncer struct {
 	Dataplane string // stable instance id
 	Store     *policy.Store
 	Leases    *LeaseTable
-	// SpentOf reports a team's cumulative window spend in µUSD (wired to
-	// the governor's usage view).
-	SpentOf func(team string) int64
+	// SpentOf reports a team's cumulative spend in µUSD for ONE budget window
+	// (wired to the governor's usage view). The period argument is load-bearing:
+	// reporting monthly spend against a daily rule's ledger row would starve
+	// that rule's grant to zero within hours, because the control plane computes
+	// remaining = dayLimit − reportedSpend.
+	SpentOf func(team string, period v1alpha1.BudgetPeriod) int64
 	// OnError receives loop errors (logged by the caller); never fatal —
 	// control-plane outage must not take the data plane down.
 	OnError func(error)
@@ -177,7 +213,9 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 	// spend against each rule — the ledger then under-grants every rule
 	// beyond the tightest (conservative, never permissive). Per-rule spend
 	// tracking lands with the durable-ledger milestone (ADR-034 known
-	// limits).
+	// limits). The per-WINDOW half of this is now fixed — SpentOf answers
+	// for the rule's own window — so only the several-rules-in-one-window
+	// case remains conservative.
 	for _, p := range s.Store.Policies() {
 		if p.Subject.Team == "" {
 			continue
@@ -188,10 +226,11 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 			}
 			var spent int64
 			if s.SpentOf != nil {
-				spent = s.SpentOf(p.Subject.Team)
+				spent = s.SpentOf(p.Subject.Team, r.Budget.Period)
 			}
 			req.Reports = append(req.Reports, policy.ConsumptionReport{
 				Policy: p.Name, Rule: r.Name, Team: p.Subject.Team, SpentMicroUSD: spent,
+				Period: r.Budget.Period,
 			})
 		}
 	}
