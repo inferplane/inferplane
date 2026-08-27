@@ -115,8 +115,11 @@ func (b blockingStore) ResetsAt(_ string, w budget.Window) time.Time {
 // TestPreCheckReturnsSoonestResettingBudgetWindow pins "block wins on tie,
 // soonest-binding window wins the 402": when BOTH windows would deny, the
 // response must name whichever one the caller can actually retry after. Both
-// directions are covered, because a non-UTC operator timezone genuinely can
-// put the next daily midnight after the UTC month boundary.
+// windows now anchor to the one operator timezone, so against the real store
+// the next daily midnight is always ≤ the next month boundary; the second
+// table case is reachable only through the injected fake store and is kept
+// deliberately, so the tie-break stays a derived comparison a future window
+// kind cannot silently break.
 func TestPreCheckReturnsSoonestResettingBudgetWindow(t *testing.T) {
 	base := time.Date(2026, 8, 31, 20, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
@@ -133,7 +136,7 @@ func TestPreCheckReturnsSoonestResettingBudgetWindow(t *testing.T) {
 		},
 		{
 			name:       "the month window resets first",
-			dayResets:  base.Add(19 * time.Hour), // next KST midnight, past the UTC 1st
+			dayResets:  base.Add(19 * time.Hour), // after the month boundary — only the fake store can produce this ordering now
 			monthReset: base.Add(4 * time.Hour),  // 2026-09-01T00:00Z
 			wantPrefix: "budget exceeded",
 		},

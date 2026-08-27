@@ -160,12 +160,14 @@ func (g *Governor) SetLeaseGate(f func(team string) (blocked bool, reason string
 	g.leaseGate = f
 }
 
-// SetBudgetTimezone sets the timezone the CALENDAR-DAY budget window anchors its
-// midnight to (config budget_timezone). nil (the default) means UTC, which is
-// exactly what every budget window meant before this knob existed. Like
-// SetTeamLookup this is a startup-only assignment with no synchronization: the
-// window boundary of a counter that already exists does not move, so changing
-// the operator timezone takes a restart by design.
+// SetBudgetTimezone sets the timezone BOTH calendar budget windows — the day
+// window's midnight and the month window's first-of-month boundary — anchor to
+// (config budget_timezone). One anchor per deployment, so audit and billing
+// reconciliation never straddle two different boundaries. nil (the default)
+// means UTC, which is exactly what every budget window meant before this knob
+// existed. Like SetTeamLookup this is a startup-only assignment with no
+// synchronization: the window boundary of a counter that already exists does
+// not move, so changing the operator timezone takes a restart by design.
 func (g *Governor) SetBudgetTimezone(loc *time.Location) {
 	g.budgetLoc = loc
 }
@@ -191,9 +193,15 @@ func (g *Governor) dayWindow() budget.Window {
 	return budget.CalendarDayIn(g.budgetLoc)
 }
 
-// budgetDayLoc resolves dayWindow's timezone for the 402 message's reset date,
-// defaulting to UTC exactly as budget.Window does for a nil Loc.
-func (g *Governor) budgetDayLoc() *time.Location {
+// monthWindow is the calendar-month budget window, built fresh per call from the
+// configured operator timezone — same posture and same reason as dayWindow.
+func (g *Governor) monthWindow() budget.Window {
+	return budget.CalendarMonthIn(g.budgetLoc)
+}
+
+// budgetLocOrUTC resolves the configured operator timezone for a 402 message's
+// reset date, defaulting to UTC exactly as budget.Window does for a nil Loc.
+func (g *Governor) budgetLocOrUTC() *time.Location {
 	if g.budgetLoc == nil {
 		return time.UTC
 	}
@@ -259,19 +267,19 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 		// key (budget.Key's window tag), its own limit, its own on_exceeded knob.
 		// Both must allow. When both would deny we return whichever window resets
 		// SOONEST, so the 402's reset date is the earliest the caller can actually
-		// retry — and that really is a comparison, not "day always first": a
-		// non-UTC operator timezone can put the next daily midnight AFTER the UTC
-		// month boundary (KST midnight on Aug 31 is Sep 1 05:00 KST = Aug 31
-		// 20:00Z, past which the next daily reset is 2026-09-01T15:00Z while the
-		// monthly one is 2026-09-01T00:00Z).
+		// retry. Both windows share the operator timezone (budget_timezone), so in
+		// one zone the next daily midnight is always ≤ the next month boundary —
+		// the comparison stays anyway, because it derives the answer instead of
+		// asserting an ordering that a future window kind could silently break.
 		var budgetDeny GovDecision
 		var budgetDenyResets time.Time
 		if p.BudgetMicrosPerMonth > 0 {
-			tbk := budget.Key(budget.ScopeTeam, team, budget.CalendarMonth)
-			if g.bud.Check(tbk, 0, p.BudgetMicrosPerMonth, budget.CalendarMonth) == budget.Block {
+			mw := g.monthWindow()
+			tbk := budget.Key(budget.ScopeTeam, team, mw)
+			if g.bud.Check(tbk, 0, p.BudgetMicrosPerMonth, mw) == budget.Block {
 				if p.BudgetExceeded != "warn" {
-					resetsAt := g.bud.ResetsAt(tbk, budget.CalendarMonth)
-					budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("budget", resetsAt, time.UTC, p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
+					resetsAt := g.bud.ResetsAt(tbk, mw)
+					budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("budget", resetsAt, g.budgetLocOrUTC(), p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
 					budgetDenyResets = resetsAt
 				}
 			}
@@ -284,7 +292,7 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 					resetsAt := g.bud.ResetsAt(tbkDay, dw)
 					// Block wins on tie: keep whichever window binds soonest.
 					if budgetDeny.Status == 0 || resetsAt.Before(budgetDenyResets) {
-						budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("daily budget", resetsAt, g.budgetDayLoc(), p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
+						budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("daily budget", resetsAt, g.budgetLocOrUTC(), p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
 						budgetDenyResets = resetsAt
 					}
 				}
@@ -306,10 +314,11 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 	var keyBudgetDeny GovDecision
 	var keyBudgetDenyResets time.Time
 	if kp.BudgetMicrosPerMonth > 0 {
-		kbk := budget.Key(budget.ScopeKey, keyID, budget.CalendarMonth)
-		if g.bud.Check(kbk, 0, kp.BudgetMicrosPerMonth, budget.CalendarMonth) == budget.Block {
-			resetsAt := g.bud.ResetsAt(kbk, budget.CalendarMonth)
-			keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key budget", resetsAt, time.UTC, ""), Code: audit.DenyKeyBudgetExceeded}
+		mw := g.monthWindow()
+		kbk := budget.Key(budget.ScopeKey, keyID, mw)
+		if g.bud.Check(kbk, 0, kp.BudgetMicrosPerMonth, mw) == budget.Block {
+			resetsAt := g.bud.ResetsAt(kbk, mw)
+			keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key budget", resetsAt, g.budgetLocOrUTC(), ""), Code: audit.DenyKeyBudgetExceeded}
 			keyBudgetDenyResets = resetsAt
 		}
 	}
@@ -319,7 +328,7 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 		if g.bud.Check(kbkDay, 0, kp.BudgetMicrosPerDay, dw) == budget.Block {
 			resetsAt := g.bud.ResetsAt(kbkDay, dw)
 			if keyBudgetDeny.Status == 0 || resetsAt.Before(keyBudgetDenyResets) {
-				keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key daily budget", resetsAt, g.budgetDayLoc(), ""), Code: audit.DenyKeyBudgetExceeded}
+				keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key daily budget", resetsAt, g.budgetLocOrUTC(), ""), Code: audit.DenyKeyBudgetExceeded}
 				keyBudgetDenyResets = resetsAt
 			}
 		}
@@ -347,14 +356,15 @@ func (g *Governor) UsageOf(team, keyID string, kp KeyPolicy) UsageStatus {
 	u := UsageStatus{Team: team}
 	if p, ok := g.policyOf(team); ok {
 		if p.BudgetMicrosPerMonth > 0 {
-			tbk := budget.Key(budget.ScopeTeam, team, budget.CalendarMonth)
-			spent := g.bud.Spent(tbk, budget.CalendarMonth)
+			mw := g.monthWindow()
+			tbk := budget.Key(budget.ScopeTeam, team, mw)
+			spent := g.bud.Spent(tbk, mw)
 			u.TeamBudget = &BudgetUsage{
 				LimitUSDMicros:     p.BudgetMicrosPerMonth,
 				SpentUSDMicros:     spent,
 				RemainingUSDMicros: max64(0, p.BudgetMicrosPerMonth-spent),
 				Window:             "calendar-month",
-				ResetsAt:           g.bud.ResetsAt(tbk, budget.CalendarMonth),
+				ResetsAt:           g.bud.ResetsAt(tbk, mw),
 			}
 		}
 		if p.BudgetMicrosPerDay > 0 {
@@ -378,14 +388,15 @@ func (g *Governor) UsageOf(team, keyID string, kp KeyPolicy) UsageStatus {
 		}
 	}
 	if kp.BudgetMicrosPerMonth > 0 {
-		kbk := budget.Key(budget.ScopeKey, keyID, budget.CalendarMonth)
-		spent := g.bud.Spent(kbk, budget.CalendarMonth)
+		mw := g.monthWindow()
+		kbk := budget.Key(budget.ScopeKey, keyID, mw)
+		spent := g.bud.Spent(kbk, mw)
 		u.KeyBudget = &BudgetUsage{
 			LimitUSDMicros:     kp.BudgetMicrosPerMonth,
 			SpentUSDMicros:     spent,
 			RemainingUSDMicros: max64(0, kp.BudgetMicrosPerMonth-spent),
 			Window:             "calendar-month",
-			ResetsAt:           g.bud.ResetsAt(kbk, budget.CalendarMonth),
+			ResetsAt:           g.bud.ResetsAt(kbk, mw),
 		}
 	}
 	if kp.BudgetMicrosPerDay > 0 {
@@ -456,8 +467,9 @@ func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model stri
 		costMicros, pricingMissing = table.CostUSDMicros(provider, model, u)
 	}
 	if p.BudgetMicrosPerMonth > 0 {
-		tbk := budget.Key(budget.ScopeTeam, team, budget.CalendarMonth)
-		g.bud.Debit(tbk, costMicros, budget.CalendarMonth)
+		mw := g.monthWindow()
+		tbk := budget.Key(budget.ScopeTeam, team, mw)
+		g.bud.Debit(tbk, costMicros, mw)
 		// Debit and Spent are each individually mutex-protected but not one
 		// atomic operation: a concurrent Settle for the same team can debit
 		// between these two calls. Under concurrent load this can make the
@@ -467,7 +479,7 @@ func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model stri
 		// an earlier one). A tighter-scoped case of the per-instance/replica
 		// approximation ADR-017 §8 documents; ponytail: add
 		// BudgetStore.DebitAndRead if this needs to be exact.
-		spent := g.bud.Spent(tbk, budget.CalendarMonth)
+		spent := g.bud.Spent(tbk, mw)
 		g.metrics.SetBudgetUtilization(team, float64(spent)/float64(p.BudgetMicrosPerMonth))
 		if g.notifyBudget != nil {
 			g.notifyBudget(team, spent, p.BudgetMicrosPerMonth)
@@ -485,14 +497,15 @@ func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model stri
 		// Both need a window dimension first (internal/metrics, internal/alert).
 	}
 	if kp.BudgetMicrosPerMonth > 0 {
-		kbk := budget.Key(budget.ScopeKey, keyID, budget.CalendarMonth)
-		g.bud.Debit(kbk, costMicros, budget.CalendarMonth)
+		mw := g.monthWindow()
+		kbk := budget.Key(budget.ScopeKey, keyID, mw)
+		g.bud.Debit(kbk, costMicros, mw)
 		// Unlike the team block above, this read has no other consumer (no
 		// per-key /metrics gauge) — skip it entirely when alerting is off,
 		// the common case, to avoid an extra store read on every keyed
 		// request (code-gate MINOR, opus).
 		if g.notifyKeyBudget != nil {
-			spent := g.bud.Spent(kbk, budget.CalendarMonth)
+			spent := g.bud.Spent(kbk, mw)
 			g.notifyKeyBudget(team, keyID, spent, kp.BudgetMicrosPerMonth)
 		}
 	}

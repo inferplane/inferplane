@@ -73,6 +73,20 @@ func CalendarDayIn(loc *time.Location) Window {
 	return Window{Kind: CalDay, Loc: loc}
 }
 
+// CalendarMonthIn is CalendarMonth in an explicit timezone: the counter ends at
+// the first instant of next month in loc (nil = UTC, the same default every
+// Window carries). It exists so the MONTH window can honour the operator's
+// budget_timezone the way CalendarDayIn already does — a daily cap anchored to
+// KST midnight and a monthly cap anchored to UTC midnight would put two
+// different boundaries into one billing reconciliation.
+//
+// Tag() is "month" for any CalMonth window, so a store key built from this and
+// one built from CalendarMonth are the SAME key: switching the operator
+// timezone moves a counter's boundary, never its identity.
+func CalendarMonthIn(loc *time.Location) Window {
+	return Window{Kind: CalMonth, Loc: loc}
+}
+
 // Tag is the window's short, stable identifier for store-key namespacing:
 // "day", "month", or "r"+Dur for a rolling window. See Key (keys.go) for why
 // a window has to identify itself inside its own store key at all.
