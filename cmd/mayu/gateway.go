@@ -502,6 +502,49 @@ func newGateway(cfgPath string) (*gateway, error) {
 		}
 		return tp, true
 	})
+	// Per-USER budget (ADR-042 Phase 3). Policy-document-only by design: there
+	// is no config key and no keys.owner budget column, because a second source
+	// of truth for one person's cap is unreconcilable — so a deployment with
+	// neither `policies` nor `control_plane` (polStore == nil) has no per-user
+	// budget at all, and that is the intended behaviour rather than a gap.
+	//
+	// Unlike the team closure above there is no BASE layer to overlay onto and
+	// no lease clamp to apply: a user-subject budget rule is deliberately
+	// excluded from the lease ledger (internal/controlplane applyWire) because
+	// a ledger row is team-keyed and its grant would clamp the whole team to an
+	// individual's limit. Per-user budget is therefore per-data-plane
+	// in-memory, the same posture `rate` has.
+	gov.SetUserLookup(func(team, user string) (governance.UserPolicy, bool) {
+		if polStore == nil {
+			return governance.UserPolicy{}, false
+		}
+		ul, ok := polStore.UserLimits(team, user)
+		if !ok {
+			return governance.UserPolicy{}, false
+		}
+		// governance.UserPolicy carries ONE on_exceeded knob for both windows
+		// (unlike TeamPolicy's per-window pair), so the two windows' hardCap
+		// flags collapse here — block wins on tie (CLAUDE.md): a soft day rule
+		// beside a hard month rule blocks. Resolving it the other way would let
+		// adding a soft rule WEAKEN an existing hard cap.
+		exceeded := "warn"
+		if ul.BudgetHard || ul.BudgetDayHard {
+			exceeded = "block"
+		}
+		// Same month-wins-day-is-fallback rule as the team closure's
+		// AdminContact above, and for the same reason: one contact field, two
+		// rules, and a day-only policy must not lose its contact hint.
+		contact := ul.AdminContact
+		if contact == "" {
+			contact = ul.AdminContactDay
+		}
+		return governance.UserPolicy{
+			BudgetMicrosPerMonth: ul.BudgetMicrosPerMonth,
+			BudgetMicrosPerDay:   ul.BudgetMicrosPerDay,
+			BudgetExceeded:       exceeded,
+			AdminContact:         contact,
+		}, true
+	})
 	// modelAccess rules narrow every ingress RBAC decision through the router's
 	// policy gate (key allow-list must pass AND the policy must allow); team-
 	// and user-subject rules both apply, user matched on the key's Owner.
@@ -550,7 +593,11 @@ func newGateway(cfgPath string) (*gateway, error) {
 			Store:     polStore,
 			Leases:    leases,
 			SpentOf: func(team string, period v1alpha1.BudgetPeriod) int64 {
-				u := gov.UsageOf(team, "", governance.KeyPolicy{})
+				// Team-scoped read: no KeyID and deliberately no User, so this
+				// reports the TEAM counter only. A user-subject rule is never
+				// lease-managed (see SetUserLookup above), so there is nothing
+				// per-user for a consumption report to carry.
+				u := gov.UsageOf(governance.Subject{Team: team}, governance.KeyPolicy{})
 				if period == v1alpha1.PeriodCalendarDay {
 					if u.TeamBudgetDay != nil {
 						return u.TeamBudgetDay.SpentUSDMicros

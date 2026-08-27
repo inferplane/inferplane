@@ -253,7 +253,7 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if h.gov != nil {
-		dec := h.gov.PreCheck(p.Team, p.KeyID, keyPolicyOf(p), estimateTokens(raw))
+		dec := h.gov.PreCheck(subjectOf(p), keyPolicyOf(p), estimateTokens(raw))
 		if !dec.Allowed {
 			h.audit(p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, false, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
@@ -557,7 +557,7 @@ func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upst
 		CacheWrite5m: write5m,
 		CacheWrite1h: write1h,
 	}
-	cost, missing := h.gov.Settle(p.Team, p.KeyID, keyPolicyOf(p), providerName, upstream, pu, table, estimatedTokens)
+	cost, missing := h.gov.Settle(subjectOf(p), keyPolicyOf(p), providerName, upstream, pu, table, estimatedTokens)
 	if h.usage != nil {
 		// Attribute to the UPSTREAM model — the name pricing billed.
 		h.usage.Record(p.Team, p.Owner, upstream, pu, cost)
@@ -567,6 +567,17 @@ func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upst
 		PricingMissing:  missing,
 		PricingVersion:  governance.PricingVersionOf(table),
 	}
+}
+
+// subjectOf maps a Principal to the governance package's Subject: the team, the
+// virtual key, and the individual the key was issued to. Owner is what carries
+// per-user budget enforcement (ADR-042 Phase 3) — governance skips the user
+// lookup entirely when Subject.User is empty, so dropping it here would
+// silently disable the feature rather than fail. Same
+// deliberately-duplicated-per-package shape as keyPolicyOf below, and for the
+// same reason: governance stays a leaf and does not import keystore.
+func subjectOf(p keystore.Principal) governance.Subject {
+	return governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.Owner}
 }
 
 // keyPolicyOf maps a Principal's optional per-key budget/TPM/RPM (§8 D2) to

@@ -18,6 +18,22 @@ import (
 	"github.com/inferplane/inferplane/internal/pricing"
 )
 
+// Subject identifies WHO a governance decision is about: the team that owns
+// the virtual key, the key itself, and — new in ADR-042 Phase 3 — the
+// individual the key was issued to (keystore.Principal.Owner, which for a
+// CLI-issued key is the OIDC "sub"). User is "" when unset, which is the
+// pre-Phase-3 behaviour exactly: no user lookup, no user counter, no change.
+//
+// It replaced two leading positional string arguments on PreCheck/Settle/
+// UsageOf. A value, not a pointer, and this package stays a leaf — the
+// ingress packages build it from keystore.Principal themselves (subjectOf),
+// so governance never imports keystore.
+type Subject struct {
+	Team  string
+	KeyID string
+	User  string
+}
+
 // TeamPolicy is the resolved per-team governance limits. Zero in any field
 // means "unlimited" for that dimension. QuotaExceeded/BudgetExceeded select
 // block|warn (warn admits the request and still settles afterward).
@@ -63,6 +79,31 @@ type KeyPolicy struct {
 	BudgetMicrosPerDay int64
 }
 
+// UserPolicy is the resolved per-USER budget limits, sourced from a
+// GovernancePolicy document only (there is no config key and no keystore
+// column for a user's cap — a second source of truth for one human's budget
+// is what ADR-042 refuses). Zero in either amount means unlimited on that
+// window.
+//
+// There are deliberately NO RPM/TPM fields: rate stays team-only, because a
+// per-user rate limit needs a rate SHARE model this phase does not build, and
+// policy.checkEnforceable still refuses a user-subject rate rule. Do not add
+// them "for symmetry".
+//
+// There is also deliberately ONE BudgetExceeded knob covering BOTH windows,
+// unlike TeamPolicy's BudgetExceeded/BudgetDayExceeded pair. The two windows
+// are still two independent policy rules with their own hardCap; the caller
+// (cmd/mayu/gateway.go) collapses them block-wins-on-tie before building this
+// value. Do not add a BudgetDayExceeded field.
+type UserPolicy struct {
+	BudgetMicrosPerMonth int64
+	BudgetMicrosPerDay   int64
+	BudgetExceeded       string // block|warn
+	// AdminContact is surfaced verbatim in the 402 body, same as
+	// TeamPolicy.AdminContact.
+	AdminContact string
+}
+
 type BudgetUsage struct {
 	LimitUSDMicros     int64     `json:"limit_usd_micros"`
 	SpentUSDMicros     int64     `json:"spent_usd_micros"`
@@ -89,6 +130,12 @@ type UsageStatus struct {
 	// believes it is reading.
 	TeamBudgetDay *BudgetUsage `json:"team_budget_day,omitempty"`
 	KeyBudgetDay  *BudgetUsage `json:"key_budget_day,omitempty"`
+	// UserBudget/UserBudgetDay report the per-USER counters (ADR-042 Phase 3),
+	// present only when Subject.User is set AND a UserPolicy was found.
+	// Appended with omitempty for the same reason the day fields were: an
+	// existing /v1/usage client must keep reading exactly what it read before.
+	UserBudget    *BudgetUsage `json:"user_budget,omitempty"`
+	UserBudgetDay *BudgetUsage `json:"user_budget_day,omitempty"`
 }
 
 // Governor enforces rate/quota/budget and settles cost. Its stateful stores
@@ -101,6 +148,7 @@ type UsageStatus struct {
 type Governor struct {
 	teams           map[string]TeamPolicy
 	lookup          func(team string) (TeamPolicy, bool)                     // D3/ADR-016: optional dynamic override, checked before teams
+	userLookup      func(team, user string) (UserPolicy, bool)               // ADR-042 Phase 3: optional per-user budget source, consulted when Subject.User is set
 	notifyBudget    func(team string, spentMicros, limitMicros int64)        // D5b/ADR-017: optional budget-alert hook, called after each team debit
 	notifyKeyBudget func(team, keyID string, spentMicros, limitMicros int64) // D5b/ADR-017 per-key follow-up: optional per-key budget-alert hook, called after each key debit
 	leaseGate       func(team string) (blocked bool, reason string)          // ADR-034: optional budget-lease check, consulted first in PreCheck
@@ -125,6 +173,17 @@ func NewGovernor(teams map[string]TeamPolicy, lim limiter.LimiterStore, bud budg
 // through to config) from a real hit; SetTeamLookup itself makes no I/O call.
 func (g *Governor) SetTeamLookup(f func(team string) (TeamPolicy, bool)) {
 	g.lookup = f
+}
+
+// SetUserLookup installs a per-USER budget source (ADR-042 Phase 3),
+// consulted on every PreCheck/Settle/UsageOf when Subject.User is non-empty.
+// It mirrors SetTeamLookup: a startup-only assignment with no
+// synchronization, and nil (the default) reproduces pre-Phase-3 behaviour
+// byte for byte — no user lookup, no user counter, no user field in
+// /v1/usage. The second return value distinguishes "no per-user rule for this
+// (team, user)" from a real hit; SetUserLookup itself makes no I/O call.
+func (g *Governor) SetUserLookup(f func(team, user string) (UserPolicy, bool)) {
+	g.userLookup = f
 }
 
 // SetBudgetNotify installs a budget-alert hook (D5b, ADR-017): called from
@@ -208,6 +267,22 @@ func (g *Governor) budgetLocOrUTC() *time.Location {
 	return g.budgetLoc
 }
 
+// userBudgetID is the id half of a user budget counter's store key:
+// budget.Key(budget.ScopeUser, userBudgetID(s), w) → "budget:day:user:acme/sub-1".
+//
+// "/" is a safe separator because adminapi.validateTeamName forbids "/" in a
+// team name (internal/server/adminapi/teams.go), so the split point is
+// unambiguous no matter what a team or an OIDC sub contains.
+//
+// ACCEPTED LIMITATION: the counter is per (team, user), so a policy whose
+// subject is user-ONLY (no team) caps that user separately in each team they
+// hold a key in — one human in two teams gets two counters, i.e. up to 2x the
+// stated cap. Keying on the bare user id instead would fix that and break
+// something worse: a (team, user) rule and a user-only rule would then share
+// one counter, so a team-scoped cap would be charged for spend made under a
+// different team. Documented in ADR-042; do not "fix" it here.
+func userBudgetID(s Subject) string { return s.Team + "/" + s.User }
+
 // PricingVersionOf returns the rate table version for the audit CostRef,
 // nil-safe.
 func PricingVersionOf(table *pricing.Table) string {
@@ -229,30 +304,31 @@ type GovDecision struct {
 // PreCheck enforces rate limit + quota + budget BEFORE the upstream call.
 // estimateTokens is the request's estimated input tokens. block policy → deny;
 // warn policy → allow (still settled afterward). An unknown team is ungoverned
-// (but a key limit, if any, still applies — see KeyPolicy). keyID scopes the
-// key-level counters; pass "" with a zero KeyPolicy when there is none.
-func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int64) GovDecision {
+// (but a key limit, if any, still applies — see KeyPolicy). Subject.KeyID
+// scopes the key-level counters; Subject.User, when set and a UserPolicy is
+// found, adds a third scope (see below).
+func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDecision {
 	// Budget-lease gate (ADR-034) first: an expired hard-cap lease means the
 	// global budget can no longer be verified locally — fail closed before
 	// charging any rate/quota counter.
 	if g.leaseGate != nil {
-		if blocked, reason := g.leaseGate(team); blocked {
+		if blocked, reason := g.leaseGate(s.Team); blocked {
 			return GovDecision{Status: 402, Reason: reason, Code: audit.DenyTeamBudgetExceeded}
 		}
 	}
-	if p, ok := g.policyOf(team); ok {
+	if p, ok := g.policyOf(s.Team); ok {
 		// rate limit (RPM): 1 request unit
-		if p.RatePerMin > 0 && !g.lim.AllowRate("rate:"+team, 1, p.RatePerMin, max64(p.RateBurst, 1)) {
+		if p.RatePerMin > 0 && !g.lim.AllowRate("rate:"+s.Team, 1, p.RatePerMin, max64(p.RateBurst, 1)) {
 			return GovDecision{Status: 429, Reason: "rate limit exceeded", Code: audit.DenyTeamRateLimited}
 		}
 		// token rate limit (TPM): charge the request estimate against a per-minute
 		// token bucket whose burst is one minute's worth of tokens.
-		if p.TokensPerMinute > 0 && !g.lim.AllowRate("tpm:"+team, estimateTokens, p.TokensPerMinute, p.TokensPerMinute) {
+		if p.TokensPerMinute > 0 && !g.lim.AllowRate("tpm:"+s.Team, estimateTokens, p.TokensPerMinute, p.TokensPerMinute) {
 			return GovDecision{Status: 429, Reason: "token rate limit exceeded", Code: audit.DenyTeamTokenRateLimited}
 		}
 		// quota (daily tokens)
 		if p.TokensPerDay > 0 {
-			if g.lim.CheckQuota("quota:"+team, estimateTokens, p.TokensPerDay, 24*time.Hour) == limiter.Block {
+			if g.lim.CheckQuota("quota:"+s.Team, estimateTokens, p.TokensPerDay, 24*time.Hour) == limiter.Block {
 				if p.QuotaExceeded != "warn" {
 					return GovDecision{Status: 429, Reason: "token quota exceeded", Code: audit.DenyTeamQuotaExceeded}
 				}
@@ -275,7 +351,7 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 		var budgetDenyResets time.Time
 		if p.BudgetMicrosPerMonth > 0 {
 			mw := g.monthWindow()
-			tbk := budget.Key(budget.ScopeTeam, team, mw)
+			tbk := budget.Key(budget.ScopeTeam, s.Team, mw)
 			if g.bud.Check(tbk, 0, p.BudgetMicrosPerMonth, mw) == budget.Block {
 				if p.BudgetExceeded != "warn" {
 					resetsAt := g.bud.ResetsAt(tbk, mw)
@@ -286,7 +362,7 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 		}
 		if p.BudgetMicrosPerDay > 0 {
 			dw := g.dayWindow()
-			tbkDay := budget.Key(budget.ScopeTeam, team, dw)
+			tbkDay := budget.Key(budget.ScopeTeam, s.Team, dw)
 			if g.bud.Check(tbkDay, 0, p.BudgetMicrosPerDay, dw) == budget.Block {
 				if p.BudgetDayExceeded != "warn" {
 					resetsAt := g.bud.ResetsAt(tbkDay, dw)
@@ -303,10 +379,10 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 		}
 	}
 	// Per-key limits (§8 D2) — independent of team governance, always block.
-	if kp.RatePerMin > 0 && !g.lim.AllowRate("rate:key:"+keyID, 1, kp.RatePerMin, kp.RatePerMin) {
+	if kp.RatePerMin > 0 && !g.lim.AllowRate("rate:key:"+s.KeyID, 1, kp.RatePerMin, kp.RatePerMin) {
 		return GovDecision{Status: 429, Reason: "key rate limit exceeded", Code: audit.DenyKeyRateLimited}
 	}
-	if kp.TokensPerMinute > 0 && !g.lim.AllowRate("tpm:key:"+keyID, estimateTokens, kp.TokensPerMinute, kp.TokensPerMinute) {
+	if kp.TokensPerMinute > 0 && !g.lim.AllowRate("tpm:key:"+s.KeyID, estimateTokens, kp.TokensPerMinute, kp.TokensPerMinute) {
 		return GovDecision{Status: 429, Reason: "key token rate limit exceeded", Code: audit.DenyKeyTokenRateLimited}
 	}
 	// Per-key budget: same two-window shape as the team block above, minus the
@@ -315,7 +391,7 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 	var keyBudgetDenyResets time.Time
 	if kp.BudgetMicrosPerMonth > 0 {
 		mw := g.monthWindow()
-		kbk := budget.Key(budget.ScopeKey, keyID, mw)
+		kbk := budget.Key(budget.ScopeKey, s.KeyID, mw)
 		if g.bud.Check(kbk, 0, kp.BudgetMicrosPerMonth, mw) == budget.Block {
 			resetsAt := g.bud.ResetsAt(kbk, mw)
 			keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key budget", resetsAt, g.budgetLocOrUTC(), ""), Code: audit.DenyKeyBudgetExceeded}
@@ -324,7 +400,7 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 	}
 	if kp.BudgetMicrosPerDay > 0 {
 		dw := g.dayWindow()
-		kbkDay := budget.Key(budget.ScopeKey, keyID, dw)
+		kbkDay := budget.Key(budget.ScopeKey, s.KeyID, dw)
 		if g.bud.Check(kbkDay, 0, kp.BudgetMicrosPerDay, dw) == budget.Block {
 			resetsAt := g.bud.ResetsAt(kbkDay, dw)
 			if keyBudgetDeny.Status == 0 || resetsAt.Before(keyBudgetDenyResets) {
@@ -335,6 +411,46 @@ func (g *Governor) PreCheck(team, keyID string, kp KeyPolicy, estimateTokens int
 	}
 	if keyBudgetDeny.Status != 0 {
 		return keyBudgetDeny
+	}
+	// Per-USER budget (ADR-042 Phase 3): the third scope, after team and key.
+	// Budget only — no RPM/TPM, see UserPolicy. Same two-window shape as the
+	// key block above, with UserPolicy's single on_exceeded knob governing
+	// both windows, and the same "whichever window resets soonest wins" so
+	// the 402's date is the earliest the caller can actually retry.
+	//
+	// Position is deliberate: team and key are checked first, so a scope that
+	// already denied returns before a user lookup is even attempted. Block
+	// wins on tie across all three scopes — none of them can turn another's
+	// denial into an allow.
+	if s.User != "" && g.userLookup != nil {
+		if up, ok := g.userLookup(s.Team, s.User); ok {
+			uid := userBudgetID(s)
+			var userDeny GovDecision
+			var userDenyResets time.Time
+			if up.BudgetMicrosPerMonth > 0 {
+				mw := g.monthWindow()
+				ubk := budget.Key(budget.ScopeUser, uid, mw)
+				if g.bud.Check(ubk, 0, up.BudgetMicrosPerMonth, mw) == budget.Block && up.BudgetExceeded != "warn" {
+					resetsAt := g.bud.ResetsAt(ubk, mw)
+					userDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("user budget", resetsAt, g.budgetLocOrUTC(), up.AdminContact), Code: audit.DenyUserBudgetExceeded}
+					userDenyResets = resetsAt
+				}
+			}
+			if up.BudgetMicrosPerDay > 0 {
+				dw := g.dayWindow()
+				ubkDay := budget.Key(budget.ScopeUser, uid, dw)
+				if g.bud.Check(ubkDay, 0, up.BudgetMicrosPerDay, dw) == budget.Block && up.BudgetExceeded != "warn" {
+					resetsAt := g.bud.ResetsAt(ubkDay, dw)
+					if userDeny.Status == 0 || resetsAt.Before(userDenyResets) {
+						userDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("user daily budget", resetsAt, g.budgetLocOrUTC(), up.AdminContact), Code: audit.DenyUserBudgetExceeded}
+						userDenyResets = resetsAt
+					}
+				}
+			}
+			if userDeny.Status != 0 {
+				return userDeny
+			}
+		}
 	}
 	return GovDecision{Allowed: true}
 }
@@ -352,12 +468,12 @@ func budgetExceededMessage(kind string, resetsAt time.Time, loc *time.Location, 
 	return msg
 }
 
-func (g *Governor) UsageOf(team, keyID string, kp KeyPolicy) UsageStatus {
-	u := UsageStatus{Team: team}
-	if p, ok := g.policyOf(team); ok {
+func (g *Governor) UsageOf(s Subject, kp KeyPolicy) UsageStatus {
+	u := UsageStatus{Team: s.Team}
+	if p, ok := g.policyOf(s.Team); ok {
 		if p.BudgetMicrosPerMonth > 0 {
 			mw := g.monthWindow()
-			tbk := budget.Key(budget.ScopeTeam, team, mw)
+			tbk := budget.Key(budget.ScopeTeam, s.Team, mw)
 			spent := g.bud.Spent(tbk, mw)
 			u.TeamBudget = &BudgetUsage{
 				LimitUSDMicros:     p.BudgetMicrosPerMonth,
@@ -369,7 +485,7 @@ func (g *Governor) UsageOf(team, keyID string, kp KeyPolicy) UsageStatus {
 		}
 		if p.BudgetMicrosPerDay > 0 {
 			dw := g.dayWindow()
-			tbkDay := budget.Key(budget.ScopeTeam, team, dw)
+			tbkDay := budget.Key(budget.ScopeTeam, s.Team, dw)
 			spent := g.bud.Spent(tbkDay, dw)
 			u.TeamBudgetDay = &BudgetUsage{
 				LimitUSDMicros:     p.BudgetMicrosPerDay,
@@ -382,14 +498,14 @@ func (g *Governor) UsageOf(team, keyID string, kp KeyPolicy) UsageStatus {
 		if p.TokensPerDay > 0 {
 			u.TeamQuota = &QuotaUsage{
 				LimitTokens: p.TokensPerDay,
-				UsedTokens:  g.lim.QuotaUsed("quota:"+team, 24*time.Hour),
+				UsedTokens:  g.lim.QuotaUsed("quota:"+s.Team, 24*time.Hour),
 				Window:      "24h",
 			}
 		}
 	}
 	if kp.BudgetMicrosPerMonth > 0 {
 		mw := g.monthWindow()
-		kbk := budget.Key(budget.ScopeKey, keyID, mw)
+		kbk := budget.Key(budget.ScopeKey, s.KeyID, mw)
 		spent := g.bud.Spent(kbk, mw)
 		u.KeyBudget = &BudgetUsage{
 			LimitUSDMicros:     kp.BudgetMicrosPerMonth,
@@ -401,7 +517,7 @@ func (g *Governor) UsageOf(team, keyID string, kp KeyPolicy) UsageStatus {
 	}
 	if kp.BudgetMicrosPerDay > 0 {
 		dw := g.dayWindow()
-		kbkDay := budget.Key(budget.ScopeKey, keyID, dw)
+		kbkDay := budget.Key(budget.ScopeKey, s.KeyID, dw)
 		spent := g.bud.Spent(kbkDay, dw)
 		u.KeyBudgetDay = &BudgetUsage{
 			LimitUSDMicros:     kp.BudgetMicrosPerDay,
@@ -411,10 +527,39 @@ func (g *Governor) UsageOf(team, keyID string, kp KeyPolicy) UsageStatus {
 			ResetsAt:           g.bud.ResetsAt(kbkDay, dw),
 		}
 	}
+	if s.User != "" && g.userLookup != nil {
+		if up, ok := g.userLookup(s.Team, s.User); ok {
+			uid := userBudgetID(s)
+			if up.BudgetMicrosPerMonth > 0 {
+				mw := g.monthWindow()
+				ubk := budget.Key(budget.ScopeUser, uid, mw)
+				spent := g.bud.Spent(ubk, mw)
+				u.UserBudget = &BudgetUsage{
+					LimitUSDMicros:     up.BudgetMicrosPerMonth,
+					SpentUSDMicros:     spent,
+					RemainingUSDMicros: max64(0, up.BudgetMicrosPerMonth-spent),
+					Window:             "calendar-month",
+					ResetsAt:           g.bud.ResetsAt(ubk, mw),
+				}
+			}
+			if up.BudgetMicrosPerDay > 0 {
+				dw := g.dayWindow()
+				ubkDay := budget.Key(budget.ScopeUser, uid, dw)
+				spent := g.bud.Spent(ubkDay, dw)
+				u.UserBudgetDay = &BudgetUsage{
+					LimitUSDMicros:     up.BudgetMicrosPerDay,
+					SpentUSDMicros:     spent,
+					RemainingUSDMicros: max64(0, up.BudgetMicrosPerDay-spent),
+					Window:             "calendar-day",
+					ResetsAt:           g.bud.ResetsAt(ubkDay, dw),
+				}
+			}
+		}
+	}
 	if kp.TokensPerMinute > 0 {
-		// Same bucket key/burst PreCheck debits ("tpm:key:"+keyID) — RateUsed
+		// Same bucket key/burst PreCheck debits ("tpm:key:"+s.KeyID) — RateUsed
 		// only peeks at the projected refill, never writes it back.
-		used := g.lim.RateUsed("tpm:key:"+keyID, kp.TokensPerMinute, kp.TokensPerMinute)
+		used := g.lim.RateUsed("tpm:key:"+s.KeyID, kp.TokensPerMinute, kp.TokensPerMinute)
 		u.KeyQuota = &QuotaUsage{
 			LimitTokens: kp.TokensPerMinute,
 			UsedTokens:  used,
@@ -433,8 +578,8 @@ func (g *Governor) UsageOf(team, keyID string, kp KeyPolicy) UsageStatus {
 // token count now that the response has completed (see AdjustRate).
 // Key-level spend is deliberately NOT added to /metrics: metric labels are
 // config-bounded (CLAUDE.md) and must never carry a key_id.
-func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model string, u pricing.Usage, table *pricing.Table, estimatedTokens int64) (costMicros int64, pricingMissing bool) {
-	p, _ := g.policyOf(team)
+func (g *Governor) Settle(s Subject, kp KeyPolicy, provider, model string, u pricing.Usage, table *pricing.Table, estimatedTokens int64) (costMicros int64, pricingMissing bool) {
+	p, _ := g.policyOf(s.Team)
 	// Total tokens actually processed, including cache tiers — the same
 	// figure both the daily quota debit and the TPM true-up below use.
 	// Excluding cache tokens here used to make a cache-read-heavy request
@@ -442,10 +587,10 @@ func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model stri
 	// consumed, the mirror image of ADR-030's pricing bug in the quota path.
 	actualTokens := u.Input + u.Output + u.CacheRead + u.CacheWrite5m + u.CacheWrite1h
 	if p.TokensPerDay > 0 {
-		g.lim.DebitQuota("quota:"+team, actualTokens, 24*time.Hour)
+		g.lim.DebitQuota("quota:"+s.Team, actualTokens, 24*time.Hour)
 		// Reflect the post-debit daily quota utilization into the gauge (0..1).
-		used := g.lim.QuotaUsed("quota:"+team, 24*time.Hour)
-		g.metrics.SetQuotaUtilization(team, "day", float64(used)/float64(p.TokensPerDay))
+		used := g.lim.QuotaUsed("quota:"+s.Team, 24*time.Hour)
+		g.metrics.SetQuotaUtilization(s.Team, "day", float64(used)/float64(p.TokensPerDay))
 	}
 	// TPM true-up (§5.3): PreCheck pre-blocked on a coarse pre-request byte
 	// estimate (estimateTokens); now that actualTokens is known, correct the
@@ -456,10 +601,10 @@ func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model stri
 	// costs a fraction of that in real load.
 	tpmDelta := estimatedTokens - actualTokens
 	if p.TokensPerMinute > 0 {
-		g.lim.AdjustRate("tpm:"+team, tpmDelta, p.TokensPerMinute)
+		g.lim.AdjustRate("tpm:"+s.Team, tpmDelta, p.TokensPerMinute)
 	}
 	if kp.TokensPerMinute > 0 {
-		g.lim.AdjustRate("tpm:key:"+keyID, tpmDelta, kp.TokensPerMinute)
+		g.lim.AdjustRate("tpm:key:"+s.KeyID, tpmDelta, kp.TokensPerMinute)
 	}
 	if table == nil {
 		costMicros, pricingMissing = 0, true
@@ -468,7 +613,7 @@ func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model stri
 	}
 	if p.BudgetMicrosPerMonth > 0 {
 		mw := g.monthWindow()
-		tbk := budget.Key(budget.ScopeTeam, team, mw)
+		tbk := budget.Key(budget.ScopeTeam, s.Team, mw)
 		g.bud.Debit(tbk, costMicros, mw)
 		// Debit and Spent are each individually mutex-protected but not one
 		// atomic operation: a concurrent Settle for the same team can debit
@@ -480,14 +625,14 @@ func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model stri
 		// approximation ADR-017 §8 documents; ponytail: add
 		// BudgetStore.DebitAndRead if this needs to be exact.
 		spent := g.bud.Spent(tbk, mw)
-		g.metrics.SetBudgetUtilization(team, float64(spent)/float64(p.BudgetMicrosPerMonth))
+		g.metrics.SetBudgetUtilization(s.Team, float64(spent)/float64(p.BudgetMicrosPerMonth))
 		if g.notifyBudget != nil {
-			g.notifyBudget(team, spent, p.BudgetMicrosPerMonth)
+			g.notifyBudget(s.Team, spent, p.BudgetMicrosPerMonth)
 		}
 	}
 	if p.BudgetMicrosPerDay > 0 {
 		dw := g.dayWindow()
-		g.bud.Debit(budget.Key(budget.ScopeTeam, team, dw), costMicros, dw)
+		g.bud.Debit(budget.Key(budget.ScopeTeam, s.Team, dw), costMicros, dw)
 		// Deliberately no gauge write and no alert hook for the daily window in
 		// this phase, and that is CORRECTNESS, not an omission:
 		// metrics.SetBudgetUtilization(team, ratio) carries no window label, so
@@ -498,7 +643,7 @@ func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model stri
 	}
 	if kp.BudgetMicrosPerMonth > 0 {
 		mw := g.monthWindow()
-		kbk := budget.Key(budget.ScopeKey, keyID, mw)
+		kbk := budget.Key(budget.ScopeKey, s.KeyID, mw)
 		g.bud.Debit(kbk, costMicros, mw)
 		// Unlike the team block above, this read has no other consumer (no
 		// per-key /metrics gauge) — skip it entirely when alerting is off,
@@ -506,19 +651,39 @@ func (g *Governor) Settle(team, keyID string, kp KeyPolicy, provider, model stri
 		// request (code-gate MINOR, opus).
 		if g.notifyKeyBudget != nil {
 			spent := g.bud.Spent(kbk, mw)
-			g.notifyKeyBudget(team, keyID, spent, kp.BudgetMicrosPerMonth)
+			g.notifyKeyBudget(s.Team, s.KeyID, spent, kp.BudgetMicrosPerMonth)
 		}
 	}
 	if kp.BudgetMicrosPerDay > 0 {
 		dw := g.dayWindow()
-		g.bud.Debit(budget.Key(budget.ScopeKey, keyID, dw), costMicros, dw)
+		g.bud.Debit(budget.Key(budget.ScopeKey, s.KeyID, dw), costMicros, dw)
 		// Same reasoning as the team daily debit above: no per-key alert hook
 		// for the daily window until alert.Notifier's fired-set is window-keyed.
+	}
+	if s.User != "" && g.userLookup != nil {
+		if up, ok := g.userLookup(s.Team, s.User); ok {
+			uid := userBudgetID(s)
+			if up.BudgetMicrosPerMonth > 0 {
+				mw := g.monthWindow()
+				g.bud.Debit(budget.Key(budget.ScopeUser, uid, mw), costMicros, mw)
+			}
+			if up.BudgetMicrosPerDay > 0 {
+				dw := g.dayWindow()
+				g.bud.Debit(budget.Key(budget.ScopeUser, uid, dw), costMicros, dw)
+			}
+			// Deliberately NO gauge write and NO alert hook, and this is a
+			// HARD RULE rather than an omission: metrics.SetBudgetUtilization
+			// takes a team label only and a raw user id must never become a
+			// Prometheus label (unbounded cardinality, CLAUDE.md — the same
+			// bar key_id sits behind); alert.Notifier's fired-set is an
+			// unbounded in-memory map, so keying it by user id would leak
+			// memory in a long-running process.
+		}
 	}
 	// Observability metrics (approximation; the µUSD budget store is the
 	// settlement source of truth). Recorded for every settled request, even an
 	// ungoverned team, so /metrics reflects all traffic.
-	g.metrics.AddBudgetSpend(team, model, "total", float64(costMicros)/1e6)
+	g.metrics.AddBudgetSpend(s.Team, model, "total", float64(costMicros)/1e6)
 	if pricingMissing {
 		g.metrics.IncPricingMiss(provider, model)
 	}

@@ -63,7 +63,7 @@ func TestPreCheckDailyBudgetBlocksWhileMonthlyAllows(t *testing.T) {
 		t.Fatalf("daily debit leaked into the monthly bucket: monthly spent = %d, want 0", got)
 	}
 
-	dec := g.PreCheck("t", "", KeyPolicy{}, 0)
+	dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0)
 	if dec.Allowed {
 		t.Fatalf("daily budget exhausted must deny: %+v", dec)
 	}
@@ -91,7 +91,7 @@ func TestPreCheckDailyBudgetZeroMeansUnlimited(t *testing.T) {
 	g.SetBudgetTimezone(loc)
 	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", dw), 999_999_999, dw)
 
-	if dec := g.PreCheck("t", "", KeyPolicy{}, 0); !dec.Allowed {
+	if dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0); !dec.Allowed {
 		t.Fatalf("an unset daily limit must not enforce anything: %+v", dec)
 	}
 }
@@ -155,7 +155,7 @@ func TestPreCheckReturnsSoonestResettingBudgetWindow(t *testing.T) {
 				},
 			}, limiter.NewMemory(), store, nil)
 
-			dec := g.PreCheck("t", "", KeyPolicy{}, 0)
+			dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0)
 			if dec.Allowed || dec.Status != 402 {
 				t.Fatalf("both windows block, want a 402 deny: %+v", dec)
 			}
@@ -183,7 +183,7 @@ func TestSettleDebitsBothBudgetWindows(t *testing.T) {
 	}, limiter.NewMemory(), budget.NewMemory(), nil)
 	g.SetBudgetTimezone(loc)
 
-	cost, missing := g.Settle("t", "", KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), 0)
+	cost, missing := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), 0)
 	if missing || cost != 1500 {
 		t.Fatalf("settle cost=%d missing=%v, want 1500 µUSD priced", cost, missing)
 	}
@@ -218,7 +218,7 @@ func TestSettleDailyDebitDoesNotTouchMetricsOrAlerts(t *testing.T) {
 	calls := 0
 	g.SetBudgetNotify(func(team string, spentMicros, limitMicros int64) { calls++ })
 
-	g.Settle("t", "", KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), 0)
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), 0)
 	if calls != 0 {
 		t.Fatalf("budget-alert hook fired %d times for a daily-only debit, want 0", calls)
 	}
@@ -241,7 +241,7 @@ func TestUsageOfReportsBothBudgetWindows(t *testing.T) {
 	}, limiter.NewMemory(), budget.NewMemory(), nil)
 	g.SetBudgetTimezone(loc)
 
-	u := g.UsageOf("t", "k", KeyPolicy{BudgetMicrosPerMonth: 3_003, BudgetMicrosPerDay: 4_004})
+	u := g.UsageOf(Subject{Team: "t", KeyID: "k"}, KeyPolicy{BudgetMicrosPerMonth: 3_003, BudgetMicrosPerDay: 4_004})
 	if u.TeamBudget == nil || u.TeamBudgetDay == nil || u.KeyBudget == nil || u.KeyBudgetDay == nil {
 		t.Fatalf("all four budget fields must be set: %+v", u)
 	}
@@ -279,7 +279,7 @@ func TestUsageOfOmitsDayFieldsWhenUnset(t *testing.T) {
 		"t": {BudgetMicrosPerMonth: 1_000_000, BudgetExceeded: "block"},
 	}, limiter.NewMemory(), budget.NewMemory(), nil)
 
-	u := g.UsageOf("t", "k", KeyPolicy{BudgetMicrosPerMonth: 500_000})
+	u := g.UsageOf(Subject{Team: "t", KeyID: "k"}, KeyPolicy{BudgetMicrosPerMonth: 500_000})
 	if u.TeamBudgetDay != nil {
 		t.Fatalf("team_budget_day must be nil with no daily limit: %+v", u.TeamBudgetDay)
 	}
@@ -299,7 +299,7 @@ func TestPreCheckKeyDailyBudgetBlocks(t *testing.T) {
 	g.SetBudgetTimezone(loc)
 	g.bud.Debit(budget.Key(budget.ScopeKey, "k", dw), 2_000, dw)
 
-	dec := g.PreCheck("t", "k", KeyPolicy{BudgetMicrosPerDay: 1_000}, 0)
+	dec := g.PreCheck(Subject{Team: "t", KeyID: "k"}, KeyPolicy{BudgetMicrosPerDay: 1_000}, 0)
 	if dec.Allowed {
 		t.Fatalf("key daily budget exhausted must deny: %+v", dec)
 	}
@@ -324,7 +324,7 @@ func TestPreCheckMonthlyBudgetUnchangedWhenDailyUnset(t *testing.T) {
 	}, limiter.NewMemory(), budget.NewMemory(), nil)
 	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonth), 2_000, budgetWindow)
 
-	dec := g.PreCheck("t", "", KeyPolicy{}, 0)
+	dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0)
 	if dec.Allowed {
 		t.Fatalf("monthly budget exhausted must deny: %+v", dec)
 	}

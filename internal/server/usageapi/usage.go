@@ -34,5 +34,5 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(governance.UsageStatus{Team: p.Team})
 		return
 	}
-	_ = json.NewEncoder(w).Encode(h.gov.UsageOf(p.Team, p.KeyID, kp))
+	_ = json.NewEncoder(w).Encode(h.gov.UsageOf(governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.Owner}, kp))
 }

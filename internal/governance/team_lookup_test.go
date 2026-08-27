@@ -26,7 +26,7 @@ func TestTeamLookup_dbOnlyTeamEnforced(t *testing.T) {
 		return TeamPolicy{}, false
 	})
 	g.bud.Debit(budget.Key(budget.ScopeTeam, "db-team", budget.CalendarMonth), 2, budgetWindow) // spend past the 1-µUSD budget
-	dec := g.PreCheck("db-team", "", KeyPolicy{}, 0)
+	dec := g.PreCheck(Subject{Team: "db-team"}, KeyPolicy{}, 0)
 	if dec.Allowed || dec.Status != 402 {
 		t.Fatalf("db-only team budget must enforce: %+v", dec)
 	}
@@ -43,7 +43,7 @@ func TestTeamLookup_recordWinsOverConfig(t *testing.T) {
 		return TeamPolicy{BudgetMicrosPerMonth: 1, BudgetExceeded: "block"}, true // record: 1 µUSD
 	})
 	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonth), 2, budgetWindow)
-	dec := g.PreCheck("t", "", KeyPolicy{}, 0)
+	dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0)
 	if dec.Allowed || dec.Status != 402 {
 		t.Fatalf("record policy must win over config for the same team: %+v", dec)
 	}
@@ -58,7 +58,7 @@ func TestTeamLookup_missFallsThroughToConfig(t *testing.T) {
 	}, limiter.NewMemory(), budget.NewMemory(), nil)
 	g.SetTeamLookup(func(string) (TeamPolicy, bool) { return TeamPolicy{}, false })
 	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonth), 2, budgetWindow)
-	dec := g.PreCheck("t", "", KeyPolicy{}, 0)
+	dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0)
 	if dec.Allowed || dec.Status != 402 {
 		t.Fatalf("lookup miss must fall through to config policy: %+v", dec)
 	}
@@ -69,7 +69,7 @@ func TestTeamLookup_missFallsThroughToConfig(t *testing.T) {
 // nil and policyOf must not panic or otherwise change behavior.
 func TestTeamLookup_nilLookupIsConfigOnlyBackCompat(t *testing.T) {
 	g := testGovernor() // config-only team "t", no SetTeamLookup call
-	dec := g.PreCheck("t", "", KeyPolicy{}, 100)
+	dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 100)
 	if !dec.Allowed {
 		t.Fatalf("nil lookup must not change existing config-only behavior: %+v", dec)
 	}
@@ -88,13 +88,13 @@ func TestTeamLookup_dynamicChangeTakesEffectNextCallNoRestart(t *testing.T) {
 		return current, true
 	})
 
-	if dec := g.PreCheck("t", "", KeyPolicy{}, 0); !dec.Allowed {
+	if dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0); !dec.Allowed {
 		t.Fatalf("team must start ungoverned: %+v", dec)
 	}
 
 	current = TeamPolicy{BudgetMicrosPerMonth: 1, BudgetExceeded: "block"}
 	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonth), 2, budgetWindow)
-	if dec := g.PreCheck("t", "", KeyPolicy{}, 0); dec.Allowed {
+	if dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0); dec.Allowed {
 		t.Fatal("edited policy must enforce on the very next PreCheck call, no restart")
 	}
 }
@@ -109,14 +109,14 @@ func TestTeamLookup_settleDebitsSameCounterKeyPreCheckReads(t *testing.T) {
 	g.SetTeamLookup(func(team string) (TeamPolicy, bool) {
 		return TeamPolicy{BudgetMicrosPerMonth: 1000, BudgetExceeded: "block"}, true
 	})
-	cost, missing := g.Settle("t", "", KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), 0)
+	cost, missing := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), 0)
 	if missing || cost != 1500 {
 		t.Fatalf("settle cost=%d missing=%v, want 1500/false", cost, missing)
 	}
 	// The 1500 µUSD debit must have landed on "budget:month:team:t" — the same key
 	// PreCheck reads — so a subsequent PreCheck against the now-exceeded
 	// 1000 µUSD budget must block.
-	if dec := g.PreCheck("t", "", KeyPolicy{}, 0); dec.Allowed {
+	if dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0); dec.Allowed {
 		t.Fatal("Settle's debit under a lookup-sourced policy must be visible to the next PreCheck via the same counter key")
 	}
 }
@@ -134,15 +134,15 @@ func TestLeaseGateBlocksBeforeCounters(t *testing.T) {
 		return false, ""
 	})
 
-	d := g.PreCheck("capped", "k", KeyPolicy{}, 10)
+	d := g.PreCheck(Subject{Team: "capped", KeyID: "k"}, KeyPolicy{}, 10)
 	if d.Allowed || d.Status != 402 {
 		t.Fatalf("gated team: %+v, want 402 deny", d)
 	}
-	if d := g.PreCheck("free", "k", KeyPolicy{}, 10); !d.Allowed {
+	if d := g.PreCheck(Subject{Team: "free", KeyID: "k"}, KeyPolicy{}, 10); !d.Allowed {
 		t.Fatalf("ungated team denied: %+v", d)
 	}
 	blocked = false
-	if d := g.PreCheck("capped", "k", KeyPolicy{}, 10); !d.Allowed {
+	if d := g.PreCheck(Subject{Team: "capped", KeyID: "k"}, KeyPolicy{}, 10); !d.Allowed {
 		t.Fatalf("unblocked team still denied: %+v", d)
 	}
 }

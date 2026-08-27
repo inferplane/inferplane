@@ -34,7 +34,7 @@ func TestUsageOfTeamMonthResetHonoursBudgetTimezone(t *testing.T) {
 	}, limiter.NewMemory(), budget.NewMemory(), nil)
 	g.SetBudgetTimezone(seoul)
 
-	u := g.UsageOf("t", "", KeyPolicy{})
+	u := g.UsageOf(Subject{Team: "t"}, KeyPolicy{})
 	if u.TeamBudget == nil {
 		t.Fatalf("team_budget must be set: %+v", u)
 	}
@@ -57,7 +57,7 @@ func TestUsageOfKeyMonthResetHonoursBudgetTimezone(t *testing.T) {
 	g := NewGovernor(map[string]TeamPolicy{}, limiter.NewMemory(), budget.NewMemory(), nil)
 	g.SetBudgetTimezone(seoul)
 
-	u := g.UsageOf("t", "k", KeyPolicy{BudgetMicrosPerMonth: 1_000_000})
+	u := g.UsageOf(Subject{Team: "t", KeyID: "k"}, KeyPolicy{BudgetMicrosPerMonth: 1_000_000})
 	if u.KeyBudget == nil {
 		t.Fatalf("key_budget must be set: %+v", u)
 	}
