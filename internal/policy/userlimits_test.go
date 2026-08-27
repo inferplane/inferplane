@@ -272,7 +272,16 @@ spec:
 }
 
 // An empty user never matches — an unauthenticated/ownerless principal must
-// not accidentally inherit a user-only policy stored under the zero team.
+// not accidentally inherit a user-only policy stored under the zero team, and
+// must never inherit its TEAM's cap as a personal one.
+//
+// The team-only policy in this fixture is load-bearing and was added after
+// mutation testing: with only the user-only policy present, mergeUserLimits'
+// team-only skip could be deleted AND UserLimits' empty-user guard deleted with
+// it, and this test still passed — nothing would ever have been stored under
+// userKey{team: "t", user: ""} for the lookup to find. The team-only rule is
+// what makes that key populatable, so the two guards are now genuinely pinned
+// rather than merely asserted. Do not simplify the fixture back to one policy.
 func TestUserLimitsEmptyUserIsNeverAMatch(t *testing.T) {
 	dir := t.TempDir()
 	writePolicy(t, dir, "p.yaml", `apiVersion: inferplane.dev/v1alpha1
@@ -284,6 +293,16 @@ spec:
   - name: month-cap
     failurePolicy: FailOpen
     budget: { limitMilliUSD: 1000 }
+---
+apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: team-only }
+spec:
+  subject: { team: t }
+  rules:
+  - name: team-month-cap
+    failurePolicy: FailOpen
+    budget: { limitMilliUSD: 7000 }
 `)
 	s, err := NewStore(dir)
 	if err != nil {
@@ -291,6 +310,13 @@ spec:
 	}
 	if ul, ok := s.UserLimits("t", ""); ok {
 		t.Fatalf("empty user matched a policy: %+v", ul)
+	}
+	// The control: the team-only rule DID load and is enforced where it
+	// belongs, so the assertion above is about the user lookup rejecting an
+	// empty user — not about an empty policy set.
+	tl, ok := s.TeamLimits("t")
+	if !ok || tl.BudgetMicrosPerMonth != 7_000_000 {
+		t.Fatalf("team-only rule did not land: ok=%v limits=%+v", ok, tl)
 	}
 }
 
