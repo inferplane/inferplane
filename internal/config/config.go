@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -299,6 +300,11 @@ type RateConfig struct {
 	CacheReadPerMTok    float64 `json:"cache_read_per_mtok"`
 	CacheWrite5mPerMTok float64 `json:"cache_write_5m_per_mtok"`
 	CacheWrite1hPerMTok float64 `json:"cache_write_1h_per_mtok"`
+	// Free declares a genuinely zero-cost model. It is the ONLY way to write a
+	// 0/0 override: without it, both rates being zero is a load error, because
+	// 0 is what an unfinished placeholder looks like and an unfinished
+	// placeholder must not bill as "free" (see validatePricing).
+	Free bool `json:"free,omitempty"`
 }
 
 // PricingConfig configures cost computation: on_missing policy (allow|block)
@@ -312,16 +318,57 @@ type PricingConfig struct {
 	Overrides map[string]map[string]RateConfig `json:"overrides"`  // provider → model → rate
 }
 
-// validatePricing rejects an unrecognized on_missing value. Before this, a typo
-// like "blcok" — or "BLOCK" — silently fell back to allow, so an operator who
-// believed unpriced traffic was refused was in fact serving it free (ADR-030).
+// validatePricing rejects an unrecognized on_missing value, and a rate override
+// that declares no price at all.
+//
+// The on_missing check: before it, a typo like "blcok" — or "BLOCK" — silently
+// fell back to allow, so an operator who believed unpriced traffic was refused
+// was in fact serving it free (ADR-030).
+//
+// The 0/0 check closes the same class of hole one level down. An override of
+// `{"input_per_mtok": 0, "output_per_mtok": 0}` is the natural way to write a
+// fill-in-the-blank placeholder, and it used to be accepted as a REAL rate: it
+// satisfied HasRate, passed `mayu pricing check`, booted under
+// `on_missing: "block"`, passed the runtime guard, and settled at 0 uUSD with
+// missing=FALSE — which is precisely how the audit record encodes a genuinely
+// free model. So an unfinished placeholder was indistinguishable from a
+// deliberate zero. 0 means unpriced; free needs `"free": true`.
+//
+// A LOAD ERROR rather than a warning, matching the two nearest precedents (an
+// unrecognized on_missing value, and an unknown budget_timezone): a money
+// control that is silently wrong is worse than a refused boot.
+//
+// Only BOTH rates being zero is refused. A single-sided zero is unusual but not
+// provably wrong — a provider could bill output only — so it loads.
 func validatePricing(p PricingConfig) error {
 	switch p.OnMissing {
 	case "", "allow", "block":
-		return nil
 	default:
 		return fmt.Errorf("config: pricing.on_missing must be \"allow\" or \"block\", got %q", p.OnMissing)
 	}
+	// Sorted so a config with several offenders always names the same one
+	// first: a load error that moves between boots is not reproducible.
+	for _, provider := range sortedKeys(p.Overrides) {
+		models := p.Overrides[provider]
+		for _, model := range sortedKeys(models) {
+			rc := models[model]
+			if rc.InputPerMTok == 0 && rc.OutputPerMTok == 0 && !rc.Free {
+				return fmt.Errorf("config: pricing.overrides[%q][%q]: 0 means unpriced, not free; fill in real rates or set \"free\": true", provider, model)
+			}
+		}
+	}
+	return nil
+}
+
+// sortedKeys returns m's keys in ascending order, for deterministic validation
+// error messages over Go's randomized map iteration.
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // validateBudgetTimezone resolves budget_timezone into cfg.BudgetLoc, failing

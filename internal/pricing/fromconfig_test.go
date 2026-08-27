@@ -86,3 +86,51 @@ func TestFromConfig_derivationMatchesBundledFigures(t *testing.T) {
 		}
 	}
 }
+
+// ADR-030 zero-rate hole: a 0/0 override means UNPRICED, not free. It used to
+// be inserted into the table anyway, so HasRate said true, `mayu pricing check`
+// passed, `on_missing: "block"` booted, the runtime PricingGuard let it through,
+// and settlement recorded missing=false at 0 uUSD — indistinguishable in the
+// audit record from a genuinely free rate.
+func TestFromConfig_zeroRateOverrideIsUnpriced(t *testing.T) {
+	tbl := FromConfig("allow", map[string]map[string]ConfigRate{
+		"bedrock-apne1": {"zai.glm-5": {InputPerMTok: 0, OutputPerMTok: 0}},
+	})
+	if tbl.HasRate("bedrock-apne1", "zai.glm-5") {
+		t.Error("HasRate = true for a 0/0 override — 0 means unpriced, not free, so the row must not be in the table at all")
+	}
+	cost, missing := tbl.CostUSDMicros("bedrock-apne1", "zai.glm-5", Usage{Input: 1_000_000})
+	if cost != 0 || !missing {
+		t.Errorf("cost=%d missing=%v, want cost=0 missing=true", cost, missing)
+	}
+}
+
+// The documented convention "0 + missing=false means genuinely free" stays
+// expressible — with an explicit opt-in, so it can never be reached by omission.
+func TestFromConfig_freeRateIsPricedAtZero(t *testing.T) {
+	tbl := FromConfig("allow", map[string]map[string]ConfigRate{
+		"selfhosted": {"llama3.3": {InputPerMTok: 0, OutputPerMTok: 0, Free: true}},
+	})
+	if !tbl.HasRate("selfhosted", "llama3.3") {
+		t.Error("HasRate = false for free:true — an explicitly free rate IS a rate")
+	}
+	cost, missing := tbl.CostUSDMicros("selfhosted", "llama3.3", Usage{Input: 1_000_000, Output: 1_000_000, CacheRead: 1_000_000})
+	if cost != 0 || missing {
+		t.Errorf("cost=%d missing=%v, want cost=0 missing=false", cost, missing)
+	}
+}
+
+// A single-sided zero is unusual but not provably wrong (a provider could bill
+// only output), so it must still be inserted.
+func TestFromConfig_singleSidedZeroIsStillPriced(t *testing.T) {
+	tbl := FromConfig("allow", map[string]map[string]ConfigRate{
+		"p": {"m": {InputPerMTok: 0, OutputPerMTok: 15.0}},
+	})
+	if !tbl.HasRate("p", "m") {
+		t.Error("HasRate = false for input 0 / output 15 — only BOTH being zero means unpriced")
+	}
+	cost, missing := tbl.CostUSDMicros("p", "m", Usage{Output: 1_000_000})
+	if missing || cost != 15_000_000 {
+		t.Errorf("cost=%d missing=%v, want 15000000/false", cost, missing)
+	}
+}

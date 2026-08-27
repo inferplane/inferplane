@@ -23,9 +23,10 @@
       "rate_limit": { "requests_per_minute": 120 }
     }
   },
-  "_comment_pricing": "Without an override, cost for zai.glm-5 settles at 0 microUSD (recorded with missing=true in the audit log) — there is no bundled rate for non-Claude Bedrock models. input_per_mtok/output_per_mtok are plain USD-per-million-tokens (converted to integer microUSD internally at settlement) — fill in real prices from the Bedrock pricing page to get accurate billing; 0 here means unpriced, not free.",
+  "_comment_pricing": "There is no bundled rate for non-Claude Bedrock models, so this route needs an explicit override or it settles at 0 microUSD with missing=true. input_per_mtok/output_per_mtok are plain USD-per-million-tokens (converted to integer microUSD internally at settlement); the three cache rates derive from input (0.1x / 1.25x / 2x) unless you set them. The two figures below are the AWS-published on-demand rates for zai.glm-5 in ap-northeast-1 ($0.0012 and $0.00384 per 1K tokens, Price List publication 2026-08-26) — regenerate them for your own region with `mayu pricing sync --config <this file>`, which reads the AWS Price List API offline and never runs on the request path. A 0/0 override is now a LOAD ERROR: 0 means unpriced, not free. Set \"free\": true only for a model you know is genuinely zero-cost.",
   "pricing": {
     "on_missing": "allow",
-    "overrides": { "bedrock-apne1": { "zai.glm-5": { "input_per_mtok": 0, "output_per_mtok": 0 } } }
+    "version": "aws-price-list-2026-08-26",
+    "overrides": { "bedrock-apne1": { "zai.glm-5": { "input_per_mtok": 1.2, "output_per_mtok": 3.84 } } }
   }
 }
