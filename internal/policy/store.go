@@ -42,17 +42,37 @@ type TeamLimits struct {
 	AdminContactDay    string
 }
 
+// UserLimits is the merged, enforceable BUDGET view — both calendar windows —
+// of every user-subject policy matching one (team, user), in the µUSD units
+// the governance pipeline consumes. Zero means "unlimited" on that dimension,
+// mirroring TeamLimits.
+//
+// There is deliberately no RPM/TPM here: a user-subject `rate` rule is still
+// refused by checkEnforceable, because a per-user rate limit needs a rate
+// SHARE model this build does not have. Only `budget` was unblocked (ADR-042
+// Phase 3).
+type UserLimits struct {
+	BudgetMicrosPerMonth int64
+	BudgetHard           bool
+	AdminContact         string
+	BudgetMicrosPerDay   int64
+	BudgetDayHard        bool
+	AdminContactDay      string
+}
+
 // Store holds the data plane's currently-loaded local policy set behind an
 // atomic snapshot: lookups on the request path never lock, and a reload
 // swaps the whole set at once (the same generation posture as live.Holder,
 // ADR-006). A failed reload keeps the previous snapshot serving.
 //
 // Enforceability gate: this data plane build can enforce team-subject budget
-// and rate rules (via the Governor's team lookup) and team- or user-subject
-// modelAccess rules (via the Router's policy gate). Anything else — routing
-// rules, user-subject budget/rate — is REJECTED at load with an explicit
-// *UnsupportedError, never silently accepted-and-ignored (the version-skew
-// stance). The gates lift as the corresponding enforcement lands.
+// and rate rules (via the Governor's team lookup), user-subject budget rules
+// (via the Governor's user lookup, ADR-042 Phase 3), and team- or
+// user-subject modelAccess rules (via the Router's policy gate). Anything
+// else — routing rules, user-subject rate — is REJECTED at load with an
+// explicit *UnsupportedError, never silently accepted-and-ignored (the
+// version-skew stance). The gates lift as the corresponding enforcement
+// lands.
 type Store struct {
 	paths []string
 	snap  atomic.Pointer[snapshot]
@@ -62,6 +82,7 @@ type snapshot struct {
 	policies []*Policy
 	files    map[string]time.Time // watched file → mtime at load
 	teams    map[string]TeamLimits
+	users    map[userKey]UserLimits
 }
 
 // NewStore loads the given paths (files or directories) and fails on any
@@ -81,7 +102,7 @@ func NewStore(paths ...string) (*Store, error) {
 // meaningless on it and must not be used.
 func NewEmptyStore() *Store {
 	s := &Store{}
-	s.snap.Store(&snapshot{teams: map[string]TeamLimits{}})
+	s.snap.Store(&snapshot{teams: map[string]TeamLimits{}, users: map[userKey]UserLimits{}})
 	return s
 }
 
@@ -122,6 +143,7 @@ func (s *Store) ApplyWire(docs []v1alpha1.GovernancePolicy) []Rejection {
 	s.snap.Store(&snapshot{
 		policies: accepted,
 		teams:    mergeTeamLimits(accepted),
+		users:    mergeUserLimits(accepted),
 	})
 	return rejected
 }
@@ -156,6 +178,7 @@ func (s *Store) Reload() error {
 		policies: policies,
 		files:    mtimes,
 		teams:    mergeTeamLimits(policies),
+		users:    mergeUserLimits(policies),
 	})
 	return nil
 }
@@ -169,13 +192,16 @@ func checkEnforceable(p *Policy) error {
 		if r.Routing != nil {
 			return reject(r.Name, "routing rules are not yet enforceable by this data plane build")
 		}
-		// Budget/rate enforcement windows are team-keyed today, so ANY
-		// user-scoped variant — user-only or (team, user) — must be refused,
-		// not accepted-and-ignored. A (team, user) subject would otherwise
-		// pass validation, be skipped by mergeTeamLimits, and enforce
-		// nothing: the exact silent failure this gate exists to prevent.
-		if (r.Budget != nil || r.Rate != nil) && (p.Subject.Team == "" || p.Subject.User != "") {
-			return reject(r.Name, "budget/rate rules require a team-only subject in this build (user-scoped budget/rate are not yet enforceable; user subjects currently support modelAccess only)")
+		// Rate enforcement is still team-keyed, so ANY user-scoped variant —
+		// user-only or (team, user) — must be refused rather than
+		// accepted-and-ignored: it would otherwise pass validation, be
+		// skipped by both merge functions and enforce nothing, the exact
+		// silent failure this gate exists to prevent. Budget no longer needs
+		// this gate — mergeUserLimits + Store.UserLimits + the Governor's
+		// user lookup enforce a user-subject budget rule as of ADR-042
+		// Phase 3.
+		if r.Rate != nil && (p.Subject.Team == "" || p.Subject.User != "") {
+			return reject(r.Name, "rate rules require a team-only subject in this build (user-scoped rate is not yet enforceable; user subjects support budget and modelAccess)")
 		}
 	}
 	return nil
@@ -252,6 +278,28 @@ func (s *Store) TeamLimits(team string) (TeamLimits, bool) {
 	return tl, ok
 }
 
+// UserLimits returns the merged budget limits of every user-subject policy
+// matching (team, user), and whether any matched. Two entries can apply: a
+// (team, user) subject and a user-only subject that matches this user in any
+// team. Both fold, most-restrictive-wins per window.
+func (s *Store) UserLimits(team, user string) (UserLimits, bool) {
+	if user == "" {
+		return UserLimits{}, false
+	}
+	m := s.snap.Load().users
+	scoped, scopedOK := m[userKey{team: team, user: user}]
+	global, globalOK := m[userKey{user: user}]
+	switch {
+	case scopedOK && globalOK:
+		return scoped.narrow(global), true
+	case scopedOK:
+		return scoped, true
+	case globalOK:
+		return global, true
+	}
+	return UserLimits{}, false
+}
+
 // ModelAllowed reports whether every modelAccess rule matching the request's
 // team and user allows the (already-canonicalized) model. ALL matching rules
 // must allow — most-restrictive-wins across team- and user-subject policies
@@ -315,8 +363,11 @@ func mergeTeamLimits(policies []*Policy) map[string]TeamLimits {
 	out := make(map[string]TeamLimits)
 	for _, p := range policies {
 		if p.Subject.Team == "" || p.Subject.User != "" {
-			// Pure team subjects only: user-scoped budget/rate (user-only or
-			// (team, user)) is rejected by checkEnforceable.
+			// Pure team subjects only. A user-scoped budget rule is now
+			// ENFORCEABLE (ADR-042 Phase 3) and is folded by mergeUserLimits
+			// instead; letting one in here would charge one person's cap to
+			// their whole team. A user-scoped rate rule is still rejected by
+			// checkEnforceable.
 			continue
 		}
 		tl, contributed := out[p.Subject.Team]
@@ -389,4 +440,101 @@ func minNonZero(a, b int64) int64 {
 	default:
 		return a
 	}
+}
+
+// userKey is mergeUserLimits's map key. A user-ONLY subject (no team) is
+// stored under the zero team, which is what lets Store.UserLimits fold "this
+// user anywhere" together with "this user in this team".
+type userKey struct{ team, user string }
+
+// narrow returns u narrowed by o, most-restrictive-wins PER WINDOW: the
+// smaller non-zero limit binds each window independently, and a window is
+// hard if the binding rule — or any rule equal to it — is a hard cap. This is
+// mergeTeamLimits's ladder, factored out so the per-rule fold and the
+// two-entry lookup fold cannot drift apart.
+//
+// THE `o.<window> == 0` GUARD IS LOAD-BEARING, and it is the one thing
+// mergeTeamLimits does not need: mergeTeamLimits inspects a RULE, where the
+// "no limit" case is `unlimited` and is skipped by the caller. narrow
+// inspects an already-merged VIEW, which legitimately carries only one
+// window. Without the guard, `u.month == 0 || o.month < u.month` is true for
+// o.month == 0 whenever u.month > 0 — so folding a DAY-ONLY policy would
+// ZERO OUT a month cap set by another policy, i.e. silently delete a money
+// control. There is a test for exactly this.
+func (u UserLimits) narrow(o UserLimits) UserLimits {
+	switch {
+	case o.BudgetMicrosPerMonth == 0:
+		// contributes nothing to the month window
+	case u.BudgetMicrosPerMonth == 0 || o.BudgetMicrosPerMonth < u.BudgetMicrosPerMonth:
+		u.BudgetMicrosPerMonth, u.BudgetHard, u.AdminContact = o.BudgetMicrosPerMonth, o.BudgetHard, o.AdminContact
+	case o.BudgetMicrosPerMonth == u.BudgetMicrosPerMonth && o.BudgetHard:
+		u.BudgetHard = true
+		if u.AdminContact == "" {
+			u.AdminContact = o.AdminContact
+		}
+	}
+	switch {
+	case o.BudgetMicrosPerDay == 0:
+		// contributes nothing to the day window
+	case u.BudgetMicrosPerDay == 0 || o.BudgetMicrosPerDay < u.BudgetMicrosPerDay:
+		u.BudgetMicrosPerDay, u.BudgetDayHard, u.AdminContactDay = o.BudgetMicrosPerDay, o.BudgetDayHard, o.AdminContactDay
+	case o.BudgetMicrosPerDay == u.BudgetMicrosPerDay && o.BudgetDayHard:
+		u.BudgetDayHard = true
+		if u.AdminContactDay == "" {
+			u.AdminContactDay = o.AdminContactDay
+		}
+	}
+	return u
+}
+
+// userLimitsFromBudget lifts ONE budget rule into a single-window UserLimits,
+// so narrow is the only place the comparison ladder exists. An `unlimited`
+// rule is the caller's business, not this function's.
+func userLimitsFromBudget(b *Budget) UserLimits {
+	if b.Period == v1alpha1.PeriodCalendarDay {
+		return UserLimits{BudgetMicrosPerDay: b.LimitMicroUSD, BudgetDayHard: b.HardCap, AdminContactDay: b.AdminContact}
+	}
+	// CalendarMonth, INCLUDING a Budget built directly in a test with a
+	// zero-value Period: "no period stated" means the month window everywhere
+	// in this schema, so month must be the `default`, never an explicit
+	// `== PeriodCalendarMonth` equality case.
+	return UserLimits{BudgetMicrosPerMonth: b.LimitMicroUSD, BudgetHard: b.HardCap, AdminContact: b.AdminContact}
+}
+
+// mergeUserLimits folds every USER-subject budget rule into one UserLimits
+// per (team, user), most-restrictive-wins per window (see narrow). Rate rules
+// are ignored here: checkEnforceable still refuses a user-subject rate rule,
+// so one cannot reach this function.
+//
+// A (team, user) entry appears ONLY when some rule actually contributed a
+// budget — a modelAccess-only user policy must not manufacture an all-zero
+// (= unlimited) entry, for exactly the reason mergeTeamLimits documents: the
+// caller's lookup chain would let it shadow a real limit.
+func mergeUserLimits(policies []*Policy) map[userKey]UserLimits {
+	out := make(map[userKey]UserLimits)
+	for _, p := range policies {
+		if p.Subject.User == "" {
+			continue // team-only subjects are mergeTeamLimits' business
+		}
+		k := userKey{team: p.Subject.Team, user: p.Subject.User}
+		ul, contributed := out[k]
+		for _, r := range p.Rules {
+			if r.Budget == nil {
+				continue
+			}
+			contributed = true
+			if r.Budget.Unlimited {
+				// Same posture as mergeTeamLimits: an explicit "no cap"
+				// neither narrows nor widens another rule's limit; it only
+				// stops this subject from being treated as having no rule at
+				// all. It carries no period, so it is window-agnostic.
+				continue
+			}
+			ul = ul.narrow(userLimitsFromBudget(r.Budget))
+		}
+		if contributed {
+			out[k] = ul
+		}
+	}
+	return out
 }

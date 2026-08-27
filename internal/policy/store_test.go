@@ -312,26 +312,12 @@ spec:
     failurePolicy: FailOpen
     routing: { onAffinityConflict: PreferAffinity }
 `},
-		{"user-subject budget", `apiVersion: inferplane.dev/v1alpha1
-kind: GovernancePolicy
-metadata: { name: u }
-spec:
-  subject: { user: junseok }
-  rules:
-  - name: cap
-    failurePolicy: FailClosed
-    budget: { limitMilliUSD: 1000, hardCap: true }
-`},
-		{"team-and-user budget (would merge to nothing)", `apiVersion: inferplane.dev/v1alpha1
-kind: GovernancePolicy
-metadata: { name: tu }
-spec:
-  subject: { team: demo, user: junseok }
-  rules:
-  - name: cap
-    failurePolicy: FailClosed
-    budget: { limitMilliUSD: 1000, hardCap: true }
-`},
+		// A user-subject BUDGET rule used to belong in this table. It is
+		// enforceable as of ADR-042 Phase 3 (mergeUserLimits +
+		// Store.UserLimits + governance.SetUserLookup), so the two budget
+		// cases moved out of here and became positive coverage in
+		// userlimits_test.go. Rate is what is still refused, and that is the
+		// case below.
 		{"team-and-user rate", `apiVersion: inferplane.dev/v1alpha1
 kind: GovernancePolicy
 metadata: { name: tur }
