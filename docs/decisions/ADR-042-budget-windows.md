@@ -7,7 +7,9 @@ money unit, the subjects, and the lease cadences, but left the budget window
 implicitly monthly), ADR-034 (control-plane distribution and leases —
 EXTENDED: the grant/report/clamp cycle it defined is now per window), ADR-033
 (local policy file channel — UNCHANGED: its enforceability gate still rejects
-every user-subject budget/rate rule, and this ADR amends nothing about it),
+every user-subject budget/rate rule, and this ADR amends nothing about it —
+that held through Phase 2; Phase 3's Decision 7 below now AMENDS the gate,
+narrowing it to `rate` only),
 ADR-039 (explicit `unlimited` rules — an unlimited rule stays window-agnostic)
 
 ## Context
@@ -92,7 +94,40 @@ before — a month-only deployment's error body does not change).
 
 The window work is deliberately independent of subject scope: `user`-subject
 budget/rate rules remain rejected by the ADR-033 enforceability gate, exactly
-as before this ADR.
+as before this ADR. That held through Phase 2; Phase 3 (Decisions 5–7 below)
+is the subject-scope step that independence deferred, and it moves `budget` —
+only `budget` — out of that gate.
+
+**Decision 5 — a `Subject` value, not a fifth positional argument.**
+`PreCheck`, `Settle` and `UsageOf` took two leading strings (team, key id) and
+Phase 3 needed a third identity dimension, the key's owner. A
+`governance.Subject{Team, KeyID, User}` value replaces the pair rather than
+growing the parameter lists, and the shape is chosen to keep the
+ingress→governance boundary a leaf: `governance` never imports `keystore`, so
+each ingress package builds the value with its own `subjectOf` — the same
+deliberately-duplicated-per-package shape as the pre-existing `keyPolicyOf`,
+and for the same reason (a shared mapping helper would need a home that
+imports both sides).
+
+**Decision 6 — per-user budget is policy-document-only.** There is no config
+key and no `keys.owner` budget column in the keystore, because a second
+source of truth for one human's cap is unreconcilable: when the two disagree,
+which limit binds, and whose window boundary applies? The cost is deliberate
+and accepted: a deployment with no policy channel at all (neither `policies`
+nor `control_plane`) has no per-user budget, and that is the intended
+behaviour rather than a gap.
+
+**Decision 7 — the enforceability gate narrows for `budget` only.** This
+AMENDS ADR-033's gate rather than superseding it. `checkEnforceable`
+(`internal/policy/store.go`) now accepts a user-subject `budget` rule, which
+is enforced end to end: `mergeUserLimits` folds the matching rules into
+`UserLimits` (most-restrictive-wins per window), `Store.UserLimits(team,
+user)` folds a user-only subject together with the (team, user) one, and the
+Governor consumes the result through `SetUserLookup`/`UserPolicy`. `rate`
+keeps the team-only restriction, because a per-user rate limit needs a
+rate-share model this build does not have (roadmap item ①), and the gate's
+rejection message is now rate-specific — a user-subject rate rule is still
+refused rather than accepted-and-ignored.
 
 ## Consequences
 
@@ -107,6 +142,11 @@ as before this ADR.
 - Back-compat is total: omitted `period`, an old control plane's grants, and
   an old data plane's reports all read as `CalendarMonth`, and the UTC
   default is unchanged.
+- `budget.ScopeUser`, added unused in Phase 0, is now used — the user budget
+  counters are its first consumer — and `budget.Key`'s tag-first layout
+  (`budget:day:user:...` vs `budget:day:team:...`) means a user counter can
+  never collide with a team or key counter, whatever a team name or an OIDC
+  `sub` contains.
 
 ### Negative
 - A daily rule exercises the control plane's window-rollover path ~30× more
@@ -115,6 +155,19 @@ as before this ADR.
   windows: the month rule's wins and the day rule's is the fallback, so a
   deployment with different contacts per window surfaces only one of them in
   the 402 body.
+- `governance.UserPolicy` carries ONE `on_exceeded` for both windows, so a
+  soft day rule beside a hard month rule resolves to `block` for both —
+  block wins on tie, collapsed in the gateway's `SetUserLookup` closure.
+  Resolving it the other way would let adding a soft rule WEAKEN an existing
+  hard cap. `TeamPolicy` keeps its per-window pair; only the user path
+  collapses at the gateway.
+- `budget.Memory` fails closed at `maxEntries`. Beyond ~100k live counters
+  (`defaultMaxEntries`) a NEW key is refused and `Check` returns `Block`
+  rather than admitting spend the store cannot account for; rolling an
+  EXISTING key over its window boundary is never refused. `Rejections()` is
+  the operator seam, and there is deliberately no metric behind it, because a
+  user-dimensioned metric label is forbidden (see the `/metrics` cardinality
+  invariant in `internal/CLAUDE.md`).
 
 ### Accepted limitation (roadmap ②, explicitly not claimed here)
 The control plane still has no first-class notion of a window boundary: a
@@ -128,3 +181,23 @@ each window edge, and a dead proxy's day-window spend is forgotten on the
 same timescale the window itself turns over. The fix — a
 control-plane-computed `windowID` on each grant and a durable ledger keyed by
 it — is roadmap item ②'s scope and is explicitly NOT claimed by this ADR.
+
+### Accepted limitation (Phase 3 — per-user scope)
+
+- **Per-user budget has no lease and no global accounting.** A user-subject
+  budget rule is excluded from the control plane's lease ledger (the
+  `applyWire` install path skips it) and from the data plane's consumption
+  report (the `Syncer`'s report loop skips it), because a ledger row is
+  team-keyed and its grant would clamp the whole TEAM to one individual's
+  limit. So with N data planes a user's effective cap is up to N× the
+  configured value — the same posture `rate` already has, and for the same
+  reason. Per-user budget is per-data-plane in-memory until a user-keyed
+  ledger exists.
+- **The counter is per (team, user)** — `governance.userBudgetID` builds the
+  id as `team + "/" + user` ("/" is unambiguous because a team name cannot
+  contain it). A user-ONLY subject therefore caps that user separately in
+  each team they hold a key in: one human in two teams gets up to 2× the
+  stated cap. Keying on the bare user id instead would fix that and break
+  something worse — a (team, user) rule and a user-only rule would then share
+  one counter, so a team-scoped cap would be charged for spend made under a
+  different team.
