@@ -217,7 +217,10 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 	// for the rule's own window — so only the several-rules-in-one-window
 	// case remains conservative.
 	for _, p := range s.Store.Policies() {
-		if p.Subject.Team == "" {
+		// A user-scoped budget rule has no ledger row upstream (ADR-042
+		// Phase 3), so reporting the TEAM's spend against it would be
+		// reporting the wrong quantity to a row that does not exist.
+		if p.Subject.Team == "" || p.Subject.User != "" {
 			continue
 		}
 		for _, r := range p.Rules {

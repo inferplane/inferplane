@@ -136,7 +136,13 @@ func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]t
 			return err // unreachable: LoadWirePaths already validated
 		}
 		for _, r := range internal.Rules {
-			if r.Budget == nil || internal.Subject.Team == "" {
+			// A USER-scoped budget rule gets no ledger row and no lease
+			// (ADR-042 Phase 3). Its limit is one person's, but a ruleLedger
+			// is keyed by TEAM (l.team) and its grant clamps every data plane
+			// serving that team — so admitting it here would throttle the
+			// whole team to an individual's cap. Per-user budget is therefore
+			// per-data-plane in-memory only, the same posture `rate` has.
+			if r.Budget == nil || internal.Subject.Team == "" || internal.Subject.User != "" {
 				continue
 			}
 			// An explicit "no cap" declaration has nothing to lease — a
