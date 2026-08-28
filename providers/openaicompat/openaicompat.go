@@ -47,11 +47,29 @@ func (p *provider) Models() []schema.ModelInfo { return nil } // models come fro
 // (like bedrock's toInvokeBody) so every other byte — and thus the prompt-cache
 // prefix — is preserved. For any other ingress the canonical request is
 // converted to OpenAI wire (best-effort) and the model set to req.Upstream.
-func (p *provider) buildBody(req *providers.ProxyRequest) ([]byte, error) {
+func (p *provider) buildBody(req *providers.ProxyRequest, stream bool) ([]byte, error) {
 	if req.IngressProtocol == "openai" {
+		// Verbatim path: the client speaks OpenAI and already set stream /
+		// stream_options as it wants them; only the model is rewritten.
 		return rewriteModel(req.RawBody, req.Upstream)
 	}
 	converted := openai.CanonicalToRequest(req.Parsed)
+	if stream {
+		// A cross-protocol ingress selects streaming by OPERATION, not body
+		// (Bedrock: /invoke-with-response-stream), so the flag must be
+		// injected here — and include_usage with it, or vLLM emits no usage
+		// frame and the stream settles with zero billable tokens.
+		var top map[string]json.RawMessage
+		if err := json.Unmarshal(converted, &top); err != nil {
+			return nil, err
+		}
+		top["stream"] = json.RawMessage("true")
+		top["stream_options"] = json.RawMessage(`{"include_usage":true}`)
+		var err error
+		if converted, err = json.Marshal(top); err != nil {
+			return nil, err
+		}
+	}
 	return rewriteModel(converted, req.Upstream)
 }
 
@@ -155,8 +173,8 @@ func skipValue(dec *json.Decoder) error {
 	return nil
 }
 
-func (p *provider) buildUpstream(ctx context.Context, req *providers.ProxyRequest) (*http.Request, error) {
-	body, err := p.buildBody(req)
+func (p *provider) buildUpstream(ctx context.Context, req *providers.ProxyRequest, stream bool) (*http.Request, error) {
+	body, err := p.buildBody(req, stream)
 	if err != nil {
 		return nil, fmt.Errorf("openaicompat: build body: %w", err)
 	}
@@ -172,7 +190,7 @@ func (p *provider) buildUpstream(ctx context.Context, req *providers.ProxyReques
 }
 
 func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {
-	u, err := p.buildUpstream(ctx, req)
+	u, err := p.buildUpstream(ctx, req, false)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +225,7 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 }
 
 func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
-	u, err := p.buildUpstream(ctx, req)
+	u, err := p.buildUpstream(ctx, req, true)
 	if err != nil {
 		return nil, err
 	}

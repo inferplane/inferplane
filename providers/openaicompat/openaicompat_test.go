@@ -139,3 +139,37 @@ func TestCompleteRerendersRawBodyForCrossProtocolIngress(t *testing.T) {
 		t.Fatalf("openai ingress RawBody must stay verbatim OpenAI wire: %v", body)
 	}
 }
+
+// A cross-protocol Stream must ask the upstream for usage in the final chunk
+// (stream_options.include_usage) — without it vLLM emits no usage frame and
+// every streamed request settles with zero billable tokens.
+func TestStreamRequestsUsageForCrossProtocolIngress(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	var cr schema.ChatRequest
+	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := p.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), Parsed: &cr, IngressProtocol: "bedrock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range evs {
+	}
+	if gotBody["stream"] != true {
+		t.Errorf("stream flag missing: %v", gotBody["stream"])
+	}
+	so, ok := gotBody["stream_options"].(map[string]any)
+	if !ok || so["include_usage"] != true {
+		t.Errorf("stream_options.include_usage missing: %v", gotBody["stream_options"])
+	}
+}
