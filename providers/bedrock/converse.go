@@ -43,22 +43,23 @@ func toConverseRequest(raw []byte) (ConverseRequest, error) {
 		cr.Inference["stopSequences"] = body.StopSequences
 	}
 	cr.System = systemText(body.System)
+	// Bedrock's ConversationRole only has user/assistant. Real Claude Code
+	// traffic interleaves other roles (observed: "system", for hook output)
+	// as ordinary messages — Anthropic's API tolerates this, but Bedrock
+	// rejects it outright. The content must stay IN PLACE, merged into the
+	// next user message (or a trailing user message — Bedrock wants the last
+	// turn to be user anyway). Folding it into the system prompt instead
+	// (the previous behavior) mutated the HEAD of the prompt on every turn a
+	// hook fired, invalidating the whole prompt-cache prefix: observed live
+	// as cache_creation ≈ full input (475k tokens) on every request, with
+	// prefill slow enough that Claude Code timed out and fell back to
+	// another model.
+	var pending []schema.ContentBlock
 	for _, m := range body.Messages {
 		if m.Role != "user" && m.Role != "assistant" {
-			// Bedrock's ConversationRole only has user/assistant. Real Claude
-			// Code traffic interleaves other roles (observed: "system", for
-			// hook/session-start output) as ordinary messages — Anthropic's
-			// API tolerates this, but Bedrock rejects it outright and, since
-			// it's usually the LAST message, "role must be user/assistant"
-			// surfaces as the more confusing "last turn must be a user
-			// message". Fold the text into the system prompt instead of
-			// dropping it or passing an invalid role through.
 			if t := flattenText(m.Content); t != "" {
-				if cr.System != "" {
-					cr.System += "\n\n" + t
-				} else {
-					cr.System = t
-				}
+				txt := t
+				pending = append(pending, schema.ContentBlock{Type: "text", Text: &txt})
 			}
 			continue
 		}
@@ -66,7 +67,14 @@ func toConverseRequest(raw []byte) (ConverseRequest, error) {
 		if len(blocks) == 0 {
 			continue // Bedrock rejects a message with zero content blocks
 		}
+		if m.Role == "user" && len(pending) > 0 {
+			blocks = append(pending, blocks...)
+			pending = nil
+		}
 		cr.Messages = append(cr.Messages, ConverseMessage{Role: m.Role, Content: blocks})
+	}
+	if len(pending) > 0 {
+		cr.Messages = append(cr.Messages, ConverseMessage{Role: "user", Content: pending})
 	}
 	cr.Tools = parseTools(body.Tools)
 	cr.ToolChoice = resolveToolChoice(parseToolChoice(body.ToolChoice), cr.Tools)

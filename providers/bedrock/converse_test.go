@@ -183,12 +183,50 @@ func TestToConverseRequestToolBlocks(t *testing.T) {
 	}
 }
 
-func TestToConverseRequestFoldsNonUserAssistantRoleIntoSystem(t *testing.T) {
-	// Real Claude Code traffic interleaves a trailing role:"system" message
-	// (hook/session-start output) in the messages array. Anthropic's API
-	// tolerates this; Bedrock's ConversationRole only has user/assistant and
-	// rejects it — and because it's the LAST message, the failure surfaces as
-	// "last turn must be a user message" rather than an obvious role error.
+func TestToConverseRequestKeepsSystemRoleInPlace(t *testing.T) {
+	// Real Claude Code traffic interleaves role:"system" messages (hook
+	// output) in the messages array — including MID-conversation. Bedrock's
+	// ConversationRole only has user/assistant, so they can't pass through —
+	// but folding them into the system prompt (the old behavior) mutates the
+	// HEAD of the prompt on every turn they appear, invalidating the entire
+	// prompt-cache prefix: observed live as cache_creation ≈ full input
+	// (475k tokens) on every request, TTFT long enough that Claude Code
+	// times out and falls back to another model. The content must stay
+	// IN PLACE: merged into the next user message.
+	raw := []byte(`{"system":"be helpful","messages":[
+		{"role":"user","content":"turn 1"},
+		{"role":"assistant","content":"reply 1"},
+		{"role":"system","content":"hook output for turn 2"},
+		{"role":"user","content":"turn 2"}
+	]}`)
+	cr, err := toConverseRequest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(cr.System, "hook output") {
+		t.Fatalf("mid-conversation system role folded into system prompt (cache-busting): %q", cr.System)
+	}
+	if len(cr.Messages) != 3 {
+		t.Fatalf("want 3 messages (user, assistant, user), got %d: %+v", len(cr.Messages), cr.Messages)
+	}
+	last := cr.Messages[2]
+	if last.Role != "user" {
+		t.Fatalf("last role = %q", last.Role)
+	}
+	joined := textOf(last)
+	if !strings.Contains(joined, "hook output for turn 2") || !strings.Contains(joined, "turn 2") {
+		t.Fatalf("system-role content not merged into the next user message: %q", joined)
+	}
+	// In-place order: hook text precedes the user text it preceded on the wire.
+	if strings.Index(joined, "hook output") > strings.Index(joined, "turn 2") {
+		t.Fatalf("merged out of order: %q", joined)
+	}
+}
+
+func TestToConverseRequestTrailingSystemRoleBecomesUserMessage(t *testing.T) {
+	// A TRAILING system-role message (session-start hook before any reply)
+	// has no following user message to merge into; it must become its own
+	// user message — Bedrock requires the last turn to be user anyway.
 	raw := []byte(`{"system":"be helpful","messages":[
 		{"role":"user","content":"hello"},
 		{"role":"system","content":"SessionStart hook: some info"}
@@ -197,11 +235,14 @@ func TestToConverseRequestFoldsNonUserAssistantRoleIntoSystem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cr.Messages) != 1 || cr.Messages[0].Role != "user" {
-		t.Fatalf("expected the system-role message to be folded away, not passed through: %+v", cr.Messages)
+	if strings.Contains(cr.System, "SessionStart hook") {
+		t.Fatalf("trailing system role folded into system prompt: %q", cr.System)
 	}
-	if !strings.Contains(cr.System, "be helpful") || !strings.Contains(cr.System, "SessionStart hook: some info") {
-		t.Fatalf("system role content not folded into system prompt: %q", cr.System)
+	if len(cr.Messages) != 2 || cr.Messages[1].Role != "user" {
+		t.Fatalf("want trailing user message carrying the hook text: %+v", cr.Messages)
+	}
+	if !strings.Contains(textOf(cr.Messages[1]), "SessionStart hook: some info") {
+		t.Fatalf("hook text missing: %q", textOf(cr.Messages[1]))
 	}
 }
 
