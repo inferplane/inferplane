@@ -60,7 +60,11 @@ type ConsumptionReport struct {
 	// BudgetRule.period omits it, and the control plane reads that as
 	// CalendarMonth — exactly the meaning the field had implicitly before it
 	// existed. The ledger still MATCHES a report on policy+rule (unique per
-	// rule), so this is a skew/observability field, never a key.
+	// rule) — Period is never part of that lookup key — but the control
+	// plane DOES compare it against the matched rule's current period and
+	// skips absorbing a report whose Period disagrees (a lagging data plane,
+	// or a heartbeat landing right after an in-place period edit): the
+	// number would otherwise be booked in the wrong window's currency.
 	Period v1alpha1.BudgetPeriod `json:"period,omitempty"`
 }
 

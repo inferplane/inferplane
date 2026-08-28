@@ -165,7 +165,12 @@ func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]t
 				spent:      map[string]int64{},
 				allowance:  map[string]int64{},
 			}
-			if prev, ok := s.ledger[k]; ok {
+			// Carry spend/allowance forward only when the rule's period is
+			// UNCHANGED. A month's cumulative spend is not the same quantity
+			// as a day's, so an in-place period edit (same policy+rule name)
+			// must start the new window's ledger row at zero rather than
+			// inheriting a number measured against a different window.
+			if prev, ok := s.ledger[k]; ok && prev.period == l.period {
 				l.spent, l.allowance = prev.spent, prev.allowance
 			}
 			ledger[k] = l
@@ -289,6 +294,22 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	// the old allowance must not carry into the fresh window.
 	for _, rep := range req.Reports {
 		if l, ok := s.ledger[ruleKey{policy: rep.Policy, rule: rep.Rule}]; ok {
+			// A report's Period is the window SpentMicroUSD was measured
+			// against (empty = CalendarMonth, the pre-period wire meaning).
+			// If it doesn't match the rule's CURRENT period — a lagging
+			// data plane, or a heartbeat that landed right after an
+			// in-place period edit — the number is in the wrong currency
+			// for this ledger row: booking it would either falsely starve
+			// the new window (an old month total vastly exceeding a new
+			// day limit) or falsely permit overspend (the reverse). Skip it
+			// and wait for the data plane's next heartbeat to catch up.
+			repPeriod := rep.Period
+			if repPeriod == "" {
+				repPeriod = v1alpha1.PeriodCalendarMonth
+			}
+			if repPeriod != l.period {
+				continue
+			}
 			if rep.SpentMicroUSD < l.spent[req.Dataplane] {
 				l.allowance[req.Dataplane] = 0
 			}
