@@ -26,6 +26,7 @@ type Metrics struct {
 	piiMask         *prometheus.CounterVec   // inferplane_pii_mask_redactions_total
 	anchorFail      prometheus.Counter       // inferplane_audit_anchor_failures_total
 	usageDropped    prometheus.Counter       // inferplane_usage_windows_dropped_total
+	budgetRejected  prometheus.Gauge         // inferplane_budget_store_rejected_total
 }
 
 func New() *Metrics {
@@ -83,10 +84,15 @@ func New() *Metrics {
 		anchorFail: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "inferplane_audit_anchor_failures_total", Help: "Audit chain-head anchor (WORM) write failures (ADR-012).",
 		}),
+		budgetRejected: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "inferplane_budget_store_rejected_total",
+			Help: "Cumulative requests denied by the budget store's at-capacity fail-safe, not by a real budget (no team/key/user label — same cardinality bar as key_id)." +
+				" Non-zero means the in-memory budget store hit its entry cap and started fail-closing new counters.",
+		}),
 	}
 	reg.MustRegister(m.tokenUsage, m.requestDuration, m.ttft, m.requestsTotal,
 		m.fallbackTotal, m.circuitState, m.quotaUtil, m.budgetUtil, m.budgetSpend, m.pricingMiss,
-		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped)
+		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected)
 	// Prometheus only emits a labeled metric family once it has at least one
 	// observed child series. Pre-initialize the token-usage family to zero so
 	// gen_ai_client_token_usage_total is always present in exposition (stable
@@ -191,6 +197,12 @@ func (m *Metrics) IncAuditFailure(sink string) {
 		return
 	}
 	m.auditFailures.WithLabelValues(sink).Inc()
+}
+func (m *Metrics) SetBudgetStoreRejections(n int64) {
+	if m == nil {
+		return
+	}
+	m.budgetRejected.Set(float64(n))
 }
 func (m *Metrics) SetAuditBufferUtilization(r float64) {
 	if m == nil {

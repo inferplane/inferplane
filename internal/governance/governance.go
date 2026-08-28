@@ -687,6 +687,16 @@ func (g *Governor) Settle(s Subject, kp KeyPolicy, provider, model string, u pri
 	if pricingMissing {
 		g.metrics.IncPricingMiss(provider, model)
 	}
+	// budget.Memory's at-capacity fail-safe (Check returning Block because the
+	// store is full, not because a real budget was exceeded) is otherwise
+	// invisible to an operator: no team/user label is possible here (the same
+	// cardinality bar key_id sits behind), so a plain cumulative gauge is the
+	// seam. A type assertion, not a BudgetStore interface method, so a
+	// BudgetStore that doesn't track rejections (e.g. a test fake) needs no
+	// change.
+	if rr, ok := g.bud.(interface{ Rejections() int64 }); ok {
+		g.metrics.SetBudgetStoreRejections(rr.Rejections())
+	}
 	return costMicros, pricingMissing
 }
 

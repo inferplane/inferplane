@@ -101,6 +101,59 @@ func TestPreCheckDailyBudgetZeroMeansUnlimited(t *testing.T) {
 // tie-break cannot be exercised against the real store: making the next daily
 // midnight fall AFTER the month boundary needs "now" to be the last day of a
 // month in a specific timezone, which no test can arrange from the wall clock.
+// rejectingStore implements budget.BudgetStore AND the unexported
+// Rejections() int64 seam Settle type-asserts for — so Settle's wiring gets
+// tested without needing to actually drive a real *budget.Memory to
+// capacity from a different package.
+type rejectingStore struct {
+	blockingStore
+	rejections int64
+}
+
+func (r rejectingStore) Rejections() int64 { return r.rejections }
+
+// TestSettleSurfacesBudgetStoreRejections pins the Settle-side half of the
+// budget store's at-capacity fail-safe observability gap: Rejections() was
+// previously defined but never read by anything, so an operator had no way
+// to tell a capacity-driven 402 apart from a real budget breach.
+func TestSettleSurfacesBudgetStoreRejections(t *testing.T) {
+	m := metrics.New()
+	store := rejectingStore{blockingStore: blockingStore{resets: map[string]time.Time{}}, rejections: 5}
+	g := NewGovernor(map[string]TeamPolicy{"t": {}}, limiter.NewMemory(), store, m)
+
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "model", pricing.Usage{Input: 1}, testTable(), 0)
+
+	mfs, err := m.Registry().Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got float64
+	found := false
+	for _, mf := range mfs {
+		if mf.GetName() == "inferplane_budget_store_rejected_total" {
+			found = true
+			got = mf.Metric[0].GetGauge().GetValue()
+		}
+	}
+	if !found {
+		t.Fatal("inferplane_budget_store_rejected_total not registered")
+	}
+	if got != 5 {
+		t.Fatalf("inferplane_budget_store_rejected_total = %v, want 5", got)
+	}
+}
+
+// TestSettleToleratesBudgetStoreWithoutRejectionsMethod confirms the type
+// assertion degrades silently (no panic, gauge left at zero) when the
+// BudgetStore in use — e.g. a bare test fake — doesn't implement
+// Rejections(), since that method is deliberately NOT part of the
+// BudgetStore interface.
+func TestSettleToleratesBudgetStoreWithoutRejectionsMethod(t *testing.T) {
+	m := metrics.New()
+	g := NewGovernor(map[string]TeamPolicy{"t": {}}, limiter.NewMemory(), budget.NewMemory(), m)
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "model", pricing.Usage{Input: 1}, testTable(), 0)
+}
+
 type blockingStore struct{ resets map[string]time.Time }
 
 func (b blockingStore) Check(string, int64, int64, budget.Window) budget.Decision {

@@ -83,3 +83,17 @@ func TestIncUsageWindowDropped(t *testing.T) {
 	var nilM *Metrics
 	nilM.IncUsageWindowDropped() // nil-safe like every other hook
 }
+
+func TestSetBudgetStoreRejections(t *testing.T) {
+	m := New()
+	m.SetBudgetStoreRejections(3)
+	if v := testutil.ToFloat64(m.budgetRejected); v != 3 {
+		t.Fatalf("inferplane_budget_store_rejected_total = %v, want 3", v)
+	}
+	m.SetBudgetStoreRejections(7) // a Set, not an Inc — the caller reports the store's own cumulative total
+	if v := testutil.ToFloat64(m.budgetRejected); v != 7 {
+		t.Fatalf("inferplane_budget_store_rejected_total = %v, want 7", v)
+	}
+	var nilM *Metrics
+	nilM.SetBudgetStoreRejections(1) // nil-safe like every other hook
+}
