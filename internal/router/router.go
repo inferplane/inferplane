@@ -24,6 +24,9 @@ type Router struct {
 	// policyGate is an optional model-access narrowing check (see
 	// SetPolicyGate). nil = no policy restriction.
 	policyGate func(p keystore.Principal, model string, canonical func(string) string) bool
+	// tierGate is an optional ADR-041 budget-tier substitution source (see
+	// SetTierGate). nil = no substitution.
+	tierGate func(p keystore.Principal) map[string]string
 }
 
 func New(holder *live.Holder) *Router {
@@ -101,6 +104,52 @@ func (r *Router) Allows(p keystore.Principal, model string) bool {
 // after the server starts serving.
 func (r *Router) SetPolicyGate(gate func(p keystore.Principal, model string, canonical func(string) string) bool) {
 	r.policyGate = gate
+}
+
+// SetTierGate installs the ADR-041 budget-tier substitution source consulted
+// by SubstituteTier: it returns p's currently active requested-model ->
+// target map (empty/nil = no tier active for this principal's team).
+// Startup-only assignment, same posture as SetPolicyGate.
+func (r *Router) SetTierGate(gate func(p keystore.Principal) map[string]string) {
+	r.tierGate = gate
+}
+
+// SubstituteTier applies an active ADR-041 budget-tier substitution to an
+// already-canonicalized, already-routed model, or returns it unchanged.
+// Unlike ResolveModel (which only ever substitutes an UNROUTED model),
+// SubstituteTier substitutes a model that IS routed — that is the whole
+// point of cost-driven substitution — so it is a distinct call, not folded
+// into ResolveModel's documented "never second-guess a configured model"
+// contract.
+//
+// Substitution can only NARROW, never widen, and can never turn into a
+// denial (ADR-041 D3): it fires only when canonical itself is already
+// allowed for p (an already-denied request is left alone — the existing
+// 403 path handles it, substitution must not rescue a model p can't reach),
+// the tier map names a target for canonical, the target is actually routed
+// on this data plane, AND the target also passes p's RBAC. If the target
+// fails RBAC, the ORIGINAL is served — substitution never denies on its
+// own account.
+func (r *Router) SubstituteTier(p keystore.Principal, canonical string) (served string, substituted bool) {
+	if r.tierGate == nil || !r.Allows(p, canonical) {
+		return canonical, false
+	}
+	target, ok := r.tierGate(p)[canonical]
+	if !ok || target == "" {
+		return canonical, false
+	}
+	st := r.live.Load()
+	target = st.Canonical(target)
+	if target == canonical {
+		return canonical, false
+	}
+	if _, routed := st.Route(target); !routed {
+		return canonical, false
+	}
+	if !r.Allows(p, target) {
+		return canonical, false
+	}
+	return target, true
 }
 
 // ChainTarget is one resolved fallback target: the provider instance, its

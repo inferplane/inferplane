@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/inferplane/inferplane/internal/policy"
+	"github.com/inferplane/inferplane/internal/tier"
 )
 
 // Lease is the data-plane view of one team's budget lease, merged across
@@ -104,6 +105,10 @@ type Syncer struct {
 	Dataplane string // stable instance id
 	Store     *policy.Store
 	Leases    *LeaseTable
+	// Tiers is the request-path ADR-041 budget-tier substitution table,
+	// kept in step with every heartbeat's resp.ActiveTiers the same way
+	// Leases tracks resp.Leases. nil = no substitution applied.
+	Tiers *tier.Table
 	// SpentOf reports a team's cumulative window spend in µUSD (wired to
 	// the governor's usage view).
 	SpentOf func(team string) int64
@@ -232,6 +237,9 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 	}
 	if s.Leases != nil {
 		s.Leases.set(resp.Leases)
+	}
+	if s.Tiers != nil {
+		s.Tiers.Set(resp.ActiveTiers)
 	}
 
 	next := time.Duration(resp.SyncIntervalSeconds) * time.Second
