@@ -436,14 +436,21 @@ var converseUnsupportedInference = []struct {
 	match  string
 	params []string
 }{
-	// OpenAI gpt-5.x reasoning models (gpt-5.6-luna/-sol/-terra) reject all
-	// sampling params. "openai." alone would be too broad: openai.gpt-oss-*
-	// ACCEPTS temperature/topP (only stopSequences rejected, below).
-	{"openai.gpt-5", []string{"temperature", "topP", "stopSequences"}},
+	// OpenAI gpt-5.6 reasoning models (gpt-5.6-luna/-sol/-terra) reject all
+	// sampling params. Neither "openai." nor "openai.gpt-5" is narrow
+	// enough: openai.gpt-oss-* ACCEPTS temperature/topP (only stopSequences
+	// rejected, below), and openai.gpt-5.4/-5.5 (served only through
+	// Bedrock Mantle's OpenAI-schema endpoint, not InvokeModel/Converse)
+	// accept every sampling param — probed via
+	// bedrock-mantle.us-east-1.api.aws /openai/v1/chat/completions.
+	{"openai.gpt-5.6", []string{"temperature", "topP", "stopSequences"}},
 	// xai (grok-4.6) rejects all sampling params.
 	{"xai.", []string{"temperature", "topP", "stopSequences"}},
 	// These accept temperature/topP but reject stopSequences:
 	{"openai.gpt-oss", []string{"stopSequences"}},
+	// deepseek v3.x only — deepseek r1 accepts all three, and
+	// "deepseek.v" deliberately does not match "deepseek.r1-v1:0".
+	{"deepseek.v", []string{"stopSequences"}},
 	{"google.gemma-", []string{"stopSequences"}},
 	{"minimax.", []string{"stopSequences"}},
 	{"moonshot", []string{"stopSequences"}}, // moonshot. and moonshotai.

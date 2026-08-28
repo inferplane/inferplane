@@ -575,11 +575,14 @@ func TestStripUnsupportedInference(t *testing.T) {
 		stripped []string
 		kept     []string
 	}{
-		// OpenAI gpt-5.x reasoning models reject every sampling param…
+		// OpenAI gpt-5.6 reasoning models reject every sampling param…
 		{"global.openai.gpt-5.6-sol", all, []string{"maxTokens"}},
 		{"global.openai.gpt-5.6-luna", all, []string{"maxTokens"}},
 		{"global.openai.gpt-5.6-terra", all, []string{"maxTokens"}},
-		// …but gpt-oss accepts temperature/topP — "openai." alone is too broad.
+		// …but gpt-5.4/5.5 (Mantle-only) and gpt-oss ACCEPT sampling params —
+		// neither "openai." nor "openai.gpt-5" is narrow enough.
+		{"openai.gpt-5.4", nil, []string{"maxTokens", "temperature", "topP", "stopSequences"}},
+		{"openai.gpt-5.5", nil, []string{"maxTokens", "temperature", "topP", "stopSequences"}},
 		{"openai.gpt-oss-120b-1:0", stopOnly, keepSampling},
 		{"global.xai.grok-4.6", all, []string{"maxTokens"}},
 		{"zai.glm-5", stopOnly, keepSampling},
@@ -589,6 +592,9 @@ func TestStripUnsupportedInference(t *testing.T) {
 		{"moonshot.kimi-k2-thinking", stopOnly, keepSampling},
 		{"moonshotai.kimi-k2.5", stopOnly, keepSampling},
 		{"qwen.qwen3-coder-next", stopOnly, keepSampling},
+		{"deepseek.v3.2", stopOnly, keepSampling},
+		// deepseek r1 accepts all three — "deepseek.v" must not match it.
+		{"us.deepseek.r1-v1:0", nil, []string{"maxTokens", "temperature", "topP", "stopSequences"}},
 		// Claude goes through invoke_model (apiFor, bedrock.go), never this
 		// path — and must stay untouched even if routed here explicitly.
 		{"global.anthropic.claude-sonnet-5", nil, []string{"maxTokens", "temperature", "topP", "stopSequences"}},
