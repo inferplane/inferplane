@@ -48,12 +48,22 @@ type OutcomeRef struct {
 	Error         *string  `json:"error"`
 }
 
+// UsageRef is the settled token usage of one request. CacheCreationInputTokens
+// is the cache-write TOTAL; the two tier fields below break it into the TTLs
+// pricing bills separately (5m at 1.25x the input rate, 1h at 2x), so the
+// billed amount can be reproduced from the ledger alone. They are appended at
+// the END with omitempty (the AuthMethod/BodyRef precedent) — an unset tier adds
+// no key, so pre-change records stay byte-identical and mixed-version chains
+// still verify.
 type UsageRef struct {
 	InputTokens              int64 `json:"input_tokens"`
 	OutputTokens             int64 `json:"output_tokens"`
 	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
 	Estimated                bool  `json:"estimated"`
+
+	CacheCreation5mInputTokens int64 `json:"cache_creation_5m_input_tokens,omitempty"`
+	CacheCreation1hInputTokens int64 `json:"cache_creation_1h_input_tokens,omitempty"`
 }
 
 type LatencyRef struct {
