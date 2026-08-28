@@ -554,3 +554,94 @@ func TestCacheWriteTiers_splitsByTTL(t *testing.T) {
 		t.Fatalf("unknown TTL: got (%d, %d), want (7, 0)", w5, w1h)
 	}
 }
+
+// Verified against live Bedrock ap-northeast-2 (2026-08-28): OpenAI and xAI
+// models reject temperature/topP/stopSequences in InferenceConfig with a 400
+// ValidationException ("This model doesn't support the temperature field"),
+// and zai models reject stopSequences — so those keys must be stripped
+// per-upstream, while models off the list keep every param untouched.
+func TestStripUnsupportedInference(t *testing.T) {
+	full := func() map[string]any {
+		return map[string]any{
+			"maxTokens": int64(256), "temperature": 1.0, "topP": 0.9,
+			"stopSequences": []string{"END"},
+		}
+	}
+	all := []string{"temperature", "topP", "stopSequences"}
+	stopOnly := []string{"stopSequences"}
+	keepSampling := []string{"maxTokens", "temperature", "topP"}
+	cases := []struct {
+		upstream string
+		stripped []string
+		kept     []string
+	}{
+		// OpenAI gpt-5.x reasoning models reject every sampling param…
+		{"global.openai.gpt-5.6-sol", all, []string{"maxTokens"}},
+		{"global.openai.gpt-5.6-luna", all, []string{"maxTokens"}},
+		{"global.openai.gpt-5.6-terra", all, []string{"maxTokens"}},
+		// …but gpt-oss accepts temperature/topP — "openai." alone is too broad.
+		{"openai.gpt-oss-120b-1:0", stopOnly, keepSampling},
+		{"global.xai.grok-4.6", all, []string{"maxTokens"}},
+		{"zai.glm-5", stopOnly, keepSampling},
+		{"zai.glm-4.7", stopOnly, keepSampling},
+		{"google.gemma-3-27b-it", stopOnly, keepSampling},
+		{"minimax.minimax-m2.5", stopOnly, keepSampling},
+		{"moonshot.kimi-k2-thinking", stopOnly, keepSampling},
+		{"moonshotai.kimi-k2.5", stopOnly, keepSampling},
+		{"qwen.qwen3-coder-next", stopOnly, keepSampling},
+		// Claude goes through invoke_model (apiFor, bedrock.go), never this
+		// path — and must stay untouched even if routed here explicitly.
+		{"global.anthropic.claude-sonnet-5", nil, []string{"maxTokens", "temperature", "topP", "stopSequences"}},
+	}
+	for _, tc := range cases {
+		inf := full()
+		stripUnsupportedInference(tc.upstream, inf)
+		for _, k := range tc.stripped {
+			if _, has := inf[k]; has {
+				t.Errorf("%s: %q not stripped", tc.upstream, k)
+			}
+		}
+		for _, k := range tc.kept {
+			if _, has := inf[k]; !has {
+				t.Errorf("%s: %q wrongly stripped", tc.upstream, k)
+			}
+		}
+	}
+}
+
+func TestCompleteConverseStripsUnsupportedInference(t *testing.T) {
+	text := "ok"
+	fc := &fakeConverser{resp: ConverseResponse{
+		Content: []schema.ContentBlock{{Type: "text", Text: &text}}, StopReason: "end_turn",
+	}}
+	p := &provider{conv: fc, modelAPI: map[string]string{"global.openai.gpt-5.6-sol": "converse"}}
+	raw := []byte(`{"model":"gpt-5.6-sol","max_tokens":64,"temperature":1,"top_p":0.9,"stop_sequences":["END"],"messages":[{"role":"user","content":"q"}]}`)
+	if _, err := p.Complete(context.Background(), &providers.ProxyRequest{Model: "gpt-5.6-sol", Upstream: "global.openai.gpt-5.6-sol", RawBody: raw}); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"temperature", "topP", "stopSequences"} {
+		if _, has := fc.gotReq.Inference[k]; has {
+			t.Errorf("complete: %q reached the upstream request", k)
+		}
+	}
+	if fc.gotReq.Inference["maxTokens"] != int64(64) {
+		t.Errorf("complete: maxTokens wrongly stripped: %v", fc.gotReq.Inference["maxTokens"])
+	}
+}
+
+func TestStreamConverseStripsUnsupportedInference(t *testing.T) {
+	fc := &fakeConverser{streamEv: []ConverseStreamEvent{{Kind: eventMessageStop, StopReason: "end_turn"}, {Kind: eventUsage, InputTokens: 1, OutputTokens: 1}}}
+	p := &provider{conv: fc, modelAPI: map[string]string{"global.xai.grok-4.6": "converse"}}
+	raw := []byte(`{"model":"grok-4.6","max_tokens":64,"temperature":1,"stop_sequences":["END"],"stream":true,"messages":[{"role":"user","content":"q"}]}`)
+	evs, err := p.Stream(context.Background(), &providers.ProxyRequest{Model: "grok-4.6", Upstream: "global.xai.grok-4.6", RawBody: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range evs { // drain so the fake records the request
+	}
+	for _, k := range []string{"temperature", "stopSequences"} {
+		if _, has := fc.gotReq.Inference[k]; has {
+			t.Errorf("stream: %q reached the upstream request", k)
+		}
+	}
+}

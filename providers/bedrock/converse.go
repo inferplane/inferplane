@@ -218,6 +218,7 @@ func (p *provider) completeConverse(ctx context.Context, req *providers.ProxyReq
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: converse req: %w", err)
 	}
+	stripUnsupportedInference(req.Upstream, cr.Inference)
 	cr.Guardrail = p.guardrailFor(req)
 	cresp, err := p.conv.Converse(ctx, req.Upstream, cr)
 	if err != nil {
@@ -254,6 +255,7 @@ func (p *provider) streamConverse(ctx context.Context, req *providers.ProxyReque
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: converse req: %w", err)
 	}
+	stripUnsupportedInference(req.Upstream, cr.Inference)
 	cr.Guardrail = p.guardrailFor(req)
 	evs, err := p.conv.ConverseStream(ctx, req.Upstream, cr)
 	if err != nil {
@@ -415,4 +417,52 @@ func usageWithCache(in, out, cacheRead, write5m, write1h, writeTotal int64) *sch
 		u.CacheCreationInputTokens = &writeTotal
 	}
 	return u
+}
+
+// converseUnsupportedInference is the upstream-model-ID substring list of
+// InferenceConfig keys a model REJECTS with a 400 ValidationException ("This
+// model doesn't support the temperature field. Remove temperature and try
+// again."), probed per-param against live Bedrock (ap-northeast-2 and
+// us-east-1) 2026-08-28. Clients like Claude Code send
+// temperature/stop_sequences on most requests, so without stripping these
+// every such request 400s and the client silently falls back to another
+// model. Same style as legacyThinkingBrokenModels (thinking.go): an
+// evidence-based allow-list, NOT a guess — models not listed keep every
+// param untouched, so an unrecognized future model fails the same way it did
+// before. Extend as models are confirmed broken. Anthropic models are absent
+// deliberately: apiFor (bedrock.go) routes them via invoke_model, and their
+// param rules are the client's contract, not ours to rewrite.
+var converseUnsupportedInference = []struct {
+	match  string
+	params []string
+}{
+	// OpenAI gpt-5.x reasoning models (gpt-5.6-luna/-sol/-terra) reject all
+	// sampling params. "openai." alone would be too broad: openai.gpt-oss-*
+	// ACCEPTS temperature/topP (only stopSequences rejected, below).
+	{"openai.gpt-5", []string{"temperature", "topP", "stopSequences"}},
+	// xai (grok-4.6) rejects all sampling params.
+	{"xai.", []string{"temperature", "topP", "stopSequences"}},
+	// These accept temperature/topP but reject stopSequences:
+	{"openai.gpt-oss", []string{"stopSequences"}},
+	{"google.gemma-", []string{"stopSequences"}},
+	{"minimax.", []string{"stopSequences"}},
+	{"moonshot", []string{"stopSequences"}}, // moonshot. and moonshotai.
+	{"qwen.", []string{"stopSequences"}},
+	{"zai.", []string{"stopSequences"}},
+}
+
+// stripUnsupportedInference removes InferenceConfig keys the upstream model
+// is known to reject outright (value-independent — gpt-5.6-sol 400s even on
+// temperature 1.0, its own default). Dropping a sampling param silently
+// changes sampling semantics, but the alternative is a hard 400 on every
+// request that carries it.
+func stripUnsupportedInference(upstream string, inf map[string]any) {
+	for _, e := range converseUnsupportedInference {
+		if !strings.Contains(upstream, e.match) {
+			continue
+		}
+		for _, p := range e.params {
+			delete(inf, p)
+		}
+	}
 }
