@@ -31,6 +31,36 @@ spec:
     modelAccess: { allow: ["claude-haiku-4-5"] }
 `
 
+// cpTierPolicyYAML adds an ADR-041 budgetTiers routing rule on top of
+// cpPolicyYAML's "cap" budget rule: at 80% global utilization,
+// claude-haiku-4-5 traffic is substituted to glm-4.7-gpu.
+const cpTierPolicyYAML = cpPolicyYAML + `  - name: downgrade-at-80
+    failurePolicy: FailOpen
+    routing:
+      budgetTiers:
+        budgetRef: cap
+        tiers:
+        - thresholdPercent: 80
+          substitute: { claude-haiku-4-5: glm-4.7-gpu }
+`
+
+func newTierTestServer(t *testing.T, token string) (*Server, *httptest.Server) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "p.yaml"), []byte(cpTierPolicyYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer(token, dir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	mux := http.NewServeMux()
+	s.Mount(mux)
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	return s, ts
+}
+
 func newTestServer(t *testing.T, token string) (*Server, *httptest.Server) {
 	t.Helper()
 	dir := t.TempDir()
@@ -356,4 +386,180 @@ func TestDataplanesViewConcurrentWithSync(t *testing.T) {
 		resp.Body.Close()
 	}
 	<-done
+}
+
+// ADR-041: the tier must activate on the GLOBAL sum, not any one data
+// plane's local view — two data planes each individually well under 80%
+// combine to cross it.
+func TestActiveTierFiresOnGlobalUtilizationNotPerPlane(t *testing.T) {
+	_, ts := newTierTestServer(t, "")
+
+	// limit is 100,000 µUSD (cap: limitMilliUSD 100). dp1 alone at 45,000
+	// (45%) must NOT see a tier yet.
+	r1 := doSync(t, ts.URL, "", policy.SyncRequest{
+		Dataplane: "dp1",
+		Reports:   []policy.ConsumptionReport{{Policy: "team-a", Rule: "cap", Team: "alpha", SpentMicroUSD: 45_000}},
+	})
+	if len(r1.ActiveTiers) != 0 {
+		t.Fatalf("dp1 alone at 45%%: got active tiers %+v, want none", r1.ActiveTiers)
+	}
+
+	// dp2 alone at 40,000 (40%) — but combined with dp1's 45,000 that's
+	// 85,000 = 85% globally, crossing the 80% tier.
+	r2 := doSync(t, ts.URL, "", policy.SyncRequest{
+		Dataplane: "dp2",
+		Reports:   []policy.ConsumptionReport{{Policy: "team-a", Rule: "cap", Team: "alpha", SpentMicroUSD: 40_000}},
+	})
+	if len(r2.ActiveTiers) != 1 {
+		t.Fatalf("global 85%%: got %d active tiers, want 1: %+v", len(r2.ActiveTiers), r2.ActiveTiers)
+	}
+	at := r2.ActiveTiers[0]
+	if at.Policy != "team-a" || at.Rule != "downgrade-at-80" || at.BudgetRef != "cap" || at.Team != "alpha" ||
+		at.ThresholdPercent != 80 || at.Substitute["claude-haiku-4-5"] != "glm-4.7-gpu" {
+		t.Fatalf("active tier mangled: %+v", at)
+	}
+
+	// dp1 alone in this SAME heartbeat also sees the globally-active tier —
+	// substitution is judged globally, applied to every data plane.
+	r1b := doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp1"})
+	if len(r1b.ActiveTiers) != 1 {
+		t.Fatalf("dp1's own heartbeat after global activation: got %d tiers, want 1", len(r1b.ActiveTiers))
+	}
+}
+
+// The latch holds within a budget window even if a later heartbeat's
+// reported spend appears lower (e.g. a window-rollover report from an
+// UNRELATED data plane momentarily drops the global sum) — activation must
+// not flap request-to-request.
+func TestActiveTierLatchHoldsOnSpendDrop(t *testing.T) {
+	_, ts := newTierTestServer(t, "")
+
+	doSync(t, ts.URL, "", policy.SyncRequest{
+		Dataplane: "dp1",
+		Reports:   []policy.ConsumptionReport{{Policy: "team-a", Rule: "cap", Team: "alpha", SpentMicroUSD: 90_000}},
+	})
+	// Confirm it's active first.
+	r := doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp1"})
+	if len(r.ActiveTiers) != 1 {
+		t.Fatalf("want tier active at 90%%, got %+v", r.ActiveTiers)
+	}
+
+	// dp1's own counter now drops sharply (window rollover semantics: a
+	// decreasing report). Within the SAME calendar-month latch window the
+	// tier must stay active.
+	r2 := doSync(t, ts.URL, "", policy.SyncRequest{
+		Dataplane: "dp1",
+		Reports:   []policy.ConsumptionReport{{Policy: "team-a", Rule: "cap", Team: "alpha", SpentMicroUSD: 1}},
+	})
+	if len(r2.ActiveTiers) != 1 {
+		t.Fatalf("latch did not hold on spend drop within window: %+v", r2.ActiveTiers)
+	}
+}
+
+// The latch resets when the injected clock crosses a calendar-month
+// boundary: a fresh window with low utilization must NOT inherit the
+// previous window's active tier.
+func TestActiveTierLatchResetsOnWindowChange(t *testing.T) {
+	s, ts := newTierTestServer(t, "")
+	fixed := time.Date(2026, time.August, 15, 0, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return fixed }
+
+	doSync(t, ts.URL, "", policy.SyncRequest{
+		Dataplane: "dp1",
+		Reports:   []policy.ConsumptionReport{{Policy: "team-a", Rule: "cap", Team: "alpha", SpentMicroUSD: 90_000}},
+	})
+	r := doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp1"})
+	if len(r.ActiveTiers) != 1 {
+		t.Fatalf("want tier active in August, got %+v", r.ActiveTiers)
+	}
+
+	// Cross into September; the ledger's own spend also rolls over (a fresh
+	// window's cumulative report legitimately restarts low).
+	next := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return next }
+	r2 := doSync(t, ts.URL, "", policy.SyncRequest{
+		Dataplane: "dp1",
+		Reports:   []policy.ConsumptionReport{{Policy: "team-a", Rule: "cap", Team: "alpha", SpentMicroUSD: 1}},
+	})
+	if len(r2.ActiveTiers) != 0 {
+		t.Fatalf("latch did not reset on window change: %+v", r2.ActiveTiers)
+	}
+}
+
+// A budgetTiers rule whose budgetRef names an unlimited budget rule is
+// rejected at conversion (internal/policy), so it can never even reach the
+// control plane's ledger — this pins that no tier silently "activates" for
+// one either.
+func TestActiveTierUnlimitedBudgetRefRejectedAtLoad(t *testing.T) {
+	const yaml = `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: bt }
+spec:
+  subject: { team: alpha }
+  rules:
+  - name: no-cap
+    failurePolicy: FailOpen
+    budget: { unlimited: true }
+  - name: downgrade
+    failurePolicy: FailOpen
+    routing:
+      budgetTiers:
+        budgetRef: no-cap
+        tiers:
+        - thresholdPercent: 80
+          substitute: { a: b }
+`
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "p.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewServer("", dir); err == nil {
+		t.Fatal("budgetTiers against an unlimited budget rule was accepted")
+	}
+}
+
+// The latch survives a Reload (policy edit) for a rule whose name is
+// unchanged — an operator editing an unrelated field (e.g. widening the
+// model allow-list) must not silently un-latch every team mid-window.
+func TestActiveTierSurvivesReload(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "p.yaml")
+	if err := os.WriteFile(f, []byte(cpTierPolicyYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	s.Mount(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	doSync(t, ts.URL, "", policy.SyncRequest{
+		Dataplane: "dp1",
+		Reports:   []policy.ConsumptionReport{{Policy: "team-a", Rule: "cap", Team: "alpha", SpentMicroUSD: 90_000}},
+	})
+	r := doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp1"})
+	if len(r.ActiveTiers) != 1 {
+		t.Fatalf("want tier active before reload, got %+v", r.ActiveTiers)
+	}
+
+	edited := bytes.Replace([]byte(cpTierPolicyYAML), []byte(`allow: ["claude-haiku-4-5"]`), []byte(`allow: ["*"]`), 1)
+	if err := os.WriteFile(f, edited, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh heartbeat with a spend report BELOW 80% would, on its own,
+	// evaluate to no tier — the latch is what keeps it active post-reload.
+	r2 := doSync(t, ts.URL, "", policy.SyncRequest{
+		Dataplane: "dp1",
+		Reports:   []policy.ConsumptionReport{{Policy: "team-a", Rule: "cap", Team: "alpha", SpentMicroUSD: 90_000}},
+	})
+	if len(r2.ActiveTiers) != 1 {
+		t.Fatalf("latch did not survive reload: %+v", r2.ActiveTiers)
+	}
 }

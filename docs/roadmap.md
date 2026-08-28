@@ -19,7 +19,7 @@ already met by earlier work (ADR-031) outside this roadmap.
 |---|---|---|
 | #1 A single entry point for Claude Code/OpenCode/Codex | 🔶 partial | No Codex-specific code, fixture, or test anywhere in the tree (`grep -ri codex internal/ providers/ tests/` → 0 hits, excluding this doc); the OpenAI-compat ingress (`internal/server/openaiapi/chat.go`) is the presumed path but has never been verified against a real Codex client |
 | #2 Per-user model choice | ✅ done | User-subject `modelAccess` rules are enforced: `internal/policy/store.go:252` `ModelAllowed`, wired at `cmd/mayu/gateway.go:407` into `router.FilterModelAllowed`. (Per-user *budget/rate* is a separate, still-blocked item — see #4b.) |
-| #3 Cost-driven model substitution via policy (routing) | ❌ blocked | `internal/policy/store.go:161` — `routing` rules rejected outright as "not yet enforceable by this data plane build," for every subject shape. Config-level `model_fallbacks` substitution exists (`internal/router/router.go:44`) but only fires when a requested model has no route at all — it's availability-triggered, not cost-triggered. |
+| #3 Cost-driven model substitution via policy (routing) | ✅ done, with caveats (ADR-041) | `routing.budgetTiers` is enforceable: `internal/policy/store.go` `checkEnforceable` now rejects only the cache-affinity half of `routing`; the control plane judges utilization globally from the ADR-034 ledger (`internal/controlplane/controlplane.go` `handleSync`) and latches the active tier per budget window (`internal/tier.Latch`); mayu applies it at ingress via `router.SubstituteTier`, never widening access or turning into a denial. Config-level `model_fallbacks` (`internal/router/router.go` `ResolveModel`) remains the separate availability-triggered substitution. Caveats: the window-latch key is an interim calendar-month-UTC derivation pending item ② below's real `windowID`; providerstore/UI pricing fields for `openai_compatible` GPU targets (ADR-041 item 6) and the full two-plane e2e (item 7) are follow-ups. |
 | #4a Team budget + block | ✅ done, with caveats | ADR-034 lease pattern bounds team-level overspend across data planes when a control plane is attached (worst case = Σ outstanding grants, not exact; window edges are approximate — ADR-034 §Known limits). Per-key budgets are not lease-managed. Standalone `mayu` (no control plane) gets no lease at all — budget is plain in-memory there, like rate. |
 | #4b Per-user budget/rate | ❌ blocked | `internal/policy/store.go:168-169` — any rule containing `budget` or `rate` is rejected unless the subject is team-only; user-only and (team,user) subjects are refused for those two rule kinds specifically |
 | #4c Rate/quota global accuracy under horizontal scale | ❌ blocked | item ① below — in-memory per-replica buckets; N replicas admit up to N× the configured rate/TPM/quota in aggregate |
@@ -96,7 +96,10 @@ reports, grants issued moments before a crash are re-derived, and — the real
 correctness hole — budget windows are per-data-plane tumbling windows, so
 "the monthly team budget" is only approximately global. Rollover is detected
 heuristically (a cumulative report DECREASING), and pruned dead planes drop
-their window spend entirely.
+their window spend entirely. ADR-041's budget-tier latch
+(`internal/tier.Latch`) currently derives its own interim window key
+(calendar-month UTC) rather than waiting on this item — once a real
+`windowID` exists it should replace that derivation.
 
 **Design — the control plane owns the window.**
 - Each budget rule gets a control-plane-computed `windowID` (calendar month
@@ -246,4 +249,6 @@ details are swappable.
 - CRD-watch controller in inferplaned (ADR-035 follow-up).
 - User-subject budget/rate windows (needs per-user governance keys end to
   end; unblocks the ADR-033 gate).
-- Cache-affinity routing engine (`routing` rules stay rejected until then).
+- Cache-affinity routing engine (the `routing` rule's *affinity* half stays
+  rejected until then; the *budgetTiers* half shipped as ADR-041 — it never
+  depended on the affinity engine).

@@ -31,6 +31,13 @@ type RequestRef struct {
 	// (ADR-009). A boolean only — never the redacted values (the count is a
 	// metric label); omitted when masking was off.
 	PIIMasked bool `json:"pii_masked,omitempty"`
+	// ModelSubstitutedFrom is the ORIGINAL requested model when an ADR-041
+	// budget tier substituted it — ModelRequested above already carries the
+	// model actually served (RBAC/pricing/metrics key off it), so without
+	// this field the client's real request is invisible in the audit trail.
+	// Appended at the end (like PIIMasked) so mixed-version chains still
+	// verify byte-identically; empty means no substitution occurred.
+	ModelSubstitutedFrom string `json:"model_substituted_from,omitempty"`
 }
 
 type OutcomeRef struct {

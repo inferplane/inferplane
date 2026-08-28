@@ -25,6 +25,23 @@ spec:
     failurePolicy: FailOpen
     modelAccess:
       allow: ["claude-sonnet-4-6", "claude-haiku-4-5"]   # "*" = all
+  - name: downgrade-subagents-at-80
+    failurePolicy: FailOpen
+    # ADR-041: once monthly-hard-cap crosses 80% utilization (judged
+    # globally by the control plane), subagent/background traffic
+    # requesting claude-haiku-4-5 is served by a self-hosted vLLM model
+    # instead — a nominal, operator-entered chargeback rate, never a free
+    # model (ADR-030/ADR-039). The main-loop model is deliberately absent
+    # from this map: substitution is keyed by requested model name, and
+    # only short-lived (subagent) conversations are safe to retarget
+    # without a prompt-cache miss on a live session.
+    routing:
+      budgetTiers:
+        budgetRef: monthly-hard-cap
+        tiers:
+        - thresholdPercent: 80
+          substitute:
+            claude-haiku-4-5: glm-4.7-gpu
 ---
 # User-subject policy: applies wherever this identity appears (a virtual
 # key's owner today; OIDC sub with the control plane). Matching team AND

@@ -39,6 +39,7 @@ import (
 	"github.com/inferplane/inferplane/internal/server/authapi"
 	"github.com/inferplane/inferplane/internal/server/configapi"
 	"github.com/inferplane/inferplane/internal/telemetry"
+	"github.com/inferplane/inferplane/internal/tier"
 	"github.com/inferplane/inferplane/internal/tracing"
 	"github.com/inferplane/inferplane/pkg/ulid"
 	"github.com/inferplane/inferplane/providers"
@@ -101,6 +102,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// enforcing it. Watched for changes in serve.
 	var polStore *policy.Store
 	var leases *proxy.LeaseTable
+	var tiers *tier.Table // ADR-041: not a gateway field, same three-sharer lifetime as leases below
 	if len(raw.Policies) > 0 {
 		polStore, err = policy.NewStore(raw.Policies...)
 		if err != nil {
@@ -118,6 +120,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		// governor's team-lookup closure, the lease gate, and the syncer
 		// built below — the three places that share it.
 		leases = proxy.NewLeaseTable()
+		tiers = tier.NewTable()
 	}
 
 	// Prometheus metrics sink: owned by main, threaded into the audit writer,
@@ -442,6 +445,20 @@ func newGateway(cfgPath string) (*gateway, error) {
 			return polStore.ModelAllowed(p.Team, p.Owner, model, canonical)
 		})
 	}
+	// ADR-041 budget-tier substitution. Control-plane mode: tiers is
+	// populated by the syncer from resp.ActiveTiers (below), judged
+	// GLOBALLY by inferplaned. Standalone mode: no control plane to judge
+	// globally, so the gate evaluates locally from this instance's own
+	// budget spend — the same per-instance-approximation caveat standalone
+	// budget/rate already carries (internal/CLAUDE.md Design Debt).
+	if raw.ControlPlane != nil {
+		r.SetTierGate(func(p keystore.Principal) map[string]string { return tiers.Get(p.Team) })
+	} else if polStore != nil {
+		standaloneTierLatch := tier.NewLatch()
+		r.SetTierGate(func(p keystore.Principal) map[string]string {
+			return standaloneActiveTierSubstitutions(polStore, gov, standaloneTierLatch, p.Team, time.Now())
+		})
+	}
 	// Control-plane heartbeat (ADR-034): lease gate + syncer. The gate fails
 	// a HARD-cap team closed when its lease expired (control plane
 	// unreachable past tolerance) or its allowance is exhausted globally;
@@ -481,6 +498,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 			Dataplane: dataplaneID,
 			Store:     polStore,
 			Leases:    leases,
+			Tiers:     tiers,
 			SpentOf: func(team string) int64 {
 				if u := gov.UsageOf(team, "", governance.KeyPolicy{}); u.TeamBudget != nil {
 					return u.TeamBudget.SpentUSDMicros
@@ -1485,4 +1503,64 @@ func buildSinks(cfgs []config.AuditSink) ([]audit.Sink, error) {
 		}
 	}
 	return sinks, nil
+}
+
+// standaloneActiveTierSubstitutions is the ADR-041 tier gate for a mayu with
+// no control plane attached: there is nothing to judge utilization
+// GLOBALLY, so each instance judges its OWN spend against every
+// budgetTiers rule matching team, the same per-instance-approximation
+// caveat standalone budget/rate already carries. latch is the caller's
+// single Latch instance (its state must persist across calls — a fresh
+// Latch every request would never observe a monotone window).
+//
+// Reuses tier.Table.Set's cross-rule merge (higher threshold wins, ties by
+// policy/rule name) instead of re-implementing it, so standalone and
+// control-plane mode can never disagree on how two active tiers combine.
+func standaloneActiveTierSubstitutions(store *policy.Store, gov *governance.Governor, latch *tier.Latch, team string, now time.Time) map[string]string {
+	var active []policy.ActiveTier
+	for _, p := range store.Policies() {
+		if p.Subject.Team != team {
+			continue
+		}
+		for _, r := range p.Rules {
+			if r.Routing == nil || r.Routing.BudgetTiers == nil {
+				continue
+			}
+			bt := r.Routing.BudgetTiers
+			var budgetLimit int64
+			found := false
+			for _, ref := range p.Rules {
+				if ref.Name == bt.BudgetRef && ref.Budget != nil && !ref.Budget.Unlimited {
+					budgetLimit = ref.Budget.LimitMicroUSD
+					found = true
+					break
+				}
+			}
+			if !found || budgetLimit <= 0 {
+				continue
+			}
+			spent := gov.UsageOf(team, "", governance.KeyPolicy{})
+			var spentMicros int64
+			if spent.TeamBudget != nil {
+				spentMicros = spent.TeamBudget.SpentUSDMicros
+			}
+			utilizedPercent := int(100 * float64(spentMicros) / float64(budgetLimit))
+			thresholds := make([]int, len(bt.Tiers))
+			for i, t := range bt.Tiers {
+				thresholds[i] = t.ThresholdPercent
+			}
+			idx := latch.Evaluate(p.Name+"/"+r.Name, tier.WindowKey(now), thresholds, utilizedPercent)
+			if idx < 0 {
+				continue
+			}
+			t := bt.Tiers[idx]
+			active = append(active, policy.ActiveTier{
+				Policy: p.Name, Rule: r.Name, BudgetRef: bt.BudgetRef, Team: team,
+				ThresholdPercent: t.ThresholdPercent, Substitute: t.Substitute,
+			})
+		}
+	}
+	table := tier.NewTable()
+	table.Set(active)
+	return table.Get(team)
 }
