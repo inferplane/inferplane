@@ -203,6 +203,16 @@ func TestMantleCompleteChatPath(t *testing.T) {
 	if resp.Parsed.Usage == nil || *resp.Parsed.Usage.OutputTokens != 2 {
 		t.Errorf("usage: %+v", resp.Parsed.Usage)
 	}
+	// The Bedrock ingress tees RawBody to the client, so a chat-route
+	// response must be re-rendered in Anthropic shape under the PUBLIC model
+	// name — raw OpenAI wire must never reach an Anthropic-speaking client.
+	var body map[string]any
+	if err := json.Unmarshal(resp.RawBody, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["type"] != "message" || body["model"] != "mantle.gpt-5.4" {
+		t.Errorf("RawBody not anthropic-shaped/public-model: type=%v model=%v", body["type"], body["model"])
+	}
 }
 
 func TestMantleStreamChatPath(t *testing.T) {

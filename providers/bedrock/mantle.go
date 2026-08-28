@@ -214,7 +214,15 @@ func (m *mantleClient) Complete(ctx context.Context, req *providers.ProxyRequest
 			out.Parsed = &parsed
 		}
 	} else if parsed, perr := openai.ResponseToCanonical(raw); perr == nil {
+		// The Bedrock ingress tees RawBody to the client, so the chat
+		// routes' OpenAI wire must be re-rendered in Anthropic shape under
+		// the PUBLIC model name (same as completeConverse) — raw OpenAI
+		// JSON must never reach an Anthropic-speaking client.
+		parsed.Model = req.Model
 		out.Parsed = parsed
+		if rendered, rerr := json.Marshal(parsed); rerr == nil {
+			out.RawBody = rendered
+		}
 	}
 	return out, nil
 }
