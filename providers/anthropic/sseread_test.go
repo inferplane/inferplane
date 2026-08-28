@@ -13,7 +13,7 @@ func TestReadSSEEventsByteExact(t *testing.T) {
 	var rawConcat strings.Builder
 	var types []string
 	var sawUsage bool
-	for ev, err := range readSSE(strings.NewReader(body)) {
+	for ev, err := range ReadSSE(strings.NewReader(body)) {
 		if err != nil {
 			t.Fatal(err)
 		}

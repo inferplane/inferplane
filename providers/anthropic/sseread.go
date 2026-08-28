@@ -12,12 +12,12 @@ import (
 	"github.com/inferplane/inferplane/providers"
 )
 
-// readSSE parses an Anthropic SSE response into a sequence of StreamEvents.
+// ReadSSE parses an Anthropic SSE response into a sequence of StreamEvents.
 // Raw is the exact bytes of each event block (all lines up to and including
 // the blank-line terminator) so the ingress can tee them to the client
 // verbatim; Chunk is the parsed "data:" JSON (nil if the block has no data
 // line). Byte-exactness is the tee guarantee.
-func readSSE(r io.Reader) iter.Seq2[*providers.StreamEvent, error] {
+func ReadSSE(r io.Reader) iter.Seq2[*providers.StreamEvent, error] {
 	return func(yield func(*providers.StreamEvent, error) bool) {
 		br := bufio.NewReader(r)
 		var block bytes.Buffer

@@ -190,3 +190,77 @@ func TestUsageFromCanonical_reExposesCacheSplit(t *testing.T) {
 		t.Error("prompt_tokens_details must be omitted when there are no cache reads")
 	}
 }
+
+// CanonicalToRequest must carry tool definitions, tool_choice, and sampling
+// params to the OpenAI wire — without them a coding assistant routed through
+// an OpenAI-schema upstream (openai_compatible, Bedrock Mantle) silently
+// loses tool calling and sampling entirely.
+func TestCanonicalToRequestCarriesToolsAndSampling(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":64,
+		"temperature":0.7,"top_p":0.9,"stop_sequences":["END","STOP"],
+		"tools":[{"name":"get_time","description":"tells time","input_schema":{"type":"object","properties":{"tz":{"type":"string"}}}}],
+		"tool_choice":{"type":"auto"},
+		"messages":[{"role":"user","content":"hi"}]}`)
+	var cr schema.ChatRequest
+	if err := json.Unmarshal(raw, &cr); err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(CanonicalToRequest(&cr), &out); err != nil {
+		t.Fatal(err)
+	}
+	tools, ok := out["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools not carried: %v", out["tools"])
+	}
+	tool := tools[0].(map[string]any)
+	if tool["type"] != "function" {
+		t.Fatalf("tool type = %v, want function", tool["type"])
+	}
+	fn := tool["function"].(map[string]any)
+	if fn["name"] != "get_time" || fn["description"] != "tells time" {
+		t.Fatalf("function fields: %v", fn)
+	}
+	params, ok := fn["parameters"].(map[string]any)
+	if !ok || params["type"] != "object" {
+		t.Fatalf("input_schema not mapped to parameters: %v", fn["parameters"])
+	}
+	if out["tool_choice"] != "auto" {
+		t.Fatalf("tool_choice = %v, want auto", out["tool_choice"])
+	}
+	if out["temperature"] != 0.7 || out["top_p"] != 0.9 {
+		t.Fatalf("sampling params not carried: temp=%v top_p=%v", out["temperature"], out["top_p"])
+	}
+	stop, ok := out["stop"].([]any)
+	if !ok || len(stop) != 2 || stop[0] != "END" {
+		t.Fatalf("stop_sequences not mapped to stop: %v", out["stop"])
+	}
+}
+
+func TestCanonicalToRequestToolChoiceVariants(t *testing.T) {
+	mk := func(tc string) map[string]any {
+		raw := []byte(`{"model":"m","max_tokens":8,"tool_choice":` + tc + `,
+			"tools":[{"name":"f","input_schema":{"type":"object"}}],
+			"messages":[{"role":"user","content":"hi"}]}`)
+		var cr schema.ChatRequest
+		if err := json.Unmarshal(raw, &cr); err != nil {
+			t.Fatal(err)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(CanonicalToRequest(&cr), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if got := mk(`{"type":"any"}`)["tool_choice"]; got != "required" {
+		t.Errorf("any → %v, want required", got)
+	}
+	if got := mk(`{"type":"none"}`)["tool_choice"]; got != "none" {
+		t.Errorf("none → %v, want none", got)
+	}
+	specific := mk(`{"type":"tool","name":"f"}`)["tool_choice"]
+	sm, ok := specific.(map[string]any)
+	if !ok || sm["type"] != "function" || sm["function"].(map[string]any)["name"] != "f" {
+		t.Errorf("tool → %v, want function/f", specific)
+	}
+}

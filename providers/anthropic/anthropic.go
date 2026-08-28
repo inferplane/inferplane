@@ -143,7 +143,7 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 		resp.Body.Close()
 		return nil, &providers.UpstreamError{StatusCode: resp.StatusCode, Body: body, Header: resp.Header}
 	}
-	inner := readSSE(resp.Body)
+	inner := ReadSSE(resp.Body)
 	return func(yield func(*providers.StreamEvent, error) bool) {
 		defer resp.Body.Close()
 		for ev, err := range inner {

@@ -140,6 +140,9 @@ type ConverseStreamEvent struct {
 // SDK type stays behind these methods; callers see only the narrow interfaces.
 type awsClient struct {
 	rt *bedrockruntime.Client
+	// cfg keeps the resolved region + credentials so the Mantle client can
+	// SigV4-sign its own HTTP requests with the same identity the SDK uses.
+	cfg aws.Config
 }
 
 // newAWSClient loads the default AWS config (env, shared config, IMDS, ...)
@@ -169,7 +172,7 @@ func newAWSClient(ctx context.Context, region, authMode, profile string, credSrc
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: load aws config: %w", err)
 	}
-	return &awsClient{rt: bedrockruntime.NewFromConfig(cfg)}, nil
+	return &awsClient{rt: bedrockruntime.NewFromConfig(cfg), cfg: cfg}, nil
 }
 
 // brokerCredentials wraps an injected providers.CredentialSource into the SDK

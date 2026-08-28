@@ -272,6 +272,21 @@ func CanonicalToRequest(cr *schema.ChatRequest) []byte {
 	if cr.Stream != nil {
 		out["stream"] = *cr.Stream
 	}
+	// Sampling params ride in Extra (canonical keeps them untyped). OpenAI's
+	// names match except stop_sequences → stop.
+	for canonical, oai := range map[string]string{
+		"temperature": "temperature", "top_p": "top_p", "stop_sequences": "stop",
+	} {
+		if v, ok := cr.Extra[canonical]; ok && len(v) > 0 {
+			out[oai] = json.RawMessage(v)
+		}
+	}
+	if tools := toolsToOAI(cr.Tools); tools != nil {
+		out["tools"] = tools
+	}
+	if tc := toolChoiceToOAI(cr.ToolChoice); tc != nil {
+		out["tool_choice"] = tc
+	}
 
 	var msgs []map[string]any
 
@@ -350,6 +365,72 @@ func CanonicalToRequest(cr *schema.ChatRequest) []byte {
 	out["messages"] = msgs
 	raw, _ := json.Marshal(out)
 	return raw
+}
+
+// toolsToOAI maps Anthropic tool definitions ({name, description,
+// input_schema}) to OpenAI function tools ({type:"function",
+// function:{name, description, parameters}}). Nil on empty or unparsable
+// input — the field is then omitted rather than sent malformed.
+func toolsToOAI(raw json.RawMessage) []map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var tools []struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description,omitempty"`
+		InputSchema json.RawMessage `json:"input_schema,omitempty"`
+	}
+	if json.Unmarshal(raw, &tools) != nil || len(tools) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(tools))
+	for _, t := range tools {
+		if t.Name == "" {
+			continue
+		}
+		fn := map[string]any{"name": t.Name}
+		if t.Description != "" {
+			fn["description"] = t.Description
+		}
+		if len(t.InputSchema) > 0 {
+			fn["parameters"] = json.RawMessage(t.InputSchema)
+		}
+		out = append(out, map[string]any{"type": "function", "function": fn})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// toolChoiceToOAI maps an Anthropic tool_choice to the OpenAI wire:
+// auto → "auto", any → "required", none → "none",
+// {type:"tool", name:N} → {type:"function", function:{name:N}}.
+func toolChoiceToOAI(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var tc struct {
+		Type string `json:"type"`
+		Name string `json:"name"`
+	}
+	if json.Unmarshal(raw, &tc) != nil {
+		return nil
+	}
+	switch tc.Type {
+	case "auto":
+		return "auto"
+	case "any":
+		return "required"
+	case "none":
+		return "none"
+	case "tool":
+		if tc.Name == "" {
+			return nil
+		}
+		return map[string]any{"type": "function", "function": map[string]any{"name": tc.Name}}
+	}
+	return nil
 }
 
 // systemToText flattens cr.System (string OR array of text blocks) into text.

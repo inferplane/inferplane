@@ -23,8 +23,8 @@ func TestApiForRouting(t *testing.T) {
 	if p.apiFor("glm.glm-4") != "converse" {
 		t.Fatal("explicit converse override")
 	}
-	if p.apiFor("x.mantle-model") != "invoke_model" {
-		t.Fatal("mantle → invoke fallback (M4)")
+	if p.apiFor("x.mantle-model") != "mantle" {
+		t.Fatal("mantle must route to the mantle client, not fall back to invoke")
 	}
 	if p.apiFor("moonshot.kimi-k2") != "converse" {
 		t.Fatal("non-claude default → converse")

@@ -8,7 +8,6 @@
 package openaicompat
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -16,7 +15,6 @@ import (
 	"io"
 	"iter"
 	"net/http"
-	"strings"
 
 	"github.com/inferplane/inferplane/internal/openai"
 	"github.com/inferplane/inferplane/pkg/schema"
@@ -214,7 +212,7 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 		resp.Body.Close()
 		return nil, &providers.UpstreamError{StatusCode: resp.StatusCode, Body: body, Header: resp.Header}
 	}
-	inner := readOpenAISSE(resp.Body)
+	inner := openai.ReadChatSSE(resp.Body)
 	return func(yield func(*providers.StreamEvent, error) bool) {
 		defer resp.Body.Close()
 		for ev, err := range inner {
@@ -223,46 +221,6 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 			}
 		}
 	}, nil
-}
-
-// readOpenAISSE parses an OpenAI Chat Completions SSE stream (sequences of
-// `data: {...}` lines terminated by `data: [DONE]`). Each event's Raw is the
-// provider-native OpenAI SSE bytes ("data: {...}\n\n") so an OpenAI ingress can
-// tee them verbatim; Chunk is the canonical (Anthropic) view parsed via
-// openai.ChunkToCanonical for observation and Anthropic-ingress re-serialization
-// (a cross-protocol ingress IGNORES Raw and re-renders from Chunk). The [DONE]
-// terminator yields Raw="data: [DONE]\n\n" with Chunk=nil.
-func readOpenAISSE(r io.Reader) iter.Seq2[*providers.StreamEvent, error] {
-	return func(yield func(*providers.StreamEvent, error) bool) {
-		br := bufio.NewReader(r)
-		for {
-			line, err := br.ReadString('\n')
-			trimmed := strings.TrimRight(line, "\r\n")
-			if strings.HasPrefix(trimmed, "data:") {
-				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
-				if payload == "[DONE]" {
-					if !yield(&providers.StreamEvent{Raw: []byte("data: [DONE]\n\n")}, nil) {
-						return
-					}
-				} else if payload != "" {
-					ev := &providers.StreamEvent{Raw: []byte("data: " + payload + "\n\n")}
-					if c, cerr := openai.ChunkToCanonical([]byte(payload)); cerr == nil {
-						ev.Chunk = c
-					}
-					if !yield(ev, nil) {
-						return
-					}
-				}
-			}
-			if err == io.EOF {
-				return
-			}
-			if err != nil {
-				yield(nil, err)
-				return
-			}
-		}
-	}
 }
 
 var _ providers.Provider = (*provider)(nil)
