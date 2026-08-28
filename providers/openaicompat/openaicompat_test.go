@@ -96,3 +96,46 @@ func TestStreamForwardsOpenAISSE(t *testing.T) {
 	}
 	_ = sawContent
 }
+
+// A non-OpenAI ingress (Anthropic, Bedrock) tees RawBody to its client, so a
+// 2xx completion must be re-rendered in Anthropic shape under the PUBLIC
+// model name — while the OpenAI ingress keeps the verbatim OpenAI wire.
+func TestCompleteRerendersRawBodyForCrossProtocolIngress(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"c1","object":"chat.completion","model":"upstream-m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hey"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}`))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	var cr schema.ChatRequest
+	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+		t.Fatal(err)
+	}
+	req := &providers.ProxyRequest{Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), Parsed: &cr, IngressProtocol: "bedrock"}
+	resp, err := p.Complete(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(resp.RawBody, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["type"] != "message" || body["model"] != "public-m" {
+		t.Fatalf("cross-protocol RawBody not anthropic-shaped/public-model: type=%v model=%v", body["type"], body["model"])
+	}
+
+	// OpenAI ingress: verbatim OpenAI wire preserved.
+	req.IngressProtocol = "openai"
+	resp, err = p.Complete(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = map[string]any{}
+	if err := json.Unmarshal(resp.RawBody, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["object"] != "chat.completion" {
+		t.Fatalf("openai ingress RawBody must stay verbatim OpenAI wire: %v", body)
+	}
+}

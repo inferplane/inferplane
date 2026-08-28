@@ -185,13 +185,22 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 	if err != nil {
 		return nil, fmt.Errorf("openaicompat: read upstream: %w", err)
 	}
-	// RawBody is the provider's native OpenAI wire; the OpenAI ingress tees it
-	// verbatim, the Anthropic ingress re-renders from Parsed. Non-2xx still
-	// returns RawBody (teeable) with Parsed nil.
+	// RawBody is the provider's native OpenAI wire for an OpenAI ingress
+	// (teed verbatim). Any other ingress (Anthropic re-renders from Parsed;
+	// Bedrock tees RawBody) gets an Anthropic-shaped re-render under the
+	// PUBLIC model name, so raw OpenAI JSON never reaches an
+	// Anthropic-speaking client. Non-2xx still returns the upstream body
+	// (teeable) with Parsed nil.
 	out := &providers.ProxyResponse{StatusCode: resp.StatusCode, Headers: resp.Header, RawBody: body}
 	if resp.StatusCode/100 == 2 {
 		if parsed, perr := openai.ResponseToCanonical(body); perr == nil {
 			out.Parsed = parsed
+			if req.IngressProtocol != "openai" {
+				parsed.Model = req.Model
+				if rendered, rerr := json.Marshal(parsed); rerr == nil {
+					out.RawBody = rendered
+				}
+			}
 		}
 	}
 	return out, nil
