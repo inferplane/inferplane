@@ -342,6 +342,79 @@ spec:
 	}
 }
 
+// A budgetTiers routing rule (ADR-041) is enforceable — unlike the affinity
+// half, it loads without SetRoutedAndPriced (no topology to validate
+// against) and with it, provided the substitution target passes.
+func TestBudgetTiersAccepted(t *testing.T) {
+	body := `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: bt }
+spec:
+  subject: { team: ml-platform }
+  rules:
+  - name: team-monthly-budget
+    failurePolicy: FailClosed
+    budget: { limitMilliUSD: 5000000, hardCap: true }
+  - name: downgrade-subagents-at-80
+    failurePolicy: FailOpen
+    routing:
+      budgetTiers:
+        budgetRef: team-monthly-budget
+        tiers:
+        - thresholdPercent: 80
+          substitute: { claude-haiku-4-5: glm-4.7-gpu }
+`
+	dir := t.TempDir()
+	writePolicy(t, dir, "p.yaml", body)
+	if _, err := NewStore(dir); err != nil {
+		t.Fatalf("budgetTiers rule rejected: %v", err)
+	}
+}
+
+// The apply-time target check (ADR-041 D1) rejects a substitution target
+// that isn't routed+priced on this data plane, closing the ADR-030
+// zero-billing hole before the policy path can open it — and it's the ONLY
+// thing that rejects it; the same document loads fine without the check
+// installed (a control plane holding no topology of its own).
+func TestBudgetTiersRejectsUnroutedOrUnpricedTarget(t *testing.T) {
+	body := `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: bt }
+spec:
+  subject: { team: ml-platform }
+  rules:
+  - name: team-monthly-budget
+    failurePolicy: FailClosed
+    budget: { limitMilliUSD: 5000000, hardCap: true }
+  - name: downgrade-subagents-at-80
+    failurePolicy: FailOpen
+    routing:
+      budgetTiers:
+        budgetRef: team-monthly-budget
+        tiers:
+        - thresholdPercent: 80
+          substitute: { claude-haiku-4-5: unrouted-model }
+`
+	dir := t.TempDir()
+	writePolicy(t, dir, "p.yaml", body)
+
+	s := &Store{paths: []string{dir}}
+	s.SetRoutedAndPriced(func(model string) error {
+		if model == "unrouted-model" {
+			return errors.New("not routed on this data plane")
+		}
+		return nil
+	})
+	err := s.Reload()
+	var ue *UnsupportedError
+	if !errors.As(err, &ue) {
+		t.Fatalf("want *UnsupportedError, got %v", err)
+	}
+	if !strings.Contains(ue.Reason, "unrouted-model") {
+		t.Fatalf("rejection reason %q does not name the offending target", ue.Reason)
+	}
+}
+
 // A failed reload keeps the previous snapshot serving (never-fatal posture).
 func TestReloadKeepsOldOnError(t *testing.T) {
 	dir := t.TempDir()

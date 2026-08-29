@@ -38,6 +38,12 @@ and analytics Mode B — none of which are the enforcement path.
   into a separate, encrypted, deletable body store; the chain carries only an
   opaque `body_ref`. `Record.body_ref`/`record_ref` are appended at the END of
   the struct (omitempty pointers), so mixed-version chains verify byte-exactly.
+- ADR-041 budget-tier substitution: `RequestRef.model_substituted_from`
+  (appended at the end of that struct, `omitempty`, same byte-stability rule)
+  carries the client's ORIGINAL requested model when a tier substituted it;
+  `model_requested` by then already holds the model actually served. The
+  `internal/analytics` read-model (`GET /admin/logs`) does not yet carry this
+  column — the audit chain is authoritative for it today.
 - Team governance policy has two sources — the config file and a `teams` DB
   record — with the DB record winning when both name the same team (D3,
   ADR-016); `internal/governance.Governor` resolves this via a per-request

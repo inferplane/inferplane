@@ -461,6 +461,36 @@ func TestChatModelFallbackCrossesOnUpstream404(t *testing.T) {
 	}
 }
 
+// ADR-041: same substitution seam as anthropicapi's
+// TestMessagesBudgetTierSubstitutesRoutedModel, exercised through the
+// OpenAI-compat ingress.
+func TestChatBudgetTierSubstitutesRoutedModel(t *testing.T) {
+	provs := map[string]providers.Provider{
+		"a": mockprovider.New("claude-haiku-4-5"),
+		"b": mockprovider.New("glm-4.7-gpu"),
+	}
+	models := map[string]config.ModelConfig{
+		"claude-haiku-4-5": {Targets: []config.Target{{Provider: "a", Model: "claude-haiku-4-5"}}},
+		"glm-4.7-gpu":      {Targets: []config.Target{{Provider: "b", Model: "glm-4.7-gpu"}}},
+	}
+	r := router.New(holderFor(provs, models))
+	r.SetTierGate(func(p keystore.Principal) map[string]string {
+		return map[string]string{"claude-haiku-4-5": "glm-4.7-gpu"}
+	})
+	h := NewChatHandler(r)
+	req := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"claude-haiku-4-5","messages":[{"role":"user","content":"hi"}]}`))
+	ctx := principal.With(req.Context(), keystore.Principal{AllowedModels: []string{"*"}})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req.WithContext(ctx))
+	if rec.Code != 200 {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Inferplane-Substituted-Model"); got != "glm-4.7-gpu" {
+		t.Fatalf("x-inferplane-substituted-model = %q, want glm-4.7-gpu", got)
+	}
+}
+
 // T4 (usage telemetry): one settled request → one collector entry attributed
 // to the upstream (pricing-billed) model; nil collector stays no-op (every
 // other test in this file runs without one).

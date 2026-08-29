@@ -517,6 +517,98 @@ func TestMessagesModelFallbackUnroutedModel(t *testing.T) {
 	}
 }
 
+// ADR-041: an active budget tier substitutes a ROUTED requested model,
+// advertises it via x-inferplane-substituted-model, and the audit record
+// carries both the served model (model_requested, per the existing
+// convention) and the original (model_substituted_from).
+func TestMessagesBudgetTierSubstitutesRoutedModel(t *testing.T) {
+	provs := map[string]providers.Provider{
+		"a": mockprovider.New("claude-haiku-4-5"),
+		"b": mockprovider.New("glm-4.7-gpu"),
+	}
+	models := map[string]config.ModelConfig{
+		"claude-haiku-4-5": {Targets: []config.Target{{Provider: "a", Model: "claude-haiku-4-5"}}},
+		"glm-4.7-gpu":      {Targets: []config.Target{{Provider: "b", Model: "glm-4.7-gpu"}}},
+	}
+	var buf bytes.Buffer
+	w, _ := audit.NewWriter("i", filepath.Join(t.TempDir(), "a.wal"), []audit.Sink{audit.NewWriterSink("b", &buf, true)})
+	r := routerWithTierGate(provs, models, map[string]string{"claude-haiku-4-5": "glm-4.7-gpu"})
+	h := NewMessagesHandlerWithAudit(r, w)
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-haiku-4-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, allowAll(req))
+	w.Close()
+	if rec.Code != 200 {
+		t.Fatalf("substituted model should serve 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Inferplane-Substituted-Model"); got != "glm-4.7-gpu" {
+		t.Fatalf("x-inferplane-substituted-model = %q, want glm-4.7-gpu", got)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"model_requested":"glm-4.7-gpu"`) {
+		t.Fatalf("audit must attribute the SERVED model to model_requested: %s", out)
+	}
+	if !strings.Contains(out, `"model_substituted_from":"claude-haiku-4-5"`) {
+		t.Fatalf("audit must record the ORIGINAL request: %s", out)
+	}
+}
+
+// No active tier: the header must be absent (never emitted empty) and the
+// originally requested (routed) model must be served unchanged.
+func TestMessagesNoActiveBudgetTierServesOriginal(t *testing.T) {
+	provs := map[string]providers.Provider{"a": mockprovider.New("claude-haiku-4-5")}
+	models := map[string]config.ModelConfig{
+		"claude-haiku-4-5": {Targets: []config.Target{{Provider: "a", Model: "claude-haiku-4-5"}}},
+	}
+	r := routerWithTierGate(provs, models, nil) // no tier active
+	h := NewMessagesHandler(r)
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-haiku-4-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, allowAll(req))
+	if rec.Code != 200 {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Inferplane-Substituted-Model"); got != "" {
+		t.Fatalf("x-inferplane-substituted-model = %q, want empty (no tier active)", got)
+	}
+}
+
+// D5+ADR-041 chain: an unrouted model first substitutes via model_fallbacks
+// (D5), and the RESULT of that substitution is itself budget-tier
+// substituted again. Both headers must be set, and the final served model
+// is the tier's target — a deliberate, tested interaction (plan D4).
+func TestMessagesModelFallbackThenBudgetTierChain(t *testing.T) {
+	provs := map[string]providers.Provider{
+		"a": mockprovider.New("claude-opus-4-8"),
+		"b": mockprovider.New("glm-4.7-gpu"),
+	}
+	models := map[string]config.ModelConfig{
+		"claude-opus-4-8": {Targets: []config.Target{{Provider: "a", Model: "claude-opus-4-8"}}},
+		"glm-4.7-gpu":     {Targets: []config.Target{{Provider: "b", Model: "glm-4.7-gpu"}}},
+	}
+	holder := holderForWithFallbacks(provs, models, map[string]string{"claude-opus-5": "claude-opus-4-8"})
+	r := router.New(holder)
+	r.SetTierGate(func(p keystore.Principal) map[string]string {
+		return map[string]string{"claude-opus-4-8": "glm-4.7-gpu"}
+	})
+	h := NewMessagesHandler(r)
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-opus-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, allowAll(req))
+	if rec.Code != 200 {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Inferplane-Model-Fallback"); got != "claude-opus-4-8" {
+		t.Fatalf("x-inferplane-model-fallback = %q, want claude-opus-4-8", got)
+	}
+	if got := rec.Header().Get("X-Inferplane-Substituted-Model"); got != "glm-4.7-gpu" {
+		t.Fatalf("x-inferplane-substituted-model = %q, want glm-4.7-gpu", got)
+	}
+}
+
 // D5: a key allowed only the ORIGINALLY REQUESTED (unconfigured) model name
 // must NOT be silently downgraded to the fallback model — fail closed, same
 // as any other allow-list mismatch.
@@ -951,6 +1043,14 @@ func holderForWithFallbacks(provs map[string]providers.Provider, models map[stri
 	h := &live.Holder{}
 	h.Swap(live.NewStateWithFallbacks(provs, models, govPricing(), ids, fallbacks, false))
 	return h
+}
+
+// holderForWithTiers is holderFor plus a router with an ADR-041 tier gate
+// installed (SetTierGate) — the direct precedent for holderForWithFallbacks.
+func routerWithTierGate(provs map[string]providers.Provider, models map[string]config.ModelConfig, tiers map[string]string) *router.Router {
+	r := router.New(holderFor(provs, models))
+	r.SetTierGate(func(p keystore.Principal) map[string]string { return tiers })
+	return r
 }
 
 // statusProvider always answers Complete with a fixed status/body and no

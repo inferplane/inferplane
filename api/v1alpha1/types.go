@@ -202,10 +202,53 @@ const (
 	PreferFallback ConflictPreference = "PreferFallback"
 )
 
-// RoutingRule pins sessions/prefixes to targets to keep server-side prompt
-// caches warm (cache-affinity routing).
+// RoutingRule is one of two mutually exclusive shapes, selected by which
+// field is set:
+//
+//   - OnAffinityConflict — cache-affinity routing (pins sessions/prefixes to
+//     keep server-side prompt caches warm). Rejected by every data plane
+//     build today (internal/policy checkEnforceable); parked behind the
+//     unimplemented internal/cache.VolatileStore.
+//   - BudgetTiers — cost-driven model substitution keyed on budget
+//     utilization (ADR-041). Enforceable independently of the affinity half.
+//
+// Exactly one must be set; internal/policy.FromV1Alpha1 rejects a rule that
+// sets both or neither.
 type RoutingRule struct {
-	// OnAffinityConflict is REQUIRED: what to do when fallback wants to
-	// move a session that cache affinity wants to keep pinned.
-	OnAffinityConflict ConflictPreference `json:"onAffinityConflict"`
+	// OnAffinityConflict: what to do when fallback wants to move a session
+	// that cache affinity wants to keep pinned. Required when this half of
+	// the rule is used.
+	OnAffinityConflict ConflictPreference `json:"onAffinityConflict,omitempty"`
+	// BudgetTiers (ADR-041): substitute designated requested-model names for
+	// a cheaper target once a named budget rule's utilization crosses a
+	// threshold. Required when this half of the rule is used.
+	BudgetTiers *BudgetTiersRule `json:"budgetTiers,omitempty"`
+}
+
+// BudgetTiersRule maps budget-utilization thresholds of one named budget
+// rule (BudgetRef) to a per-requested-model substitution map. Substitution
+// is keyed by REQUESTED model name, never by session, so a long-conversation
+// (prompt-cached) model can simply be left out of every tier's map and is
+// never touched — the intended targets are subagent/background model names
+// (ADR-041 §Context, constraint 2).
+type BudgetTiersRule struct {
+	// BudgetRef names a budget rule IN THE SAME DOCUMENT whose utilization
+	// this rule is judged against. That rule must carry a numeric
+	// limitMilliUSD — a tier against an unlimited budget is meaningless.
+	BudgetRef string `json:"budgetRef"`
+	// Tiers must be strictly increasing by ThresholdPercent; the highest
+	// tier whose threshold the current utilization has crossed is active.
+	Tiers []BudgetTier `json:"tiers"`
+}
+
+// BudgetTier activates its Substitute map once utilization reaches
+// ThresholdPercent of the referenced budget rule's limit.
+type BudgetTier struct {
+	// ThresholdPercent must be in [1, 99] and strictly greater than the
+	// previous tier's in the same rule.
+	ThresholdPercent int `json:"thresholdPercent"`
+	// Substitute maps requested model name -> substitution target. A model
+	// may not appear as both a key and a value in one rule (no chains); the
+	// map must be non-empty with no empty key or value.
+	Substitute map[string]string `json:"substitute"`
 }

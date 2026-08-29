@@ -76,9 +76,32 @@ type SyncResponse struct {
 	Policies []v1alpha1.GovernancePolicy `json:"policies,omitempty"`
 	// Leases carries one budget grant per lease-managed rule.
 	Leases []LeaseGrant `json:"leases,omitempty"`
+	// ActiveTiers carries the currently-active budget tier (ADR-041) for
+	// every budgetTiers routing rule whose referenced budget rule has
+	// crossed at least its lowest threshold, judged GLOBALLY from the
+	// control plane's lease ledger (the same Σ spend + Σ outstanding grants
+	// the lease loop above computes) and latched per budget window: once
+	// active, a tier stays active until the window rolls over, never
+	// flapping and never escalating/lifting on stale (disconnected) data —
+	// see internal/tier.Latch. Additive/omitempty: an older data plane build
+	// that doesn't understand it simply never applies a substitution.
+	ActiveTiers []ActiveTier `json:"activeTiers,omitempty"`
 	// SyncIntervalSeconds is the control plane's requested heartbeat
 	// cadence (derived from the tightest lease renew interval).
 	SyncIntervalSeconds int `json:"syncIntervalSeconds"`
+}
+
+// ActiveTier is the currently-active budget tier for one budgetTiers routing
+// rule: at least ThresholdPercent utilization of Policy/BudgetRef's budget
+// rule has been reached, and Substitute is the tier's requested-model ->
+// target map to apply at ingress.
+type ActiveTier struct {
+	Policy           string            `json:"policy"`
+	Rule             string            `json:"rule"`
+	BudgetRef        string            `json:"budgetRef"`
+	Team             string            `json:"team"`
+	ThresholdPercent int               `json:"thresholdPercent"`
+	Substitute       map[string]string `json:"substitute"`
 }
 
 // LeaseGrant is one budget lease: the data plane may serve this rule's team

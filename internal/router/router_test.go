@@ -478,3 +478,101 @@ func TestAllowsPolicyGateNarrows(t *testing.T) {
 		t.Fatal("policy gate widened a key's allow-list")
 	}
 }
+
+// substituteTierRouter builds a two-model router (haiku -> gpu target) with
+// an all-access wildcard tier gate, mirroring the ADR-041 subagent-model
+// substitution scenario.
+func substituteTierRouter(allowed []string) (*Router, keystore.Principal) {
+	provs := map[string]providers.Provider{
+		"a": mockprovider.New("claude-haiku-4-5"),
+		"b": mockprovider.New("glm-4.7-gpu"),
+	}
+	models := map[string]config.ModelConfig{
+		"claude-haiku-4-5": {Targets: []config.Target{{Provider: "a", Model: "claude-haiku-4-5"}}},
+		"glm-4.7-gpu":      {Targets: []config.Target{{Provider: "b", Model: "glm-4.7-gpu"}}},
+	}
+	r, _ := newTestRouter(provs, models)
+	r.SetTierGate(func(p keystore.Principal) map[string]string {
+		return map[string]string{"claude-haiku-4-5": "glm-4.7-gpu"}
+	})
+	return r, keystore.Principal{Team: "t", AllowedModels: allowed}
+}
+
+func TestSubstituteTierSubstitutesWhenTargetAllowed(t *testing.T) {
+	r, p := substituteTierRouter([]string{"*"})
+	served, substituted := r.SubstituteTier(p, "claude-haiku-4-5")
+	if !substituted || served != "glm-4.7-gpu" {
+		t.Fatalf("SubstituteTier = (%q, %v), want (glm-4.7-gpu, true)", served, substituted)
+	}
+}
+
+func TestSubstituteTierNoEntryLeavesModelUnchanged(t *testing.T) {
+	provs := map[string]providers.Provider{"a": mockprovider.New("claude-sonnet-4-6")}
+	models := map[string]config.ModelConfig{
+		"claude-sonnet-4-6": {Targets: []config.Target{{Provider: "a", Model: "claude-sonnet-4-6"}}},
+	}
+	r, _ := newTestRouter(provs, models)
+	r.SetTierGate(func(p keystore.Principal) map[string]string { return nil })
+	p := keystore.Principal{Team: "t", AllowedModels: []string{"*"}}
+	served, substituted := r.SubstituteTier(p, "claude-sonnet-4-6")
+	if substituted || served != "claude-sonnet-4-6" {
+		t.Fatalf("SubstituteTier with no tier gate entry = (%q, %v), want unchanged", served, substituted)
+	}
+}
+
+// D3: if the substitution TARGET is not routed on this data plane, the
+// original is served — never a hard failure.
+func TestSubstituteTierUnroutedTargetLeavesModelUnchanged(t *testing.T) {
+	provs := map[string]providers.Provider{"a": mockprovider.New("claude-haiku-4-5")}
+	models := map[string]config.ModelConfig{
+		"claude-haiku-4-5": {Targets: []config.Target{{Provider: "a", Model: "claude-haiku-4-5"}}},
+	}
+	r, _ := newTestRouter(provs, models)
+	r.SetTierGate(func(p keystore.Principal) map[string]string {
+		return map[string]string{"claude-haiku-4-5": "glm-4.7-gpu"} // not configured on THIS plane
+	})
+	p := keystore.Principal{Team: "t", AllowedModels: []string{"*"}}
+	served, substituted := r.SubstituteTier(p, "claude-haiku-4-5")
+	if substituted || served != "claude-haiku-4-5" {
+		t.Fatalf("SubstituteTier with unrouted target = (%q, %v), want unchanged", served, substituted)
+	}
+}
+
+// D3: substitution never widens access — if the principal's own allow-list
+// denies the TARGET, the original is served, not the (also allowed)
+// original swapped for a denial.
+func TestSubstituteTierTargetDeniedByRBACLeavesModelUnchanged(t *testing.T) {
+	r, p := substituteTierRouter([]string{"claude-haiku-4-5"}) // target glm-4.7-gpu NOT allowed
+	served, substituted := r.SubstituteTier(p, "claude-haiku-4-5")
+	if substituted || served != "claude-haiku-4-5" {
+		t.Fatalf("SubstituteTier with RBAC-denied target = (%q, %v), want unchanged (never widen access)", served, substituted)
+	}
+}
+
+// D3: substitution must not rescue a model the principal cannot reach at
+// all — if the ORIGINAL is already denied, SubstituteTier leaves it denied
+// so the caller's existing 403 path fires; it must not accidentally swap in
+// an allowed target and make a denied request succeed.
+func TestSubstituteTierOriginalDeniedStaysDenied(t *testing.T) {
+	r, p := substituteTierRouter([]string{"glm-4.7-gpu"}) // original claude-haiku-4-5 NOT allowed
+	served, substituted := r.SubstituteTier(p, "claude-haiku-4-5")
+	if substituted || served != "claude-haiku-4-5" {
+		t.Fatalf("SubstituteTier with denied original = (%q, %v), want unchanged (substitution must not rescue a denial)", served, substituted)
+	}
+	if r.Allows(p, served) {
+		t.Fatal("original model unexpectedly allowed — test setup invalid")
+	}
+}
+
+func TestSubstituteTierNilGateIsNoop(t *testing.T) {
+	provs := map[string]providers.Provider{"a": mockprovider.New("claude-sonnet-4-6")}
+	models := map[string]config.ModelConfig{
+		"claude-sonnet-4-6": {Targets: []config.Target{{Provider: "a", Model: "claude-sonnet-4-6"}}},
+	}
+	r, _ := newTestRouter(provs, models)
+	p := keystore.Principal{Team: "t", AllowedModels: []string{"*"}}
+	served, substituted := r.SubstituteTier(p, "claude-sonnet-4-6")
+	if substituted || served != "claude-sonnet-4-6" {
+		t.Fatalf("SubstituteTier with no tier gate installed = (%q, %v), want unchanged", served, substituted)
+	}
+}

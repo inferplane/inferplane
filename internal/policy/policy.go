@@ -141,9 +141,31 @@ type Rate struct {
 	TPM       int64
 }
 
-// Routing is the internal form of a cache-affinity routing rule.
+// Routing is the internal form of a routing rule: exactly one of Affinity or
+// BudgetTiers is set (ADR-041 added the second half).
 type Routing struct {
+	Affinity    *Affinity
+	BudgetTiers *BudgetTiers
+}
+
+// Affinity is the internal form of the cache-affinity half of a routing
+// rule.
+type Affinity struct {
 	OnAffinityConflict v1alpha1.ConflictPreference
+}
+
+// BudgetTiers is the internal form of the ADR-041 budget-tier substitution
+// half of a routing rule.
+type BudgetTiers struct {
+	BudgetRef string
+	Tiers     []BudgetTier
+}
+
+// BudgetTier is the internal form of one tier: at ThresholdPercent
+// utilization of BudgetRef, Substitute takes effect.
+type BudgetTier struct {
+	ThresholdPercent int
+	Substitute       map[string]string
 }
 
 // Lease is one budget grant issued by the control plane to one data plane.
@@ -169,7 +191,10 @@ type Lease struct {
 //     CalendarMonth, the window every rule enforced before the field existed);
 //   - lease grant / renew interval take the ADR-032 defaults when unset,
 //     but an explicit sub-floor renew interval is rejected;
-//   - a routing rule must state its affinity-vs-fallback preference;
+//   - a routing rule sets exactly one of onAffinityConflict (affinity vs
+//     fallback preference, required for that half) or budgetTiers (ADR-041:
+//     budgetRef names a numeric-limit budget rule in the same document,
+//     thresholds strictly increase, substitution maps are well-formed);
 //   - exactly one rule kind per rule.
 func FromV1Alpha1(doc *v1alpha1.GovernancePolicy) (*Policy, error) {
 	reject := func(rule, reason string) *UnsupportedError {
@@ -228,12 +253,11 @@ func FromV1Alpha1(doc *v1alpha1.GovernancePolicy) (*Policy, error) {
 			}
 			r.Budget = b
 		case wr.Routing != nil:
-			switch wr.Routing.OnAffinityConflict {
-			case v1alpha1.PreferAffinity, v1alpha1.PreferFallback:
-			default:
-				return nil, reject(wr.Name, "routing.onAffinityConflict is required: cache affinity vs fallback has no default winner")
+			rt, err := routingFromV1Alpha1(wr, doc, reject)
+			if err != nil {
+				return nil, err
 			}
-			r.Routing = &Routing{OnAffinityConflict: wr.Routing.OnAffinityConflict}
+			r.Routing = rt
 		case wr.ModelAccess != nil:
 			if len(wr.ModelAccess.Allow) == 0 {
 				return nil, reject(wr.Name, `modelAccess.allow must be non-empty (use ["*"] for all): an empty list is deny-all and must be written deliberately`)
@@ -336,4 +360,80 @@ func budgetFromV1Alpha1(wr v1alpha1.Rule, reject func(rule, reason string) *Unsu
 		AdminContact:       wb.AdminContact,
 		Period:             period,
 	}, nil
+}
+
+// routingFromV1Alpha1 converts the routing rule's exactly-one-of-two halves.
+// doc is the whole document so BudgetTiers.budgetRef can be resolved against
+// a budget rule declared elsewhere in the same policy (ADR-041 D1).
+func routingFromV1Alpha1(wr v1alpha1.Rule, doc *v1alpha1.GovernancePolicy, reject func(rule, reason string) *UnsupportedError) (*Routing, error) {
+	wrt := wr.Routing
+	affinitySet := wrt.OnAffinityConflict != ""
+	tiersSet := wrt.BudgetTiers != nil
+	if affinitySet == tiersSet {
+		return nil, reject(wr.Name, "routing rule must set exactly one of onAffinityConflict or budgetTiers")
+	}
+	if affinitySet {
+		switch wrt.OnAffinityConflict {
+		case v1alpha1.PreferAffinity, v1alpha1.PreferFallback:
+		default:
+			return nil, reject(wr.Name, fmt.Sprintf("unknown routing.onAffinityConflict %q", wrt.OnAffinityConflict))
+		}
+		return &Routing{Affinity: &Affinity{OnAffinityConflict: wrt.OnAffinityConflict}}, nil
+	}
+
+	bt := wrt.BudgetTiers
+	if bt.BudgetRef == "" {
+		return nil, reject(wr.Name, "routing.budgetTiers.budgetRef is required: it names the budget rule this tier's utilization is judged against")
+	}
+	var ref *v1alpha1.Rule
+	for i := range doc.Spec.Rules {
+		if doc.Spec.Rules[i].Name == bt.BudgetRef {
+			ref = &doc.Spec.Rules[i]
+			break
+		}
+	}
+	if ref == nil || ref.Budget == nil {
+		return nil, reject(wr.Name, fmt.Sprintf("routing.budgetTiers.budgetRef %q must name a budget rule in the same document", bt.BudgetRef))
+	}
+	if ref.Budget.Unlimited {
+		return nil, reject(wr.Name, fmt.Sprintf("routing.budgetTiers.budgetRef %q must name a budget rule with a numeric limitMilliUSD: a tier against an unlimited budget is meaningless", bt.BudgetRef))
+	}
+	if len(bt.Tiers) == 0 {
+		return nil, reject(wr.Name, "routing.budgetTiers.tiers must be non-empty")
+	}
+
+	tiers := make([]BudgetTier, 0, len(bt.Tiers))
+	prevThreshold := 0
+	for _, t := range bt.Tiers {
+		if t.ThresholdPercent < 1 || t.ThresholdPercent > 99 {
+			return nil, reject(wr.Name, fmt.Sprintf("routing.budgetTiers.tiers.thresholdPercent must be in [1, 99], got %d", t.ThresholdPercent))
+		}
+		if t.ThresholdPercent <= prevThreshold {
+			return nil, reject(wr.Name, "routing.budgetTiers.tiers.thresholdPercent must be strictly increasing across tiers")
+		}
+		prevThreshold = t.ThresholdPercent
+		if len(t.Substitute) == 0 {
+			return nil, reject(wr.Name, "routing.budgetTiers.tiers.substitute must be non-empty")
+		}
+		sub := make(map[string]string, len(t.Substitute))
+		values := make(map[string]bool, len(t.Substitute))
+		for k, v := range t.Substitute {
+			if k == "" || v == "" {
+				return nil, reject(wr.Name, "routing.budgetTiers.tiers.substitute must not contain an empty key or value")
+			}
+			if k == v {
+				return nil, reject(wr.Name, fmt.Sprintf("routing.budgetTiers.tiers.substitute maps %q to itself", k))
+			}
+			sub[k] = v
+			values[v] = true
+		}
+		for k := range sub {
+			if values[k] {
+				return nil, reject(wr.Name, fmt.Sprintf("routing.budgetTiers.tiers.substitute: %q may not appear as both a key and a value (no chains)", k))
+			}
+		}
+		tiers = append(tiers, BudgetTier{ThresholdPercent: t.ThresholdPercent, Substitute: sub})
+	}
+
+	return &Routing{BudgetTiers: &BudgetTiers{BudgetRef: bt.BudgetRef, Tiers: tiers}}, nil
 }

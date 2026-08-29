@@ -43,6 +43,34 @@ func TestStartedRecordOmitsCompletionFields(t *testing.T) {
 	}
 }
 
+// ADR-041: model_substituted_from is appended at the end of RequestRef with
+// omitempty — a record with no substitution must be byte-identical to a
+// pre-ADR-041 record (no new key leaks in), and a substituted one must carry
+// both the served model (ModelRequested, already resolved by the router
+// before audit is called) and the original.
+func TestModelSubstitutedFromOmittedWhenUnset(t *testing.T) {
+	r := Record{SchemaVersion: 1, Event: "request_started", ID: "01J", TS: "t", Instance: "i",
+		Principal: PrincipalRef{KeyID: "ik", Team: "t"},
+		Request:   RequestRef{Ingress: "anthropic", ModelRequested: "claude-haiku-4-5"}}
+	b, _ := r.Canonical()
+	if contains(string(b), `"model_substituted_from"`) {
+		t.Fatalf("unset substitution must omit the field: %s", b)
+	}
+}
+
+func TestModelSubstitutedFromPresentWhenSet(t *testing.T) {
+	r := Record{SchemaVersion: 1, Event: "request_started", ID: "01J", TS: "t", Instance: "i",
+		Principal: PrincipalRef{KeyID: "ik", Team: "t"},
+		Request: RequestRef{
+			Ingress: "anthropic", ModelRequested: "glm-4.7-gpu", // served, post-substitution
+			ModelSubstitutedFrom: "claude-haiku-4-5", // the client's original request
+		}}
+	b, _ := r.Canonical()
+	if !contains(string(b), `"model_substituted_from":"claude-haiku-4-5"`) {
+		t.Fatalf("substitution field missing or wrong: %s", b)
+	}
+}
+
 func contains(s, sub string) bool { return len(s) >= len(sub) && (indexOf(s, sub) >= 0) }
 func indexOf(s, sub string) int {
 	for i := 0; i+len(sub) <= len(s); i++ {

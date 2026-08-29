@@ -13,6 +13,7 @@ import (
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
 	"github.com/inferplane/inferplane/internal/controlplane"
 	"github.com/inferplane/inferplane/internal/policy"
+	"github.com/inferplane/inferplane/internal/tier"
 )
 
 // The distributed set carries one enforceable policy and one this data-plane
@@ -41,6 +42,47 @@ spec:
     failurePolicy: FailOpen
     routing: { onAffinityConflict: PreferAffinity }
 `
+
+// syncTierPolicyYAML adds an ADR-041 budgetTiers routing rule on top of the
+// "cap" budget rule.
+const syncTierPolicyYAML = `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: team-a }
+spec:
+  subject: { team: alpha }
+  rules:
+  - name: cap
+    failurePolicy: FailClosed
+    budget:
+      limitMilliUSD: 100
+      hardCap: true
+      lease: { grantMilliUSD: 10, renewInterval: "5s" }
+  - name: downgrade-at-80
+    failurePolicy: FailOpen
+    routing:
+      budgetTiers:
+        budgetRef: cap
+        tiers:
+        - thresholdPercent: 80
+          substitute: { claude-haiku-4-5: glm-4.7-gpu }
+`
+
+func newControlPlaneWithTiers(t *testing.T, token string) *httptest.Server {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "p.yaml"), []byte(syncTierPolicyYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := controlplane.NewServer(token, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	cp.Mount(mux)
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	return ts
+}
 
 func newControlPlane(t *testing.T, token string) *httptest.Server {
 	t.Helper()
@@ -398,5 +440,62 @@ func TestLeaseTableBlockedIsTeamWideAcrossWindows(t *testing.T) {
 	})
 	if blocked, _ := lt.Blocked("t"); blocked {
 		t.Error("a soft lease must fail open on either window")
+	}
+}
+
+// The syncer applies the control plane's ActiveTiers into the Tiers table
+// (ADR-041), the same way it applies Leases.
+func TestSyncerAppliesActiveTiers(t *testing.T) {
+	ts := newControlPlaneWithTiers(t, "")
+	store := policy.NewEmptyStore()
+	leases := NewLeaseTable()
+	tiers := tier.NewTable()
+	s := &Syncer{
+		URL: ts.URL, Dataplane: "dp1",
+		Store: store, Leases: leases, Tiers: tiers,
+		SpentOf: func(string, v1alpha1.BudgetPeriod) int64 { return 90_000 }, // 90% of the 100,000 µUSD limit
+	}
+	// First heartbeat applies the policy set (the report loop below reads
+	// s.Store.Policies(), which is still empty before this); the second
+	// heartbeat's report then carries the 90% spend to the ledger.
+	if _, err := s.syncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.syncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := tiers.Get("alpha")
+	if got["claude-haiku-4-5"] != "glm-4.7-gpu" {
+		t.Fatalf("tier not applied: %v", got)
+	}
+}
+
+// A dead control plane must not clear the last-applied tier state either —
+// same keep-last-state posture as leases and policies.
+func TestSyncerOutageKeepsLastTierState(t *testing.T) {
+	ts := newControlPlaneWithTiers(t, "")
+	store := policy.NewEmptyStore()
+	leases := NewLeaseTable()
+	tiers := tier.NewTable()
+	s := &Syncer{
+		URL: ts.URL, Dataplane: "dp1",
+		Store: store, Leases: leases, Tiers: tiers,
+		SpentOf: func(string, v1alpha1.BudgetPeriod) int64 { return 90_000 },
+	}
+	if _, err := s.syncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.syncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if tiers.Get("alpha")["claude-haiku-4-5"] != "glm-4.7-gpu" {
+		t.Fatal("tier not applied before outage")
+	}
+	ts.Close()
+	if _, err := s.syncOnce(context.Background()); err == nil {
+		t.Fatal("sync against a dead control plane must error")
+	}
+	if tiers.Get("alpha")["claude-haiku-4-5"] != "glm-4.7-gpu" {
+		t.Fatal("tier state lost on outage")
 	}
 }

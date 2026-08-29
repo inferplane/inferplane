@@ -27,6 +27,7 @@ type Metrics struct {
 	anchorFail      prometheus.Counter       // inferplane_audit_anchor_failures_total
 	usageDropped    prometheus.Counter       // inferplane_usage_windows_dropped_total
 	budgetRejected  prometheus.Gauge         // inferplane_budget_store_rejected_total
+	substitution    *prometheus.CounterVec   // inferplane_model_substitution_total (ADR-041)
 }
 
 func New() *Metrics {
@@ -89,10 +90,18 @@ func New() *Metrics {
 			Help: "Cumulative requests denied by the budget store's at-capacity fail-safe, not by a real budget (no team/key/user label — same cardinality bar as key_id)." +
 				" Non-zero means the in-memory budget store hit its entry cap and started fail-closing new counters.",
 		}),
+		substitution: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "inferplane_model_substitution_total",
+			Help: "ADR-041 budget-tier model substitutions applied at ingress.",
+			// Cardinality guard, same rule as fallbackTotal above: every
+			// label here comes from a GovernancePolicy document's own
+			// config-declared values (team, from/to model names) — never
+			// raw, unvalidated client input.
+		}, []string{"team", "from_model", "to_model"}),
 	}
 	reg.MustRegister(m.tokenUsage, m.requestDuration, m.ttft, m.requestsTotal,
 		m.fallbackTotal, m.circuitState, m.quotaUtil, m.budgetUtil, m.budgetSpend, m.pricingMiss,
-		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected)
+		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected, m.substitution)
 	// Prometheus only emits a labeled metric family once it has at least one
 	// observed child series. Pre-initialize the token-usage family to zero so
 	// gen_ai_client_token_usage_total is always present in exposition (stable
@@ -161,6 +170,12 @@ func (m *Metrics) ObserveFallback(model, from, to, reason string) {
 		return
 	}
 	m.fallbackTotal.WithLabelValues(model, from, to, reason).Inc()
+}
+func (m *Metrics) ObserveModelSubstitution(team, from, to string) {
+	if m == nil {
+		return
+	}
+	m.substitution.WithLabelValues(team, from, to).Inc()
 }
 func (m *Metrics) SetCircuitState(provider string, state int) {
 	if m == nil {

@@ -44,11 +44,24 @@ func TestCircuitStateGauge(t *testing.T) {
 	}
 }
 
+// ADR-041: the substitution counter is labeled team/from_model/to_model —
+// all config/policy-declared values, never raw client input (mirrors
+// ObserveFallback's cardinality posture).
+func TestModelSubstitutionCounter(t *testing.T) {
+	m := New()
+	m.ObserveModelSubstitution("ml-platform", "claude-haiku-4-5", "glm-4.7-gpu")
+	got := testutil.ToFloat64(m.substitution.WithLabelValues("ml-platform", "claude-haiku-4-5", "glm-4.7-gpu"))
+	if got != 1 {
+		t.Fatalf("substitution count = %v, want 1", got)
+	}
+}
+
 func TestNilMetricsNoPanic(t *testing.T) {
 	var m *Metrics // nil
 	m.ObserveRequest("a", "b", "c", "d", 200, 1, 0)
 	m.ObserveTokenUsage("input", "m", "p", "t", 10)
 	m.ObserveFallback("m", "from", "to", "reason")
+	m.ObserveModelSubstitution("t", "from", "to")
 	m.SetCircuitState("p", 2)
 	m.SetQuotaUtilization("t", "day", 0.5)
 	m.AddBudgetSpend("t", "m", "total", 1.5)

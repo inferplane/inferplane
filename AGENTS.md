@@ -1,4 +1,4 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: da761feca2f8 · generated-at: 2026-08-19 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 44c6da2c807e · generated-at: 2026-08-26 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
 > from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
 > per-AI copy).
@@ -14,7 +14,10 @@ Kubernetes-native, Apache-2.0, CNCF Sandbox aspirant.
 
 **Core purpose (judge diffs against this):** (1) a single entry point for
 coding-assistant traffic, (2) per-user model choice, (3) cost-driven model
-substitution, (4) team/per-user budget control with visibility, (5) no SPOF.
+substitution — enforceable via `routing.budgetTiers` (ADR-041): a budget
+rule crossing a threshold substitutes a cheaper target for a requested
+model name, judged globally by the control plane, never widening access
+or denying, (4) team/per-user budget control with visibility, (5) no SPOF.
 Known tension: (5)'s no-SPOF pulls against making (4)'s enforcement accurate
 under multi-replica — see the HA note below.
 
@@ -60,7 +63,12 @@ credentials, or a real IdP (httptest fakes only).
   once.
 - `internal/cache` (VolatileStore, for cache-affinity routing) is an
   unimplemented interface with no importers today — don't assume
-  cache-affinity is enforced anywhere yet.
+  cache-affinity is enforced anywhere yet. This is unrelated to `internal/tier`
+  (ADR-041 budget-tier substitution), which is implemented and does not
+  depend on `internal/cache`.
+- A budget-tier substitution TARGET must pass RBAC and be routed on the
+  enforcing data plane, or the ORIGINAL model is served — substitution must
+  never widen access and must never itself deny a request.
 
 ## Banned patterns / security mandates (violations are CRITICAL)
 
