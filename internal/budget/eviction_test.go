@@ -62,9 +62,12 @@ func TestMemorySweepKeepsLiveSpend(t *testing.T) {
 
 // TestMemoryAtCapacityFailsClosedForNewKey pins the fail-safe's posture: at
 // capacity a genuinely new key with a REAL limit is refused and Check returns
-// Block — never Allow, which would admit spend the store cannot account for.
-// A zero limit stays Allow: an uncapped dimension has no counter to enforce,
-// so capacity must not deny it.
+// BlockCapacity — a distinct value from a real-budget-breach Block, because a
+// capacity refusal must never be downgraded by an "on_exceeded: warn" policy
+// (governance would otherwise allow the request AND silently drop the debit,
+// since a Debit on a key the store could never admit is a no-op — see
+// TestDebitIsANoOpForAKeyTheStoreNeverAdmitted). A zero limit stays Allow: an
+// uncapped dimension has no counter to enforce, so capacity must not deny it.
 func TestMemoryAtCapacityFailsClosedForNewKey(t *testing.T) {
 	b := NewMemory()
 	b.maxEntries = 8
@@ -75,8 +78,8 @@ func TestMemoryAtCapacityFailsClosedForNewKey(t *testing.T) {
 		b.Debit(fmt.Sprintf("budget:r24h0m0s:user:t/u%d", i), 1_000, w)
 	}
 	newKey := "budget:r24h0m0s:user:t/new"
-	if d := b.Check(newKey, 0, 5_000_000, w); d != Block {
-		t.Fatalf("Check(new key at capacity, real limit) = %v, want Block (fail closed)", d)
+	if d := b.Check(newKey, 0, 5_000_000, w); d != BlockCapacity {
+		t.Fatalf("Check(new key at capacity, real limit) = %v, want BlockCapacity (fail closed, never warn-downgradable)", d)
 	}
 	if got := b.Rejections(); got < 1 {
 		t.Fatalf("Rejections() = %d, want >= 1", got)
@@ -143,5 +146,28 @@ func TestMemoryCapacitySweepsBeforeRefusing(t *testing.T) {
 	}
 	if got := b.Rejections(); got != 0 {
 		t.Fatalf("Rejections() = %d, want 0", got)
+	}
+}
+
+// TestDebitIsANoOpForAKeyTheStoreNeverAdmitted pins the OTHER half of the
+// capacity fail-safe's contract: Debit on a key Check refused (BlockCapacity)
+// is a documented no-op, not a lost-spend bug in this package — it is
+// governance's job (BlockCapacity is unconditional, unlike Block) to make
+// sure a request that hits this path is ALWAYS denied before Settle would
+// ever call Debit for it. This test exists so a future change that makes
+// Debit panic or silently allocate a bucket doesn't slip in unnoticed.
+func TestDebitIsANoOpForAKeyTheStoreNeverAdmitted(t *testing.T) {
+	b := NewMemory()
+	b.maxEntries = 1
+	w := Window{Kind: Rolling, Dur: time.Minute}
+	b.Debit("k0", 1_000, w) // fills the only slot
+
+	newKey := "new"
+	if d := b.Check(newKey, 0, 5_000_000, w); d != BlockCapacity {
+		t.Fatalf("Check(new key, full store) = %v, want BlockCapacity", d)
+	}
+	b.Debit(newKey, 999_999, w) // must not panic, must not admit the key
+	if got := b.Spent(newKey, w); got != 0 {
+		t.Fatalf("Spent(never-admitted key) after Debit = %d, want 0 (the debit is a documented no-op)", got)
 	}
 }

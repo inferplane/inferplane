@@ -154,6 +154,71 @@ func TestSettleToleratesBudgetStoreWithoutRejectionsMethod(t *testing.T) {
 	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "model", pricing.Usage{Input: 1}, testTable(), 0)
 }
 
+// capacityBlockingStore always reports BlockCapacity — the budget store's
+// at-capacity fail-safe, distinct from a real-budget-breach Block — so the
+// "must never be warn-downgraded" invariant is testable without actually
+// driving a real *budget.Memory to its entry cap from a different package.
+type capacityBlockingStore struct{ blockingStore }
+
+func (c capacityBlockingStore) Check(string, int64, int64, budget.Window) budget.Decision {
+	return budget.BlockCapacity
+}
+
+// TestPreCheckTeamCapacityBlockIsNeverWarnDowngraded is the TDD entry point
+// for the AI-review finding: a team configured "on_exceeded: warn" must
+// still be DENIED when the budget store itself is at capacity — a warn
+// policy answers "should a real budget breach still admit the request?", not
+// "should we serve a request the store cannot even account for?". Before
+// this fix, PreCheck only ever compared against budget.Block, so a capacity
+// refusal (which used to BE budget.Block) was silently downgraded to Allow,
+// and Settle's later Debit for that same never-admitted key was then a
+// silent no-op — spend permanently untracked for a subject with an
+// effectively uncapped budget under continuous capacity pressure.
+func TestPreCheckTeamCapacityBlockIsNeverWarnDowngraded(t *testing.T) {
+	store := capacityBlockingStore{blockingStore{resets: map[string]time.Time{}}}
+	g := NewGovernor(map[string]TeamPolicy{
+		"t": {BudgetMicrosPerMonth: 1_000, BudgetExceeded: "warn"},
+	}, limiter.NewMemory(), store, nil)
+
+	dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0)
+	if dec.Allowed {
+		t.Fatalf("a capacity-exhaustion block must deny regardless of on_exceeded=warn: %+v", dec)
+	}
+	if dec.Status != 402 {
+		t.Fatalf("capacity-block deny status = %d, want 402", dec.Status)
+	}
+}
+
+// TestPreCheckUserCapacityBlockIsNeverWarnDowngraded is the same invariant
+// for the per-user scope, which has its own independent warn-downgrade site.
+func TestPreCheckUserCapacityBlockIsNeverWarnDowngraded(t *testing.T) {
+	store := capacityBlockingStore{blockingStore{resets: map[string]time.Time{}}}
+	g := NewGovernor(map[string]TeamPolicy{"t": {}}, limiter.NewMemory(), store, nil)
+	g.SetUserLookup(func(team, user string) (UserPolicy, bool) {
+		return UserPolicy{BudgetMicrosPerMonth: 1_000, BudgetExceeded: "warn"}, true
+	})
+
+	dec := g.PreCheck(Subject{Team: "t", User: "alice"}, KeyPolicy{}, 0)
+	if dec.Allowed {
+		t.Fatalf("a capacity-exhaustion block must deny regardless of user on_exceeded=warn: %+v", dec)
+	}
+}
+
+// TestPreCheckKeyCapacityBlockDenies pins the key scope, which has no
+// on_exceeded knob at all (a key limit always blocks) — before the fix, an
+// equality check hardcoded to budget.Block meant a capacity refusal for a
+// key-scoped budget was not recognised as blocking AT ALL, silently
+// admitting the request.
+func TestPreCheckKeyCapacityBlockDenies(t *testing.T) {
+	store := capacityBlockingStore{blockingStore{resets: map[string]time.Time{}}}
+	g := NewGovernor(map[string]TeamPolicy{"t": {}}, limiter.NewMemory(), store, nil)
+
+	dec := g.PreCheck(Subject{Team: "t", KeyID: "ik_x"}, KeyPolicy{BudgetMicrosPerMonth: 1_000}, 0)
+	if dec.Allowed {
+		t.Fatalf("a capacity-exhaustion block must deny a key-scoped budget too: %+v", dec)
+	}
+}
+
 type blockingStore struct{ resets map[string]time.Time }
 
 func (b blockingStore) Check(string, int64, int64, budget.Window) budget.Decision {
