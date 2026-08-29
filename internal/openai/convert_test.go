@@ -264,3 +264,138 @@ func TestCanonicalToRequestToolChoiceVariants(t *testing.T) {
 		t.Errorf("tool → %v, want function/f", specific)
 	}
 }
+
+// Cache WRITE tokens are part of what the prompt consumed too. Folding only
+// cache reads left prompt_tokens under-reporting every cache-writing request.
+func TestUsageFromCanonical_foldsCacheWrites(t *testing.T) {
+	i := func(v int64) *int64 { return &v }
+	got := usageFromCanonical(&schema.Usage{
+		InputTokens:  i(100),
+		OutputTokens: i(10),
+		CacheCreation: &schema.CacheCreation{
+			Ephemeral5mInputTokens: i(300),
+			Ephemeral1hInputTokens: i(200),
+		},
+	})
+	if got["prompt_tokens"] != int64(600) {
+		t.Errorf("prompt_tokens = %v, want 600 (100 input + 300 5m + 200 1h)", got["prompt_tokens"])
+	}
+	if got["total_tokens"] != int64(610) {
+		t.Errorf("total_tokens = %v, want 610", got["total_tokens"])
+	}
+	if _, present := got["prompt_tokens_details"]; present {
+		t.Error("cache writes are not cached_tokens — details must stay omitted")
+	}
+
+	// The split wins over the flat total; summing both would double-count.
+	both := usageFromCanonical(&schema.Usage{
+		InputTokens:              i(100),
+		CacheCreationInputTokens: i(500),
+		CacheCreation:            &schema.CacheCreation{Ephemeral5mInputTokens: i(500)},
+	})
+	if both["prompt_tokens"] != int64(600) {
+		t.Errorf("prompt_tokens = %v, want 600 (no double-count)", both["prompt_tokens"])
+	}
+}
+
+// A tool-call chunk must survive the OpenAI→canonical direction: before this,
+// delta.tool_calls parsed to nothing and ChunkToCanonical returned (nil, nil),
+// so a Bedrock-ingress client streaming through an OpenAI-wire provider saw
+// text only and every tool call vanished mid-stream.
+func TestChunkToCanonicalToolCalls(t *testing.T) {
+	open, err := ChunkToCanonical([]byte(`{"choices":[{"index":0,"delta":{"content":null,"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if open == nil {
+		t.Fatal("tool_calls opener dropped")
+	}
+	if open.Type != "content_block_start" || open.ContentBlock == nil {
+		t.Fatalf("opener: %+v", open)
+	}
+	if open.ContentBlock.Type != "tool_use" || open.ContentBlock.ID != "call_1" || open.ContentBlock.Name != "get_weather" {
+		t.Errorf("content_block: %+v", open.ContentBlock)
+	}
+	if string(open.ContentBlock.Input) != `{}` {
+		t.Errorf("input = %s, want {} for an empty arguments opener", open.ContentBlock.Input)
+	}
+	if open.Index == nil || *open.Index != 0 {
+		t.Errorf("index: %v", open.Index)
+	}
+
+	frag, err := ChunkToCanonical([]byte(`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\"city\":"}}]},"finish_reason":null}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frag == nil || frag.Type != "content_block_delta" {
+		t.Fatalf("argument fragment: %+v", frag)
+	}
+	if frag.Index == nil || *frag.Index != 1 {
+		t.Errorf("fragment index: %v", frag.Index)
+	}
+	var d struct {
+		Type        string `json:"type"`
+		PartialJSON string `json:"partial_json"`
+	}
+	if err := json.Unmarshal(frag.Delta, &d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Type != "input_json_delta" || d.PartialJSON != `{"city":` {
+		t.Errorf("delta = %+v", d)
+	}
+}
+
+// Usage on the rendered OpenAI stream is opt-in: it rides the terminal chunk
+// only when the client sent stream_options.include_usage, and it must carry the
+// FOLDED counts (input arrives on message_start, output on message_delta).
+func TestChunkFromCanonicalUsageIsOptIn(t *testing.T) {
+	i := func(v int64) *int64 { return &v }
+	start := &schema.ChatChunk{Type: "message_start", Message: &schema.ChatResponse{
+		ID: "id1", Model: "m", Usage: &schema.Usage{InputTokens: i(7)},
+	}}
+	end := &schema.ChatChunk{
+		Type:  "message_delta",
+		Delta: json.RawMessage(`{"stop_reason":"end_turn"}`),
+		Usage: &schema.Usage{OutputTokens: i(3)},
+	}
+
+	off := StreamState{}
+	_ = ChunkFromCanonical(start, &off)
+	var chunk map[string]any
+	if err := json.Unmarshal(ChunkFromCanonical(end, &off), &chunk); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := chunk["usage"]; present {
+		t.Error("usage sent to a client that never set stream_options.include_usage")
+	}
+
+	on := StreamState{IncludeUsage: true}
+	_ = ChunkFromCanonical(start, &on)
+	if err := json.Unmarshal(ChunkFromCanonical(end, &on), &chunk); err != nil {
+		t.Fatal(err)
+	}
+	u, ok := chunk["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("usage missing: %v", chunk)
+	}
+	if u["prompt_tokens"] != float64(7) || u["completion_tokens"] != float64(3) || u["total_tokens"] != float64(10) {
+		t.Errorf("usage = %v, want folded 7/3/10", u)
+	}
+}
+
+func TestStreamWantsUsage(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{
+		{`{"stream":true,"stream_options":{"include_usage":true}}`, true},
+		{`{"stream":true,"stream_options":{"include_usage":false}}`, false},
+		{`{"stream":true,"stream_options":{}}`, false},
+		{`{"stream":true}`, false},
+		{`not json`, false},
+	} {
+		if got := StreamWantsUsage([]byte(tc.body)); got != tc.want {
+			t.Errorf("StreamWantsUsage(%s) = %v, want %v", tc.body, got, tc.want)
+		}
+	}
+}

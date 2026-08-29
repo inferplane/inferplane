@@ -174,6 +174,22 @@ func TestMantleCompleteAnthropicPath(t *testing.T) {
 	if resp.StatusCode != 200 || resp.Parsed == nil || *resp.Parsed.Usage.OutputTokens != 2 {
 		t.Fatalf("resp: %+v", resp)
 	}
+	// The client asked for the PUBLIC name; Mantle answered with the upstream
+	// id. Both the parsed response and the teed RawBody must carry the public
+	// one, or the client sees a model it never requested.
+	if resp.Parsed.Model != "mantle.opus" {
+		t.Errorf("parsed model = %q, want the public name mantle.opus", resp.Parsed.Model)
+	}
+	var teed map[string]any
+	if err := json.Unmarshal(resp.RawBody, &teed); err != nil {
+		t.Fatal(err)
+	}
+	if teed["model"] != "mantle.opus" {
+		t.Errorf("teed body model = %v, want mantle.opus", teed["model"])
+	}
+	if teed["stop_reason"] != "end_turn" {
+		t.Errorf("re-render lost stop_reason: %v", teed["stop_reason"])
+	}
 }
 
 func TestMantleCompleteChatPath(t *testing.T) {

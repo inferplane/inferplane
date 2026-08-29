@@ -552,18 +552,24 @@ func usageFromCanonical(u *schema.Usage) map[string]any {
 	if u.OutputTokens != nil {
 		completion = *u.OutputTokens
 	}
+	// Re-expose the cache split the way OpenAI does: prompt_tokens is the
+	// INCLUSIVE total, with the cached read portion broken out underneath. We
+	// hold every cache tier separately from InputTokens, so reads AND writes
+	// have to be added back — folding reads alone under-reported prompt_tokens
+	// on any cache-writing request. CacheWriteTiers picks the split or the flat
+	// total, never both (double-counting guard, ADR-030).
+	var cached int64
+	if u.CacheReadInputTokens != nil {
+		cached = *u.CacheReadInputTokens
+	}
+	w5, w1 := u.CacheWriteTiers()
+	prompt += cached + w5 + w1
 	out := map[string]any{
 		"prompt_tokens":     prompt,
 		"completion_tokens": completion,
 		"total_tokens":      prompt + completion,
 	}
-	// Re-expose the cache split the way OpenAI does: prompt_tokens is the
-	// INCLUSIVE total, with the cached portion broken out underneath. We hold
-	// them separately (InputTokens excludes cache reads), so add them back.
-	if u.CacheReadInputTokens != nil && *u.CacheReadInputTokens != 0 {
-		cached := *u.CacheReadInputTokens
-		out["prompt_tokens"] = prompt + cached
-		out["total_tokens"] = prompt + cached + completion
+	if cached != 0 {
 		out["prompt_tokens_details"] = map[string]any{"cached_tokens": cached}
 	}
 	return out
@@ -625,9 +631,20 @@ func ResponseToCanonical(openaiBody []byte) (*schema.ChatResponse, error) {
 // StreamState carries the minimal cross-event state OpenAI streaming needs:
 // whether the leading role delta was already emitted.
 type StreamState struct {
+	// IncludeUsage mirrors the client's stream_options.include_usage. Usage is
+	// rendered onto the terminal chunk ONLY when the client asked for it — an
+	// OpenAI client that did not request it does not expect a usage object.
+	IncludeUsage bool
+
 	roleSent bool
 	id       string
 	model    string
+	// usage accumulates across frames: the canonical stream keeps Anthropic's
+	// vocabulary, so input/cache counts arrive on message_start while
+	// message_delta commonly carries output alone (ADR-030 — fold, never
+	// overwrite). Rendering message_delta's own usage would report a zero
+	// prompt_tokens.
+	usage *schema.Usage
 }
 
 // ChunkFromCanonical renders one canonical (Anthropic) streaming event to an
@@ -635,6 +652,9 @@ type StreamState struct {
 // content_block_start, content_block_stop, message_stop) return nil — the
 // caller appends the terminal [DONE] line itself.
 func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
+	if c.Usage != nil {
+		st.usage = schema.MergeUsage(st.usage, c.Usage)
+	}
 	switch c.Type {
 	case "message_start":
 		if c.Message != nil {
@@ -644,11 +664,14 @@ func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
 			if st.model == "" {
 				st.model = c.Message.Model
 			}
+			if c.Message.Usage != nil {
+				st.usage = schema.MergeUsage(st.usage, c.Message.Usage)
+			}
 		}
 		// Emit the opening role delta once.
 		if !st.roleSent {
 			st.roleSent = true
-			return chunkJSON(st, map[string]any{"role": "assistant"}, nil)
+			return chunkJSON(st, map[string]any{"role": "assistant"}, nil, nil)
 		}
 		return nil
 
@@ -665,7 +688,7 @@ func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
 				st.roleSent = true
 				delta["role"] = "assistant"
 			}
-			return chunkJSON(st, delta, nil)
+			return chunkJSON(st, delta, nil, nil)
 		case "input_json_delta":
 			// Tool-call argument streaming. Emit a tool_calls delta carrying
 			// the partial arguments string for the block at this index.
@@ -686,7 +709,7 @@ func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
 				st.roleSent = true
 				delta["role"] = "assistant"
 			}
-			return chunkJSON(st, delta, nil)
+			return chunkJSON(st, delta, nil, nil)
 		}
 		return nil
 
@@ -711,7 +734,7 @@ func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
 				st.roleSent = true
 				delta["role"] = "assistant"
 			}
-			return chunkJSON(st, delta, nil)
+			return chunkJSON(st, delta, nil, nil)
 		}
 		return nil
 
@@ -724,7 +747,11 @@ func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
 		if d.StopReason != nil {
 			finish = mapStopToFinish(*d.StopReason)
 		}
-		return chunkJSON(st, map[string]any{}, &finish)
+		var usage map[string]any
+		if st.IncludeUsage {
+			usage = usageFromCanonical(st.usage)
+		}
+		return chunkJSON(st, map[string]any{}, &finish, usage)
 
 	default:
 		// message_stop, ping, error, content_block_stop: no OpenAI chunk.
@@ -733,7 +760,7 @@ func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
 }
 
 // chunkJSON builds a single OpenAI chat.completion.chunk with one choice.
-func chunkJSON(st *StreamState, delta map[string]any, finishReason *string) []byte {
+func chunkJSON(st *StreamState, delta map[string]any, finishReason *string, usage map[string]any) []byte {
 	choice := map[string]any{"index": 0, "delta": delta}
 	if finishReason != nil {
 		choice["finish_reason"] = *finishReason
@@ -746,20 +773,41 @@ func chunkJSON(st *StreamState, delta map[string]any, finishReason *string) []by
 		"model":   st.model,
 		"choices": []map[string]any{choice},
 	}
+	if usage != nil {
+		out["usage"] = usage
+	}
 	raw, _ := json.Marshal(out)
 	return raw
 }
 
+// StreamWantsUsage reports whether an OpenAI chat-completions request body asked
+// for token usage on the stream (stream_options.include_usage). Usage frames are
+// opt-in on this wire, so a client that never asked must not be sent one.
+func StreamWantsUsage(clientBody []byte) bool {
+	var in struct {
+		StreamOptions *struct {
+			IncludeUsage *bool `json:"include_usage"`
+		} `json:"stream_options"`
+	}
+	if json.Unmarshal(clientBody, &in) != nil || in.StreamOptions == nil {
+		return false
+	}
+	return in.StreamOptions.IncludeUsage != nil && *in.StreamOptions.IncludeUsage
+}
+
 // ChunkToCanonical parses one vLLM/OpenAI stream chunk into a canonical
 // ChatChunk for governance observation. delta.content → a content_block_delta
-// text_delta; finish_reason → a message_delta carrying stop_reason; usage (if
-// present, e.g. with stream_options.include_usage) is attached.
+// text_delta; delta.tool_calls → a content_block_start (the opener carrying
+// id/name) or a content_block_delta input_json_delta (an argument fragment);
+// finish_reason → a message_delta carrying stop_reason; usage (if present, e.g.
+// with stream_options.include_usage) is attached.
 func ChunkToCanonical(openaiChunk []byte) (*schema.ChatChunk, error) {
 	var in struct {
 		Choices []struct {
 			Index int `json:"index"`
 			Delta struct {
-				Content *string `json:"content"`
+				Content   *string       `json:"content"`
+				ToolCalls []oaiToolCall `json:"tool_calls"`
 			} `json:"delta"`
 			FinishReason *string `json:"finish_reason"`
 		} `json:"choices"`
@@ -779,6 +827,29 @@ func ChunkToCanonical(openaiChunk []byte) (*schema.ChatChunk, error) {
 		if ch.FinishReason != nil {
 			delta := mustJSON(map[string]any{"stop_reason": mapFinishToStop(*ch.FinishReason)})
 			return &schema.ChatChunk{Type: "message_delta", Delta: delta, Usage: usage}, nil
+		}
+		// tool_calls before content: a chunk carrying a tool call often also
+		// carries content:"" , and answering that with an empty text_delta
+		// would drop the tool call entirely (it reached no ingress at all
+		// before this branch existed — Bedrock ingress renders from Chunk).
+		if len(ch.Delta.ToolCalls) > 0 {
+			tc := ch.Delta.ToolCalls[0]
+			idx := ch.Index
+			if tc.Index != nil {
+				idx = *tc.Index
+			}
+			if tc.ID != "" || tc.Function.Name != "" {
+				input := json.RawMessage(tc.Function.Arguments)
+				if len(input) == 0 || !json.Valid(input) {
+					input = json.RawMessage(`{}`)
+				}
+				block := &schema.ContentBlock{Type: "tool_use", ID: tc.ID, Name: tc.Function.Name, Input: input}
+				return &schema.ChatChunk{Type: "content_block_start", Index: &idx, ContentBlock: block, Usage: usage}, nil
+			}
+			if tc.Function.Arguments != "" {
+				delta := mustJSON(map[string]any{"type": "input_json_delta", "partial_json": tc.Function.Arguments})
+				return &schema.ChatChunk{Type: "content_block_delta", Index: &idx, Delta: delta, Usage: usage}, nil
+			}
 		}
 		if ch.Delta.Content != nil {
 			idx := ch.Index

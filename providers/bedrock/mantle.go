@@ -211,7 +211,15 @@ func (m *mantleClient) Complete(ctx context.Context, req *providers.ProxyRequest
 	if path == "/anthropic/v1/messages" {
 		var parsed schema.ChatResponse
 		if json.Unmarshal(raw, &parsed) == nil {
+			// Mantle answers under the UPSTREAM model id, but the client asked
+			// for the public name — same rewrite the chat branch below does.
+			// Re-rendering is lossless here: ChatResponse round-trips unknown
+			// fields through Extra.
+			parsed.Model = req.Model
 			out.Parsed = &parsed
+			if rendered, rerr := json.Marshal(&parsed); rerr == nil {
+				out.RawBody = rendered
+			}
 		}
 	} else if parsed, perr := openai.ResponseToCanonical(raw); perr == nil {
 		// The Bedrock ingress tees RawBody to the client, so the chat
