@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -57,7 +58,11 @@ func pricingSync(args []string) int {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
 	}
-	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background())
+	// A bounded context, not Background: every Price List call this command makes
+	// is a network round trip, and an unbounded one hangs the CLI forever.
+	ctx, cancel := context.WithTimeout(context.Background(), pricingSyncTimeout)
+	defer cancel()
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: aws config: %v\n", err)
 		return 2
@@ -73,6 +78,11 @@ func pricingSync(args []string) int {
 // eu-central-1) — there is no per-Bedrock-region pricing endpoint, so the
 // client region is fixed here regardless of the Bedrock region being priced.
 const priceListEndpointRegion = "us-east-1"
+
+// pricingSyncTimeout bounds the whole run: credential resolution plus one
+// paginated Price List fetch per region. Generous enough for a many-region
+// config, finite so the command can never hang.
+const pricingSyncTimeout = 5 * time.Minute
 
 // pricingAPI is the narrow seam over aws-sdk-go-v2/service/pricing so the
 // resolve/unresolved partition is unit-testable with no AWS credentials and no
@@ -329,7 +339,11 @@ func resolveTarget(cands []priceCandidate, model string) (in, out *big.Rat, reas
 				exact = true
 				break
 			}
-			if strings.HasPrefix(f, c.ModelPart) || strings.HasPrefix(c.ModelPart, f) {
+			// One direction only: the catalog row's model part must be a PREFIX
+			// of the configured id, never the reverse. The reverse direction
+			// let a shorter configured id match a longer, more specific
+			// catalog row (a different model's rate) and bind it silently.
+			if strings.HasPrefix(f, c.ModelPart) {
 				prefix = true
 			}
 		}
@@ -448,6 +462,10 @@ func fetchBedrockCandidates(ctx context.Context, api pricingAPI, region string) 
 // runPricingSync is the whole command except AWS client construction and
 // config loading, so a test can drive it with a fake API and buffers.
 func runPricingSync(stdout, stderr io.Writer, cfg *config.Config, api pricingAPI, outPath string) int {
+	// Bounded, not Background: the per-region Price List fetches below are
+	// network calls, and an unbounded context hangs the CLI indefinitely.
+	ctx, cancel := context.WithTimeout(context.Background(), pricingSyncTimeout)
+	defer cancel()
 	targets := bedrockSyncTargets(cfg)
 	if len(targets) == 0 {
 		// Not 0: exiting 0 having produced nothing is indistinguishable from
@@ -480,7 +498,7 @@ func runPricingSync(stdout, stderr io.Writer, cfg *config.Config, api pricingAPI
 			}
 			continue
 		}
-		cands, err := fetchBedrockCandidates(context.Background(), api, region)
+		cands, err := fetchBedrockCandidates(ctx, api, region)
 		if err != nil {
 			// Do not continue to other regions: a partial fragment silently
 			// missing a region is worse than no fragment.

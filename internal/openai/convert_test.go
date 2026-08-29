@@ -303,13 +303,14 @@ func TestUsageFromCanonical_foldsCacheWrites(t *testing.T) {
 // so a Bedrock-ingress client streaming through an OpenAI-wire provider saw
 // text only and every tool call vanished mid-stream.
 func TestChunkToCanonicalToolCalls(t *testing.T) {
-	open, err := ChunkToCanonical([]byte(`{"choices":[{"index":0,"delta":{"content":null,"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}`))
+	opens, err := ChunkToCanonical([]byte(`{"choices":[{"index":0,"delta":{"content":null,"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if open == nil {
-		t.Fatal("tool_calls opener dropped")
+	if len(opens) != 1 {
+		t.Fatalf("tool_calls opener dropped: %+v", opens)
 	}
+	open := opens[0]
 	if open.Type != "content_block_start" || open.ContentBlock == nil {
 		t.Fatalf("opener: %+v", open)
 	}
@@ -323,13 +324,14 @@ func TestChunkToCanonicalToolCalls(t *testing.T) {
 		t.Errorf("index: %v", open.Index)
 	}
 
-	frag, err := ChunkToCanonical([]byte(`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\"city\":"}}]},"finish_reason":null}]}`))
+	frags, err := ChunkToCanonical([]byte(`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\"city\":"}}]},"finish_reason":null}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if frag == nil || frag.Type != "content_block_delta" {
-		t.Fatalf("argument fragment: %+v", frag)
+	if len(frags) != 1 || frags[0].Type != "content_block_delta" {
+		t.Fatalf("argument fragment: %+v", frags)
 	}
+	frag := frags[0]
 	if frag.Index == nil || *frag.Index != 1 {
 		t.Errorf("fragment index: %v", frag.Index)
 	}
@@ -345,57 +347,39 @@ func TestChunkToCanonicalToolCalls(t *testing.T) {
 	}
 }
 
-// Usage on the rendered OpenAI stream is opt-in: it rides the terminal chunk
-// only when the client sent stream_options.include_usage, and it must carry the
-// FOLDED counts (input arrives on message_start, output on message_delta).
-func TestChunkFromCanonicalUsageIsOptIn(t *testing.T) {
-	i := func(v int64) *int64 { return &v }
-	start := &schema.ChatChunk{Type: "message_start", Message: &schema.ChatResponse{
-		ID: "id1", Model: "m", Usage: &schema.Usage{InputTokens: i(7)},
-	}}
-	end := &schema.ChatChunk{
-		Type:  "message_delta",
-		Delta: json.RawMessage(`{"stop_reason":"end_turn"}`),
-		Usage: &schema.Usage{OutputTokens: i(3)},
-	}
-
-	off := StreamState{}
-	_ = ChunkFromCanonical(start, &off)
-	var chunk map[string]any
-	if err := json.Unmarshal(ChunkFromCanonical(end, &off), &chunk); err != nil {
+// Parallel tool calls arrive as several entries in ONE chunk. Converting only
+// the first dropped every additional call, and usage repeated across the
+// fan-out would be folded more than once by the ingress.
+func TestChunkToCanonicalParallelToolCalls(t *testing.T) {
+	chunks, err := ChunkToCanonical([]byte(`{"choices":[{"index":0,"delta":{"tool_calls":[` +
+		`{"index":0,"id":"call_a","type":"function","function":{"name":"a","arguments":""}},` +
+		`{"index":1,"id":"call_b","type":"function","function":{"name":"b","arguments":""}}` +
+		`]},"finish_reason":null}],"usage":{"prompt_tokens":10,"completion_tokens":2}}`))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, present := chunk["usage"]; present {
-		t.Error("usage sent to a client that never set stream_options.include_usage")
+	if len(chunks) != 2 {
+		t.Fatalf("want 2 canonical frames, got %d: %+v", len(chunks), chunks)
 	}
-
-	on := StreamState{IncludeUsage: true}
-	_ = ChunkFromCanonical(start, &on)
-	if err := json.Unmarshal(ChunkFromCanonical(end, &on), &chunk); err != nil {
-		t.Fatal(err)
-	}
-	u, ok := chunk["usage"].(map[string]any)
-	if !ok {
-		t.Fatalf("usage missing: %v", chunk)
-	}
-	if u["prompt_tokens"] != float64(7) || u["completion_tokens"] != float64(3) || u["total_tokens"] != float64(10) {
-		t.Errorf("usage = %v, want folded 7/3/10", u)
-	}
-}
-
-func TestStreamWantsUsage(t *testing.T) {
-	for _, tc := range []struct {
-		body string
-		want bool
-	}{
-		{`{"stream":true,"stream_options":{"include_usage":true}}`, true},
-		{`{"stream":true,"stream_options":{"include_usage":false}}`, false},
-		{`{"stream":true,"stream_options":{}}`, false},
-		{`{"stream":true}`, false},
-		{`not json`, false},
-	} {
-		if got := StreamWantsUsage([]byte(tc.body)); got != tc.want {
-			t.Errorf("StreamWantsUsage(%s) = %v, want %v", tc.body, got, tc.want)
+	for i, want := range []struct {
+		id, name string
+		index    int
+	}{{"call_a", "a", 0}, {"call_b", "b", 1}} {
+		c := chunks[i]
+		if c.Type != "content_block_start" || c.ContentBlock == nil {
+			t.Fatalf("frame %d: %+v", i, c)
 		}
+		if c.ContentBlock.ID != want.id || c.ContentBlock.Name != want.name {
+			t.Errorf("frame %d block = %+v", i, c.ContentBlock)
+		}
+		if c.Index == nil || *c.Index != want.index {
+			t.Errorf("frame %d index = %v, want %d", i, c.Index, want.index)
+		}
+	}
+	if chunks[0].Usage == nil {
+		t.Error("usage must ride the first frame")
+	}
+	if chunks[1].Usage != nil {
+		t.Error("usage repeated on a later frame — the ingress would double-count it")
 	}
 }

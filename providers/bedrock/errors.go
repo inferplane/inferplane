@@ -107,6 +107,14 @@ func upstreamError(err error) *providers.UpstreamError {
 	if code != "" {
 		msg = "bedrock upstream error (" + code + ")"
 	}
+	return synthError(status, msg)
+}
+
+// synthError builds an UpstreamError with an Anthropic-shaped body, for the
+// cases where the gateway itself is the one refusing (no SDK error to classify).
+// The message must never carry an account id, ARN, or upstream error text —
+// same rule as upstreamError's deliberate omission of ErrorMessage().
+func synthError(status int, msg string) *providers.UpstreamError {
 	body, _ := json.Marshal(map[string]any{
 		"type":  "error",
 		"error": map[string]string{"type": anthropicErrType(status), "message": msg},

@@ -10,7 +10,9 @@
 //
 // Some models (openai.gpt-5.4/-5.5) exist ONLY here, so the invoke_model
 // fallback sent them to an endpoint that has never heard of them. Bedrock
-// Guardrails do not apply on this path — Mantle has no guardrail parameter.
+// Guardrails do not apply on this path — Mantle has no guardrail parameter — so
+// a request carrying an effective guardrail is refused before it gets here
+// (bedrock.go's mantleGuardrailCheck), never served unguarded.
 package bedrock
 
 import (
@@ -52,7 +54,13 @@ type mantleClient struct {
 
 func newMantleClient(baseURL, region string, creds aws.CredentialsProvider, client *http.Client) *mantleClient {
 	if client == nil {
-		client = &http.Client{}
+		// A zero-value client has no timeout at all, so a hung Mantle connection
+		// would pin the request goroutine indefinitely. The bound goes on the
+		// transport, not Client.Timeout: the latter also caps body reading, which
+		// would truncate any SSE stream that outlives it.
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.ResponseHeaderTimeout = 120 * time.Second
+		client = &http.Client{Transport: tr}
 	}
 	return &mantleClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -208,30 +216,35 @@ func (m *mantleClient) Complete(ctx context.Context, req *providers.ProxyRequest
 	if resp.StatusCode/100 != 2 {
 		return out, nil
 	}
+	// A 2xx body we cannot parse must NOT be forwarded: out.Parsed stays nil,
+	// and the ingress skips settle/metering entirely when it is — the request
+	// would bill nothing and audit identically to a genuinely free model
+	// (ADR-030's zero-cost bug class). Fail the call instead.
+	var parsed *schema.ChatResponse
 	if path == "/anthropic/v1/messages" {
-		var parsed schema.ChatResponse
-		if json.Unmarshal(raw, &parsed) == nil {
-			// Mantle answers under the UPSTREAM model id, but the client asked
-			// for the public name — same rewrite the chat branch below does.
-			// Re-rendering is lossless here: ChatResponse round-trips unknown
-			// fields through Extra.
-			parsed.Model = req.Model
-			out.Parsed = &parsed
-			if rendered, rerr := json.Marshal(&parsed); rerr == nil {
-				out.RawBody = rendered
-			}
+		var pv schema.ChatResponse
+		if err := json.Unmarshal(raw, &pv); err != nil {
+			return nil, synthError(502, "bedrock mantle: unparseable upstream response body")
 		}
-	} else if parsed, perr := openai.ResponseToCanonical(raw); perr == nil {
-		// The Bedrock ingress tees RawBody to the client, so the chat
-		// routes' OpenAI wire must be re-rendered in Anthropic shape under
-		// the PUBLIC model name (same as completeConverse) — raw OpenAI
-		// JSON must never reach an Anthropic-speaking client.
-		parsed.Model = req.Model
-		out.Parsed = parsed
-		if rendered, rerr := json.Marshal(parsed); rerr == nil {
-			out.RawBody = rendered
-		}
+		parsed = &pv
+	} else if pv, perr := openai.ResponseToCanonical(raw); perr != nil {
+		return nil, synthError(502, "bedrock mantle: unparseable upstream response body")
+	} else {
+		parsed = pv
 	}
+	// Mantle answers under the UPSTREAM model id, but the client asked for the
+	// public name (same rewrite completeConverse does). Re-rendering is lossless:
+	// ChatResponse round-trips unknown fields through Extra. The Bedrock ingress
+	// tees RawBody to the client, so the chat routes' OpenAI wire has to be
+	// re-rendered in Anthropic shape — raw OpenAI JSON must never reach an
+	// Anthropic-speaking client.
+	parsed.Model = req.Model
+	out.Parsed = parsed
+	rendered, rerr := json.Marshal(parsed)
+	if rerr != nil {
+		return nil, synthError(502, "bedrock mantle: cannot render upstream response")
+	}
+	out.RawBody = rendered
 	return out, nil
 }
 

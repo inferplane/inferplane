@@ -74,7 +74,14 @@ func toConverseRequest(raw []byte) (ConverseRequest, error) {
 		cr.Messages = append(cr.Messages, ConverseMessage{Role: m.Role, Content: blocks})
 	}
 	if len(pending) > 0 {
-		cr.Messages = append(cr.Messages, ConverseMessage{Role: "user", Content: pending})
+		// Trailing hook text with no user turn left to attach to. If the last
+		// message is already a user turn, extend it — a second consecutive
+		// user message is a shape Converse can reject.
+		if n := len(cr.Messages); n > 0 && cr.Messages[n-1].Role == "user" {
+			cr.Messages[n-1].Content = append(cr.Messages[n-1].Content, pending...)
+		} else {
+			cr.Messages = append(cr.Messages, ConverseMessage{Role: "user", Content: pending})
+		}
 	}
 	cr.Tools = parseTools(body.Tools)
 	cr.ToolChoice = resolveToolChoice(parseToolChoice(body.ToolChoice), cr.Tools)

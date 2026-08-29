@@ -3,6 +3,8 @@ package bedrock
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -281,4 +283,89 @@ func TestAPIForMantleNoLongerFallsBack(t *testing.T) {
 	if got := p.apiFor("openai.gpt-5.4"); got != "mantle" {
 		t.Fatalf("apiFor = %q, want mantle", got)
 	}
+}
+
+// A 2xx whose body we cannot parse must fail, not tee through: out.Parsed stays
+// nil, and the ingress then skips settle entirely — the request would bill
+// nothing and audit like a genuinely free model (ADR-030's zero-cost class).
+func TestMantleCompleteUnparseableBodyFails(t *testing.T) {
+	for _, tc := range []struct{ name, upstream, body string }{
+		{"anthropic route", "anthropic.claude-opus-5", `not json at all`},
+		{"chat route", "openai.gpt-5.4", `<html>gateway blurb</html>`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			mc := staticMantle(t, srv)
+			raw := `{"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+			resp, err := mc.Complete(context.Background(), &providers.ProxyRequest{
+				Model: "mantle.m", Upstream: tc.upstream,
+				RawBody: []byte(raw), Parsed: parseChat(t, raw),
+			})
+			if err == nil {
+				t.Fatalf("unparseable 2xx returned success: %+v", resp)
+			}
+			var ue *providers.UpstreamError
+			if !errors.As(err, &ue) || ue.StatusCode != 502 {
+				t.Fatalf("want a 502 UpstreamError, got %v", err)
+			}
+		})
+	}
+}
+
+// Mantle has no guardrail parameter, and the Bedrock ingress writes the
+// request's guardrail id into the tamper-evident audit chain regardless — so a
+// guarded model routed here would be served UNGUARDED and then attested as
+// guarded. ADR-019 gives guardrails no per-team opt-out; refuse instead.
+func TestMantleRefusesWhenAGuardrailIsConfigured(t *testing.T) {
+	req := &providers.ProxyRequest{Model: "mantle.gpt", Upstream: "openai.gpt-5.4"}
+	for _, tc := range []struct {
+		name string
+		p    *provider
+	}{
+		{"provider default", &provider{
+			modelAPI:         map[string]string{"openai.gpt-5.4": "mantle"},
+			defaultGuardrail: Guardrail{ID: "gr-1", Version: "2"},
+		}},
+		{"per-team override", &provider{
+			modelAPI: map[string]string{"openai.gpt-5.4": "mantle"},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := *req
+			if tc.name == "per-team override" {
+				r.GuardrailID = "gr-team"
+			}
+			if _, err := tc.p.Complete(context.Background(), &r); !isGuardrailRefusal(err) {
+				t.Errorf("Complete: want a 400 refusal, got %v", err)
+			}
+			if _, err := tc.p.Stream(context.Background(), &r); !isGuardrailRefusal(err) {
+				t.Errorf("Stream: want a 400 refusal, got %v", err)
+			}
+		})
+	}
+	// No guardrail anywhere: the mantle client is reached as before (nil `man`
+	// would panic if the check short-circuited the wrong way).
+	clean := &provider{modelAPI: map[string]string{"openai.gpt-5.4": "mantle"}, man: &panicMantler{}}
+	if _, err := clean.Complete(context.Background(), req); err == nil || err.Error() != "reached mantle" {
+		t.Errorf("unguarded request did not reach the mantle client: %v", err)
+	}
+}
+
+func isGuardrailRefusal(err error) bool {
+	var ue *providers.UpstreamError
+	return errors.As(err, &ue) && ue.StatusCode == 400 && strings.Contains(string(ue.Body), "guardrail")
+}
+
+type panicMantler struct{}
+
+func (panicMantler) Complete(context.Context, *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+	return nil, errors.New("reached mantle")
+}
+
+func (panicMantler) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
+	return nil, errors.New("reached mantle")
 }

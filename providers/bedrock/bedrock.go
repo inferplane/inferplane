@@ -85,11 +85,29 @@ func (p *provider) apiFor(upstream string) string {
 	return "converse"
 }
 
+// mantleGuardrailCheck refuses a request whose effective guardrail cannot be
+// enforced on the selected egress path. Mantle has no guardrail parameter at
+// all, so routing a guarded model through it would send the request unguarded —
+// and because the ingress writes ProxyRequest.GuardrailID into the
+// tamper-evident audit chain unconditionally, the record would then ATTEST a
+// guardrail that never ran. A falsified attestation is worse than a bypass, and
+// ADR-019 gives guardrails no per-team opt-out, so `routing.model_api: mantle`
+// must not become one: refuse instead of serving unguarded.
+func (p *provider) mantleGuardrailCheck(req *providers.ProxyRequest) error {
+	if g := p.guardrailFor(req); g.ID != "" {
+		return synthError(400, "bedrock: guardrail cannot be enforced on the mantle egress path for this model — remove the guardrail or route the model via converse/invoke_model")
+	}
+	return nil
+}
+
 func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {
 	switch p.apiFor(req.Upstream) {
 	case "converse":
 		return p.completeConverse(ctx, req)
 	case "mantle":
+		if err := p.mantleGuardrailCheck(req); err != nil {
+			return nil, err
+		}
 		return p.man.Complete(ctx, req)
 	default:
 		return p.completeInvoke(ctx, req)
@@ -101,6 +119,9 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 	case "converse":
 		return p.streamConverse(ctx, req)
 	case "mantle":
+		if err := p.mantleGuardrailCheck(req); err != nil {
+			return nil, err
+		}
 		return p.man.Stream(ctx, req)
 	default:
 		return p.streamInvoke(ctx, req)

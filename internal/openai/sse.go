@@ -31,12 +31,25 @@ func ReadChatSSE(r io.Reader) iter.Seq2[*providers.StreamEvent, error] {
 						return
 					}
 				} else if payload != "" {
-					ev := &providers.StreamEvent{Raw: []byte("data: " + payload + "\n\n")}
-					if c, cerr := ChunkToCanonical([]byte(payload)); cerr == nil {
-						ev.Chunk = c
+					raw := []byte("data: " + payload + "\n\n")
+					chunks, cerr := ChunkToCanonical([]byte(payload))
+					if cerr != nil || len(chunks) == 0 {
+						if !yield(&providers.StreamEvent{Raw: raw}, nil) {
+							return
+						}
 					}
-					if !yield(ev, nil) {
-						return
+					// One SSE line can carry several canonical frames (parallel
+					// tool calls). Raw rides the FIRST event only: an
+					// OpenAI-wire ingress tees Raw, so repeating it would
+					// duplicate the line on the client's stream.
+					for i, c := range chunks {
+						ev := &providers.StreamEvent{Chunk: c}
+						if i == 0 {
+							ev.Raw = raw
+						}
+						if !yield(ev, nil) {
+							return
+						}
 					}
 				}
 			}

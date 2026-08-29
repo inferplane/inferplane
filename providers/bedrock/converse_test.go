@@ -223,10 +223,11 @@ func TestToConverseRequestKeepsSystemRoleInPlace(t *testing.T) {
 	}
 }
 
-func TestToConverseRequestTrailingSystemRoleBecomesUserMessage(t *testing.T) {
-	// A TRAILING system-role message (session-start hook before any reply)
-	// has no following user message to merge into; it must become its own
-	// user message — Bedrock requires the last turn to be user anyway.
+func TestToConverseRequestTrailingSystemRoleJoinsTheLastUserMessage(t *testing.T) {
+	// A TRAILING system-role message (session-start hook before any reply) has
+	// no following user message to merge into. It must extend the PRECEDING
+	// user turn rather than become a second consecutive user message, a shape
+	// Converse can reject.
 	raw := []byte(`{"system":"be helpful","messages":[
 		{"role":"user","content":"hello"},
 		{"role":"system","content":"SessionStart hook: some info"}
@@ -238,11 +239,35 @@ func TestToConverseRequestTrailingSystemRoleBecomesUserMessage(t *testing.T) {
 	if strings.Contains(cr.System, "SessionStart hook") {
 		t.Fatalf("trailing system role folded into system prompt: %q", cr.System)
 	}
-	if len(cr.Messages) != 2 || cr.Messages[1].Role != "user" {
-		t.Fatalf("want trailing user message carrying the hook text: %+v", cr.Messages)
+	if len(cr.Messages) != 1 || cr.Messages[0].Role != "user" {
+		t.Fatalf("want one merged user message: %+v", cr.Messages)
 	}
-	if !strings.Contains(textOf(cr.Messages[1]), "SessionStart hook: some info") {
-		t.Fatalf("hook text missing: %q", textOf(cr.Messages[1]))
+	joined := textOf(cr.Messages[0])
+	if !strings.Contains(joined, "hello") || !strings.Contains(joined, "SessionStart hook: some info") {
+		t.Fatalf("merged text missing a part: %q", joined)
+	}
+	if strings.Index(joined, "hello") > strings.Index(joined, "SessionStart hook") {
+		t.Fatalf("merged out of order: %q", joined)
+	}
+}
+
+func TestToConverseRequestTrailingSystemRoleAfterAssistantBecomesUserMessage(t *testing.T) {
+	// Same trailing hook, but the last turn is the assistant's — there is no
+	// user message to extend, so the hook text becomes its own user turn.
+	raw := []byte(`{"messages":[
+		{"role":"user","content":"hello"},
+		{"role":"assistant","content":"hi"},
+		{"role":"system","content":"SessionStart hook: some info"}
+	]}`)
+	cr, err := toConverseRequest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cr.Messages) != 3 || cr.Messages[2].Role != "user" {
+		t.Fatalf("want a trailing user message: %+v", cr.Messages)
+	}
+	if !strings.Contains(textOf(cr.Messages[2]), "SessionStart hook: some info") {
+		t.Fatalf("hook text missing: %q", textOf(cr.Messages[2]))
 	}
 }
 
