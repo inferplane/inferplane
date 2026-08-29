@@ -369,3 +369,33 @@ func (panicMantler) Complete(context.Context, *providers.ProxyRequest) (*provide
 func (panicMantler) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
 	return nil, errors.New("reached mantle")
 }
+
+// Review follow-up (PR #65, round 2): a 200 SSE stream whose every frame
+// fails to parse must surface an error, not end cleanly — otherwise the
+// ingress settles zero billable tokens for a served stream (ADR-030's
+// zero-cost class), same fail-closed rule as openaicompat.Stream.
+func TestMantleStreamFailsClosedWhenNothingParses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {not json\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	mc := staticMantle(t, srv)
+	raw := `{"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	evs, err := mc.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "mantle.gpt-5.4", Upstream: "openai.gpt-5.4",
+		RawBody: []byte(raw), Parsed: parseChat(t, raw),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawErr bool
+	for _, serr := range evs {
+		if serr != nil {
+			sawErr = true
+		}
+	}
+	if !sawErr {
+		t.Fatal("a mantle stream with zero parseable frames must surface an error, not end cleanly")
+	}
+}

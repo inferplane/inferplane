@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -445,5 +446,21 @@ func TestPriceCandidateFrom_dropsWhatItCannotRead(t *testing.T) {
 				t.Errorf("priceCandidateFrom accepted a document it cannot safely read")
 			}
 		})
+	}
+}
+
+// Review follow-up (PR #65, round 2): the tool promises to never emit a 0
+// rate (0 means unpriced, not free — the load-time check now REJECTS 0/0),
+// but ratToConfigNumber renders a zero big.Rat as the JSON number 0. A route
+// whose Price List SKU quotes $0 must be reported UNRESOLVED instead of
+// generating a fragment the gateway then refuses to load.
+func TestSyncZeroPricedSKUIsUnresolvedNotEmitted(t *testing.T) {
+	cands := []priceCandidate{
+		{ModelPart: "vendorfreemodel", Direction: "input", PerMTok: big.NewRat(0, 1), UsageType: "APN1-vendor.free-model-input"},
+		{ModelPart: "vendorfreemodel", Direction: "output", PerMTok: big.NewRat(0, 1), UsageType: "APN1-vendor.free-model-output"},
+	}
+	_, _, reason := resolveTarget(cands, "vendor.free-model")
+	if reason == "" {
+		t.Fatal("a $0/$0 SKU must resolve to a reason (unresolved), not a 0 rate the config loader rejects")
 	}
 }

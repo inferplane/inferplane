@@ -276,10 +276,22 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 	}
 	return func(yield func(*providers.StreamEvent, error) bool) {
 		defer resp.Body.Close()
+		// Fail-closed parity with Complete and openaicompat.Stream: the
+		// Bedrock ingress re-renders from ev.Chunk, so a 200 stream whose
+		// every frame fails to parse would otherwise end cleanly with zero
+		// canonical frames — and settle zero billable tokens for a served
+		// request (ADR-030's zero-cost class).
+		var sawChunk bool
 		for ev, serr := range inner {
+			if ev != nil && ev.Chunk != nil {
+				sawChunk = true
+			}
 			if !yield(ev, serr) {
 				return
 			}
+		}
+		if !sawChunk {
+			yield(nil, fmt.Errorf("bedrock mantle: upstream stream for %s produced no parseable frames", req.Upstream))
 		}
 	}, nil
 }

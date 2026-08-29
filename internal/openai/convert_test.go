@@ -463,3 +463,15 @@ func TestToolsRoundTripThroughBothConversions(t *testing.T) {
 		t.Fatalf("tool_choice did not round-trip: %s", back.ToolChoice)
 	}
 }
+
+// Review follow-up (PR #65, round 2): OpenAI clients send "stop": null;
+// forwarding it as stop_sequences:null 400s on Anthropic and Bedrock Converse.
+func TestRequestToCanonicalSkipsNullStop(t *testing.T) {
+	cr, err := RequestToCanonical([]byte(`{"model":"m","stop":null,"messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, has := cr.Extra["stop_sequences"]; has {
+		t.Fatalf("stop:null must be skipped, got %s", cr.Extra["stop_sequences"])
+	}
+}

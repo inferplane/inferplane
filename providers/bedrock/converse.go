@@ -68,7 +68,19 @@ func toConverseRequest(raw []byte) (ConverseRequest, error) {
 			continue // Bedrock rejects a message with zero content blocks
 		}
 		if m.Role == "user" && len(pending) > 0 {
-			blocks = append(pending, blocks...)
+			// tool_result blocks must stay FIRST in a user message — a hook
+			// firing between an assistant tool_use and the user tool_result
+			// would otherwise put text ahead of them, a shape upstreams
+			// reject. Merge the pending text after any leading tool_results.
+			lead := 0
+			for lead < len(blocks) && blocks[lead].Type == "tool_result" {
+				lead++
+			}
+			merged := make([]schema.ContentBlock, 0, len(blocks)+len(pending))
+			merged = append(merged, blocks[:lead]...)
+			merged = append(merged, pending...)
+			merged = append(merged, blocks[lead:]...)
+			blocks = merged
 			pending = nil
 		}
 		cr.Messages = append(cr.Messages, ConverseMessage{Role: m.Role, Content: blocks})

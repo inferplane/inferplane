@@ -717,3 +717,30 @@ func TestStreamConverseStripsUnsupportedInference(t *testing.T) {
 		}
 	}
 }
+
+// Review follow-up (PR #65, round 2): a hook firing between an assistant
+// tool_use and the user tool_result must not put the merged text BEFORE the
+// tool_result — tool_result blocks must stay first in the user message, or
+// the upstream rejects the shape.
+func TestToConverseRequestSystemRoleMergesAfterToolResults(t *testing.T) {
+	raw := []byte(`{"messages":[
+		{"role":"user","content":"list files"},
+		{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}]},
+		{"role":"system","content":"hook output mid-tool-turn"},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a.go"},{"type":"text","text":"continue"}]}
+	]}`)
+	cr, err := toConverseRequest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := cr.Messages[len(cr.Messages)-1]
+	if last.Role != "user" || len(last.Content) != 3 {
+		t.Fatalf("unexpected last message: %+v", last)
+	}
+	if last.Content[0].Type != "tool_result" {
+		t.Fatalf("tool_result must stay FIRST in the user message, got %q first", last.Content[0].Type)
+	}
+	if last.Content[1].Type != "text" || last.Content[1].Text == nil || !strings.Contains(*last.Content[1].Text, "hook output") {
+		t.Fatalf("hook text must follow the tool_result blocks: %+v", last.Content[1])
+	}
+}

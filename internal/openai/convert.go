@@ -254,7 +254,7 @@ func RequestToCanonical(openaiBody []byte) (*schema.ChatRequest, error) {
 	if len(in.TopP) > 0 {
 		extra["top_p"] = in.TopP
 	}
-	if len(in.Stop) > 0 {
+	if len(in.Stop) > 0 && in.Stop[0] != 'n' { // skip JSON null — stop_sequences:null 400s downstream
 		// OpenAI stop may be a string or an array; canonical stop_sequences
 		// is an array.
 		if in.Stop[0] == '"' {

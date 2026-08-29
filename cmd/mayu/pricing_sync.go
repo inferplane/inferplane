@@ -399,6 +399,13 @@ func resolveTarget(cands []priceCandidate, model string) (in, out *big.Rat, reas
 	case outReason != "":
 		return nil, nil, outReason
 	}
+	// A $0/$0 SKU cannot be emitted: 0 means unpriced, not free (the config
+	// loader now rejects a 0/0 override outright), and this tool's contract
+	// is to never write a placeholder or 0 rate. Report it unresolved so the
+	// operator declares `"free": true` by hand if the model really is free.
+	if in.Sign() == 0 && out.Sign() == 0 {
+		return nil, nil, "Price List quotes $0 for both directions — declare the model free by hand (\"free\": true) if that is real"
+	}
 	return in, out, ""
 }
 
