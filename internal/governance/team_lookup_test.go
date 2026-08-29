@@ -25,7 +25,7 @@ func TestTeamLookup_dbOnlyTeamEnforced(t *testing.T) {
 		}
 		return TeamPolicy{}, false
 	})
-	g.bud.Debit(budget.Key(budget.ScopeTeam, "db-team", budget.CalendarMonth), 2, budgetWindow) // spend past the 1-µUSD budget
+	g.bud.Debit(budget.Key(budget.ScopeTeam, "db-team", budget.CalendarMonthIn(nil)), 2, budgetWindow) // spend past the 1-µUSD budget
 	dec := g.PreCheck(Subject{Team: "db-team"}, KeyPolicy{}, 0)
 	if dec.Allowed || dec.Status != 402 {
 		t.Fatalf("db-only team budget must enforce: %+v", dec)
@@ -42,7 +42,7 @@ func TestTeamLookup_recordWinsOverConfig(t *testing.T) {
 	g.SetTeamLookup(func(team string) (TeamPolicy, bool) {
 		return TeamPolicy{BudgetMicrosPerMonth: 1, BudgetExceeded: "block"}, true // record: 1 µUSD
 	})
-	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonth), 2, budgetWindow)
+	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonthIn(nil)), 2, budgetWindow)
 	dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0)
 	if dec.Allowed || dec.Status != 402 {
 		t.Fatalf("record policy must win over config for the same team: %+v", dec)
@@ -57,7 +57,7 @@ func TestTeamLookup_missFallsThroughToConfig(t *testing.T) {
 		"t": {BudgetMicrosPerMonth: 1, BudgetExceeded: "block"},
 	}, limiter.NewMemory(), budget.NewMemory(), nil)
 	g.SetTeamLookup(func(string) (TeamPolicy, bool) { return TeamPolicy{}, false })
-	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonth), 2, budgetWindow)
+	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonthIn(nil)), 2, budgetWindow)
 	dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0)
 	if dec.Allowed || dec.Status != 402 {
 		t.Fatalf("lookup miss must fall through to config policy: %+v", dec)
@@ -93,7 +93,7 @@ func TestTeamLookup_dynamicChangeTakesEffectNextCallNoRestart(t *testing.T) {
 	}
 
 	current = TeamPolicy{BudgetMicrosPerMonth: 1, BudgetExceeded: "block"}
-	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonth), 2, budgetWindow)
+	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonthIn(nil)), 2, budgetWindow)
 	if dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0); dec.Allowed {
 		t.Fatal("edited policy must enforce on the very next PreCheck call, no restart")
 	}
@@ -101,7 +101,7 @@ func TestTeamLookup_dynamicChangeTakesEffectNextCallNoRestart(t *testing.T) {
 
 // TestTeamLookup_settleDebitsSameCounterKeyPreCheckReads proves Settle debits
 // the SAME counter key — budget.Key(budget.ScopeTeam, team,
-// budget.CalendarMonth) — that PreCheck reads, regardless of whether the
+// budget.CalendarMonthIn(nil)) — that PreCheck reads, regardless of whether the
 // policy came from the lookup or the config map: a policy-source switch must
 // not orphan or fork counters.
 func TestTeamLookup_settleDebitsSameCounterKeyPreCheckReads(t *testing.T) {

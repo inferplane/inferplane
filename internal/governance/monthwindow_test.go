@@ -82,7 +82,7 @@ func TestUsageOfKeyMonthResetHonoursBudgetTimezone(t *testing.T) {
 func TestCalendarMonthInKeepsStoreKey(t *testing.T) {
 	seoul := seoulLocation(t)
 	got := budget.Key(budget.ScopeTeam, "t", budget.CalendarMonthIn(seoul))
-	want := budget.Key(budget.ScopeTeam, "t", budget.CalendarMonth)
+	want := budget.Key(budget.ScopeTeam, "t", budget.CalendarMonthIn(nil))
 	if got != want {
 		t.Fatalf("month store key moved with the timezone: %q != %q — every existing month counter would be orphaned", got, want)
 	}

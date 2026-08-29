@@ -55,16 +55,7 @@ type Window struct {
 	Loc  *time.Location // nil = UTC
 }
 
-// CalendarMonth is the window every money cap has used since §5.3: the
-// counter ends at the first instant of next month in Loc (nil here, so UTC).
-// Kept under its original name so the call sites that predate WindowKind read
-// unchanged.
-//
-// It is a var only because a struct cannot be a Go constant — never reassign
-// it.
-var CalendarMonth = Window{Kind: CalMonth}
-
-// CalendarDayIn is CalendarMonth's daily counterpart: the counter ends at the
+// CalendarDayIn is CalendarMonthIn's daily counterpart: the counter ends at the
 // next midnight in loc (nil = UTC, the same default every Window carries). It
 // is a function, not a var, because the operator timezone is config-supplied
 // (budget_timezone) rather than a compile-time constant — one Window value per
@@ -73,16 +64,19 @@ func CalendarDayIn(loc *time.Location) Window {
 	return Window{Kind: CalDay, Loc: loc}
 }
 
-// CalendarMonthIn is CalendarMonth in an explicit timezone: the counter ends at
-// the first instant of next month in loc (nil = UTC, the same default every
-// Window carries). It exists so the MONTH window can honour the operator's
-// budget_timezone the way CalendarDayIn already does — a daily cap anchored to
-// KST midnight and a monthly cap anchored to UTC midnight would put two
-// different boundaries into one billing reconciliation.
+// CalendarMonthIn is the calendar-month window in an explicit timezone: the
+// counter ends at the first instant of next month in loc (nil = UTC, the same
+// default every Window carries). It exists so the MONTH window can honour the
+// operator's budget_timezone the way CalendarDayIn already does — a daily cap
+// anchored to KST midnight and a monthly cap anchored to UTC midnight would
+// put two different boundaries into one billing reconciliation. A function,
+// not a var, for the same reason CalendarDayIn is: a shared package-level
+// Window value would be a mutable-in-place footgun (its fields are exported)
+// with nothing enforcing "never reassign it" beyond a comment.
 //
-// Tag() is "month" for any CalMonth window, so a store key built from this and
-// one built from CalendarMonth are the SAME key: switching the operator
-// timezone moves a counter's boundary, never its identity.
+// Tag() is "month" for every CalMonth window regardless of Loc, so a store
+// key built from any two CalendarMonthIn calls is the SAME key: switching the
+// operator timezone moves a counter's boundary, never its identity.
 func CalendarMonthIn(loc *time.Location) Window {
 	return Window{Kind: CalMonth, Loc: loc}
 }

@@ -64,7 +64,7 @@ func TestCalendarMonthStillAnchorsToNextUTCMonth(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			b := NewMemory()
 			b.now = func() time.Time { return tc.now }
-			got := b.ResetsAt(Key(ScopeTeam, "acme", CalendarMonth), CalendarMonth)
+			got := b.ResetsAt(Key(ScopeTeam, "acme", CalendarMonthIn(nil)), CalendarMonthIn(nil))
 			if !got.Equal(tc.want) {
 				t.Fatalf("ResetsAt = %s, want %s", got.Format(time.RFC3339), tc.want.Format(time.RFC3339))
 			}
