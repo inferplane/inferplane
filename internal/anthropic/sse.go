@@ -12,11 +12,16 @@ import (
 	"github.com/inferplane/inferplane/providers"
 )
 
+// Package anthropic holds the Anthropic-wire helpers shared by more than one
+// provider — the mirror of internal/openai for this wire. It lives outside
+// providers/ so a provider never has to import another provider's package.
+
 // ReadSSE parses an Anthropic SSE response into a sequence of StreamEvents.
 // Raw is the exact bytes of each event block (all lines up to and including
 // the blank-line terminator) so the ingress can tee them to the client
 // verbatim; Chunk is the parsed "data:" JSON (nil if the block has no data
-// line). Byte-exactness is the tee guarantee.
+// line). Byte-exactness is the tee guarantee. Shared by the anthropic provider
+// and the Bedrock Mantle /anthropic/v1/messages route.
 func ReadSSE(r io.Reader) iter.Seq2[*providers.StreamEvent, error] {
 	return func(yield func(*providers.StreamEvent, error) bool) {
 		br := bufio.NewReader(r)

@@ -30,9 +30,9 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
+	anthropicsse "github.com/inferplane/inferplane/internal/anthropic"
 	"github.com/inferplane/inferplane/internal/openai"
 	"github.com/inferplane/inferplane/pkg/schema"
-	anthropicprov "github.com/inferplane/inferplane/providers/anthropic"
 
 	"github.com/inferplane/inferplane/providers"
 )
@@ -265,7 +265,7 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 	}
 	var inner iter.Seq2[*providers.StreamEvent, error]
 	if path == "/anthropic/v1/messages" {
-		inner = anthropicprov.ReadSSE(resp.Body)
+		inner = anthropicsse.ReadSSE(resp.Body)
 	} else {
 		inner = openai.ReadChatSSE(resp.Body)
 	}
