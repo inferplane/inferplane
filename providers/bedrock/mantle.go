@@ -58,7 +58,12 @@ func newMantleClient(baseURL, region string, creds aws.CredentialsProvider, clie
 		// would pin the request goroutine indefinitely. The bound goes on the
 		// transport, not Client.Timeout: the latter also caps body reading, which
 		// would truncate any SSE stream that outlives it.
-		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr, ok := http.DefaultTransport.(*http.Transport)
+		if ok {
+			tr = tr.Clone()
+		} else {
+			tr = &http.Transport{}
+		}
 		tr.ResponseHeaderTimeout = 120 * time.Second
 		client = &http.Client{Transport: tr}
 	}

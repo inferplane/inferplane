@@ -215,9 +215,11 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 			out.Parsed = parsed
 			if req.IngressProtocol != "openai" {
 				parsed.Model = req.Model
-				if rendered, rerr := json.Marshal(parsed); rerr == nil {
-					out.RawBody = rendered
+				rendered, rerr := json.Marshal(parsed)
+				if rerr != nil {
+					return nil, fmt.Errorf("openaicompat: cannot render upstream response: %w", rerr)
 				}
+				out.RawBody = rendered
 			}
 		}
 	}

@@ -70,7 +70,7 @@ func pricingSync(args []string) int {
 	api := awspricing.NewFromConfig(awsCfg, func(o *awspricing.Options) {
 		o.Region = priceListEndpointRegion
 	})
-	return runPricingSync(os.Stdout, os.Stderr, cfg, api, *outPath)
+	return runPricingSyncCtx(ctx, os.Stdout, os.Stderr, cfg, api, *outPath)
 }
 
 // priceListEndpointRegion is where the Price List Query API itself lives. The
@@ -466,6 +466,12 @@ func runPricingSync(stdout, stderr io.Writer, cfg *config.Config, api pricingAPI
 	// network calls, and an unbounded context hangs the CLI indefinitely.
 	ctx, cancel := context.WithTimeout(context.Background(), pricingSyncTimeout)
 	defer cancel()
+	return runPricingSyncCtx(ctx, stdout, stderr, cfg, api, outPath)
+}
+
+// runPricingSyncCtx takes the deadline from its caller so credential resolution
+// and the fetches below share ONE ceiling instead of one each.
+func runPricingSyncCtx(ctx context.Context, stdout, stderr io.Writer, cfg *config.Config, api pricingAPI, outPath string) int {
 	targets := bedrockSyncTargets(cfg)
 	if len(targets) == 0 {
 		// Not 0: exiting 0 having produced nothing is indistinguishable from
