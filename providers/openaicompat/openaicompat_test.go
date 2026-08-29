@@ -140,6 +140,39 @@ func TestCompleteRerendersRawBodyForCrossProtocolIngress(t *testing.T) {
 	}
 }
 
+// An unparseable 2xx must FAIL on a non-OpenAI ingress instead of teeing
+// through: Parsed would stay nil, the Bedrock ingress skips settle when it is
+// (zero billing, no token counts in the audit record), and the client would
+// get raw OpenAI JSON in answer to an Anthropic-shaped request. The OpenAI
+// ingress is unaffected — it tees the same wire it asked for.
+func TestCompleteUnparseableBodyFailsForCrossProtocolIngress(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html>502 from a load balancer</html>"))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	var cr schema.ChatRequest
+	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+		t.Fatal(err)
+	}
+	req := &providers.ProxyRequest{Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), Parsed: &cr, IngressProtocol: "bedrock"}
+	if _, err := p.Complete(context.Background(), req); err == nil {
+		t.Fatal("want an error for an unparseable 2xx on a bedrock ingress, got nil")
+	}
+
+	// OpenAI ingress: the body is the client's own wire, so it still tees.
+	req.IngressProtocol = "openai"
+	resp, err := p.Complete(context.Background(), req)
+	if err != nil {
+		t.Fatalf("openai ingress must still tee an unparsed body: %v", err)
+	}
+	if string(resp.RawBody) != "<html>502 from a load balancer</html>" {
+		t.Fatalf("RawBody = %q", resp.RawBody)
+	}
+}
+
 // A cross-protocol Stream must ask the upstream for usage in the final chunk
 // (stream_options.include_usage) — without it vLLM emits no usage frame and
 // every streamed request settles with zero billable tokens.
