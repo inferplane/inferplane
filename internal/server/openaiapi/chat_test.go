@@ -62,11 +62,40 @@ func TestChatNonStreamingConvertsMockCanonicalToOpenAI(t *testing.T) {
 // package maps its own Principal → KeyPolicy; this test only proves THIS
 // copy is correct).
 func TestKeyPolicyOfMapsAllFields(t *testing.T) {
-	p := keystore.Principal{KeyOptions: keystore.KeyOptions{RPM: 60, TPM: 1000, BudgetUSDMicros: 5_000_000}}
+	p := keystore.Principal{KeyOptions: keystore.KeyOptions{RPM: 60, TPM: 1000, BudgetUSDMicros: 5_000_000, BudgetUSDMicrosPerDay: 250_000}}
 	got := keyPolicyOf(p)
-	want := governance.KeyPolicy{RatePerMin: 60, TokensPerMinute: 1000, BudgetMicrosPerMonth: 5_000_000}
+	want := governance.KeyPolicy{RatePerMin: 60, TokensPerMinute: 1000, BudgetMicrosPerMonth: 5_000_000, BudgetMicrosPerDay: 250_000}
 	if got != want {
 		t.Fatalf("keyPolicyOf(%+v) = %+v, want %+v", p.KeyOptions, got, want)
+	}
+}
+
+// TestSubjectOfMapsAllFields guards subjectOf against dropping Owner: Owner is
+// the field that carries the individual's identity into per-user budget
+// enforcement, and a subjectOf that dropped it would silently disable the
+// whole feature — Subject.User == "" makes the Governor skip the user lookup
+// entirely, with no error anywhere (this function is duplicated in the sibling
+// ingress packages — governance stays a leaf and does not import keystore, so
+// each ingress package maps its own Principal → Subject; this test only proves
+// THIS copy is correct).
+func TestSubjectOfMapsAllFields(t *testing.T) {
+	p := keystore.Principal{Team: "team-a", KeyID: "key-b", KeyOptions: keystore.KeyOptions{Owner: "owner-c"}}
+	got := subjectOf(p)
+	want := governance.Subject{Team: "team-a", KeyID: "key-b", User: "owner-c"}
+	if got != want {
+		t.Fatalf("subjectOf(%+v) = %+v, want %+v", p, got, want)
+	}
+}
+
+// TestSubjectOfEmptyOwnerYieldsEmptyUser pins the byte-identical-to-Phase-2
+// path: a Principal with no Owner yields Subject.User == "" (no user lookup,
+// no user counter, no user_budget in /v1/usage).
+func TestSubjectOfEmptyOwnerYieldsEmptyUser(t *testing.T) {
+	p := keystore.Principal{Team: "team-a", KeyID: "key-b"}
+	got := subjectOf(p)
+	want := governance.Subject{Team: "team-a", KeyID: "key-b"}
+	if got != want {
+		t.Fatalf("subjectOf(%+v) = %+v, want %+v", p, got, want)
 	}
 }
 
@@ -75,7 +104,8 @@ func TestChatGovernorKeyBudgetBlocks402EvenForUngovernedTeam(t *testing.T) {
 	// No TeamPolicy entry for "platform-eng" at all — the team is ungoverned;
 	// only the key's own budget (§8 D2) must still be enforced.
 	gov := governance.NewGovernor(nil, limiter.NewMemory(), bud, nil)
-	bud.Debit("budget:key:ik_over", 1_500_000, 30*24*time.Hour) // over the key's 1M cap
+	bud.Debit(budget.Key(budget.ScopeKey, "ik_over", budget.CalendarMonthIn(nil)), 1_500_000,
+		budget.Window{Kind: budget.Rolling, Dur: 30 * 24 * time.Hour}) // over the key's 1M cap
 
 	h := NewChatHandlerFull(testRouter(), nil, gov)
 	req := httptest.NewRequest("POST", "/v1/chat/completions",

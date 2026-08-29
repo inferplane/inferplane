@@ -363,3 +363,44 @@ func TestE2ERegionLock(t *testing.T) {
 		t.Fatal("config-declared team should reach eu-provider once a DB record overrides its region policy")
 	}
 }
+
+// TestE2ETeamRecordDailyBudgetEnforcesDynamically is the day-window analogue of
+// TestE2ETeamRecordEnforcesDynamicallyNoRestart, and it exists to pin the ONE
+// link nothing else covers: cmd/mayu's lookupBase mapping keystore's
+// budget_usd_micros_per_day column onto governance.TeamPolicy.
+// BudgetMicrosPerDay. Drop that line and the admin API still accepts the value,
+// the keystore still stores it, /admin/teams still shows it — and it is never
+// enforced. The record sets ONLY the daily cap, so a 402 here can come from
+// nowhere else.
+func TestE2ETeamRecordDailyBudgetEnforcesDynamically(t *testing.T) {
+	up := newAnthropicUpstream(t)
+	dataURL, adminURL, _ := bootGateway(t, teamsAPIConfig(up.srv.URL))
+
+	_, key := createKey(t, adminURL, "dyn-team", []string{"claude-test"})
+
+	putResp := putTeam(t, adminURL, "dyn-team", `{"budget_usd_micros_per_day":1,"budget_on_exceeded":"block"}`)
+	body, _ := io.ReadAll(putResp.Body)
+	putResp.Body.Close()
+	if putResp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT /admin/teams/dyn-team: status %d: %s", putResp.StatusCode, body)
+	}
+
+	// Same §5.3 shape as the monthly test: pre-check reads only ALREADY-spent,
+	// so request 1 is allowed and settles past the 1 µUSD daily cap.
+	r1 := postMessages(t, dataURL, key, "claude-test")
+	io.Copy(io.Discard, r1.Body)
+	r1.Body.Close()
+	if r1.StatusCode != http.StatusOK {
+		t.Fatalf("first request under new record: status %d, want 200 (daily budget not yet spent)", r1.StatusCode)
+	}
+
+	r2 := postMessages(t, dataURL, key, "claude-test")
+	got, _ := io.ReadAll(r2.Body)
+	r2.Body.Close()
+	if r2.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("request after the DAILY budget was exhausted: status %d: %s, want 402", r2.StatusCode, got)
+	}
+	if !strings.Contains(string(got), "daily budget exceeded") {
+		t.Fatalf("402 must name the DAILY window (the record set no monthly cap): %s", got)
+	}
+}

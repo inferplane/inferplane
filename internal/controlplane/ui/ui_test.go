@@ -98,6 +98,14 @@ func TestServedBytesDiscipline(t *testing.T) {
 				}
 			}
 		}
+		// The budget form does not render period, so saveCard's builder must
+		// carry the fetched rule's period through explicitly — otherwise a
+		// console round trip silently downgrades a CalendarDay cap to a
+		// CalendarMonth one. A text pin is the only guard a Go test can give
+		// browser-side code.
+		if path == "/app.js" && !strings.Contains(body, "prev.period") {
+			t.Fatalf("%s no longer carries prev.period through a budget save — a console round trip must not silently turn a CalendarDay cap into a CalendarMonth one", path)
+		}
 	}
 }
 

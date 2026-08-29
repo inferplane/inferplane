@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -186,5 +187,244 @@ spec:
 	r2.Body.Close()
 	if r2.StatusCode != http.StatusPaymentRequired {
 		t.Fatalf("second request: status %d, want 402 (soft policy budget must not downgrade base block to warn)", r2.StatusCode)
+	}
+}
+
+// TestE2EPolicyFileModelAccessPreservesConfigDailyBudget is the day-window twin
+// of TestE2EPolicyFileModelAccessOverlaysConfigBudget, and it guards the same
+// class of bug that test was written for: a policy file that speaks about ONE
+// dimension must not silently unlimit the others.
+//
+// A modelAccess-only policy declares no budget rule in either window, so
+// cmd/mayu's overlay seeds the daily cap from the base layer and leaves it
+// untouched. Nothing else covers that passthrough — the overlay closure
+// only runs when a policy source is configured, so every other daily-budget
+// test in this package returns before reaching it.
+func TestE2EPolicyFileModelAccessPreservesConfigDailyBudget(t *testing.T) {
+	up := newAnthropicUpstream(t)
+	dataURL, adminURL, _ := bootGateway(t, func(cfg map[string]any, dir string) {
+		teamsAPIConfig(up.srv.URL)(cfg, dir)
+		// A config team whose ONLY money cap is the DAILY one, so a 402 can
+		// come from nowhere else.
+		cfg["teams"] = map[string]any{
+			"pol-team": map[string]any{
+				"allowed_models": []any{"*"},
+				"budget":         map[string]any{"usd_per_day": 0.000001, "on_exceeded": "block"},
+			},
+		}
+		polDir := filepath.Join(dir, "policies")
+		if err := os.MkdirAll(polDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(polDir, "team.yaml"), []byte(policyFileYAML), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg["policies"] = []any{polDir}
+	})
+
+	_, key := createKey(t, adminURL, "pol-team", []string{"*"})
+
+	r1 := postMessages(t, dataURL, key, "claude-test")
+	io.Copy(io.Discard, r1.Body)
+	r1.Body.Close()
+	if r1.StatusCode != http.StatusOK {
+		t.Fatalf("first allowed request: status %d, want 200", r1.StatusCode)
+	}
+	r2 := postMessages(t, dataURL, key, "claude-test")
+	got, _ := io.ReadAll(r2.Body)
+	r2.Body.Close()
+	if r2.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("request after the daily budget was exhausted: status %d: %s, want 402 (the config DAILY budget must survive a modelAccess-only policy overlay)", r2.StatusCode, got)
+	}
+	if !strings.Contains(string(got), "daily budget exceeded") {
+		t.Fatalf("402 must name the DAILY window: %s", got)
+	}
+}
+
+// TestE2EPolicyFileBudgetRuleKeepsConfigDailyBudget reaches the ONE line that
+// TestE2EPolicyFileModelAccessPreservesConfigDailyBudget cannot: the overlay
+// closure's PolicyFromLimits literal. A modelAccess-only policy makes
+// TeamLimits report no entry, so that closure returns the base early and never
+// builds a new TeamPolicy. A policy that DOES declare a budget rule takes the
+// other branch — and there the daily cap has to be copied across explicitly.
+//
+// The scenario is a real one for anyone on the local policy channel today: a
+// GovernancePolicy budget rule with no period caps the MONTH (an omitted
+// period means CalendarMonth), while the operator's config file caps the DAY.
+// Both must bind: a month-only policy must leave the config's daily cap in
+// force — the fall-through the per-window overlay must not break. The policy's
+// monthly cap here is roomy, so the 402 can only be the daily one.
+func TestE2EPolicyFileBudgetRuleKeepsConfigDailyBudget(t *testing.T) {
+	up := newAnthropicUpstream(t)
+	dataURL, adminURL, _ := bootGateway(t, func(cfg map[string]any, dir string) {
+		teamsAPIConfig(up.srv.URL)(cfg, dir)
+		cfg["teams"] = map[string]any{
+			"pol-team": map[string]any{
+				"allowed_models": []any{"*"},
+				"budget":         map[string]any{"usd_per_day": 0.000001, "on_exceeded": "block"},
+			},
+		}
+		polDir := filepath.Join(dir, "policies")
+		if err := os.MkdirAll(polDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// 100_000 milliUSD = $100/month — far above anything this test spends.
+		pol := `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: pol-team-monthly }
+spec:
+  subject: { team: pol-team }
+  rules:
+  - name: roomy-monthly
+    failurePolicy: FailClosed
+    budget: { limitMilliUSD: 100000, hardCap: true }
+`
+		if err := os.WriteFile(filepath.Join(polDir, "monthly.yaml"), []byte(pol), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg["policies"] = []any{polDir}
+	})
+
+	_, key := createKey(t, adminURL, "pol-team", []string{"*"})
+
+	r1 := postMessages(t, dataURL, key, "claude-test")
+	io.Copy(io.Discard, r1.Body)
+	r1.Body.Close()
+	if r1.StatusCode != http.StatusOK {
+		t.Fatalf("first request: status %d, want 200", r1.StatusCode)
+	}
+	r2 := postMessages(t, dataURL, key, "claude-test")
+	got, _ := io.ReadAll(r2.Body)
+	r2.Body.Close()
+	if r2.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("second request: status %d: %s, want 402 (the config DAILY cap must survive a policy BUDGET rule)", r2.StatusCode, got)
+	}
+	if !strings.Contains(string(got), "daily budget exceeded") {
+		t.Fatalf("402 must be the DAILY window, not the roomy policy month cap: %s", got)
+	}
+}
+
+// TestE2EPolicyFileDayBudgetRuleBindsDailyWindow proves the policy channel now
+// binds the DAY window: a period: CalendarDay budget rule with a tiny limit
+// folds into TeamLimits.BudgetMicrosPerDay and is enforced by the overlay's
+// day twin. The same document carries a ROOMY monthly rule, so the 402 can
+// only be the daily one — the same isolation trick as
+// TestE2EPolicyFileBudgetRuleKeepsConfigDailyBudget, mirrored.
+func TestE2EPolicyFileDayBudgetRuleBindsDailyWindow(t *testing.T) {
+	up := newAnthropicUpstream(t)
+	dataURL, adminURL, _ := bootGateway(t, func(cfg map[string]any, dir string) {
+		teamsAPIConfig(up.srv.URL)(cfg, dir)
+		// Config team with NO money cap of its own: every cap in play comes
+		// from the policy document.
+		cfg["teams"] = map[string]any{
+			"pol-team": map[string]any{
+				"allowed_models": []any{"*"},
+			},
+		}
+		polDir := filepath.Join(dir, "policies")
+		if err := os.MkdirAll(polDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// 1 milliUSD/day is exhausted by one settled request; 100_000 milliUSD
+		// = $100/month is far above anything this test spends.
+		pol := `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: pol-team-day }
+spec:
+  subject: { team: pol-team }
+  rules:
+  - name: tiny-daily
+    failurePolicy: FailClosed
+    budget:
+      period: CalendarDay
+      limitMilliUSD: 1
+      hardCap: true
+  - name: roomy-monthly
+    failurePolicy: FailClosed
+    budget: { limitMilliUSD: 100000, hardCap: true }
+`
+		if err := os.WriteFile(filepath.Join(polDir, "day.yaml"), []byte(pol), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg["policies"] = []any{polDir}
+	})
+
+	_, key := createKey(t, adminURL, "pol-team", []string{"*"})
+
+	r1 := postMessages(t, dataURL, key, "claude-test")
+	io.Copy(io.Discard, r1.Body)
+	r1.Body.Close()
+	if r1.StatusCode != http.StatusOK {
+		t.Fatalf("first request: status %d, want 200", r1.StatusCode)
+	}
+	r2 := postMessages(t, dataURL, key, "claude-test")
+	got, _ := io.ReadAll(r2.Body)
+	r2.Body.Close()
+	if r2.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("second request: status %d: %s, want 402 (a period: CalendarDay policy rule must bind the DAY window)", r2.StatusCode, got)
+	}
+	if !strings.Contains(string(got), "daily budget exceeded") {
+		t.Fatalf("402 must be the DAILY window, not the roomy policy month cap: %s", got)
+	}
+}
+
+// TestE2EPolicyFileSoftDayBudgetKeepsBaseBlock is the day-window twin of
+// TestE2EPolicyFileSoftBudgetKeepsBaseBlock: a SOFT policy day rule layered
+// on a config team whose DAILY budget blocks must not loosen enforcement to
+// warn — block wins on tie, resolved per window. This pins the overlay's
+// `tl.BudgetDayHard || base.BudgetDayExceeded == "block"` line, the kind of
+// one-word inversion that would silently turn a hard cap into a warning.
+func TestE2EPolicyFileSoftDayBudgetKeepsBaseBlock(t *testing.T) {
+	up := newAnthropicUpstream(t)
+	dataURL, adminURL, _ := bootGateway(t, func(cfg map[string]any, dir string) {
+		teamsAPIConfig(up.srv.URL)(cfg, dir)
+		// Config: roomy DAILY budget, but BLOCK on exceed.
+		cfg["teams"] = map[string]any{
+			"pol-team": map[string]any{
+				"allowed_models": []any{"*"},
+				"budget":         map[string]any{"usd_per_day": 1000.0, "on_exceeded": "block"},
+			},
+		}
+		polDir := filepath.Join(dir, "policies")
+		if err := os.MkdirAll(polDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// Policy: tighter DAY budget, SOFT (no hardCap) — must inherit block.
+		pol := `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: pol-team-soft-day }
+spec:
+  subject: { team: pol-team }
+  rules:
+  - name: soft-day-cap
+    failurePolicy: FailOpen
+    budget:
+      period: CalendarDay
+      limitMilliUSD: 1
+`
+		if err := os.WriteFile(filepath.Join(polDir, "day.yaml"), []byte(pol), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg["policies"] = []any{polDir}
+	})
+
+	_, key := createKey(t, adminURL, "pol-team", []string{"*"})
+
+	r1 := postMessages(t, dataURL, key, "claude-test")
+	io.Copy(io.Discard, r1.Body)
+	r1.Body.Close()
+	if r1.StatusCode != http.StatusOK {
+		t.Fatalf("first request: status %d, want 200", r1.StatusCode)
+	}
+	// Past the 1 milliUSD file limit now. warn would admit (200); the base's
+	// block must win → 402.
+	r2 := postMessages(t, dataURL, key, "claude-test")
+	got, _ := io.ReadAll(r2.Body)
+	r2.Body.Close()
+	if r2.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("second request: status %d: %s, want 402 (a soft policy DAY rule must not downgrade the base's block to warn)", r2.StatusCode, got)
+	}
+	if !strings.Contains(string(got), "daily budget exceeded") {
+		t.Fatalf("402 must be the DAILY window: %s", got)
 	}
 }

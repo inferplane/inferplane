@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -95,4 +96,53 @@ func TestIncUsageWindowDropped(t *testing.T) {
 	}
 	var nilM *Metrics
 	nilM.IncUsageWindowDropped() // nil-safe like every other hook
+}
+
+func TestSetBudgetStoreRejections(t *testing.T) {
+	m := New()
+	// The caller passes the store's own cumulative total, not a delta; the
+	// Counter's exposed value must still land on that total after each call.
+	m.SetBudgetStoreRejections(3)
+	if v := testutil.ToFloat64(m.budgetRejected); v != 3 {
+		t.Fatalf("inferplane_budget_store_rejected_total = %v, want 3", v)
+	}
+	m.SetBudgetStoreRejections(7)
+	if v := testutil.ToFloat64(m.budgetRejected); v != 7 {
+		t.Fatalf("inferplane_budget_store_rejected_total = %v, want 7", v)
+	}
+	// A value at or below what was already seen (a stale/racing read of the
+	// store's total) must not move the Counter backward — Prometheus counters
+	// cannot decrease.
+	m.SetBudgetStoreRejections(7)
+	m.SetBudgetStoreRejections(2)
+	if v := testutil.ToFloat64(m.budgetRejected); v != 7 {
+		t.Fatalf("inferplane_budget_store_rejected_total = %v after a non-increasing report, want unchanged 7", v)
+	}
+	var nilM *Metrics
+	nilM.SetBudgetStoreRejections(1) // nil-safe like every other hook
+}
+
+// TestSetBudgetStoreRejectionsConcurrentCallsDoNotDoubleCount pins the CAS
+// loop's correctness argument: N goroutines each reporting the same
+// increasing sequence of snapshots (as concurrent Settle calls racing to read
+// budget.Memory.Rejections() would) must add up to exactly the final value,
+// never more (double-counted) and never less (a dropped increment).
+func TestSetBudgetStoreRejectionsConcurrentCallsDoNotDoubleCount(t *testing.T) {
+	m := New()
+	const goroutines = 8
+	const finalValue = 500
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for n := int64(1); n <= finalValue; n++ {
+				m.SetBudgetStoreRejections(n)
+			}
+		}()
+	}
+	wg.Wait()
+	if v := testutil.ToFloat64(m.budgetRejected); v != finalValue {
+		t.Fatalf("inferplane_budget_store_rejected_total = %v, want exactly %d (no double-count, no dropped increment)", v, finalValue)
+	}
 }

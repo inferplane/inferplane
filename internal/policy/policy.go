@@ -119,6 +119,11 @@ type Budget struct {
 	LeaseGrantMicroUSD int64
 	LeaseRenewInterval time.Duration
 	AdminContact       string
+	// Period is the calendar window this rule's limit applies to. NEVER empty
+	// after conversion: an empty wire value is normalized to
+	// v1alpha1.PeriodCalendarMonth here, so no consumer has to re-implement
+	// the default (and none may treat "" as a third window).
+	Period v1alpha1.BudgetPeriod
 }
 
 // ModelAccess is the internal form of a model allow-list rule. Entries match
@@ -182,6 +187,8 @@ type Lease struct {
 //   - the subject must select a team and/or a user;
 //   - failurePolicy is required per rule — no silent defaults;
 //   - a hard-cap budget rule must be FailClosed (soft budgets fail open);
+//   - a budget rule's period is CalendarDay or CalendarMonth (empty defaults to
+//     CalendarMonth, the window every rule enforced before the field existed);
 //   - lease grant / renew interval take the ADR-032 defaults when unset,
 //     but an explicit sub-floor renew interval is rejected;
 //   - a routing rule sets exactly one of onAffinityConflict (affinity vs
@@ -294,16 +301,31 @@ const maxWireMilliUSD = math.MaxInt64 / microPerMilli
 func budgetFromV1Alpha1(wr v1alpha1.Rule, reject func(rule, reason string) *UnsupportedError) (*Budget, error) {
 	wb := wr.Budget
 	if wb.Unlimited {
-		if wb.LimitMilliUSD != 0 || wb.HardCap || wb.Lease != (v1alpha1.LeaseSpec{}) || wb.AdminContact != "" {
-			return nil, reject(wr.Name, "budget.unlimited must not be combined with limitMilliUSD, hardCap, lease, or adminContact")
+		if wb.LimitMilliUSD != 0 || wb.HardCap || wb.Lease != (v1alpha1.LeaseSpec{}) || wb.AdminContact != "" || wb.Period != "" {
+			return nil, reject(wr.Name, "budget.unlimited must not be combined with limitMilliUSD, hardCap, lease, adminContact, or period")
 		}
-		return &Budget{Unlimited: true}, nil
+		// Period is normalized even here. An unlimited rule has no window to
+		// speak of, but leaving it "" would make the struct's "never empty
+		// after conversion" contract false and push a default into every
+		// consumer; the value is simply never read for an unlimited rule.
+		return &Budget{Unlimited: true, Period: v1alpha1.PeriodCalendarMonth}, nil
 	}
 	if wb.LimitMilliUSD <= 0 || wb.LimitMilliUSD > maxWireMilliUSD {
 		return nil, reject(wr.Name, fmt.Sprintf("budget.limitMilliUSD must be in (0, %d] (1000 = $1) (or set unlimited: true to declare no cap deliberately)", int64(maxWireMilliUSD)))
 	}
 	if wb.HardCap && wr.FailurePolicy != v1alpha1.FailClosed {
 		return nil, reject(wr.Name, "a hard-cap budget rule must be FailClosed: fail-open on lease expiry voids the cap")
+	}
+
+	period := wb.Period
+	switch period {
+	case v1alpha1.PeriodCalendarDay, v1alpha1.PeriodCalendarMonth:
+	case "":
+		// Empty is the pre-existing meaning, not a missing decision: every
+		// budget rule written before this field existed capped the month.
+		period = v1alpha1.PeriodCalendarMonth
+	default:
+		return nil, reject(wr.Name, fmt.Sprintf("unknown budget.period %q (supported: %q, %q; empty means %q)", period, v1alpha1.PeriodCalendarDay, v1alpha1.PeriodCalendarMonth, v1alpha1.PeriodCalendarMonth))
 	}
 
 	grantMilli := wb.Lease.GrantMilliUSD
@@ -336,6 +358,7 @@ func budgetFromV1Alpha1(wr v1alpha1.Rule, reject func(rule, reason string) *Unsu
 		LeaseGrantMicroUSD: grantMilli * microPerMilli,
 		LeaseRenewInterval: iv,
 		AdminContact:       wb.AdminContact,
+		Period:             period,
 	}, nil
 }
 

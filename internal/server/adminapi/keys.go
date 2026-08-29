@@ -72,12 +72,13 @@ func (h *KeysHandler) adminEvent(event string, id principal.AdminIdentity, team,
 // the request hot path is a separate follow-up — these fields are stored and
 // surfaced only, for now.
 type keyOptionsBody struct {
-	BudgetUSDMicros int64             `json:"budget_usd_micros,omitempty"`
-	TPM             int64             `json:"tpm,omitempty"`
-	RPM             int64             `json:"rpm,omitempty"`
-	ExpiresAt       string            `json:"expires_at,omitempty"`
-	Owner           string            `json:"owner,omitempty"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
+	BudgetUSDMicros       int64             `json:"budget_usd_micros,omitempty"`
+	BudgetUSDMicrosPerDay int64             `json:"budget_usd_micros_per_day,omitempty"`
+	TPM                   int64             `json:"tpm,omitempty"`
+	RPM                   int64             `json:"rpm,omitempty"`
+	ExpiresAt             string            `json:"expires_at,omitempty"`
+	Owner                 string            `json:"owner,omitempty"`
+	Metadata              map[string]string `json:"metadata,omitempty"`
 }
 
 // maxMetadataBytes bounds the serialized size of KeyOptions.Metadata, and
@@ -90,7 +91,7 @@ const (
 )
 
 func (b keyOptionsBody) toKeyOptions() (keystore.KeyOptions, error) {
-	if b.BudgetUSDMicros < 0 || b.TPM < 0 || b.RPM < 0 {
+	if b.BudgetUSDMicros < 0 || b.BudgetUSDMicrosPerDay < 0 || b.TPM < 0 || b.RPM < 0 {
 		return keystore.KeyOptions{}, fmt.Errorf("budget/tpm/rpm must be non-negative")
 	}
 	if len(b.Owner) > maxOwnerBytes {
@@ -101,7 +102,7 @@ func (b keyOptionsBody) toKeyOptions() (keystore.KeyOptions, error) {
 			return keystore.KeyOptions{}, fmt.Errorf("metadata exceeds %d bytes serialized", maxMetadataBytes)
 		}
 	}
-	opts := keystore.KeyOptions{BudgetUSDMicros: b.BudgetUSDMicros, TPM: b.TPM, RPM: b.RPM, Owner: b.Owner, Metadata: b.Metadata}
+	opts := keystore.KeyOptions{BudgetUSDMicros: b.BudgetUSDMicros, BudgetUSDMicrosPerDay: b.BudgetUSDMicrosPerDay, TPM: b.TPM, RPM: b.RPM, Owner: b.Owner, Metadata: b.Metadata}
 	if b.ExpiresAt != "" {
 		// RFC3339Nano parses both plain RFC3339 and sub-second timestamps.
 		t, err := time.Parse(time.RFC3339Nano, b.ExpiresAt)
@@ -120,6 +121,9 @@ func keyView(p keystore.Principal) map[string]any {
 	v := map[string]any{"key_id": p.KeyID, "team": p.Team, "allowed_models": p.AllowedModels}
 	if p.BudgetUSDMicros != 0 {
 		v["budget_usd_micros"] = p.BudgetUSDMicros
+	}
+	if p.BudgetUSDMicrosPerDay != 0 {
+		v["budget_usd_micros_per_day"] = p.BudgetUSDMicrosPerDay
 	}
 	if p.TPM != 0 {
 		v["tpm"] = p.TPM

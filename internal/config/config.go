@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -256,10 +257,15 @@ type QuotaConfig struct {
 	OnExceeded     string `json:"on_exceeded"` // block|warn
 }
 
-// BudgetConfig is a team's monthly spend ceiling. USDPerMonth is a human USD
-// float in config, converted to µUSD at use.
+// BudgetConfig is a team's spend ceiling. USDPerMonth/USDPerDay are human USD
+// floats in config, converted to µUSD at use; each is 0 = not limited on that
+// dimension, and both can be set at once (a team capped at $50/day AND
+// $1000/month). OnExceeded (block|warn) governs BOTH windows — there is
+// deliberately one knob, not two, because the policy-document channel that can
+// express "day soft, month hard" is a later phase.
 type BudgetConfig struct {
 	USDPerMonth float64 `json:"usd_per_month"` // converted to µUSD at use
+	USDPerDay   float64 `json:"usd_per_day"`   // converted to µUSD at use
 	OnExceeded  string  `json:"on_exceeded"`
 }
 
@@ -280,6 +286,7 @@ type VirtualKeyConfig struct {
 	RPM               int64             `json:"rpm,omitempty"`
 	TPM               int64             `json:"tpm,omitempty"`
 	BudgetUSDPerMonth float64           `json:"budget_usd_per_month,omitempty"`
+	BudgetUSDPerDay   float64           `json:"budget_usd_per_day,omitempty"`
 	Owner             string            `json:"owner,omitempty"`
 	Metadata          map[string]string `json:"metadata,omitempty"`
 	Key               string            `json:"-"`
@@ -293,6 +300,11 @@ type RateConfig struct {
 	CacheReadPerMTok    float64 `json:"cache_read_per_mtok"`
 	CacheWrite5mPerMTok float64 `json:"cache_write_5m_per_mtok"`
 	CacheWrite1hPerMTok float64 `json:"cache_write_1h_per_mtok"`
+	// Free declares a genuinely zero-cost model. It is the ONLY way to write a
+	// 0/0 override: without it, both rates being zero is a load error, because
+	// 0 is what an unfinished placeholder looks like and an unfinished
+	// placeholder must not bill as "free" (see validatePricing).
+	Free bool `json:"free,omitempty"`
 }
 
 // PricingConfig configures cost computation: on_missing policy (allow|block)
@@ -306,16 +318,80 @@ type PricingConfig struct {
 	Overrides map[string]map[string]RateConfig `json:"overrides"`  // provider → model → rate
 }
 
-// validatePricing rejects an unrecognized on_missing value. Before this, a typo
-// like "blcok" — or "BLOCK" — silently fell back to allow, so an operator who
-// believed unpriced traffic was refused was in fact serving it free (ADR-030).
+// validatePricing rejects an unrecognized on_missing value, and a rate override
+// that declares no price at all.
+//
+// The on_missing check: before it, a typo like "blcok" — or "BLOCK" — silently
+// fell back to allow, so an operator who believed unpriced traffic was refused
+// was in fact serving it free (ADR-030).
+//
+// The 0/0 check closes the same class of hole one level down. An override of
+// `{"input_per_mtok": 0, "output_per_mtok": 0}` is the natural way to write a
+// fill-in-the-blank placeholder, and it used to be accepted as a REAL rate: it
+// satisfied HasRate, passed `mayu pricing check`, booted under
+// `on_missing: "block"`, passed the runtime guard, and settled at 0 uUSD with
+// missing=FALSE — which is precisely how the audit record encodes a genuinely
+// free model. So an unfinished placeholder was indistinguishable from a
+// deliberate zero. 0 means unpriced; free needs `"free": true`.
+//
+// A LOAD ERROR rather than a warning, matching the two nearest precedents (an
+// unrecognized on_missing value, and an unknown budget_timezone): a money
+// control that is silently wrong is worse than a refused boot.
+//
+// Only BOTH rates being zero is refused. A single-sided zero is unusual but not
+// provably wrong — a provider could bill output only — so it loads.
 func validatePricing(p PricingConfig) error {
 	switch p.OnMissing {
 	case "", "allow", "block":
-		return nil
 	default:
 		return fmt.Errorf("config: pricing.on_missing must be \"allow\" or \"block\", got %q", p.OnMissing)
 	}
+	// Sorted so a config with several offenders always names the same one
+	// first: a load error that moves between boots is not reproducible.
+	for _, provider := range sortedKeys(p.Overrides) {
+		models := p.Overrides[provider]
+		for _, model := range sortedKeys(models) {
+			rc := models[model]
+			if rc.InputPerMTok == 0 && rc.OutputPerMTok == 0 && !rc.Free {
+				return fmt.Errorf("config: pricing.overrides[%q][%q]: 0 means unpriced, not free; fill in real rates or set \"free\": true", provider, model)
+			}
+		}
+	}
+	return nil
+}
+
+// sortedKeys returns m's keys in ascending order, for deterministic validation
+// error messages over Go's randomized map iteration.
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// validateBudgetTimezone resolves budget_timezone into cfg.BudgetLoc, failing
+// the load on an unknown zone. "Local" is refused on purpose: it resolves to
+// whatever the host's TZ happens to be, so the same config would put the daily
+// money boundary at a different instant in a developer's shell than in a
+// distroless container (where TZ is unset and Local is UTC) — a silent,
+// environment-dependent money control. Name the zone explicitly instead.
+func validateBudgetTimezone(cfg *Config) error {
+	name := strings.TrimSpace(cfg.BudgetTimezone)
+	if name == "" || name == "UTC" {
+		cfg.BudgetLoc = time.UTC
+		return nil
+	}
+	if name == "Local" {
+		return fmt.Errorf("config: budget_timezone must be an explicit IANA zone name (e.g. \"Asia/Seoul\"), not \"Local\" — Local depends on the host TZ and would move the daily budget boundary between environments")
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return fmt.Errorf("config: budget_timezone %q: %w", name, err)
+	}
+	cfg.BudgetLoc = loc
+	return nil
 }
 
 // PluginConfig enables a request-transform filter plugin (the spec's filter
@@ -379,6 +455,19 @@ type Config struct {
 	// policies, budget leases, and rejection reporting flow over one
 	// heartbeat. Mutually exclusive with Policies.
 	ControlPlane *ControlPlaneConfig `json:"control_plane,omitempty"`
+	// BudgetTimezone is the IANA zone name the CALENDAR-DAY budget window
+	// anchors its midnight to (e.g. "Asia/Seoul"). Empty = "UTC", which is
+	// byte-for-byte the behavior every budget window had before this key
+	// existed. Validated with time.LoadLocation at load: an unknown zone is a
+	// LOAD ERROR, not a warning, because a money control silently anchored to
+	// the wrong midnight is worse than a refused boot (same logic as
+	// pricing.on_missing's typo rejection). The binaries import
+	// _ "time/tzdata", so a named zone resolves inside distroless/static too.
+	BudgetTimezone string `json:"budget_timezone,omitempty"`
+	// BudgetLoc is the RESOLVED location, filled at load. Tagged "-" so a
+	// config file can never set it directly — same posture as
+	// ProviderConfig.APIKey and AdminAuth.Tokens.
+	BudgetLoc *time.Location `json:"-"`
 }
 
 // ControlPlaneConfig is the data plane's inferplaned connection (ADR-034).
@@ -410,6 +499,16 @@ type ControlPlaneConfig struct {
 // (default: yes).
 func (c *Config) FallbackFamilyEnabled() bool {
 	return c.ModelFallbackFamily == nil || *c.ModelFallbackFamily
+}
+
+// BudgetLocation returns the resolved budget timezone, UTC when unset — the
+// same nil-means-UTC default budget.Window carries, so a config that never
+// mentions budget_timezone produces the pre-existing behavior exactly.
+func (c *Config) BudgetLocation() *time.Location {
+	if c.BudgetLoc == nil {
+		return time.UTC
+	}
+	return c.BudgetLoc
 }
 
 // BudgetAlertsConfig enables webhook budget alerts (D5b, ADR-017): a team's
@@ -557,6 +656,9 @@ func LoadRaw(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := validatePricing(cfg.Pricing); err != nil {
+		return nil, err
+	}
+	if err := validateBudgetTimezone(&cfg); err != nil {
 		return nil, err
 	}
 	if err := validateOTel(cfg.OTel); err != nil {
@@ -715,6 +817,9 @@ func validateVirtualKeys(vks []VirtualKeyConfig) error {
 		}
 		if vks[i].BudgetUSDPerMonth < 0 {
 			return fmt.Errorf("config: virtual_keys[%d].budget_usd_per_month must be >= 0", i)
+		}
+		if vks[i].BudgetUSDPerDay < 0 {
+			return fmt.Errorf("config: virtual_keys[%d].budget_usd_per_day must be >= 0", i)
 		}
 		if err := ValidateSecretRef(vks[i].KeyRef); err != nil {
 			return fmt.Errorf("config: virtual_keys[%d].key_ref: %w", i, err)

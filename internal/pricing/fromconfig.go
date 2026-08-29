@@ -11,6 +11,35 @@ type ConfigRate struct {
 	CacheReadPerMTok    float64
 	CacheWrite5mPerMTok float64
 	CacheWrite1hPerMTok float64
+	// Free declares a genuinely zero-cost model, and is the ONLY way to get a
+	// 0-cost row into the table (see Unpriced).
+	Free bool
+}
+
+// Unpriced reports whether this override declares no price at all: both
+// per-token rates zero with no explicit Free opt-in. Such a row is NOT put in
+// the table, so HasRate stays false and the whole unpriced machinery engages —
+// UnpricedTargets lists it, `mayu pricing check` exits 1, `on_missing: "block"`
+// refuses to boot, the runtime guard 402s, and settlement records
+// missing=true.
+//
+// Before this, `{"input_per_mtok": 0, "output_per_mtok": 0}` — the natural way
+// to write a fill-in-the-blank placeholder, and exactly what
+// examples/config.bedrock-glm.json shipped — was inserted as a real rate. It
+// passed every one of those gates and settled at 0 uUSD with missing=false,
+// which is the documented encoding for a genuinely FREE model. So an
+// unfinished placeholder was indistinguishable in the audit record from a
+// deliberate zero: the one thing ADR-030 set out to make impossible.
+//
+// Only BOTH rates being zero counts. A single-sided zero is unusual but not
+// provably wrong (a provider could bill output only), so it is left alone.
+//
+// internal/config's load-time validation rejects the same shape with an
+// actionable message; this is defense in depth for the paths that never see
+// the file loader — BuildState is also reached by the ADR-008 UI-write overlay
+// and by every hot reload.
+func (cr ConfigRate) Unpriced() bool {
+	return cr.InputPerMTok == 0 && cr.OutputPerMTok == 0 && !cr.Free
 }
 
 // Cache rates are fixed multiples of the input rate on every provider that
@@ -33,7 +62,8 @@ const (
 // FromConfig builds a Table starting from Bundled() rates and applying the
 // per-(provider,model) overrides, converting USD-per-MTok floats to µUSD-per-
 // MTok int64 via round-half-away-from-zero. Unset cache rates are derived from
-// the input rate (see above). onMissing "block" selects OnMissingBlock;
+// the input rate (see above). An Unpriced() override is skipped entirely rather
+// than inserted as a 0-cost rate. onMissing "block" selects OnMissingBlock;
 // anything else selects OnMissingAllow.
 func FromConfig(onMissing string, overrides map[string]map[string]ConfigRate) *Table {
 	return FromConfigVersioned(onMissing, "", overrides)
@@ -44,6 +74,9 @@ func FromConfigVersioned(onMissing, version string, overrides map[string]map[str
 	rates := Bundled()
 	for provider, models := range overrides {
 		for model, cr := range models {
+			if cr.Unpriced() {
+				continue
+			}
 			rates[Key{Provider: provider, Model: model}] = Rate{
 				InputPerMTok:        usdToMicros(cr.InputPerMTok),
 				OutputPerMTok:       usdToMicros(cr.OutputPerMTok),

@@ -93,6 +93,10 @@ policies: {}
 #     spec:
 #       subject: { team: demo }
 #       rules:
+#       - name: daily-soft-cap
+#         failurePolicy: FailOpen
+#         budget: { period: CalendarDay, limitMilliUSD: 5000 }   # $5 / day
 #       - name: monthly-hard-cap
 #         failurePolicy: FailClosed
+#         # period omitted = CalendarMonth (the default)
 #         budget: { limitMilliUSD: 50000, hardCap: true }   # 1000 = $1

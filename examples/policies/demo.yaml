@@ -10,9 +10,16 @@ spec:
   subject:
     team: demo            # organizational unit (department)
   rules:
+  - name: daily-soft-cap
+    failurePolicy: FailOpen            # soft budgets fail open
+    budget:
+      period: CalendarDay              # resets at midnight in budget_timezone
+      limitMilliUSD: 5000              # $5 / day
   - name: monthly-hard-cap
     failurePolicy: FailClosed          # hard caps must be FailClosed
     budget:
+      # period omitted → CalendarMonth: documents written before `period`
+      # existed keep their exact meaning
       limitMilliUSD: 50000             # $50 / month
       hardCap: true
       # lease omitted → defaults: grant 0.1% of limit, renew every 10s

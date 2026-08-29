@@ -484,6 +484,10 @@ func pricingFromConfig(cfg *config.Config) *pricing.Table {
 				CacheReadPerMTok:    rc.CacheReadPerMTok,
 				CacheWrite5mPerMTok: rc.CacheWrite5mPerMTok,
 				CacheWrite1hPerMTok: rc.CacheWrite1hPerMTok,
+				// Free must ride along or every free:true override silently
+				// becomes an Unpriced() row here — the exact inversion of the
+				// bug this field exists to fix.
+				Free: rc.Free,
 			}
 		}
 	}

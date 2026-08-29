@@ -28,10 +28,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RatePerMin:           p.RPM,
 		TokensPerMinute:      p.TPM,
 		BudgetMicrosPerMonth: p.BudgetUSDMicros,
+		BudgetMicrosPerDay:   p.BudgetUSDMicrosPerDay,
 	}
 	if h.gov == nil {
 		_ = json.NewEncoder(w).Encode(governance.UsageStatus{Team: p.Team})
 		return
 	}
-	_ = json.NewEncoder(w).Encode(h.gov.UsageOf(p.Team, p.KeyID, kp))
+	_ = json.NewEncoder(w).Encode(h.gov.UsageOf(governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.Owner}, kp))
 }

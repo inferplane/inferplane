@@ -32,11 +32,14 @@ import (
 func pricingCmd(args []string) int {
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: mayu pricing check --config <path>")
+		fmt.Fprintln(os.Stderr, "       mayu pricing sync --config <path> [--out <path>]")
 		return 2
 	}
 	switch args[0] {
 	case "check":
 		return pricingCheck(args[1:])
+	case "sync":
+		return pricingSync(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown pricing subcommand %q\n", args[0])
 		return 2
