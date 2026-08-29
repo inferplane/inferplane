@@ -6,7 +6,11 @@
 // the settlement source of truth is the µUSD budget store, not this gauge.
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"sync/atomic"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 type Metrics struct {
 	reg *prometheus.Registry
@@ -26,8 +30,15 @@ type Metrics struct {
 	piiMask         *prometheus.CounterVec   // inferplane_pii_mask_redactions_total
 	anchorFail      prometheus.Counter       // inferplane_audit_anchor_failures_total
 	usageDropped    prometheus.Counter       // inferplane_usage_windows_dropped_total
-	budgetRejected  prometheus.Gauge         // inferplane_budget_store_rejected_total
-	substitution    *prometheus.CounterVec   // inferplane_model_substitution_total (ADR-041)
+	// budgetRejected is a Counter, matching the _total naming convention every
+	// other cumulative metric in this file follows (anchorFail, usageDropped):
+	// rate() works on it, unlike on a Gauge with the same suffix. The caller
+	// (governance.Settle) only has the budget store's own cumulative total to
+	// report, not a delta, so SetBudgetStoreRejections tracks the last value it
+	// saw (budgetRejectedSeen) and Adds only the increase.
+	budgetRejected     prometheus.Counter     // inferplane_budget_store_rejected_total
+	budgetRejectedSeen int64                  // last value passed to SetBudgetStoreRejections; atomic
+	substitution       *prometheus.CounterVec // inferplane_model_substitution_total (ADR-041)
 }
 
 func New() *Metrics {
@@ -85,7 +96,7 @@ func New() *Metrics {
 		anchorFail: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "inferplane_audit_anchor_failures_total", Help: "Audit chain-head anchor (WORM) write failures (ADR-012).",
 		}),
-		budgetRejected: prometheus.NewGauge(prometheus.GaugeOpts{
+		budgetRejected: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "inferplane_budget_store_rejected_total",
 			Help: "Cumulative requests denied by the budget store's at-capacity fail-safe, not by a real budget (no team/key/user label — same cardinality bar as key_id)." +
 				" Non-zero means the in-memory budget store hit its entry cap and started fail-closing new counters.",
@@ -213,11 +224,30 @@ func (m *Metrics) IncAuditFailure(sink string) {
 	}
 	m.auditFailures.WithLabelValues(sink).Inc()
 }
+
+// SetBudgetStoreRejections reports the budget store's own cumulative
+// rejection total (budget.Memory.Rejections()), NOT a delta — Settle calls
+// this on every request with a fresh snapshot. A CAS loop on
+// budgetRejectedSeen (rather than a plain load-then-store) is what keeps
+// concurrent Settle calls from double-crediting or dropping an increment:
+// each successful swap advances the "last seen" value by exactly the amount
+// it Adds, so the sum of every successful Add across any number of
+// concurrent callers telescopes to n_final − 0, matching the store's real
+// total regardless of interleaving.
 func (m *Metrics) SetBudgetStoreRejections(n int64) {
 	if m == nil {
 		return
 	}
-	m.budgetRejected.Set(float64(n))
+	for {
+		old := atomic.LoadInt64(&m.budgetRejectedSeen)
+		if n <= old {
+			return
+		}
+		if atomic.CompareAndSwapInt64(&m.budgetRejectedSeen, old, n) {
+			m.budgetRejected.Add(float64(n - old))
+			return
+		}
+	}
 }
 func (m *Metrics) SetAuditBufferUtilization(r float64) {
 	if m == nil {

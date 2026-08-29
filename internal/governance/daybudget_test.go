@@ -59,7 +59,7 @@ func TestPreCheckDailyBudgetBlocksWhileMonthlyAllows(t *testing.T) {
 	// it is a DIFFERENT store key.
 	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", dw), 2_000, dw)
 
-	if got := g.bud.Spent(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonth), budget.CalendarMonth); got != 0 {
+	if got := g.bud.Spent(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonthIn(nil)), budget.CalendarMonthIn(nil)); got != 0 {
 		t.Fatalf("daily debit leaked into the monthly bucket: monthly spent = %d, want 0", got)
 	}
 
@@ -132,7 +132,7 @@ func TestSettleSurfacesBudgetStoreRejections(t *testing.T) {
 	for _, mf := range mfs {
 		if mf.GetName() == "inferplane_budget_store_rejected_total" {
 			found = true
-			got = mf.Metric[0].GetGauge().GetValue()
+			got = mf.Metric[0].GetCounter().GetValue()
 		}
 	}
 	if !found {
@@ -244,7 +244,7 @@ func TestSettleDebitsBothBudgetWindows(t *testing.T) {
 	if got := g.bud.Spent(budget.Key(budget.ScopeTeam, "t", dw), dw); got != cost {
 		t.Fatalf("day counter spent = %d, want %d", got, cost)
 	}
-	if got := g.bud.Spent(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonth), budget.CalendarMonth); got != cost {
+	if got := g.bud.Spent(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonthIn(nil)), budget.CalendarMonthIn(nil)); got != cost {
 		t.Fatalf("month counter spent = %d, want %d", got, cost)
 	}
 }
@@ -375,7 +375,7 @@ func TestPreCheckMonthlyBudgetUnchangedWhenDailyUnset(t *testing.T) {
 	g := NewGovernor(map[string]TeamPolicy{
 		"t": {BudgetMicrosPerMonth: 1_000, BudgetExceeded: "block"},
 	}, limiter.NewMemory(), budget.NewMemory(), nil)
-	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonth), 2_000, budgetWindow)
+	g.bud.Debit(budget.Key(budget.ScopeTeam, "t", budget.CalendarMonthIn(nil)), 2_000, budgetWindow)
 
 	dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0)
 	if dec.Allowed {
