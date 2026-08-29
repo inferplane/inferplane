@@ -844,49 +844,56 @@ func ChunkToCanonical(openaiChunk []byte) ([]*schema.ChatChunk, error) {
 	}
 
 	if len(in.Choices) > 0 {
+		// One OpenAI chunk can carry content, tool_calls, AND finish_reason
+		// together (Ollama-style servers batch the whole tool call into the
+		// final chunk) — every part must convert, in stream order: text,
+		// then tool frames, then the stop. An early return on any one of
+		// them silently drops the others.
 		ch := in.Choices[0]
-		if ch.FinishReason != nil {
-			delta := mustJSON(map[string]any{"stop_reason": mapFinishToStop(*ch.FinishReason)})
-			return []*schema.ChatChunk{{Type: "message_delta", Delta: delta, Usage: usage}}, nil
-		}
-		// tool_calls before content: a chunk carrying a tool call often also
-		// carries content:"" , and answering that with an empty text_delta
-		// would drop the tool call entirely (it reached no ingress at all
-		// before this branch existed — Bedrock ingress renders from Chunk).
-		// EVERY entry is converted, not just the first: parallel tool calls
-		// arrive as several entries in one chunk, and each needs its own
-		// canonical frame at its own block index.
-		if len(ch.Delta.ToolCalls) > 0 {
-			var out []*schema.ChatChunk
-			for _, tc := range ch.Delta.ToolCalls {
-				idx := ch.Index
-				if tc.Index != nil {
-					idx = *tc.Index
-				}
-				switch {
-				case tc.ID != "" || tc.Function.Name != "":
-					input := json.RawMessage(tc.Function.Arguments)
-					if len(input) == 0 || !json.Valid(input) {
-						input = json.RawMessage(`{}`)
-					}
-					block := &schema.ContentBlock{Type: "tool_use", ID: tc.ID, Name: tc.Function.Name, Input: input}
-					out = append(out, &schema.ChatChunk{Type: "content_block_start", Index: &idx, ContentBlock: block})
-				case tc.Function.Arguments != "":
-					delta := mustJSON(map[string]any{"type": "input_json_delta", "partial_json": tc.Function.Arguments})
-					out = append(out, &schema.ChatChunk{Type: "content_block_delta", Index: &idx, Delta: delta})
-				}
-			}
-			if len(out) > 0 {
-				// Usage rides the FIRST frame only — consumers fold usage per
-				// frame, so repeating it across the fan-out double-counts.
-				out[0].Usage = usage
-				return out, nil
-			}
-		}
-		if ch.Delta.Content != nil {
+		var out []*schema.ChatChunk
+		if ch.Delta.Content != nil && *ch.Delta.Content != "" {
+			// content:"" often rides a tool_calls chunk; an empty text_delta
+			// for it is noise, so only non-empty text converts.
 			idx := ch.Index
 			delta := mustJSON(map[string]any{"type": "text_delta", "text": *ch.Delta.Content})
-			return []*schema.ChatChunk{{Type: "content_block_delta", Index: &idx, Delta: delta, Usage: usage}}, nil
+			out = append(out, &schema.ChatChunk{Type: "content_block_delta", Index: &idx, Delta: delta})
+		}
+		// EVERY tool_calls entry is converted, not just the first: parallel
+		// tool calls arrive as several entries in one chunk, each needing
+		// its own canonical frame at its own block index. Tool indices shift
+		// +1: OpenAI numbers tool calls independently of text, and the
+		// choice's text stream owns canonical block index ch.Index — reusing
+		// tc.Index verbatim opened a tool_use on top of the open text block.
+		for _, tc := range ch.Delta.ToolCalls {
+			idx := ch.Index + 1
+			if tc.Index != nil {
+				idx = *tc.Index + 1
+			}
+			if tc.ID != "" || tc.Function.Name != "" {
+				// Opener. Arguments — complete OR a partial fragment — are
+				// NEVER embedded in the block (a partial fragment failed
+				// json.Valid and was replaced by {}, permanently corrupting
+				// the tool input): the block opens with {} and any arguments
+				// bytes re-emit as an input_json_delta, the same shape the
+				// real Anthropic wire uses.
+				block := &schema.ContentBlock{Type: "tool_use", ID: tc.ID, Name: tc.Function.Name, Input: json.RawMessage(`{}`)}
+				out = append(out, &schema.ChatChunk{Type: "content_block_start", Index: &idx, ContentBlock: block})
+			}
+			if tc.Function.Arguments != "" {
+				argIdx := idx
+				delta := mustJSON(map[string]any{"type": "input_json_delta", "partial_json": tc.Function.Arguments})
+				out = append(out, &schema.ChatChunk{Type: "content_block_delta", Index: &argIdx, Delta: delta})
+			}
+		}
+		if ch.FinishReason != nil {
+			delta := mustJSON(map[string]any{"stop_reason": mapFinishToStop(*ch.FinishReason)})
+			out = append(out, &schema.ChatChunk{Type: "message_delta", Delta: delta})
+		}
+		if len(out) > 0 {
+			// Usage rides the FIRST frame only — consumers fold usage per
+			// frame, so repeating it across the fan-out double-counts.
+			out[0].Usage = usage
+			return out, nil
 		}
 	}
 

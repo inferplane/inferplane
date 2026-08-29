@@ -21,14 +21,14 @@ import (
 // /v1/chat/completions — each rejects the others' models with a 400.
 func TestMantlePathFor(t *testing.T) {
 	cases := map[string]string{
-		"anthropic.claude-opus-5":  "/anthropic/v1/messages",
+		"anthropic.claude-opus-5":    "/anthropic/v1/messages",
 		"anthropic.claude-haiku-4-5": "/anthropic/v1/messages",
-		"openai.gpt-5.4":           "/openai/v1/chat/completions",
-		"openai.gpt-5.6-sol":       "/openai/v1/chat/completions",
-		"xai.grok-4.3":             "/openai/v1/chat/completions",
-		"deepseek.v3.2":            "/v1/chat/completions",
-		"zai.glm-5":                "/v1/chat/completions",
-		"moonshotai.kimi-k2.5":     "/v1/chat/completions",
+		"openai.gpt-5.4":             "/openai/v1/chat/completions",
+		"openai.gpt-5.6-sol":         "/openai/v1/chat/completions",
+		"xai.grok-4.3":               "/openai/v1/chat/completions",
+		"deepseek.v3.2":              "/v1/chat/completions",
+		"zai.glm-5":                  "/v1/chat/completions",
+		"moonshotai.kimi-k2.5":       "/v1/chat/completions",
 	}
 	for upstream, want := range cases {
 		if got := mantlePathFor(upstream); got != want {
@@ -397,5 +397,108 @@ func TestMantleStreamFailsClosedWhenNothingParses(t *testing.T) {
 	}
 	if !sawErr {
 		t.Fatal("a mantle stream with zero parseable frames must surface an error, not end cleanly")
+	}
+}
+
+// Local review of PR #65 (CONFIRMED): a non-2xx from a mantle CHAT route is an
+// OpenAI-shaped {"error":{...}} envelope, and the Anthropic ingress tees
+// RawBody verbatim for non-2xx — the error must be re-rendered in Anthropic
+// shape, same as the success path.
+func TestMantleChatErrorBodyRerenderedAnthropicShape(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(429)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited","type":"rate_limit_exceeded","code":"429"}}`))
+	}))
+	defer srv.Close()
+	mc := staticMantle(t, srv)
+	raw := `{"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	resp, err := mc.Complete(context.Background(), &providers.ProxyRequest{
+		Model: "mantle.gpt-5.4", Upstream: "openai.gpt-5.4",
+		RawBody: []byte(raw), Parsed: parseChat(t, raw),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 429 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	var body struct {
+		Type  string `json:"type"`
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(resp.RawBody, &body); err != nil || body.Type != "error" {
+		t.Fatalf("non-2xx chat body must be Anthropic-shaped: %s", resp.RawBody)
+	}
+	if body.Error.Message != "rate limited" {
+		t.Fatalf("upstream error message lost: %s", resp.RawBody)
+	}
+}
+
+// Local review of PR #65 (CONFIRMED): streamed frames leaked the internal
+// upstream model id ("openai.gpt-5.4") where Complete echoes the public name;
+// on the chat routes the re-rendered message_start had model "" entirely.
+func TestMantleStreamEchoesPublicModelName(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"openai.gpt-5.4\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"}}]}\n\n" +
+			"data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	mc := staticMantle(t, srv)
+	raw := `{"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	evs, err := mc.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "mantle.gpt-5.4", Upstream: "openai.gpt-5.4",
+		RawBody: []byte(raw), Parsed: parseChat(t, raw),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ev, serr := range evs {
+		if serr != nil || ev == nil || ev.Chunk == nil {
+			continue
+		}
+		if ev.Chunk.Message != nil && ev.Chunk.Message.Model != "mantle.gpt-5.4" {
+			t.Fatalf("frame leaks upstream model id: %q", ev.Chunk.Message.Model)
+		}
+	}
+}
+
+func TestMantleAnthropicStreamRewritesModelInChunkAndRaw(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"anthropic.claude-opus-5\",\"content\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n" +
+			"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
+	}))
+	defer srv.Close()
+	mc := staticMantle(t, srv)
+	raw := `{"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	evs, err := mc.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "mantle.opus", Upstream: "anthropic.claude-opus-5",
+		RawBody: []byte(raw), Parsed: parseChat(t, raw),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawStart bool
+	for ev, serr := range evs {
+		if serr != nil || ev == nil || ev.Chunk == nil || ev.Chunk.Message == nil {
+			continue
+		}
+		sawStart = true
+		if ev.Chunk.Message.Model != "mantle.opus" {
+			t.Fatalf("Chunk leaks upstream model id: %q", ev.Chunk.Message.Model)
+		}
+		// The Anthropic ingress tees Raw verbatim — it must carry the public
+		// name too, or the rewrite only covers the re-rendering ingresses.
+		if strings.Contains(string(ev.Raw), "anthropic.claude-opus-5") || !strings.Contains(string(ev.Raw), "mantle.opus") {
+			t.Fatalf("Raw leaks upstream model id: %s", ev.Raw)
+		}
+	}
+	if !sawStart {
+		t.Fatal("no message_start frame observed")
 	}
 }

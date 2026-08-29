@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/inferplane/inferplane/pkg/schema"
@@ -320,7 +321,9 @@ func TestChunkToCanonicalToolCalls(t *testing.T) {
 	if string(open.ContentBlock.Input) != `{}` {
 		t.Errorf("input = %s, want {} for an empty arguments opener", open.ContentBlock.Input)
 	}
-	if open.Index == nil || *open.Index != 0 {
+	// tool indices shift +1: OpenAI numbers tool calls independently of text,
+	// and the choice's text stream owns canonical block index 0.
+	if open.Index == nil || *open.Index != 1 {
 		t.Errorf("index: %v", open.Index)
 	}
 
@@ -332,7 +335,7 @@ func TestChunkToCanonicalToolCalls(t *testing.T) {
 		t.Fatalf("argument fragment: %+v", frags)
 	}
 	frag := frags[0]
-	if frag.Index == nil || *frag.Index != 1 {
+	if frag.Index == nil || *frag.Index != 2 {
 		t.Errorf("fragment index: %v", frag.Index)
 	}
 	var d struct {
@@ -364,7 +367,7 @@ func TestChunkToCanonicalParallelToolCalls(t *testing.T) {
 	for i, want := range []struct {
 		id, name string
 		index    int
-	}{{"call_a", "a", 0}, {"call_b", "b", 1}} {
+	}{{"call_a", "a", 1}, {"call_b", "b", 2}} { // tool indices shift +1 past the text block
 		c := chunks[i]
 		if c.Type != "content_block_start" || c.ContentBlock == nil {
 			t.Fatalf("frame %d: %+v", i, c)
@@ -473,5 +476,71 @@ func TestRequestToCanonicalSkipsNullStop(t *testing.T) {
 	}
 	if _, has := cr.Extra["stop_sequences"]; has {
 		t.Fatalf("stop:null must be skipped, got %s", cr.Extra["stop_sequences"])
+	}
+}
+
+// Local review of PR #65 (CONFIRMED findings) — streaming tool_calls edge
+// cases in ChunkToCanonical:
+//  1. finish_reason on the same chunk as tool_calls must not swallow them.
+//  2. content + tool_calls on one chunk must emit the text too.
+//  3. a partial arguments fragment on the OPENER must not be replaced by {}
+//     and lost — it re-emits as an input_json_delta.
+//  4. tool indices must not collide with the text block's index.
+func TestChunkToCanonicalToolCallsWithFinishReason(t *testing.T) {
+	frames, err := ChunkToCanonical([]byte(`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"f","arguments":"{\"a\":1}"}}]},"finish_reason":"tool_calls"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawStart, sawArgs, sawStop bool
+	for _, f := range frames {
+		switch {
+		case f.Type == "content_block_start" && f.ContentBlock != nil && f.ContentBlock.Type == "tool_use":
+			sawStart = true
+		case f.Type == "content_block_delta" && strings.Contains(string(f.Delta), `{\"a\":1}`):
+			sawArgs = true
+		case f.Type == "message_delta" && strings.Contains(string(f.Delta), "tool_use"):
+			sawStop = true
+		}
+	}
+	if !sawStart || !sawArgs || !sawStop {
+		t.Fatalf("start=%v args=%v stop=%v — a one-chunk tool call with finish_reason must yield all three: %+v", sawStart, sawArgs, sawStop, frames)
+	}
+}
+
+func TestChunkToCanonicalContentAndToolCallsTogether(t *testing.T) {
+	frames, err := ChunkToCanonical([]byte(`{"choices":[{"index":0,"delta":{"content":"Let me check.","tool_calls":[{"index":0,"id":"c1","function":{"name":"f","arguments":""}}]},"finish_reason":null}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frames) < 2 {
+		t.Fatalf("want text + tool frames, got %+v", frames)
+	}
+	if frames[0].Type != "content_block_delta" || !strings.Contains(string(frames[0].Delta), "Let me check.") {
+		t.Fatalf("text must be emitted first: %+v", frames[0])
+	}
+	if frames[0].Index == nil || *frames[0].Index != 0 {
+		t.Fatalf("text index: %v", frames[0].Index)
+	}
+	if frames[1].Type != "content_block_start" || frames[1].Index == nil || *frames[1].Index != 1 {
+		t.Fatalf("tool_use must open at a DIFFERENT index than the text block: %+v", frames[1])
+	}
+}
+
+func TestChunkToCanonicalOpenerWithPartialArguments(t *testing.T) {
+	frames, err := ChunkToCanonical([]byte(`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"f","arguments":"{\"loc"}}]},"finish_reason":null}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frames) != 2 {
+		t.Fatalf("want opener + fragment delta, got %+v", frames)
+	}
+	if string(frames[0].ContentBlock.Input) != `{}` {
+		t.Fatalf("opener input: %s", frames[0].ContentBlock.Input)
+	}
+	var d struct {
+		PartialJSON string `json:"partial_json"`
+	}
+	if err := json.Unmarshal(frames[1].Delta, &d); err != nil || d.PartialJSON != `{"loc` {
+		t.Fatalf("the partial fragment must re-emit as input_json_delta, got %s", frames[1].Delta)
 	}
 }

@@ -493,3 +493,42 @@ func TestInvokeRecordsUsageIntoCollector(t *testing.T) {
 		t.Fatalf("token counts wrong: %+v", e)
 	}
 }
+
+// anthropicNamedProvider fails servesBedrockIngress — for pinning that a
+// budget-tier substitution whose target this ingress cannot serve is IGNORED
+// rather than turned into a 404 (ADR-041: substitution never denies).
+type anthropicNamedProvider struct{ captureProvider }
+
+func (*anthropicNamedProvider) Name() string { return "anthropic" }
+
+func TestTierSubstitutionToUnservableTargetIsIgnoredNot404(t *testing.T) {
+	cap := &captureProvider{}
+	provs := map[string]providers.Provider{
+		"p": cap,
+		"a": &anthropicNamedProvider{},
+	}
+	models := map[string]config.ModelConfig{
+		"claude-x": {Targets: []config.Target{{Provider: "p", Model: "global.anthropic.claude-x-v1:0"}}},
+		"cheap-x":  {Targets: []config.Target{{Provider: "a", Model: "cheap-upstream"}}},
+	}
+	h := holderFor(provs, models)
+	r := router.New(h)
+	r.SetTierGate(func(keystore.Principal) map[string]string {
+		return map[string]string{"claude-x": "cheap-x"}
+	})
+	handler := NewInvokeHandler(r, h, false)
+
+	body := `{"anthropic_version":"bedrock-2023-05-31","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, allowAll(invokeReq("claude-x", body)))
+
+	if rec.Code != 200 {
+		t.Fatalf("substitution to an ingress-unservable target became a %d (%s) — it must fall back to the original model", rec.Code, rec.Body.String())
+	}
+	if cap.last == nil {
+		t.Fatal("the ORIGINAL model's provider was never called")
+	}
+	if got := rec.Header().Get("x-inferplane-substituted-model"); got != "" {
+		t.Fatalf("an ignored substitution must not advertise itself: %q", got)
+	}
+}

@@ -28,7 +28,6 @@ func writeConfig(t *testing.T, body string) string {
 // Rejected at LOAD, not warned about, matching the precedent set by an
 // unrecognized `pricing.on_missing` value and by an unknown `budget_timezone`:
 // a money control that is silently wrong is worse than a refused boot.
-//
 func TestPricingOverride_zeroRateWithoutFreeIsLoadError(t *testing.T) {
 	_, err := LoadRaw(writeConfig(t, `{"pricing":{"overrides":{"bedrock-apne1":{"zai.glm-5":{"input_per_mtok":0,"output_per_mtok":0}}}}}`))
 	if err == nil {

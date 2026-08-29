@@ -154,3 +154,24 @@ func TestWindowKeyIsCalendarMonthUTC(t *testing.T) {
 		t.Fatalf("WindowKey across tz = %q, want 2026-09", got)
 	}
 }
+
+// Local review of PR #65 (CONFIRMED): a latch survives a policy reload by
+// design (ADR-041 D2), so a rule edited to FEWER tiers could return a latched
+// tierIndex out of range for the new thresholds slice — both consumers index
+// it unchecked (controlplane handleSync, mayu gateway), a per-heartbeat /
+// per-request panic. The latched index clamps to the deepest tier that still
+// exists; monotonicity within the window is preserved.
+func TestEvaluateClampsLatchedIndexAfterTiersShrink(t *testing.T) {
+	l := NewLatch()
+	if got := l.Evaluate("p/r", "2026-08", []int{50, 80, 95}, 96); got != 2 {
+		t.Fatalf("latch at deepest tier: got %d", got)
+	}
+	// Rule edited to a single tier; the latch state survives the reload.
+	if got := l.Evaluate("p/r", "2026-08", []int{50}, 10); got != 0 {
+		t.Fatalf("shrunk thresholds must clamp the latched index into range, got %d", got)
+	}
+	// An emptied thresholds list means no tier can be active at all.
+	if got := l.Evaluate("p/r", "2026-08", nil, 10); got != -1 {
+		t.Fatalf("empty thresholds must yield -1, got %d", got)
+	}
+}

@@ -116,11 +116,19 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// site, or it would be a cost-leak path around the same policy the other
 	// two ingresses enforce.
 	if served, tierSubstituted := h.r.SubstituteTier(p, model); tierSubstituted {
-		h.metrics.ObserveModelSubstitution(p.Team, model, served)
-		req = req.WithContext(audit.WithSubstitutedFrom(req.Context(), model))
-		model = served
-		tracing.SetGenAIRequest(span, model)
-		w.Header().Set("x-inferplane-substituted-model", model)
+		// ADR-041: substitution never denies. SubstituteTier checks the
+		// target is routed and allowed in general, but not that any of its
+		// providers serves THIS ingress — committing such a target would
+		// turn a served request into a 404 below the moment the budget tier
+		// activates. An unservable target means the substitution is ignored,
+		// not the request denied.
+		if servableOnBedrockIngress(h.r, served) {
+			h.metrics.ObserveModelSubstitution(p.Team, model, served)
+			req = req.WithContext(audit.WithSubstitutedFrom(req.Context(), model))
+			model = served
+			tracing.SetGenAIRequest(span, model)
+			w.Header().Set("x-inferplane-substituted-model", model)
+		}
 	}
 	if !h.r.Allows(p, model) {
 		h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: http.StatusForbidden, Error: audit.DenyModelNotAllowed.Ptr()}, false, traceID)

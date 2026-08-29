@@ -59,3 +59,19 @@ func resolveModel(r *router.Router, holder *live.Holder, urlID string) (string, 
 	}
 	return "", false, false
 }
+
+// servableOnBedrockIngress reports whether model resolves to at least one
+// target this ingress can serve — the pre-commit check for an ADR-041
+// budget-tier substitution (see the SubstituteTier call site in invoke.go).
+func servableOnBedrockIngress(r *router.Router, model string) bool {
+	chain, _, err := r.ResolveChain(model)
+	if err != nil {
+		return false
+	}
+	for _, ct := range chain {
+		if servesBedrockIngress(ct.Provider.Name()) {
+			return true
+		}
+	}
+	return false
+}

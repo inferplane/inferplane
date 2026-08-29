@@ -219,6 +219,13 @@ func (m *mantleClient) Complete(ctx context.Context, req *providers.ProxyRequest
 	}
 	out := &providers.ProxyResponse{StatusCode: resp.StatusCode, Headers: resp.Header, RawBody: raw}
 	if resp.StatusCode/100 != 2 {
+		// The Anthropic ingress tees non-2xx RawBody verbatim, and the chat
+		// routes speak OpenAI — re-render their {"error":{...}} envelope in
+		// Anthropic shape, same invariant as the success path. The anthropic
+		// route's errors are already Anthropic-shaped and pass through.
+		if path != "/anthropic/v1/messages" {
+			out.RawBody = anthropicErrorBody(resp.StatusCode, raw)
+		}
 		return out, nil
 	}
 	// A 2xx body we cannot parse must NOT be forwarded: out.Parsed stays nil,
@@ -285,6 +292,20 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 		for ev, serr := range inner {
 			if ev != nil && ev.Chunk != nil {
 				sawChunk = true
+				// Echo the PUBLIC model name, matching Complete: streamed
+				// message_start frames otherwise leak the internal upstream
+				// id ("anthropic.claude-opus-5") — and the Raw bytes the
+				// Anthropic ingress tees verbatim must be regenerated to
+				// match, or only the re-rendering ingresses get the rewrite.
+				if ev.Chunk.Message != nil && ev.Chunk.Message.Model != req.Model {
+					ev.Chunk.Message.Model = req.Model
+					if len(ev.Raw) > 0 {
+						var buf bytes.Buffer
+						if schema.WriteAnthropicSSE(&buf, ev.Chunk) == nil {
+							ev.Raw = buf.Bytes()
+						}
+					}
+				}
 			}
 			if !yield(ev, serr) {
 				return
@@ -297,3 +318,23 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 }
 
 var _ mantler = (*mantleClient)(nil)
+
+// anthropicErrorBody re-renders an OpenAI {"error":{...}} envelope in
+// Anthropic shape, preserving the upstream message. Unparseable input gets a
+// fixed message rather than being echoed (it may not be JSON at all).
+func anthropicErrorBody(status int, raw []byte) []byte {
+	msg := "bedrock mantle: upstream error"
+	var oai struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &oai) == nil && oai.Error.Message != "" {
+		msg = oai.Error.Message
+	}
+	body, _ := json.Marshal(map[string]any{
+		"type":  "error",
+		"error": map[string]string{"type": anthropicErrType(status), "message": msg},
+	})
+	return body
+}
