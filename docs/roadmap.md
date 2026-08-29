@@ -6,6 +6,10 @@ the split architecture's costs are already being paid (fleet of data planes,
 version skew management, distributed accounting); these five items are where
 the benefits are still only partially collected.
 
+[Enterprise product strategy](enterprise-strategy.md) is the canonical source for
+target market, product contracts, priorities, and production-release gates. This
+roadmap tracks execution status and retains the original five-gap work breakdown.
+
 ## Purpose alignment (2026-08-14)
 
 `CLAUDE.md` → Core Purpose lists five goals. This table is the internal

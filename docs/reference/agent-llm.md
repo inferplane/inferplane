@@ -46,16 +46,84 @@ client and upstream protocols without losing thinking blocks or `cache_control`.
   exposition on `:9090/metrics` and control-plane usage windows are `POST /v1alpha1/usage`
   — see the Collector contract in [infrastructure.md](infrastructure.md).
 
-### 4. Code Pointers
+### 4. Prompt-cache preservation by path
+The §4.4 cache invariant, per concrete egress path. "Preserved" means the client's
+cache breakpoints reach the upstream byte-stable; every rewrite on a preserved path
+is top-level-only (`system`/`messages`/`tools` values byte-identical).
+
+| Ingress → egress | Cache marker | Status | Mechanism |
+|---|---|---|---|
+| Anthropic → `anthropic` | `cache_control` | Preserved | verbatim `RawBody`; only top-level `model` rewritten, HTML escaping off (`providers/anthropic/anthropic.go` `rewriteTopLevelModel`) |
+| Anthropic/Bedrock → `bedrock` InvokeModel (Claude default) | `cache_control` | Preserved | `toInvokeBody` parses top level only; drops `model`/`stream`, injects `anthropic_version` + required body betas (`providers/bedrock/invoke.go`) |
+| Anthropic/Bedrock → `bedrock` Mantle, `/anthropic/v1/messages` route | `cache_control` | Preserved | `toMantleAnthropicBody` top-level-only rewrite (`providers/bedrock/mantle.go`) |
+| Anthropic → `bedrock` Converse (non-Claude) | `cache_control` → `cachePoint` | **Dropped** | `toConverseRequest` flattens `system` to plain text and keeps only text/tool_use/tool_result blocks; no `CachePoint` mapping exists — a known gap vs spec §4.4, which promises `cachePoint` pass-through |
+| Anthropic → `bedrock` Mantle chat-completions route | `cache_control` | Dropped | body re-rendered from `Parsed` via `internal/openai.CanonicalToRequest`; the OpenAI wire has no cache marker |
+| Anthropic → `openai_compatible` | `cache_control` | Dropped (documented) | best-effort cross-protocol conversion; spec §3.3 states cache_control is ignored with a warning |
+| OpenAI → `openai_compatible` | (upstream-side caching) | Preserved | `RawBody` forwarded byte-for-byte except the top-level `model` value span (order-preserving splice) |
+| Any path, PII-masked team | `cache_control` | Kept on blocks, **cache lost** | masking re-serializes the whole body (opt-in, ~10× cost warned at boot — ADR-009) |
+
+Even on paths whose cache MARKER is dropped, the conversation prefix itself must
+stay byte-stable across turns for upstream AUTOMATIC caching to hit:
+`toConverseRequest` keeps non-user/assistant role messages (Claude Code hook
+output) in place by merging them into the next user message — folding them into
+the system prompt (the pre-2026-08-28 behavior) mutated the prompt head on every
+turn a hook fired and invalidated the entire cached prefix (observed live:
+cache_creation ≈ full 475k-token input on every request).
+
+Usage settlement is cache-tier aware on every path that returns cache counts:
+Anthropic/Invoke fold `message_start` + `message_delta` frames (`schema.MergeUsage`,
+ADR-030); Converse maps `CacheReadInputTokens`/`CacheDetails` into the canonical
+split (`usageWithCache`); the 5m/1h write tiers are priced separately end to end.
+
+### 5. Per-model Converse/Mantle inference-param strip rules
+Some Bedrock models 400 (`ValidationException`) on inference params Claude Code
+sends routinely (`temperature`, `stop_sequences`), value-independent — without
+stripping, every such request fails and the client silently falls back. Both
+tables are evidence-based allow-lists probed against live Bedrock
+(ap-northeast-2 + us-east-1, 2026-08-28), same posture as ADR-022's
+`legacyThinkingBrokenModels`: an unlisted model keeps every param untouched.
+Anthropic models are deliberately absent — `apiFor` routes them via InvokeModel
+and their param contract belongs to the client.
+
+`converseUnsupportedInference` (`providers/bedrock/converse.go`), Converse `InferenceConfig` keys:
+
+| Upstream id substring | Stripped |
+|---|---|
+| `openai.gpt-5.6` (luna/sol/terra; NOT gpt-oss, NOT Mantle-only gpt-5.4/5.5) | `temperature`, `topP`, `stopSequences` |
+| `xai.` (grok-4.6) | `temperature`, `topP`, `stopSequences` |
+| `openai.gpt-oss` | `stopSequences` |
+| `deepseek.v` (v3.x only — r1 accepts all three) | `stopSequences` |
+| `google.gemma-` | `stopSequences` |
+| `minimax.` | `stopSequences` |
+| `moonshot` (moonshot. and moonshotai.) | `stopSequences` |
+| `qwen.` | `stopSequences` |
+| `zai.` | `stopSequences` |
+
+`mantleChatStripParams` (`providers/bedrock/mantle.go`), OpenAI-wire field names on
+Mantle's chat-completions route:
+
+| Upstream id substring | Stripped |
+|---|---|
+| `openai.gpt-5.6` | `temperature`, `top_p`, `stop` |
+
+Mantle chat additionally renames `max_tokens` → `max_completion_tokens` for every
+model on that route (the gpt-5.6 family rejects `max_tokens` outright; all probed
+models accept the newer name), and streaming requests set
+`stream_options.include_usage` so the final chunk carries billable counts.
+
+### 6. Code Pointers
 - `internal/tracing/tracing.go` — `SetGenAIRequest`/`SetGenAIResponse` (semconv) + `SetUsageDetail`/`SetCost`/`SetPartial` (`inferplane.*`) + `SetStatus`
 - `providers/provider.go` — the interface every provider implements; `ProxyRequest.GuardrailID`/`GuardrailVersion` (D6) is the narrow provider-isolation exception carrying a per-team override
 - `providers/bedrock/invoke.go` — InvokeModel body build + SSE re-serialization
 - `providers/bedrock/client.go` — `Guardrail` type, `buildGuardrailConfig`/`buildGuardrailStreamConfig`
 - `providers/bedrock/errors.go` — AWS SDK error → HTTP status classification, synthesized Anthropic-shaped error body
 - `providers/bedrock/thinking.go` — legacy `thinking` → adaptive+`effort` rewrite for the allow-listed broken models (ADR-022)
+- `providers/bedrock/converse.go` — Anthropic→Converse translation, `converseUnsupportedInference` strip table, `usageWithCache`
+- `providers/bedrock/mantle.go` — Mantle route partitioning, `toMantleAnthropicBody` (cache-safe), `mantleChatStripParams`
+- `pkg/schema/usage.go` — `MergeUsage` streaming fold + `CacheWriteTiers` 5m/1h resolution (ADR-030)
 - `pkg/schema/extra.go` — unknown-field preservation + case-collision rejection
 
-### 5. Cross-references
+### 7. Cross-references
 - Related modules: `internal/router` (resolution/fallback), `internal/openai` (conversion), `internal/keystore` (team-record guardrail override)
 - Related ADRs: docs/decisions/ADR-019-bedrock-guardrails-data-plane.md, docs/decisions/ADR-022-bedrock-legacy-thinking-rewrite.md
 - Related runbooks: docs/runbooks/

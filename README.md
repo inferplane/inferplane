@@ -211,6 +211,7 @@ The project targets CNCF Sandbox.
 
 ## Documentation
 
+- [docs/enterprise-strategy.md](docs/enterprise-strategy.md) — canonical product direction, enterprise contracts, priorities, and release gates
 - [docs/architecture.md](docs/architecture.md) — component-level architecture
 - [docs/onboarding.md](docs/onboarding.md) — Docker/Kubernetes deployment, SSO, CLI login
 - [docs/reference/](docs/reference/INDEX.md) — per-layer implementation reference (API, data, security, infrastructure, agent/LLM)
