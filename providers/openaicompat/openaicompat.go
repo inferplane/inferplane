@@ -221,6 +221,11 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 				}
 				out.RawBody = rendered
 			}
+		} else if req.IngressProtocol != "openai" {
+			// An unparsed 2xx leaves Parsed nil, and the Bedrock ingress skips
+			// settle entirely when it is: the request would bill nothing and
+			// the client would get raw OpenAI JSON it cannot read.
+			return nil, fmt.Errorf("openaicompat: re-render for %s ingress: %w", req.IngressProtocol, perr)
 		}
 	}
 	return out, nil

@@ -37,18 +37,21 @@ func ReadChatSSE(r io.Reader) iter.Seq2[*providers.StreamEvent, error] {
 						if !yield(&providers.StreamEvent{Raw: raw}, nil) {
 							return
 						}
-					}
-					// One SSE line can carry several canonical frames (parallel
-					// tool calls). Raw rides the FIRST event only: an
-					// OpenAI-wire ingress tees Raw, so repeating it would
-					// duplicate the line on the client's stream.
-					for i, c := range chunks {
-						ev := &providers.StreamEvent{Chunk: c}
-						if i == 0 {
-							ev.Raw = raw
-						}
-						if !yield(ev, nil) {
-							return
+					} else {
+						// One SSE line can carry several canonical frames
+						// (parallel tool calls). Raw rides the FIRST event
+						// only: an OpenAI-wire ingress tees Raw, so repeating
+						// it would duplicate the line on the client's stream.
+						// The else is structural — it must stay impossible to
+						// emit raw AND frames for one line.
+						for i, c := range chunks {
+							ev := &providers.StreamEvent{Chunk: c}
+							if i == 0 {
+								ev.Raw = raw
+							}
+							if !yield(ev, nil) {
+								return
+							}
 						}
 					}
 				}
