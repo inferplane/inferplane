@@ -82,7 +82,9 @@ type oaiRequest struct {
 	Stream              *bool           `json:"stream,omitempty"`
 	Temperature         json.RawMessage `json:"temperature,omitempty"`
 	TopP                json.RawMessage `json:"top_p,omitempty"`
+	Stop                json.RawMessage `json:"stop,omitempty"`
 	Tools               json.RawMessage `json:"tools,omitempty"`
+	ToolChoice          json.RawMessage `json:"tool_choice,omitempty"`
 }
 
 type oaiUsage struct {
@@ -233,8 +235,16 @@ func RequestToCanonical(openaiBody []byte) (*schema.ChatRequest, error) {
 			cr.System = raw
 		}
 	}
-	if len(in.Tools) > 0 {
-		cr.Tools = in.Tools
+	// tools/tool_choice are CONVERTED to the canonical (Anthropic) shape,
+	// mirroring CanonicalToRequest's write side — a raw copy left them in
+	// OpenAI shape, which the anthropic-shaped consumers (Bedrock
+	// Converse/Mantle) then dropped wholesale: an OpenAI client's tool
+	// calling silently vanished on every cross-protocol target.
+	if tools := toolsFromOAI(in.Tools); tools != nil {
+		cr.Tools = tools
+	}
+	if tc := toolChoiceFromOAI(in.ToolChoice); tc != nil {
+		cr.ToolChoice = tc
 	}
 
 	extra := map[string]json.RawMessage{}
@@ -243,6 +253,17 @@ func RequestToCanonical(openaiBody []byte) (*schema.ChatRequest, error) {
 	}
 	if len(in.TopP) > 0 {
 		extra["top_p"] = in.TopP
+	}
+	if len(in.Stop) > 0 {
+		// OpenAI stop may be a string or an array; canonical stop_sequences
+		// is an array.
+		if in.Stop[0] == '"' {
+			if arr, err := json.Marshal([]json.RawMessage{in.Stop}); err == nil {
+				extra["stop_sequences"] = arr
+			}
+		} else {
+			extra["stop_sequences"] = in.Stop
+		}
 	}
 	if len(extra) > 0 {
 		cr.Extra = extra
@@ -905,4 +926,86 @@ func usageFromOAI(u *oaiUsage) *schema.Usage {
 		out.CacheReadInputTokens = &cached
 	}
 	return out
+}
+
+// toolsFromOAI maps OpenAI function tools ({type:"function", function:{name,
+// description, parameters}}) to the canonical Anthropic shape ({name,
+// description, input_schema}) — the inverse of toolsToOAI. Nil on empty or
+// unparsable input, so the field is omitted rather than forwarded malformed.
+func toolsFromOAI(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	var tools []struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description,omitempty"`
+			Parameters  json.RawMessage `json:"parameters,omitempty"`
+		} `json:"function"`
+	}
+	if json.Unmarshal(raw, &tools) != nil || len(tools) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(tools))
+	for _, t := range tools {
+		if t.Function.Name == "" {
+			continue
+		}
+		m := map[string]any{"name": t.Function.Name}
+		if t.Function.Description != "" {
+			m["description"] = t.Function.Description
+		}
+		if len(t.Function.Parameters) > 0 {
+			m["input_schema"] = json.RawMessage(t.Function.Parameters)
+		}
+		out = append(out, m)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// toolChoiceFromOAI maps an OpenAI tool_choice to the canonical Anthropic
+// shape — the inverse of toolChoiceToOAI: "auto" → {type:auto},
+// "required" → {type:any}, "none" → {type:none},
+// {type:"function", function:{name:N}} → {type:"tool", name:N}.
+func toolChoiceFromOAI(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	if raw[0] == '"' {
+		var s string
+		if json.Unmarshal(raw, &s) != nil {
+			return nil
+		}
+		switch s {
+		case "auto":
+			return json.RawMessage(`{"type":"auto"}`)
+		case "required":
+			return json.RawMessage(`{"type":"any"}`)
+		case "none":
+			return json.RawMessage(`{"type":"none"}`)
+		}
+		return nil
+	}
+	var tc struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if json.Unmarshal(raw, &tc) != nil || tc.Type != "function" || tc.Function.Name == "" {
+		return nil
+	}
+	b, err := json.Marshal(map[string]any{"type": "tool", "name": tc.Function.Name})
+	if err != nil {
+		return nil
+	}
+	return b
 }

@@ -383,3 +383,83 @@ func TestChunkToCanonicalParallelToolCalls(t *testing.T) {
 		t.Error("usage repeated on a later frame — the ingress would double-count it")
 	}
 }
+
+// Review follow-up (PR #65): the READ side must mirror CanonicalToRequest's
+// write side. An OpenAI client's tools / tool_choice / stop reached the
+// gateway and were silently dropped before a cross-protocol target
+// (OpenAI ingress → Bedrock Converse/Mantle): tools were copied RAW in
+// OpenAI shape (which the anthropic-shaped consumers then drop wholesale),
+// and tool_choice/stop were not parsed at all.
+func TestRequestToCanonicalCarriesToolsChoiceAndStop(t *testing.T) {
+	in := []byte(`{"model":"m","max_tokens":32,"stop":["END","STOP"],
+		"tools":[{"type":"function","function":{"name":"get_time","description":"tells time","parameters":{"type":"object","properties":{"tz":{"type":"string"}}}}}],
+		"tool_choice":"required",
+		"messages":[{"role":"user","content":"hi"}]}`)
+	cr, err := RequestToCanonical(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tools []map[string]any
+	if err := json.Unmarshal(cr.Tools, &tools); err != nil || len(tools) != 1 {
+		t.Fatalf("tools not converted to anthropic shape: %s (%v)", cr.Tools, err)
+	}
+	if tools[0]["name"] != "get_time" || tools[0]["description"] != "tells time" {
+		t.Fatalf("tool fields: %v", tools[0])
+	}
+	if params, ok := tools[0]["input_schema"].(map[string]any); !ok || params["type"] != "object" {
+		t.Fatalf("parameters not mapped to input_schema: %v", tools[0]["input_schema"])
+	}
+	var tc map[string]any
+	if err := json.Unmarshal(cr.ToolChoice, &tc); err != nil || tc["type"] != "any" {
+		t.Fatalf(`tool_choice "required" must map to {"type":"any"}: %s (%v)`, cr.ToolChoice, err)
+	}
+	var stop []string
+	if err := json.Unmarshal(cr.Extra["stop_sequences"], &stop); err != nil || len(stop) != 2 || stop[0] != "END" {
+		t.Fatalf("stop not mapped to stop_sequences: %s (%v)", cr.Extra["stop_sequences"], err)
+	}
+}
+
+func TestRequestToCanonicalToolChoiceVariants(t *testing.T) {
+	mk := func(tc string) json.RawMessage {
+		in := []byte(`{"model":"m","tool_choice":` + tc + `,"messages":[{"role":"user","content":"hi"}]}`)
+		cr, err := RequestToCanonical(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cr.ToolChoice
+	}
+	var v map[string]any
+	if json.Unmarshal(mk(`"auto"`), &v) != nil || v["type"] != "auto" {
+		t.Errorf("auto → %v", v)
+	}
+	if json.Unmarshal(mk(`"none"`), &v) != nil || v["type"] != "none" {
+		t.Errorf("none → %v", v)
+	}
+	if json.Unmarshal(mk(`{"type":"function","function":{"name":"f"}}`), &v) != nil || v["type"] != "tool" || v["name"] != "f" {
+		t.Errorf("function → %v", v)
+	}
+}
+
+// Same-protocol round trip must survive: canonical → OpenAI → canonical.
+func TestToolsRoundTripThroughBothConversions(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":8,
+		"tools":[{"name":"f","description":"d","input_schema":{"type":"object"}}],
+		"tool_choice":{"type":"tool","name":"f"},
+		"messages":[{"role":"user","content":"hi"}]}`)
+	var cr schema.ChatRequest
+	if err := json.Unmarshal(raw, &cr); err != nil {
+		t.Fatal(err)
+	}
+	back, err := RequestToCanonical(CanonicalToRequest(&cr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tools []map[string]any
+	if err := json.Unmarshal(back.Tools, &tools); err != nil || len(tools) != 1 || tools[0]["name"] != "f" {
+		t.Fatalf("tools did not round-trip: %s", back.Tools)
+	}
+	var tc map[string]any
+	if err := json.Unmarshal(back.ToolChoice, &tc); err != nil || tc["type"] != "tool" || tc["name"] != "f" {
+		t.Fatalf("tool_choice did not round-trip: %s", back.ToolChoice)
+	}
+}

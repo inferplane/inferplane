@@ -206,3 +206,48 @@ func TestStreamRequestsUsageForCrossProtocolIngress(t *testing.T) {
 		t.Errorf("stream_options.include_usage missing: %v", gotBody["stream_options"])
 	}
 }
+
+// Review follow-up (PR #65): a nil Parsed on the conversion path must be a
+// typed error, not a panic — the Bedrock-ingress path is a new caller
+// surface, and the mantle sibling already guards this.
+func TestCrossProtocolNilParsedIsErrorNotPanic(t *testing.T) {
+	p := &provider{baseURL: "http://127.0.0.1:0"}
+	req := &providers.ProxyRequest{Model: "m", Upstream: "u", IngressProtocol: "bedrock"}
+	if _, err := p.buildBody(req, false); err == nil {
+		t.Fatal("nil Parsed must error, not panic or succeed")
+	}
+}
+
+// Review follow-up (PR #65): Complete fails closed when a 2xx body cannot be
+// parsed for a non-openai ingress; Stream must match — a stream whose every
+// frame fails ChunkToCanonical would otherwise exit cleanly with zero
+// billable tokens.
+func TestStreamFailsClosedWhenNothingParsesForCrossProtocolIngress(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {not json\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	var cr schema.ChatRequest
+	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := p.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), Parsed: &cr, IngressProtocol: "bedrock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawErr bool
+	for ev, serr := range evs {
+		if serr != nil {
+			sawErr = true
+		}
+		_ = ev
+	}
+	if !sawErr {
+		t.Fatal("a cross-protocol stream with zero parseable frames must surface an error, not end cleanly")
+	}
+}

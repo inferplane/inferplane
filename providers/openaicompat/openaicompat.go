@@ -53,6 +53,11 @@ func (p *provider) buildBody(req *providers.ProxyRequest, stream bool) ([]byte, 
 		// stream_options as it wants them; only the model is rewritten.
 		return rewriteModel(req.RawBody, req.Upstream)
 	}
+	if req.Parsed == nil {
+		// Same guard as the mantle sibling: CanonicalToRequest dereferences
+		// the request, and the Bedrock ingress is a newer caller surface.
+		return nil, fmt.Errorf("openaicompat: request for %s has no parsed body", req.Upstream)
+	}
 	converted := openai.CanonicalToRequest(req.Parsed)
 	if stream {
 		// A cross-protocol ingress selects streaming by OPERATION, not body
@@ -249,10 +254,23 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 	inner := openai.ReadChatSSE(resp.Body)
 	return func(yield func(*providers.StreamEvent, error) bool) {
 		defer resp.Body.Close()
+		// Fail-closed parity with Complete: a cross-protocol ingress ignores
+		// Raw and re-renders from Chunk, so a stream whose every frame fails
+		// ChunkToCanonical would otherwise end cleanly with zero canonical
+		// frames — and settle zero billable tokens (ADR-030's zero-cost
+		// class). Surface an error instead of a silent empty stream.
+		crossProtocol := req.IngressProtocol != "openai"
+		var sawChunk bool
 		for ev, err := range inner {
+			if ev != nil && ev.Chunk != nil {
+				sawChunk = true
+			}
 			if !yield(ev, err) {
 				return
 			}
+		}
+		if crossProtocol && !sawChunk {
+			yield(nil, fmt.Errorf("openaicompat: upstream stream for %s produced no parseable frames", req.Upstream))
 		}
 	}, nil
 }
