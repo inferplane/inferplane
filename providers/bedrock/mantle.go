@@ -322,10 +322,11 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 		return nil, &providers.UpstreamError{StatusCode: resp.StatusCode, Body: raw, Header: resp.Header}
 	}
 	var inner iter.Seq2[*providers.StreamEvent, error]
-	if path == "/anthropic/v1/messages" {
-		inner = anthropicsse.ReadSSE(resp.Body)
-	} else {
+	chatRoute := path != "/anthropic/v1/messages"
+	if chatRoute {
 		inner = openai.ReadChatSSE(resp.Body, req.Model)
+	} else {
+		inner = anthropicsse.ReadSSE(resp.Body)
 	}
 	return func(yield func(*providers.StreamEvent, error) bool) {
 		defer resp.Body.Close()
@@ -341,6 +342,14 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 			}
 			if ev != nil && ev.Chunk != nil {
 				sawChunk = true
+				// Chat routes always inject include_usage (toMantleChatBody)
+				// — strip the usage-only frame's Raw from the client tee,
+				// same as openaicompat: the Bedrock ingress ignores Raw, but
+				// the Anthropic ingress tees it verbatim and must never
+				// receive an OpenAI-shaped line. Chunk stays for settlement.
+				if chatRoute && openai.IsUsageOnlyFrame(ev.Chunk) {
+					ev.Raw = nil
+				}
 				// Echo the PUBLIC model name, matching Complete: streamed
 				// message_start frames otherwise leak the internal upstream
 				// id ("anthropic.claude-opus-5") — and the Raw bytes the

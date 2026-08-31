@@ -317,10 +317,13 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 		// buildBody injected include_usage the client never asked for (the
 		// zero-billing guard) — the resulting usage-only frame is observed
 		// (Chunk stays, so settle sees real tokens) but stripped from the
-		// client tee (Raw cleared): a client that opted out must not receive
-		// a usage frame, and one with empty choices can crash naive
-		// choices[0] indexing.
-		injectedUsage := !crossProtocol && !openai.StreamWantsUsage(req.RawBody)
+		// client tee (Raw cleared). Native path: a client that opted out
+		// must not receive a usage frame, and one with empty choices can
+		// crash naive choices[0] indexing. Cross-protocol path: injection is
+		// unconditional and an Anthropic-wire client must never see an
+		// OpenAI-shaped line at all — the Bedrock ingress ignores Raw, but
+		// the Anthropic ingress tees it verbatim.
+		injectedUsage := crossProtocol || !openai.StreamWantsUsage(req.RawBody)
 		var sawChunk, sawErr bool
 		for ev, err := range inner {
 			if err != nil {
@@ -328,7 +331,7 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 			}
 			if ev != nil && ev.Chunk != nil {
 				sawChunk = true
-				if injectedUsage && isUsageOnlyFrame(ev.Chunk) {
+				if injectedUsage && openai.IsUsageOnlyFrame(ev.Chunk) {
 					ev.Raw = nil
 				}
 			}
@@ -346,11 +349,3 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 }
 
 var _ providers.Provider = (*provider)(nil)
-
-// isUsageOnlyFrame matches the canonical form ChunkToCanonical gives a
-// usage-only OpenAI chunk (choices:[] + usage — what include_usage appends at
-// stream end): a message_delta whose delta is empty and whose usage is set. A
-// finish frame carries stop_reason in its delta and never matches.
-func isUsageOnlyFrame(c *schema.ChatChunk) bool {
-	return c.Type == "message_delta" && c.Usage != nil && string(c.Delta) == "{}"
-}

@@ -676,10 +676,13 @@ type StreamState struct {
 // content_block_start, content_block_stop, message_stop) return nil — the
 // caller appends the terminal [DONE] line itself.
 func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
-	// message_start merges its usage in its own case below — the Anthropic
-	// wire nests it under message.usage, and folding BOTH that and a
-	// top-level c.Usage here would count the initial tokens twice if one
-	// chunk ever carried them in both places.
+	// message_start merges its usage in its own case below, from exactly ONE
+	// source. Note this is single-source hygiene, not double-count
+	// prevention: MergeUsage folds latest-non-nil per field (never sums), so
+	// merging both message.usage and a top-level c.Usage would be idempotent
+	// today — the structure exists so a future additive merge cannot
+	// silently turn "both set" into a double count. Do not remove the guard
+	// on that reasoning.
 	if c.Usage != nil && c.Type != "message_start" {
 		st.usage = schema.MergeUsage(st.usage, c.Usage)
 	}
@@ -876,6 +879,10 @@ func ChunkToCanonical(openaiChunk []byte) ([]*schema.ChatChunk, error) {
 		// +1: OpenAI numbers tool calls independently of text, and the
 		// choice's text stream owns canonical block index ch.Index — reusing
 		// tc.Index verbatim opened a tool_use on top of the open text block.
+		// Known theoretical gap: the +1 shift assumes ch.Index == 0 (every
+		// real client single-choice stream); a non-zero ch.Index with
+		// tc.Index = ch.Index-1 would collide. n>1 choices aren't served
+		// through this path today — revisit if that ever changes.
 		for _, tc := range ch.Delta.ToolCalls {
 			idx := ch.Index + 1
 			if tc.Index != nil {
@@ -1045,4 +1052,14 @@ func EnsureIncludeUsage(top map[string]json.RawMessage) {
 	if raw, err := json.Marshal(so); err == nil {
 		top["stream_options"] = raw
 	}
+}
+
+// IsUsageOnlyFrame matches the canonical form ChunkToCanonical gives a
+// usage-only OpenAI chunk (choices:[] + usage — what include_usage appends at
+// stream end): a message_delta whose delta is empty and whose usage is set. A
+// finish frame carries stop_reason in its delta and never matches. Providers
+// that inject include_usage use this to strip the frame's Raw from client
+// tees the client never asked to receive.
+func IsUsageOnlyFrame(c *schema.ChatChunk) bool {
+	return c != nil && c.Type == "message_delta" && c.Usage != nil && string(c.Delta) == "{}"
 }
