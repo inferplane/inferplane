@@ -579,3 +579,24 @@ func TestEnsureIncludeUsageMergesExistingStreamOptions(t *testing.T) {
 		t.Errorf("pre-existing stream_options field clobbered: %s", top["stream_options"])
 	}
 }
+
+// Review follow-up (PR #65, round 5): a message_start carrying usage BOTH
+// nested under message.usage and at the chunk top level takes exactly ONE
+// source, the nested one (the wire's shape). Note MergeUsage folds (latest
+// non-nil per field) rather than sums, so the flagged double-COUNT could
+// never occur — this pins the single-source structure so a future additive
+// merge can't reintroduce the risk, and the nested-wins precedence.
+func TestChunkFromCanonicalMessageStartUsageSingleSource(t *testing.T) {
+	i := func(v int64) *int64 { return &v }
+	c := &schema.ChatChunk{
+		Type:    "message_start",
+		Message: &schema.ChatResponse{ID: "msg_1", Model: "m", Role: "assistant", Usage: &schema.Usage{InputTokens: i(100)}},
+		Usage:   &schema.Usage{InputTokens: i(999)},
+	}
+	st := &StreamState{}
+	ChunkFromCanonical(c, st)
+	got := st.usage
+	if got == nil || got.InputTokens == nil || *got.InputTokens != 100 {
+		t.Fatalf("usage = %+v, want input 100 (message.usage wins as the single source)", got)
+	}
+}

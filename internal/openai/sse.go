@@ -2,7 +2,6 @@ package openai
 
 import (
 	"bufio"
-	"encoding/json"
 	"io"
 	"iter"
 	"maps"
@@ -103,11 +102,16 @@ func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, er
 							if c.Type == "content_block_start" && c.Index != nil {
 								openTools[*c.Index] = true
 							}
-							// Close every open tool block BEFORE the
-							// stop-bearing message_delta (finish_reason);
-							// usage-only message_delta frames (Delta == "{}")
-							// don't end the message and close nothing.
-							if c.Type == "message_delta" && stopBearing(c.Delta) && !closeOpenTools() {
+							// Close every open tool block BEFORE any
+							// message_delta — the stop-bearing one AND the
+							// usage-only include_usage frame: Anthropic
+							// ordering puts every content_block_stop before
+							// message-level frames, and a consumer may treat
+							// the first message_delta as end-of-message. The
+							// OpenAI wire only emits usage-only chunks at the
+							// end of a stream, so there is nothing left to
+							// close early.
+							if c.Type == "message_delta" && !closeOpenTools() {
 								return
 							}
 							ev := &providers.StreamEvent{Chunk: c}
@@ -130,13 +134,4 @@ func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, er
 			}
 		}
 	}
-}
-
-// stopBearing reports whether a message_delta's delta payload carries a
-// stop_reason — i.e. it is the finish frame, not an include_usage-only frame.
-func stopBearing(delta json.RawMessage) bool {
-	var d struct {
-		StopReason *string `json:"stop_reason"`
-	}
-	return json.Unmarshal(delta, &d) == nil && d.StopReason != nil
 }

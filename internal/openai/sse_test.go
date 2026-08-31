@@ -118,9 +118,10 @@ func TestReadChatSSEClosesToolBlocksAtDoneWithoutFinish(t *testing.T) {
 		}
 		types = append(types, ev.Chunk.Type)
 	}
-	// The usage-only message_delta rides through open blocks untouched; the
-	// close lands before [DONE].
-	want := []string{"message_start", "content_block_start", "content_block_delta", "message_delta", "content_block_stop", "message_stop"}
+	// Anthropic ordering: every content_block_stop lands before ANY
+	// message-level frame — the usage-only message_delta included, since a
+	// consumer may treat the first message_delta as end-of-message.
+	want := []string{"message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}
 	if strings.Join(types, ",") != strings.Join(want, ",") {
 		t.Fatalf("frame order = %v, want %v", types, want)
 	}

@@ -352,6 +352,12 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 						var buf bytes.Buffer
 						if schema.WriteAnthropicSSE(&buf, ev.Chunk) == nil {
 							ev.Raw = buf.Bytes()
+						} else {
+							// Unreachable in practice (a bytes.Buffer write
+							// never errors), but a stale Raw here still names
+							// the upstream id and the Anthropic ingress tees
+							// Raw verbatim — drop it rather than leak it.
+							ev.Raw = nil
 						}
 					}
 				}

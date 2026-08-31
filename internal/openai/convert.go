@@ -676,7 +676,11 @@ type StreamState struct {
 // content_block_start, content_block_stop, message_stop) return nil — the
 // caller appends the terminal [DONE] line itself.
 func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
-	if c.Usage != nil {
+	// message_start merges its usage in its own case below — the Anthropic
+	// wire nests it under message.usage, and folding BOTH that and a
+	// top-level c.Usage here would count the initial tokens twice if one
+	// chunk ever carried them in both places.
+	if c.Usage != nil && c.Type != "message_start" {
 		st.usage = schema.MergeUsage(st.usage, c.Usage)
 	}
 	switch c.Type {
@@ -688,9 +692,14 @@ func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
 			if st.model == "" {
 				st.model = c.Message.Model
 			}
-			if c.Message.Usage != nil {
-				st.usage = schema.MergeUsage(st.usage, c.Message.Usage)
-			}
+		}
+		// Exactly one source: the nested message.usage (the wire's shape)
+		// wins; a bare top-level usage on a start frame is the fallback.
+		switch {
+		case c.Message != nil && c.Message.Usage != nil:
+			st.usage = schema.MergeUsage(st.usage, c.Message.Usage)
+		case c.Usage != nil:
+			st.usage = schema.MergeUsage(st.usage, c.Usage)
 		}
 		// Emit the opening role delta once.
 		if !st.roleSent {
