@@ -49,9 +49,21 @@ func (p *provider) Models() []schema.ModelInfo { return nil } // models come fro
 // converted to OpenAI wire (best-effort) and the model set to req.Upstream.
 func (p *provider) buildBody(req *providers.ProxyRequest, stream bool) ([]byte, error) {
 	if req.IngressProtocol == "openai" {
-		// Verbatim path: the client speaks OpenAI and already set stream /
-		// stream_options as it wants them; only the model is rewritten.
-		return rewriteModel(req.RawBody, req.Upstream)
+		// Verbatim path: the client speaks OpenAI, so the body forwards
+		// byte-preserving — only the model is rewritten, plus ONE governed
+		// exception: a streaming request whose client did not ask for
+		// include_usage gets it injected (order-preserving splice, like the
+		// model rewrite), or the upstream emits no usage frame, lastUsage
+		// stays nil, and the request settles at zero tokens (ADR-030's
+		// zero-cost class — the cross-protocol ingresses already inject it).
+		// Stream() strips the resulting usage-only frame from the client tee
+		// (injectedUsageOnly), so a client that never asked still never sees
+		// one.
+		body, err := rewriteModel(req.RawBody, req.Upstream)
+		if err != nil || !stream || openai.StreamWantsUsage(req.RawBody) {
+			return body, err
+		}
+		return ensureIncludeUsageRaw(body)
 	}
 	if req.Parsed == nil {
 		// Same guard as the mantle sibling: CanonicalToRequest dereferences
@@ -78,6 +90,48 @@ func (p *provider) buildBody(req *providers.ProxyRequest, stream bool) ([]byte, 
 	return rewriteModel(converted, req.Upstream)
 }
 
+// ensureIncludeUsageRaw sets stream_options.include_usage=true on a raw
+// OpenAI request body while preserving every other byte and the top-level key
+// ORDER (same discipline as rewriteModel — the §4.4 verbatim posture). An
+// existing stream_options object has include_usage merged into its value
+// span; a body without one gets the key appended before the closing brace.
+func ensureIncludeUsageRaw(raw []byte) ([]byte, error) {
+	start, end, ok, err := topLevelKeySpan(raw, "stream_options")
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		so := map[string]json.RawMessage{}
+		// A non-object value was invalid on this wire to begin with —
+		// replaced wholesale, same posture as openai.EnsureIncludeUsage.
+		_ = json.Unmarshal(raw[start:end], &so)
+		so["include_usage"] = json.RawMessage("true")
+		repl, merr := json.Marshal(so)
+		if merr != nil {
+			return nil, merr
+		}
+		out := make([]byte, 0, len(raw)-(end-start)+len(repl))
+		out = append(out, raw[:start]...)
+		out = append(out, repl...)
+		out = append(out, raw[end:]...)
+		return out, nil
+	}
+	// Append the key before the object's closing brace.
+	i := len(raw) - 1
+	for i >= 0 && isJSONSpace(raw[i]) {
+		i--
+	}
+	if i < 0 || raw[i] != '}' {
+		return nil, fmt.Errorf("openaicompat: request body is not a JSON object")
+	}
+	ins := []byte(`,"stream_options":{"include_usage":true}`)
+	out := make([]byte, 0, len(raw)+len(ins))
+	out = append(out, raw[:i]...)
+	out = append(out, ins...)
+	out = append(out, raw[i:]...)
+	return out, nil
+}
+
 // rewriteModel sets the top-level "model" field to model while preserving every
 // other byte — including top-level key ORDER — so the request stays verbatim and
 // the prompt-cache prefix is untouched (§4.4). It locates the top-level model
@@ -89,7 +143,7 @@ func rewriteModel(raw []byte, model string) ([]byte, error) {
 	if model == "" {
 		return raw, nil
 	}
-	start, end, ok, err := topLevelModelSpan(raw)
+	start, end, ok, err := topLevelKeySpan(raw, "model")
 	if err != nil {
 		return nil, err
 	}
@@ -107,14 +161,14 @@ func rewriteModel(raw []byte, model string) ([]byte, error) {
 	return out, nil
 }
 
-// topLevelModelSpan returns the byte offsets [start,end) of the top-level
-// "model" VALUE within raw (a JSON object), or ok=false if absent. It uses a
+// topLevelKeySpan returns the byte offsets [start,end) of the top-level
+// keyed VALUE within raw (a JSON object), or ok=false if absent. It uses a
 // json.Decoder at object depth 1 so nested "model" keys (e.g. inside a tool
 // definition) are not matched. After a key it reads the full value — descending
 // through any nested composites with depth tracking — so InputOffset() lands at
 // the true value end. The returned start is trimmed of leading whitespace so the
 // splice is byte-exact.
-func topLevelModelSpan(raw []byte) (start, end int, ok bool, err error) {
+func topLevelKeySpan(raw []byte, wantKey string) (start, end int, ok bool, err error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	tok, err := dec.Token()
 	if err != nil {
@@ -134,7 +188,7 @@ func topLevelModelSpan(raw []byte) (start, end int, ok bool, err error) {
 			return 0, 0, false, verr
 		}
 		valEnd := int(dec.InputOffset())
-		if key == "model" {
+		if key == wantKey {
 			// InputOffset after the key lands just past the closing quote, so
 			// valStart includes the ":" separator and any surrounding spaces;
 			// advance past both to point at the value's first byte.
@@ -260,6 +314,13 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 		// frames — and settle zero billable tokens (ADR-030's zero-cost
 		// class). Surface an error instead of a silent empty stream.
 		crossProtocol := req.IngressProtocol != "openai"
+		// buildBody injected include_usage the client never asked for (the
+		// zero-billing guard) — the resulting usage-only frame is observed
+		// (Chunk stays, so settle sees real tokens) but stripped from the
+		// client tee (Raw cleared): a client that opted out must not receive
+		// a usage frame, and one with empty choices can crash naive
+		// choices[0] indexing.
+		injectedUsage := !crossProtocol && !openai.StreamWantsUsage(req.RawBody)
 		var sawChunk, sawErr bool
 		for ev, err := range inner {
 			if err != nil {
@@ -267,6 +328,9 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 			}
 			if ev != nil && ev.Chunk != nil {
 				sawChunk = true
+				if injectedUsage && isUsageOnlyFrame(ev.Chunk) {
+					ev.Raw = nil
+				}
 			}
 			if !yield(ev, err) {
 				return
@@ -282,3 +346,11 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 }
 
 var _ providers.Provider = (*provider)(nil)
+
+// isUsageOnlyFrame matches the canonical form ChunkToCanonical gives a
+// usage-only OpenAI chunk (choices:[] + usage — what include_usage appends at
+// stream end): a message_delta whose delta is empty and whose usage is set. A
+// finish frame carries stop_reason in its delta and never matches.
+func isUsageOnlyFrame(c *schema.ChatChunk) bool {
+	return c.Type == "message_delta" && c.Usage != nil && string(c.Delta) == "{}"
+}

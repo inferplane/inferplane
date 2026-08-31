@@ -2,6 +2,7 @@ package openai
 
 import (
 	"bufio"
+	"encoding/json"
 	"io"
 	"iter"
 	"maps"
@@ -34,15 +35,19 @@ import (
 func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, error] {
 	return func(yield func(*providers.StreamEvent, error) bool) {
 		br := bufio.NewReader(r)
-		// Tool blocks ChunkToCanonical opened (content_block_start) that no
-		// frame has closed yet. The OpenAI wire has no close event — a tool
-		// call just stops producing argument fragments — but the Anthropic
-		// frame vocabulary the canonical consumers re-render requires a
-		// content_block_stop per opened block before the message-level stop
-		// (an Anthropic client finalizes the accumulated partial_json there).
-		// ChunkToCanonical is stateless per chunk, so the closes are
-		// synthesized here, where the whole stream passes through.
-		openTools := map[int]bool{}
+		// Content blocks open at each index that no frame has closed yet.
+		// The OpenAI wire opens a TEXT block implicitly with its first
+		// delta and has no close event for anything — but the Anthropic
+		// frame vocabulary the canonical consumers re-render requires an
+		// explicit content_block_start before any delta at an index (a
+		// strict client buffers per opened block and may discard deltas
+		// with no opener) and a content_block_stop per opened block before
+		// the message-level frames (an Anthropic client finalizes
+		// accumulated partial_json there). ChunkToCanonical is stateless
+		// per chunk — tool openers come from the wire's id/name fragment,
+		// text openers and every close are synthesized here, where the
+		// whole stream passes through.
+		openBlocks := map[int]bool{}
 		started := false // message_start emitted (implies ≥1 parsed chunk)
 		startMessage := func() bool {
 			if started {
@@ -52,8 +57,8 @@ func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, er
 			msg := &schema.ChatResponse{Type: "message", Role: "assistant", Model: model, Content: []schema.ContentBlock{}}
 			return yield(&providers.StreamEvent{Chunk: &schema.ChatChunk{Type: "message_start", Message: msg}}, nil)
 		}
-		closeOpenTools := func() bool {
-			for _, idx := range slices.Sorted(maps.Keys(openTools)) {
+		closeOpenBlocks := func() bool {
+			for _, idx := range slices.Sorted(maps.Keys(openBlocks)) {
 				i := idx
 				// Raw stays nil: an OpenAI-wire ingress tees Raw verbatim and
 				// its wire has no such frame; only canonical consumers see it.
@@ -61,7 +66,7 @@ func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, er
 					return false
 				}
 			}
-			clear(openTools)
+			clear(openBlocks)
 			return true
 		}
 		for {
@@ -72,7 +77,7 @@ func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, er
 				if payload == "[DONE]" {
 					// A stream that ended without a finish_reason still must
 					// not leave blocks open, and a started message must close.
-					if !closeOpenTools() {
+					if !closeOpenBlocks() {
 						return
 					}
 					if started && !yield(&providers.StreamEvent{Chunk: &schema.ChatChunk{Type: "message_stop"}}, nil) {
@@ -100,7 +105,19 @@ func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, er
 								return
 							}
 							if c.Type == "content_block_start" && c.Index != nil {
-								openTools[*c.Index] = true
+								openBlocks[*c.Index] = true
+							}
+							// A text_delta at an index no opener claimed:
+							// synthesize the text opener the OpenAI wire
+							// implies but never sends.
+							if c.Type == "content_block_delta" && c.Index != nil && !openBlocks[*c.Index] && isTextDelta(c.Delta) {
+								openBlocks[*c.Index] = true
+								idx := *c.Index
+								empty := ""
+								blk := &schema.ContentBlock{Type: "text", Text: &empty}
+								if !yield(&providers.StreamEvent{Chunk: &schema.ChatChunk{Type: "content_block_start", Index: &idx, ContentBlock: blk}}, nil) {
+									return
+								}
 							}
 							// Close every open tool block BEFORE any
 							// message_delta — the stop-bearing one AND the
@@ -111,7 +128,7 @@ func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, er
 							// OpenAI wire only emits usage-only chunks at the
 							// end of a stream, so there is nothing left to
 							// close early.
-							if c.Type == "message_delta" && !closeOpenTools() {
+							if c.Type == "message_delta" && !closeOpenBlocks() {
 								return
 							}
 							ev := &providers.StreamEvent{Chunk: c}
@@ -134,4 +151,13 @@ func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, er
 			}
 		}
 	}
+}
+
+// isTextDelta reports whether a content_block_delta payload is a text_delta —
+// the one delta kind whose block the OpenAI wire opens implicitly.
+func isTextDelta(delta json.RawMessage) bool {
+	var d struct {
+		Type string `json:"type"`
+	}
+	return json.Unmarshal(delta, &d) == nil && d.Type == "text_delta"
 }

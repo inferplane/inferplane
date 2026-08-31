@@ -126,3 +126,36 @@ func TestReadChatSSEClosesToolBlocksAtDoneWithoutFinish(t *testing.T) {
 		t.Fatalf("frame order = %v, want %v", types, want)
 	}
 }
+
+// A text stream must arrive as a complete Anthropic block lifecycle: the
+// OpenAI wire opens text blocks implicitly with the first delta, but a strict
+// Anthropic consumer buffers per opened block and may discard deltas with no
+// content_block_start (review finding, PR #65 round 4).
+func TestReadChatSSEOpensAndClosesTextBlocks(t *testing.T) {
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\"}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	var types []string
+	for ev, err := range ReadChatSSE(strings.NewReader(body), "public-m") {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.Chunk == nil {
+			continue
+		}
+		types = append(types, ev.Chunk.Type)
+		if ev.Chunk.Type == "content_block_start" {
+			if ev.Raw != nil {
+				t.Error("synthesized text opener must carry no Raw")
+			}
+			if ev.Chunk.ContentBlock == nil || ev.Chunk.ContentBlock.Type != "text" {
+				t.Errorf("opener block = %+v, want text", ev.Chunk.ContentBlock)
+			}
+		}
+	}
+	want := []string{"message_start", "content_block_start", "content_block_delta", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}
+	if strings.Join(types, ",") != strings.Join(want, ",") {
+		t.Fatalf("frame order = %v, want %v", types, want)
+	}
+}

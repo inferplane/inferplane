@@ -286,3 +286,79 @@ func TestStreamDoesNotDoubleErrorAfterUpstreamIOFailure(t *testing.T) {
 		t.Fatalf("got %d errors, want exactly 1 (the IO error, no synthetic duplicate)", errs)
 	}
 }
+
+// Native OpenAI-ingress streaming without stream_options.include_usage: the
+// upstream body must gain it (order-preserving splice — zero-billing guard,
+// review finding PR #65 round 4), the usage must still be OBSERVED for
+// settlement, and the usage-only frame must NOT reach the client tee — the
+// client opted out, and its empty choices array crashes naive indexing.
+func TestStreamInjectsAndStripsUsageForNativeOpenAIIngress(t *testing.T) {
+	var upstreamBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+				"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2}}\n\n" +
+				"data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	evs, err := p.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), IngressProtocol: "openai",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var teed []byte
+	var sawUsage bool
+	for ev, serr := range evs {
+		if serr != nil {
+			t.Fatal(serr)
+		}
+		teed = append(teed, ev.Raw...)
+		if ev.Chunk != nil && ev.Chunk.Usage != nil {
+			sawUsage = true
+		}
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(upstreamBody, &top); err != nil {
+		t.Fatal(err)
+	}
+	if string(top["stream_options"]) != `{"include_usage":true}` {
+		t.Errorf("upstream stream_options = %s, want injected include_usage", top["stream_options"])
+	}
+	if !strings.HasPrefix(string(upstreamBody), `{"model":"upstream-m","stream":true`) {
+		t.Errorf("injection must preserve top-level key order: %s", upstreamBody)
+	}
+	if !sawUsage {
+		t.Error("usage frame must still be observed for settlement")
+	}
+	if strings.Contains(string(teed), `"usage"`) || strings.Contains(string(teed), `"choices":[]`) {
+		t.Errorf("injected usage-only frame leaked to the client tee: %s", teed)
+	}
+	if !strings.Contains(string(teed), "data: [DONE]") {
+		t.Errorf("terminal [DONE] must still tee: %s", teed)
+	}
+
+	// A client that ASKED for usage keeps the frame on its tee, byte-verbatim.
+	raw = `{"model":"public-m","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"hi"}]}`
+	evs, err = p.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), IngressProtocol: "openai",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	teed = nil
+	for ev, serr := range evs {
+		if serr != nil {
+			t.Fatal(serr)
+		}
+		teed = append(teed, ev.Raw...)
+	}
+	if !strings.Contains(string(teed), `"usage"`) {
+		t.Errorf("opted-in client must receive the usage frame: %s", teed)
+	}
+}

@@ -62,7 +62,7 @@ is top-level-only (`system`/`messages`/`tools` values byte-identical).
 | Anthropic → `bedrock` Converse (non-Claude) | `cache_control` → `cachePoint` | **Dropped** | `toConverseRequest` flattens `system` to plain text and keeps only text/tool_use/tool_result blocks; no `CachePoint` mapping exists — a known gap vs spec §4.4, which promises `cachePoint` pass-through |
 | Anthropic → `bedrock` Mantle chat-completions route | `cache_control` | Dropped | body re-rendered from `Parsed` via `internal/openai.CanonicalToRequest`; the OpenAI wire has no cache marker |
 | Anthropic → `openai_compatible` | `cache_control` | Dropped (documented) | best-effort cross-protocol conversion; spec §3.3 states cache_control is ignored with a warning |
-| OpenAI → `openai_compatible` | (upstream-side caching) | Preserved | `RawBody` forwarded byte-for-byte except the top-level `model` value span (order-preserving splice) |
+| OpenAI → `openai_compatible` | (upstream-side caching) | Preserved | `RawBody` forwarded byte-for-byte except the top-level `model` value span, plus — streaming only, when the client did not opt in — an order-preserving `stream_options.include_usage` splice (`ensureIncludeUsageRaw`, the zero-billing guard); the resulting usage-only frame is stripped from the client tee |
 | Any path, PII-masked team | `cache_control` | Kept on blocks, **cache lost** | masking re-serializes the whole body (opt-in, ~10× cost warned at boot — ADR-009) |
 
 Even on paths whose cache MARKER is dropped, the conversation prefix itself must
@@ -75,12 +75,13 @@ cache_creation ≈ full 475k-token input on every request).
 
 OpenAI-wire streams (openai_compatible, Mantle chat routes) are re-rendered by
 canonical consumers into the Anthropic frame vocabulary, and the OpenAI wire
-has no message_start/message_stop and no per-block close — `ReadChatSSE`
-(`internal/openai/sse.go`) synthesizes all three (message_start lazily before
-the first parsed chunk, stamped with the PUBLIC model name; content_block_stop
-per opened tool block before the stop-bearing message_delta; message_stop at
-[DONE]), Chunk-only with Raw nil so an OpenAI-wire ingress tees no invented
-lines.
+has no message_start/message_stop, opens text blocks implicitly, and has no
+per-block close — `ReadChatSSE` (`internal/openai/sse.go`) synthesizes the
+whole lifecycle (message_start lazily before the first parsed chunk, stamped
+with the PUBLIC model name; a text content_block_start at any index no opener
+claimed; content_block_stop per opened block before ANY message_delta;
+message_stop at [DONE]), Chunk-only with Raw nil so an OpenAI-wire ingress
+tees no invented lines.
 
 Usage settlement is cache-tier aware on every path that returns cache counts:
 Anthropic/Invoke fold `message_start` + `message_delta` frames (`schema.MergeUsage`,
