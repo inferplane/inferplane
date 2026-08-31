@@ -11,7 +11,27 @@ type ConfigTeam struct {
 	TokensPerDay      int64
 	QuotaExceeded     string // block|warn
 	BudgetUSDPerMonth float64
-	BudgetExceeded    string // block|warn
+	// BudgetUSDPerDay is the calendar-day counterpart; there is deliberately
+	// no BudgetDayExceeded here because config.BudgetConfig carries a single
+	// on_exceeded knob that governs both windows (BudgetExceeded feeds both).
+	BudgetUSDPerDay float64
+	BudgetExceeded  string // block|warn
+}
+
+// Limits is PolicyFromLimits's already-resolved input, one field per governance
+// dimension. It replaced six positional arguments — two adjacent int64 pairs
+// among them, which a caller could silently transpose — so that adding a
+// dimension is an additive struct field rather than an edit at every call site.
+// Field names match the TeamPolicy fields they feed.
+type Limits struct {
+	RatePerMin           int64
+	TokensPerMinute      int64
+	TokensPerDay         int64
+	QuotaExceeded        string // block|warn
+	BudgetMicrosPerMonth int64
+	BudgetExceeded       string // block|warn
+	BudgetMicrosPerDay   int64
+	BudgetDayExceeded    string // block|warn
 }
 
 // PolicyFromLimits builds a TeamPolicy from already-resolved limits (budget in
@@ -21,19 +41,21 @@ type ConfigTeam struct {
 // callback) — both must produce byte-identical TeamPolicy shapes for the same
 // numbers, or ADR-016's "DB record wins" precedence would also silently
 // change enforcement behavior, not just the source of the values.
-func PolicyFromLimits(ratePerMin, tokensPerMinute, tokensPerDay int64, quotaExceeded string, budgetMicrosPerMonth int64, budgetExceeded string) TeamPolicy {
-	burst := ratePerMin
+func PolicyFromLimits(l Limits) TeamPolicy {
+	burst := l.RatePerMin
 	if burst <= 0 {
 		burst = 1
 	}
 	return TeamPolicy{
-		RatePerMin:           ratePerMin,
+		RatePerMin:           l.RatePerMin,
 		RateBurst:            burst,
-		TokensPerMinute:      tokensPerMinute,
-		TokensPerDay:         tokensPerDay,
-		QuotaExceeded:        quotaExceeded,
-		BudgetMicrosPerMonth: budgetMicrosPerMonth,
-		BudgetExceeded:       budgetExceeded,
+		TokensPerMinute:      l.TokensPerMinute,
+		TokensPerDay:         l.TokensPerDay,
+		QuotaExceeded:        l.QuotaExceeded,
+		BudgetMicrosPerMonth: l.BudgetMicrosPerMonth,
+		BudgetExceeded:       l.BudgetExceeded,
+		BudgetMicrosPerDay:   l.BudgetMicrosPerDay,
+		BudgetDayExceeded:    l.BudgetDayExceeded,
 	}
 }
 
@@ -42,8 +64,16 @@ func PolicyFromLimits(ratePerMin, tokensPerMinute, tokensPerDay int64, quotaExce
 func PoliciesFromConfig(in map[string]ConfigTeam) map[string]TeamPolicy {
 	out := make(map[string]TeamPolicy, len(in))
 	for name, c := range in {
-		out[name] = PolicyFromLimits(c.RatePerMin, c.TokensPerMinute, c.TokensPerDay,
-			c.QuotaExceeded, int64(c.BudgetUSDPerMonth*1_000_000), c.BudgetExceeded)
+		out[name] = PolicyFromLimits(Limits{
+			RatePerMin:           c.RatePerMin,
+			TokensPerMinute:      c.TokensPerMinute,
+			TokensPerDay:         c.TokensPerDay,
+			QuotaExceeded:        c.QuotaExceeded,
+			BudgetMicrosPerMonth: int64(c.BudgetUSDPerMonth * 1_000_000),
+			BudgetExceeded:       c.BudgetExceeded,
+			BudgetMicrosPerDay:   int64(c.BudgetUSDPerDay * 1_000_000),
+			BudgetDayExceeded:    c.BudgetExceeded,
+		})
 	}
 	return out
 }

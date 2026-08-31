@@ -518,3 +518,43 @@ func TestIsLoopbackHost(t *testing.T) {
 		}
 	}
 }
+
+// TestGateway_DeclaredVirtualKeyCarriesBothBudgetWindows pins the config
+// virtual_keys → keystore.KeyOptions conversion for BOTH money dimensions. The
+// two USD→µUSD sites in this repo deliberately disagree — this one rounds
+// (math.Round), governance.PoliciesFromConfig truncates — so the assertion uses
+// a value where they would differ: 0.0000015 USD rounds to 2 µUSD and truncates
+// to 1, which makes "this site rounds" a checked claim rather than a comment.
+func TestGateway_DeclaredVirtualKeyCarriesBothBudgetWindows(t *testing.T) {
+	t.Setenv("INFERPLANE_VKEY_BUDGETS", "sk-declarative-key-0123456789")
+	cfgPath := writeTestConfig(t, func(cfg map[string]any, dir string) {
+		cfg["teams"] = map[string]any{"demo": map[string]any{"allowed_models": []string{"*"}}}
+		cfg["virtual_keys"] = []map[string]any{{
+			"team": "demo", "key_ref": map[string]string{"env": "INFERPLANE_VKEY_BUDGETS"},
+			"allowed_models":       []string{"*"},
+			"budget_usd_per_month": 5.0,
+			"budget_usd_per_day":   0.0000015,
+		}}
+	})
+	g, err := newGateway(cfgPath)
+	if err != nil {
+		t.Fatalf("newGateway: %v", err)
+	}
+	bootAndStop(t, g)
+
+	store, err := keystore.OpenSQLite(filepath.Join(filepath.Dir(cfgPath), "keys.db"))
+	if err != nil {
+		t.Fatalf("open keystore: %v", err)
+	}
+	defer store.Close()
+	p, err := store.Resolve(context.Background(), "sk-declarative-key-0123456789")
+	if err != nil {
+		t.Fatalf("resolve declared key: %v", err)
+	}
+	if p.BudgetUSDMicros != 5_000_000 {
+		t.Fatalf("BudgetUSDMicros = %d, want 5000000", p.BudgetUSDMicros)
+	}
+	if p.BudgetUSDMicrosPerDay != 2 {
+		t.Fatalf("BudgetUSDMicrosPerDay = %d, want 2 (math.Round(1.5)); 1 would mean this site started truncating", p.BudgetUSDMicrosPerDay)
+	}
+}

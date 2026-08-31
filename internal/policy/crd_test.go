@@ -55,7 +55,7 @@ func TestCRDManifestMatchesAPIVersion(t *testing.T) {
 	}
 	// The wire fields the Go schema requires must appear in the manifest —
 	// a cheap tripwire against renaming one side only.
-	for _, field := range []string{"failurePolicy", "limitMilliUSD", "grantMilliUSD", "renewInterval", "onAffinityConflict", "modelAccess", "unlimited", "budgetTiers", "budgetRef", "thresholdPercent", "substitute"} {
+	for _, field := range []string{"failurePolicy", "limitMilliUSD", "grantMilliUSD", "renewInterval", "onAffinityConflict", "modelAccess", "unlimited", "period", "budgetTiers", "budgetRef", "thresholdPercent", "substitute"} {
 		if !strings.Contains(string(data), field) {
 			t.Fatalf("CRD manifest lost field %q", field)
 		}

@@ -18,6 +18,22 @@ spec:
     failurePolicy: FailOpen
     budget:
       unlimited: true
+  # `unlimited` is window-agnostic — "no cap" is a statement about the budget
+  # dimension as a whole, not about one calendar window, so combining it with
+  # `period` is rejected at load. If this demo ever takes a real cap, the
+  # day+month shape is two rules, one per window, because hardCap /
+  # failurePolicy / lease are per-rule and each window carries its own lease:
+  #
+  # - name: daily-soft-cap
+  #   failurePolicy: FailOpen
+  #   budget:
+  #     period: CalendarDay
+  #     limitMilliUSD: 5000            # $5 / day (1000 = $1)
+  # - name: monthly-hard-cap
+  #   failurePolicy: FailClosed
+  #   budget:
+  #     limitMilliUSD: 50000           # $50 / month; period omitted = CalendarMonth
+  #     hardCap: true
   # The previous fixed 2M tpm choked Claude Code's cache-creation bursts
   # (150k+ tokens per request) with team_token_rate_limited 429s, because
   # PreCheck's estimate counted the full cached prefix even on a cache hit —

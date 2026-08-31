@@ -335,3 +335,124 @@ func TestRejectDuplicateRuleNamesAndOverflow(t *testing.T) {
 		t.Fatalf("boundary conversion overflowed: %d", p.Rules[0].Budget.LimitMicroUSD)
 	}
 }
+
+// period selects a budget rule's calendar window. Empty normalizes to
+// CalendarMonth — the window every budget rule enforced before the field
+// existed — so Budget.Period is never empty after conversion and every
+// pre-existing document keeps its exact meaning.
+func TestBudgetPeriodConversion(t *testing.T) {
+	cases := []struct {
+		name string
+		wire v1alpha1.BudgetPeriod
+		want v1alpha1.BudgetPeriod
+	}{
+		{"omitted defaults to CalendarMonth", "", v1alpha1.PeriodCalendarMonth},
+		{"CalendarDay", v1alpha1.PeriodCalendarDay, v1alpha1.PeriodCalendarDay},
+		{"CalendarMonth", v1alpha1.PeriodCalendarMonth, v1alpha1.PeriodCalendarMonth},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := validDoc()
+			doc.Spec.Rules[0].Budget.Period = tc.wire
+			p, err := FromV1Alpha1(doc)
+			if err != nil {
+				t.Fatalf("FromV1Alpha1: %v", err)
+			}
+			if got := p.Rules[0].Budget.Period; got != tc.want {
+				t.Fatalf("Budget.Period = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// An unknown period is an explicit *UnsupportedError carrying the offending
+// rule's name, never a silent fallback — and case matters: this package does
+// not coerce a value the schema doesn't spell exactly.
+func TestBudgetPeriodUnknownRejected(t *testing.T) {
+	for _, bad := range []v1alpha1.BudgetPeriod{"Weekly", "calendarday"} {
+		t.Run(string(bad), func(t *testing.T) {
+			doc := validDoc()
+			doc.Spec.Rules[0].Budget.Period = bad
+			_, err := FromV1Alpha1(doc)
+			var ue *UnsupportedError
+			if !errors.As(err, &ue) {
+				t.Fatalf("want *UnsupportedError, got %v", err)
+			}
+			if ue.Rule != "monthly-hard-cap" {
+				t.Fatalf("UnsupportedError.Rule = %q, want %q", ue.Rule, "monthly-hard-cap")
+			}
+		})
+	}
+}
+
+// unlimited combined with period is rejected — "no cap" is a statement about
+// the budget dimension as a whole and has no window — while an unlimited rule
+// alone still gets a normalized Period, keeping Budget's "never empty after
+// conversion" contract true.
+func TestBudgetPeriodUnlimited(t *testing.T) {
+	combined := validDoc()
+	combined.Spec.Rules[0].Budget = &v1alpha1.BudgetRule{Unlimited: true, Period: v1alpha1.PeriodCalendarDay}
+	_, err := FromV1Alpha1(combined)
+	var ue *UnsupportedError
+	if !errors.As(err, &ue) {
+		t.Fatalf("want *UnsupportedError, got %v", err)
+	}
+
+	alone := validDoc()
+	alone.Spec.Rules[0].Budget = &v1alpha1.BudgetRule{Unlimited: true}
+	p, err := FromV1Alpha1(alone)
+	if err != nil {
+		t.Fatalf("FromV1Alpha1: %v", err)
+	}
+	b := p.Rules[0].Budget
+	if b == nil || !b.Unlimited || b.Period != v1alpha1.PeriodCalendarMonth {
+		t.Fatalf("unlimited budget rule mangled: %+v", b)
+	}
+}
+
+// The design's day+month shape: two rules in one document, one per window,
+// each carrying its own limit and hardCap. This round trip — right periods,
+// exact ×1000 milliUSD→µUSD limits, right hardCap flags — is what the rest of
+// the daily-budget phase is built on.
+func TestBudgetDayAndMonthRules(t *testing.T) {
+	doc := &v1alpha1.GovernancePolicy{
+		TypeMeta: v1alpha1.TypeMeta{APIVersion: v1alpha1.APIVersion, Kind: v1alpha1.KindGovernancePolicy},
+		Metadata: v1alpha1.ObjectMeta{Name: "demo-team"},
+		Spec: v1alpha1.GovernancePolicySpec{
+			Subject: v1alpha1.Subject{Team: "demo"},
+			Rules: []v1alpha1.Rule{
+				{
+					Name:          "daily-soft-cap",
+					FailurePolicy: v1alpha1.FailOpen,
+					Budget: &v1alpha1.BudgetRule{
+						Period:        v1alpha1.PeriodCalendarDay,
+						LimitMilliUSD: 50_000, // $50 / day
+					},
+				},
+				{
+					Name:          "monthly-hard-cap",
+					FailurePolicy: v1alpha1.FailClosed,
+					Budget: &v1alpha1.BudgetRule{
+						LimitMilliUSD: 1_000_000, // $1000 / month; period omitted = CalendarMonth
+						HardCap:       true,
+					},
+				},
+			},
+		},
+	}
+	p, err := FromV1Alpha1(doc)
+	if err != nil {
+		t.Fatalf("FromV1Alpha1: %v", err)
+	}
+	if len(p.Rules) != 2 {
+		t.Fatalf("got %d rules, want 2", len(p.Rules))
+	}
+	day := p.Rules[0].Budget
+	if day == nil || day.Period != v1alpha1.PeriodCalendarDay || day.LimitMicroUSD != 50_000_000 || day.HardCap {
+		t.Fatalf("day rule mangled: %+v", day)
+	}
+	month := p.Rules[1].Budget
+	if month == nil || month.Period != v1alpha1.PeriodCalendarMonth || month.LimitMicroUSD != 1_000_000_000 || !month.HardCap {
+		t.Fatalf("month rule mangled: %+v", month)
+	}
+}

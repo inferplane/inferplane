@@ -98,6 +98,24 @@ type Rule struct {
 	Rate          *RateRule        `json:"rate,omitempty"`
 }
 
+// BudgetPeriod is the calendar window a budget rule's limit applies to. It is
+// PER RULE, not per document: hardCap, failurePolicy, lease and adminContact
+// are all per-rule knobs, so "day = soft, month = hard" can only be expressed
+// as two rules — and the control plane's lease ledger is keyed per rule, so one
+// rule cannot hold two independent leases either. A day cap and a month cap are
+// two entries in spec.rules.
+type BudgetPeriod string
+
+const (
+	// PeriodCalendarDay resets at the next midnight in the data plane's
+	// configured budget_timezone.
+	PeriodCalendarDay BudgetPeriod = "CalendarDay"
+	// PeriodCalendarMonth resets at the first instant of next month in that
+	// same timezone. It is also the meaning of an EMPTY period, so every
+	// document written before this field existed keeps its exact meaning.
+	PeriodCalendarMonth BudgetPeriod = "CalendarMonth"
+)
+
 // BudgetRule enforces spend via budget leases: the control plane grants the
 // data plane a slice of budget it may burn without a network round trip, the
 // data plane reports consumption asynchronously and renews (ADR-031). Cost
@@ -109,7 +127,7 @@ type BudgetRule struct {
 	// Unlimited declares, explicitly and auditably, that this dimension has
 	// no cap — the alternative to simply omitting the rule (which reads as
 	// "no policy decision was made" rather than "we decided not to cap
-	// this"). When true, LimitMilliUSD/HardCap/Lease/AdminContact must all
+	// this"). When true, LimitMilliUSD/HardCap/Lease/AdminContact/Period must all
 	// be unset; the rule exists only to be enforced=false in an observation
 	// sense — its presence is itself the record.
 	Unlimited bool `json:"unlimited,omitempty"`
@@ -129,6 +147,12 @@ type BudgetRule struct {
 	// or a Slack channel) — where to go when a hard cap blocks. Optional;
 	// empty means the error carries no contact hint.
 	AdminContact string `json:"adminContact,omitempty"`
+	// Period is the calendar window this rule's limit applies to. Empty means
+	// CalendarMonth — the window every budget rule enforced before this field
+	// existed — so omitting it preserves an existing document's meaning
+	// exactly. Must not be combined with Unlimited: "no cap" is a statement
+	// about the budget dimension as a whole and has no window.
+	Period BudgetPeriod `json:"period,omitempty"`
 }
 
 // LeaseSpec sizes a budget lease. Both fields are optional; defaults are

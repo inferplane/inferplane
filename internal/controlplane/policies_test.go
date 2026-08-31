@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
 	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/policystore"
 )
@@ -202,6 +203,68 @@ func TestApplyWriteLedgerCarryForward(t *testing.T) {
 	r = doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp1"})
 	if len(r.Leases) != 1 || r.Leases[0].Rule != "cap2" || r.Leases[0].AllowanceMicroUSD != 10_000 {
 		t.Fatalf("leases after rename = %+v, want one fresh lease for cap2 with allowance 10000", r.Leases)
+	}
+}
+
+// Changing rule "cap"'s period in place (same policy+rule name) must NOT
+// carry forward the old window's spend/allowance: a month's 60,000 µUSD
+// booked against a $0.10 CalendarDay limit would misreport the team as
+// already over budget for a window it never actually spent against.
+func TestApplyWriteLedgerResetsOnPeriodChange(t *testing.T) {
+	s, ts := newTestServer(t, "")
+	fs := newFakeStore()
+	if err := s.AttachPolicyStore(context.Background(), fs); err != nil {
+		t.Fatal(err)
+	}
+
+	doSync(t, ts.URL, "", policy.SyncRequest{
+		Dataplane: "dp1",
+		Reports:   []policy.ConsumptionReport{{Policy: "team-a", Rule: "cap", Team: "alpha", SpentMicroUSD: 60_000}},
+	})
+
+	// Same rule name, but now CalendarDay: the old month-scoped spend must
+	// not survive into the new day-scoped ledger row.
+	edited := strings.Replace(cpPolicyYAML, "limitMilliUSD: 100", "limitMilliUSD: 100\n      period: CalendarDay", 1)
+	if err := s.ApplyWrite(context.Background(), "team-a", []byte(edited)); err != nil {
+		t.Fatalf("ApplyWrite: %v", err)
+	}
+	r := doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp1"})
+	if len(r.Leases) != 1 {
+		t.Fatalf("leases = %+v, want exactly one", r.Leases)
+	}
+	if r.Leases[0].Period != v1alpha1.PeriodCalendarDay {
+		t.Fatalf("lease period = %q, want %q", r.Leases[0].Period, v1alpha1.PeriodCalendarDay)
+	}
+	if r.Leases[0].AllowanceMicroUSD != 10_000 {
+		t.Fatalf("allowance after period change = %d, want 10000 (fresh grant, old month spend NOT carried forward)", r.Leases[0].AllowanceMicroUSD)
+	}
+}
+
+// A ConsumptionReport measured against a different period than the rule's
+// CURRENT period (a stale/lagging data plane, or one heartbeat that landed
+// right after an in-place period change) must not be booked into the
+// ledger: the number is in the wrong currency for this window and would
+// either falsely starve or falsely permit the new limit.
+func TestSyncSkipsConsumptionReportWithStalePeriod(t *testing.T) {
+	s, ts := newTestServer(t, "")
+	fs := newFakeStore()
+	if err := s.AttachPolicyStore(context.Background(), fs); err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(cpPolicyYAML, "limitMilliUSD: 100", "limitMilliUSD: 100\n      period: CalendarDay", 1)
+	if err := s.ApplyWrite(context.Background(), "team-a", []byte(edited)); err != nil {
+		t.Fatalf("ApplyWrite: %v", err)
+	}
+
+	// This report omits Period, which the wire convention reads as
+	// CalendarMonth (see ConsumptionReport.Period doc) — a mismatch against
+	// the rule's now-CalendarDay ledger row.
+	r := doSync(t, ts.URL, "", policy.SyncRequest{
+		Dataplane: "dp1",
+		Reports:   []policy.ConsumptionReport{{Policy: "team-a", Rule: "cap", Team: "alpha", SpentMicroUSD: 60_000}},
+	})
+	if len(r.Leases) != 1 || r.Leases[0].AllowanceMicroUSD != 10_000 {
+		t.Fatalf("leases = %+v, want allowance 10000 (stale-period report must be skipped, not booked as spend)", r.Leases)
 	}
 }
 

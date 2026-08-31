@@ -164,7 +164,9 @@
 
   // applyRule edits one rule kind in place: unchecked removes the rule
   // entirely, checked updates the existing rule or appends a new one named
-  // defaultName. Every other rule in the document is left untouched.
+  // defaultName. Every other rule in the document is left untouched. build
+  // receives the existing rule body (or null) so a field the form does not
+  // render can be carried through.
   function applyRule(doc, kind, enabled, defaultName, build, failurePolicy) {
     const existing = firstRule(doc, kind);
     if (!enabled) {
@@ -172,12 +174,12 @@
       return;
     }
     if (existing) {
-      existing[kind] = build();
+      existing[kind] = build(existing[kind]);
       if (failurePolicy) existing.failurePolicy = failurePolicy;
       return;
     }
     const rule = { name: defaultName, failurePolicy: failurePolicy || "FailOpen" };
-    rule[kind] = build();
+    rule[kind] = build(null);
     doc.spec.rules.push(rule);
   }
 
@@ -195,7 +197,11 @@
     }
     const doc = structuredClone(view.policy);
     doc.spec.rules = doc.spec.rules || [];
-    applyRule(doc, "budget", refs.budgetOn.checked, "budget", () => ({
+    // The form does not render period, and build() replaces the whole budget
+    // object — so carry the fetched rule's period through explicitly or a
+    // console save silently turns a CalendarDay cap into a CalendarMonth one.
+    applyRule(doc, "budget", refs.budgetOn.checked, "budget", (prev) => ({
+      ...(prev && prev.period ? { period: prev.period } : {}),
       limitMilliUSD: Number(refs.limit.value),
       hardCap: refs.hardCap.checked,
       lease: { grantMilliUSD: Number(refs.grant.value), renewInterval: refs.renew.value },

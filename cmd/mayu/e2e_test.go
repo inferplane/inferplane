@@ -879,3 +879,140 @@ func TestE2EBodyLoggingRoundTrip(t *testing.T) {
 		t.Fatalf("mixed-event chain not valid: %+v", res)
 	}
 }
+
+// dailyBudgetConfig declares two teams that differ ONLY in which budget window
+// they cap, plus a non-UTC budget_timezone, so one boot exercises both the day
+// window's enforcement and the byte-identical-when-unset guarantee.
+func dailyBudgetConfig(upstreamURL string) func(cfg map[string]any, dir string) {
+	return func(cfg map[string]any, dir string) {
+		withAnthropicProvider(upstreamURL)(cfg, dir)
+		cfg["budget_timezone"] = "Asia/Seoul"
+		cfg["teams"] = map[string]any{
+			// First request costs ~(10 in + 5 out tokens) at $1M/MTok ⇒ way over
+			// a $0.000001 daily budget; block kicks in on request 2. No monthly
+			// cap at all, so a 402 here can only come from the DAY window.
+			"daily-only": map[string]any{
+				"budget": map[string]any{"usd_per_day": 0.000001, "on_exceeded": "block"},
+			},
+			// The control: monthly only. Its /v1/usage must carry no day field.
+			"monthly-only": map[string]any{
+				"budget": map[string]any{"usd_per_month": 1000.0, "on_exceeded": "block"},
+			},
+		}
+		cfg["pricing"] = map[string]any{
+			"overrides": map[string]any{
+				"up": map[string]any{
+					"claude-test": map[string]any{"input_per_mtok": 1000000.0, "output_per_mtok": 1000000.0},
+				},
+			},
+		}
+	}
+}
+
+// TestE2EDailyBudgetBlocks is the end-to-end pin for the whole daily-budget
+// chain: config file → governance.ConfigTeam → Limits → TeamPolicy → PreCheck's
+// day branch → 402, plus budget_timezone reaching the Governor.
+//
+// It exists because every layer below has its own unit test and NONE of them
+// covers cmd/mayu's wiring: dropping `BudgetUSDPerDay: tc.Budget.USDPerDay`
+// from the ConfigTeam literal, or the gov.SetBudgetTimezone call, leaves the
+// entire package suite green while the feature is silently dead.
+func TestE2EDailyBudgetBlocks(t *testing.T) {
+	up := newAnthropicUpstream(t)
+	dataURL, adminURL, _ := bootGateway(t, dailyBudgetConfig(up.srv.URL))
+
+	t.Run("daily budget blocks with no monthly cap", func(t *testing.T) {
+		_, key := createKey(t, adminURL, "daily-only", []string{"claude-test"})
+		r1 := postMessages(t, dataURL, key, "claude-test")
+		io.Copy(io.Discard, r1.Body)
+		r1.Body.Close()
+		if r1.StatusCode != http.StatusOK {
+			t.Fatalf("first request: status %d, want 200 (daily budget not yet spent)", r1.StatusCode)
+		}
+		r2 := postMessages(t, dataURL, key, "claude-test")
+		body, _ := io.ReadAll(r2.Body)
+		r2.Body.Close()
+		if r2.StatusCode != http.StatusPaymentRequired {
+			t.Fatalf("second request: status %d, want 402 (daily budget exhausted): %s", r2.StatusCode, body)
+		}
+		if !strings.Contains(string(body), "daily budget exceeded") {
+			t.Fatalf("402 must name the DAILY window, got: %s", body)
+		}
+		// The reset date is rendered in the configured operator timezone, so it
+		// is tomorrow in Asia/Seoul — not necessarily tomorrow in UTC.
+		kst, err := time.LoadLocation("Asia/Seoul")
+		if err != nil {
+			t.Fatalf("LoadLocation: %v (time/tzdata must be imported)", err)
+		}
+		wantDate := time.Now().In(kst).AddDate(0, 0, 1).Format("2006-01-02")
+		if !strings.Contains(string(body), "resets "+wantDate) {
+			t.Fatalf("402 reset date should be %s (tomorrow in Asia/Seoul), got: %s", wantDate, body)
+		}
+
+		usage := getUsage(t, dataURL, key)
+		day, ok := usage["team_budget_day"].(map[string]any)
+		if !ok {
+			t.Fatalf("/v1/usage must report team_budget_day: %+v", usage)
+		}
+		if day["window"] != "calendar-day" {
+			t.Fatalf("team_budget_day window = %v, want calendar-day", day["window"])
+		}
+		if day["limit_usd_micros"].(float64) != 1 {
+			t.Fatalf("team_budget_day limit = %v, want 1 µUSD", day["limit_usd_micros"])
+		}
+		// The reset INSTANT is what distinguishes the configured zone from UTC
+		// even on a day when the two calendar dates agree.
+		resets, err := time.Parse(time.RFC3339, day["resets_at"].(string))
+		if err != nil {
+			t.Fatalf("resets_at %v: %v", day["resets_at"], err)
+		}
+		n := time.Now().In(kst)
+		wantResets := time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, kst).AddDate(0, 0, 1)
+		if !resets.Equal(wantResets) {
+			t.Fatalf("team_budget_day resets_at = %s, want the next Asia/Seoul midnight %s", resets.Format(time.RFC3339), wantResets.Format(time.RFC3339))
+		}
+		if _, present := usage["team_budget"]; present {
+			t.Fatalf("a team with no monthly cap must not report team_budget: %+v", usage)
+		}
+	})
+
+	t.Run("a monthly-only team reports no day field", func(t *testing.T) {
+		_, key := createKey(t, adminURL, "monthly-only", []string{"claude-test"})
+		r := postMessages(t, dataURL, key, "claude-test")
+		io.Copy(io.Discard, r.Body)
+		r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("status %d, want 200", r.StatusCode)
+		}
+		usage := getUsage(t, dataURL, key)
+		if _, present := usage["team_budget_day"]; present {
+			t.Fatalf("usd_per_day unset must leave /v1/usage byte-identical (no team_budget_day): %+v", usage)
+		}
+		month, ok := usage["team_budget"].(map[string]any)
+		if !ok || month["window"] != "calendar-month" {
+			t.Fatalf("monthly field must be unchanged: %+v", usage)
+		}
+	})
+}
+
+func getUsage(t *testing.T, dataURL, virtualKey string) map[string]any {
+	t.Helper()
+	req, err := http.NewRequest("GET", dataURL+"/v1/usage", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("x-api-key", virtualKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/usage: status %d", resp.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}

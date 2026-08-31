@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS keys (
     rpm                INTEGER NOT NULL DEFAULT 0,
     expires_at         TEXT NOT NULL DEFAULT '',
     owner              TEXT NOT NULL DEFAULT '',
-    metadata           TEXT NOT NULL DEFAULT ''
+    metadata           TEXT NOT NULL DEFAULT '',
+    budget_usd_micros_per_day INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_keys_hash ON keys(key_hash) WHERE revoked = 0;
 
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS teams (
     quota_on_exceeded   TEXT NOT NULL DEFAULT '',
     budget_usd_micros   INTEGER NOT NULL DEFAULT 0,
     budget_on_exceeded  TEXT NOT NULL DEFAULT '',
+    budget_usd_micros_per_day  INTEGER NOT NULL DEFAULT 0,
     guardrail_id        TEXT NOT NULL DEFAULT '',
     guardrail_version   TEXT NOT NULL DEFAULT '',
     allowed_regions     TEXT NOT NULL DEFAULT '',
@@ -139,6 +141,7 @@ func ensureSchema(db *sql.DB) error {
 		{"expires_at", `ALTER TABLE keys ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`},
 		{"owner", `ALTER TABLE keys ADD COLUMN owner TEXT NOT NULL DEFAULT ''`},
 		{"metadata", `ALTER TABLE keys ADD COLUMN metadata TEXT NOT NULL DEFAULT ''`},
+		{"budget_usd_micros_per_day", `ALTER TABLE keys ADD COLUMN budget_usd_micros_per_day INTEGER NOT NULL DEFAULT 0`},
 	}
 	if err := applyMigrations(ctx, conn, keyColumns, keyMigrations); err != nil {
 		rollback()
@@ -158,6 +161,7 @@ func ensureSchema(db *sql.DB) error {
 		{"guardrail_id", `ALTER TABLE teams ADD COLUMN guardrail_id TEXT NOT NULL DEFAULT ''`},
 		{"guardrail_version", `ALTER TABLE teams ADD COLUMN guardrail_version TEXT NOT NULL DEFAULT ''`},
 		{"allowed_regions", `ALTER TABLE teams ADD COLUMN allowed_regions TEXT NOT NULL DEFAULT ''`},
+		{"budget_usd_micros_per_day", `ALTER TABLE teams ADD COLUMN budget_usd_micros_per_day INTEGER NOT NULL DEFAULT 0`},
 	}
 	if err := applyMigrations(ctx, conn, existingTeamCols, teamMigrations); err != nil {
 		rollback()
@@ -226,9 +230,9 @@ func (s *SQLiteStore) CreateWithOptions(ctx context.Context, team string, allowe
 	}
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO keys (key_id, key_hash, team, allowed_models, created_at,
-		 budget_usd_micros, tpm, rpm, expires_at, owner, metadata) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		 budget_usd_micros, tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 		keyID, hashHex, team, joinModels(allowedModels), nowRFC3339(),
-		opts.BudgetUSDMicros, opts.TPM, opts.RPM, encodeExpiry(opts.ExpiresAt), opts.Owner, metaJSON)
+		opts.BudgetUSDMicros, opts.TPM, opts.RPM, encodeExpiry(opts.ExpiresAt), opts.Owner, metaJSON, opts.BudgetUSDMicrosPerDay)
 	if err != nil {
 		return "", Principal{}, fmt.Errorf("keystore: insert: %w", err)
 	}
@@ -245,13 +249,13 @@ func (s *SQLiteStore) EnsureKey(ctx context.Context, plaintext, team string, all
 	}
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO keys (key_id, key_hash, team, allowed_models, created_at,
-		 budget_usd_micros, tpm, rpm, expires_at, owner, metadata) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		 budget_usd_micros, tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(key_hash) DO UPDATE SET
 		   team=excluded.team, allowed_models=excluded.allowed_models,
-		   budget_usd_micros=excluded.budget_usd_micros, tpm=excluded.tpm, rpm=excluded.rpm,
+		   budget_usd_micros=excluded.budget_usd_micros, budget_usd_micros_per_day=excluded.budget_usd_micros_per_day, tpm=excluded.tpm, rpm=excluded.rpm,
 		   expires_at=excluded.expires_at, owner=excluded.owner, metadata=excluded.metadata`,
 		keyID, hashHex, team, joinModels(allowedModels), nowRFC3339(),
-		opts.BudgetUSDMicros, opts.TPM, opts.RPM, encodeExpiry(opts.ExpiresAt), opts.Owner, metaJSON)
+		opts.BudgetUSDMicros, opts.TPM, opts.RPM, encodeExpiry(opts.ExpiresAt), opts.Owner, metaJSON, opts.BudgetUSDMicrosPerDay)
 	if err != nil {
 		return Principal{}, fmt.Errorf("keystore: ensure key: %w", err)
 	}
@@ -268,7 +272,7 @@ var ErrKeyNotFound = errors.New("keystore: key not found")
 // login` rather than suspect a typo (ADR-028).
 var ErrKeyExpired = errors.New("keystore: key expired")
 
-const keyColumns = `key_id, team, allowed_models, budget_usd_micros, tpm, rpm, expires_at, owner, metadata`
+const keyColumns = `key_id, team, allowed_models, budget_usd_micros, tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day`
 
 // scanPrincipal reads one keyColumns-shaped row. Expiry is checked by the
 // caller (Resolve treats an expired key as not-found; List shows it as-is so
@@ -278,7 +282,7 @@ const keyColumns = `key_id, team, allowed_models, budget_usd_micros, tpm, rpm, e
 func scanPrincipal(row interface{ Scan(...any) error }) (Principal, error) {
 	var p Principal
 	var models, expiresAt, metaJSON string
-	if err := row.Scan(&p.KeyID, &p.Team, &models, &p.BudgetUSDMicros, &p.TPM, &p.RPM, &expiresAt, &p.Owner, &metaJSON); err != nil {
+	if err := row.Scan(&p.KeyID, &p.Team, &models, &p.BudgetUSDMicros, &p.TPM, &p.RPM, &expiresAt, &p.Owner, &metaJSON, &p.BudgetUSDMicrosPerDay); err != nil {
 		return Principal{}, err
 	}
 	p.AllowedModels = splitModels(models)
@@ -380,13 +384,13 @@ var _ KeyEnsurer = (*SQLiteStore)(nil)
 
 var ErrTeamNotFound = errors.New("keystore: team not found")
 
-const teamColumns = `name, allowed_models, rpm, tpm, tokens_per_day, quota_on_exceeded, budget_usd_micros, budget_on_exceeded, guardrail_id, guardrail_version, allowed_regions, created_at, updated_at`
+const teamColumns = `name, allowed_models, rpm, tpm, tokens_per_day, quota_on_exceeded, budget_usd_micros, budget_on_exceeded, budget_usd_micros_per_day, guardrail_id, guardrail_version, allowed_regions, created_at, updated_at`
 
 func scanTeam(row interface{ Scan(...any) error }) (TeamRecord, error) {
 	var t TeamRecord
 	var models, regions string
 	if err := row.Scan(&t.Name, &models, &t.RPM, &t.TPM, &t.TokensPerDay,
-		&t.QuotaOnExceeded, &t.BudgetUSDMicros, &t.BudgetOnExceeded,
+		&t.QuotaOnExceeded, &t.BudgetUSDMicros, &t.BudgetOnExceeded, &t.BudgetUSDMicrosPerDay,
 		&t.GuardrailID, &t.GuardrailVersion, &regions, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return TeamRecord{}, err
 	}
@@ -400,17 +404,18 @@ func scanTeam(row interface{ Scan(...any) error }) (TeamRecord, error) {
 func (s *SQLiteStore) UpsertTeam(ctx context.Context, t TeamRecord) error {
 	now := nowRFC3339()
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO teams (name, allowed_models, rpm, tpm, tokens_per_day, quota_on_exceeded, budget_usd_micros, budget_on_exceeded, guardrail_id, guardrail_version, allowed_regions, created_at, updated_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+		`INSERT INTO teams (name, allowed_models, rpm, tpm, tokens_per_day, quota_on_exceeded, budget_usd_micros, budget_on_exceeded, budget_usd_micros_per_day, guardrail_id, guardrail_version, allowed_regions, created_at, updated_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(name) DO UPDATE SET
 		   allowed_models=excluded.allowed_models, rpm=excluded.rpm, tpm=excluded.tpm,
 		   tokens_per_day=excluded.tokens_per_day, quota_on_exceeded=excluded.quota_on_exceeded,
 		   budget_usd_micros=excluded.budget_usd_micros, budget_on_exceeded=excluded.budget_on_exceeded,
+		   budget_usd_micros_per_day=excluded.budget_usd_micros_per_day,
 		   guardrail_id=excluded.guardrail_id, guardrail_version=excluded.guardrail_version,
 		   allowed_regions=excluded.allowed_regions,
 		   updated_at=excluded.updated_at`,
 		t.Name, joinModels(t.AllowedModels), t.RPM, t.TPM, t.TokensPerDay,
-		t.QuotaOnExceeded, t.BudgetUSDMicros, t.BudgetOnExceeded,
+		t.QuotaOnExceeded, t.BudgetUSDMicros, t.BudgetOnExceeded, t.BudgetUSDMicrosPerDay,
 		t.GuardrailID, t.GuardrailVersion, joinModels(t.AllowedRegions), now, now)
 	if err != nil {
 		return fmt.Errorf("keystore: upsert team: %w", err)

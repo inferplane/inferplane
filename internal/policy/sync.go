@@ -46,15 +46,26 @@ type Rejection struct {
 }
 
 // ConsumptionReport is cumulative spend for one budget rule's team in the
-// current window, in µUSD. Cumulative (not delta) so a lost heartbeat never
-// loses spend; a DECREASE tells the control plane the reporter's budget
-// window rolled over (or its counters restarted), and the ledger adopts the
-// fresh counter rather than keeping the old maximum.
+// rule's own window (see Period), in µUSD. Cumulative (not delta) so a lost
+// heartbeat never loses spend; a DECREASE tells the control plane the
+// reporter's budget window rolled over (or its counters restarted), and the
+// ledger adopts the fresh counter rather than keeping the old maximum.
 type ConsumptionReport struct {
 	Policy        string `json:"policy"`
 	Rule          string `json:"rule"`
 	Team          string `json:"team"`
 	SpentMicroUSD int64  `json:"spentMicroUSD"`
+	// Period is the budget window SpentMicroUSD was measured against.
+	// Appended last with omitempty: a data plane that predates
+	// BudgetRule.period omits it, and the control plane reads that as
+	// CalendarMonth — exactly the meaning the field had implicitly before it
+	// existed. The ledger still MATCHES a report on policy+rule (unique per
+	// rule) — Period is never part of that lookup key — but the control
+	// plane DOES compare it against the matched rule's current period and
+	// skips absorbing a report whose Period disagrees (a lagging data plane,
+	// or a heartbeat landing right after an in-place period edit): the
+	// number would otherwise be booked in the wrong window's currency.
+	Period v1alpha1.BudgetPeriod `json:"period,omitempty"`
 }
 
 // SyncResponse is the control plane's answer.
@@ -107,6 +118,13 @@ type LeaseGrant struct {
 	ExpiresAt         time.Time `json:"expiresAt"`
 	// HardCap mirrors the rule: an expired hard-cap lease fails closed.
 	HardCap bool `json:"hardCap"`
+	// Period is the budget window this allowance applies to. Appended last
+	// with omitempty: a control plane that predates BudgetRule.period omits
+	// it and the data plane reads it as CalendarMonth, which is what every
+	// grant meant before windows existed. The data plane keys its lease table
+	// by (team, period) — a daily allowance and a monthly allowance are not
+	// comparable quantities and must never be merged into one minimum.
+	Period v1alpha1.BudgetPeriod `json:"period,omitempty"`
 }
 
 // GenerationOf fingerprints a policy document set: the sha256 of the

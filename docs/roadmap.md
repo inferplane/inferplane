@@ -22,10 +22,10 @@ already met by earlier work (ADR-031) outside this roadmap.
 | Purpose | Status | Evidence |
 |---|---|---|
 | #1 A single entry point for Claude Code/OpenCode/Codex | 🔶 partial | No Codex-specific code, fixture, or test anywhere in the tree (`grep -ri codex internal/ providers/ tests/` → 0 hits, excluding this doc); the OpenAI-compat ingress (`internal/server/openaiapi/chat.go`) is the presumed path but has never been verified against a real Codex client |
-| #2 Per-user model choice | ✅ done | User-subject `modelAccess` rules are enforced: `internal/policy/store.go:252` `ModelAllowed`, wired at `cmd/mayu/gateway.go:407` into `router.FilterModelAllowed`. (Per-user *budget/rate* is a separate, still-blocked item — see #4b.) |
+| #2 Per-user model choice | ✅ done | User-subject `modelAccess` rules are enforced: `Store.ModelAllowed` (`internal/policy/store.go`), wired into the router via `SetPolicyGate` in `cmd/mayu/gateway.go`. (Per-user *rate* is a separate, still-blocked item — see #4b; per-user *budget* is enforced as of ADR-042 Phase 3.) |
 | #3 Cost-driven model substitution via policy (routing) | ✅ done, with caveats (ADR-041) | `routing.budgetTiers` is enforceable: `internal/policy/store.go` `checkEnforceable` now rejects only the cache-affinity half of `routing`; the control plane judges utilization globally from the ADR-034 ledger (`internal/controlplane/controlplane.go` `handleSync`) and latches the active tier per budget window (`internal/tier.Latch`); mayu applies it at ingress via `router.SubstituteTier`, never widening access or turning into a denial. Config-level `model_fallbacks` (`internal/router/router.go` `ResolveModel`) remains the separate availability-triggered substitution. Caveats: the window-latch key is an interim calendar-month-UTC derivation pending item ② below's real `windowID`; providerstore/UI pricing fields for `openai_compatible` GPU targets (ADR-041 item 6) and the full two-plane e2e (item 7) are follow-ups. |
 | #4a Team budget + block | ✅ done, with caveats | ADR-034 lease pattern bounds team-level overspend across data planes when a control plane is attached (worst case = Σ outstanding grants, not exact; window edges are approximate — ADR-034 §Known limits). Per-key budgets are not lease-managed. Standalone `mayu` (no control plane) gets no lease at all — budget is plain in-memory there, like rate. |
-| #4b Per-user budget/rate | ❌ blocked | `internal/policy/store.go:168-169` — any rule containing `budget` or `rate` is rejected unless the subject is team-only; user-only and (team,user) subjects are refused for those two rule kinds specifically |
+| #4b Per-user budget/rate | 🔶 partial | *Budget* is unblocked (ADR-042 Phase 3): `checkEnforceable` (`internal/policy/store.go`) now rejects only user-subject *rate*; user-subject budget rules are merged by `mergeUserLimits`/`Store.UserLimits` and enforced by the Governor via `governance.SetUserLookup`/`UserPolicy`. *Rate* stays blocked — a per-user rate limit needs the rate-share model (item ① below). And per-user budget has no lease: a user-subject rule is excluded from the control-plane ledger and the consumption report, so with N data planes a user's effective cap is up to N× the configured value (ADR-042 §Accepted limitation, Phase 3) |
 | #4c Rate/quota global accuracy under horizontal scale | ❌ blocked | item ① below — in-memory per-replica buckets; N replicas admit up to N× the configured rate/TPM/quota in aggregate |
 | #4d Spend visibility | ✅ done | `internal/analytics` + console + `GET /admin/logs` (`analyticsapi.LogsHandler`, backed by the same analytics index — its `events` rows carry `cost_micros` per request, `internal/analytics/index.go:40`) |
 | #5 No SPOF (control/data plane split) | ✅ done | ADR-031 — scoped to the control plane not gating the inference path; it does not mean any one `mayu` instance is itself highly available (see #4c and "Current limits") |
@@ -251,8 +251,9 @@ details are swappable.
 - SSE push stream for policy distribution (poll-at-lease-cadence already
   beats the 60s/15s requirement).
 - CRD-watch controller in inferplaned (ADR-035 follow-up).
-- User-subject budget/rate windows (needs per-user governance keys end to
-  end; unblocks the ADR-033 gate).
+- User-subject *rate* rules (need a rate-share model — item ① — before the
+  ADR-033 gate can accept them; user-subject *budget* shipped in ADR-042
+  Phase 3, which narrowed that gate to rate-only).
 - Cache-affinity routing engine (the `routing` rule's *affinity* half stays
   rejected until then; the *budgetTiers* half shipped as ADR-041 — it never
   depended on the affinity engine).

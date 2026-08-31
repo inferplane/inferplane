@@ -83,11 +83,11 @@ spec:
                           # unlimited declares "no cap" explicitly instead of
                           # omitting the rule; exactly one of unlimited or
                           # limitMilliUSD must be set, and unlimited must not
-                          # be combined with hardCap/lease.
+                          # be combined with hardCap/lease/period.
                           - rule: "(has(self.unlimited) && self.unlimited) ? !has(self.limitMilliUSD) : has(self.limitMilliUSD)"
                             message: "exactly one of unlimited or limitMilliUSD must be set"
-                          - rule: "!(has(self.unlimited) && self.unlimited) || (!has(self.hardCap) && !has(self.lease))"
-                            message: "unlimited must not be combined with hardCap or lease"
+                          - rule: "!(has(self.unlimited) && self.unlimited) || (!has(self.hardCap) && !has(self.lease) && !has(self.period))"
+                            message: "unlimited must not be combined with hardCap, lease, or period"
                         properties:
                           unlimited:
                             type: boolean
@@ -109,6 +109,9 @@ spec:
                                 type: string
                                 # Go duration, e.g. "10s", "1m30s".
                                 pattern: "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$"
+                          period:
+                            type: string
+                            enum: ["CalendarDay", "CalendarMonth"]
                       routing:
                         type: object
                         x-kubernetes-validations:

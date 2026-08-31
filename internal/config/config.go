@@ -257,10 +257,15 @@ type QuotaConfig struct {
 	OnExceeded     string `json:"on_exceeded"` // block|warn
 }
 
-// BudgetConfig is a team's monthly spend ceiling. USDPerMonth is a human USD
-// float in config, converted to µUSD at use.
+// BudgetConfig is a team's spend ceiling. USDPerMonth/USDPerDay are human USD
+// floats in config, converted to µUSD at use; each is 0 = not limited on that
+// dimension, and both can be set at once (a team capped at $50/day AND
+// $1000/month). OnExceeded (block|warn) governs BOTH windows — there is
+// deliberately one knob, not two, because the policy-document channel that can
+// express "day soft, month hard" is a later phase.
 type BudgetConfig struct {
 	USDPerMonth float64 `json:"usd_per_month"` // converted to µUSD at use
+	USDPerDay   float64 `json:"usd_per_day"`   // converted to µUSD at use
 	OnExceeded  string  `json:"on_exceeded"`
 }
 
@@ -281,6 +286,7 @@ type VirtualKeyConfig struct {
 	RPM               int64             `json:"rpm,omitempty"`
 	TPM               int64             `json:"tpm,omitempty"`
 	BudgetUSDPerMonth float64           `json:"budget_usd_per_month,omitempty"`
+	BudgetUSDPerDay   float64           `json:"budget_usd_per_day,omitempty"`
 	Owner             string            `json:"owner,omitempty"`
 	Metadata          map[string]string `json:"metadata,omitempty"`
 	Key               string            `json:"-"`
@@ -365,6 +371,29 @@ func sortedKeys[V any](m map[string]V) []string {
 	return out
 }
 
+// validateBudgetTimezone resolves budget_timezone into cfg.BudgetLoc, failing
+// the load on an unknown zone. "Local" is refused on purpose: it resolves to
+// whatever the host's TZ happens to be, so the same config would put the daily
+// money boundary at a different instant in a developer's shell than in a
+// distroless container (where TZ is unset and Local is UTC) — a silent,
+// environment-dependent money control. Name the zone explicitly instead.
+func validateBudgetTimezone(cfg *Config) error {
+	name := strings.TrimSpace(cfg.BudgetTimezone)
+	if name == "" || name == "UTC" {
+		cfg.BudgetLoc = time.UTC
+		return nil
+	}
+	if name == "Local" {
+		return fmt.Errorf("config: budget_timezone must be an explicit IANA zone name (e.g. \"Asia/Seoul\"), not \"Local\" — Local depends on the host TZ and would move the daily budget boundary between environments")
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return fmt.Errorf("config: budget_timezone %q: %w", name, err)
+	}
+	cfg.BudgetLoc = loc
+	return nil
+}
+
 // PluginConfig enables a request-transform filter plugin (the spec's filter
 // chain ⑥, ADR-009). Name must match a registered filter (e.g. "pii-mask").
 // Teams scopes it to those teams; an empty Teams means GLOBAL (all teams). The
@@ -426,6 +455,19 @@ type Config struct {
 	// policies, budget leases, and rejection reporting flow over one
 	// heartbeat. Mutually exclusive with Policies.
 	ControlPlane *ControlPlaneConfig `json:"control_plane,omitempty"`
+	// BudgetTimezone is the IANA zone name the CALENDAR-DAY budget window
+	// anchors its midnight to (e.g. "Asia/Seoul"). Empty = "UTC", which is
+	// byte-for-byte the behavior every budget window had before this key
+	// existed. Validated with time.LoadLocation at load: an unknown zone is a
+	// LOAD ERROR, not a warning, because a money control silently anchored to
+	// the wrong midnight is worse than a refused boot (same logic as
+	// pricing.on_missing's typo rejection). The binaries import
+	// _ "time/tzdata", so a named zone resolves inside distroless/static too.
+	BudgetTimezone string `json:"budget_timezone,omitempty"`
+	// BudgetLoc is the RESOLVED location, filled at load. Tagged "-" so a
+	// config file can never set it directly — same posture as
+	// ProviderConfig.APIKey and AdminAuth.Tokens.
+	BudgetLoc *time.Location `json:"-"`
 }
 
 // ControlPlaneConfig is the data plane's inferplaned connection (ADR-034).
@@ -457,6 +499,16 @@ type ControlPlaneConfig struct {
 // (default: yes).
 func (c *Config) FallbackFamilyEnabled() bool {
 	return c.ModelFallbackFamily == nil || *c.ModelFallbackFamily
+}
+
+// BudgetLocation returns the resolved budget timezone, UTC when unset — the
+// same nil-means-UTC default budget.Window carries, so a config that never
+// mentions budget_timezone produces the pre-existing behavior exactly.
+func (c *Config) BudgetLocation() *time.Location {
+	if c.BudgetLoc == nil {
+		return time.UTC
+	}
+	return c.BudgetLoc
 }
 
 // BudgetAlertsConfig enables webhook budget alerts (D5b, ADR-017): a team's
@@ -604,6 +656,9 @@ func LoadRaw(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := validatePricing(cfg.Pricing); err != nil {
+		return nil, err
+	}
+	if err := validateBudgetTimezone(&cfg); err != nil {
 		return nil, err
 	}
 	if err := validateOTel(cfg.OTel); err != nil {
@@ -762,6 +817,9 @@ func validateVirtualKeys(vks []VirtualKeyConfig) error {
 		}
 		if vks[i].BudgetUSDPerMonth < 0 {
 			return fmt.Errorf("config: virtual_keys[%d].budget_usd_per_month must be >= 0", i)
+		}
+		if vks[i].BudgetUSDPerDay < 0 {
+			return fmt.Errorf("config: virtual_keys[%d].budget_usd_per_day must be >= 0", i)
 		}
 		if err := ValidateSecretRef(vks[i].KeyRef); err != nil {
 			return fmt.Errorf("config: virtual_keys[%d].key_ref: %w", i, err)

@@ -1,23 +1,9 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
-
-// writeConfig writes body to a temp config file and returns its path. The
-// branch this test was picked from shares it via budget_timezone_test.go
-// (ADR-042, not merged here yet) — fold this copy into that one when it lands.
-func writeConfig(t *testing.T, body string) string {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
 
 // ADR-030 zero-rate hole. An override of `{"input_per_mtok": 0,
 // "output_per_mtok": 0}` used to load cleanly, pass `mayu pricing check`, pass
@@ -28,6 +14,8 @@ func writeConfig(t *testing.T, body string) string {
 // Rejected at LOAD, not warned about, matching the precedent set by an
 // unrecognized `pricing.on_missing` value and by an unknown `budget_timezone`:
 // a money control that is silently wrong is worse than a refused boot.
+//
+// writeConfig lives in budget_timezone_test.go (same package) — do not redefine it.
 func TestPricingOverride_zeroRateWithoutFreeIsLoadError(t *testing.T) {
 	_, err := LoadRaw(writeConfig(t, `{"pricing":{"overrides":{"bedrock-apne1":{"zai.glm-5":{"input_per_mtok":0,"output_per_mtok":0}}}}}`))
 	if err == nil {

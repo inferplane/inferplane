@@ -81,6 +81,7 @@ func teamView(t keystore.TeamRecord, source string) map[string]any {
 	v["tokens_per_day"] = t.TokensPerDay
 	v["quota_on_exceeded"] = t.QuotaOnExceeded
 	v["budget_usd_micros"] = t.BudgetUSDMicros
+	v["budget_usd_micros_per_day"] = t.BudgetUSDMicrosPerDay
 	v["budget_on_exceeded"] = t.BudgetOnExceeded
 	v["guardrail_id"] = t.GuardrailID
 	v["guardrail_version"] = t.GuardrailVersion
@@ -118,13 +119,14 @@ func (h *TeamsHandler) list(w http.ResponseWriter, r *http.Request) {
 // microUSD (never float, CLAUDE.md) — the console converts from a USD input
 // client-side, same as the key-creation form.
 type teamWriteBody struct {
-	AllowedModels    []string `json:"allowed_models,omitempty"`
-	RPM              int64    `json:"rpm,omitempty"`
-	TPM              int64    `json:"tpm,omitempty"`
-	TokensPerDay     int64    `json:"tokens_per_day,omitempty"`
-	QuotaOnExceeded  string   `json:"quota_on_exceeded,omitempty"`
-	BudgetUSDMicros  int64    `json:"budget_usd_micros,omitempty"`
-	BudgetOnExceeded string   `json:"budget_on_exceeded,omitempty"`
+	AllowedModels         []string `json:"allowed_models,omitempty"`
+	RPM                   int64    `json:"rpm,omitempty"`
+	TPM                   int64    `json:"tpm,omitempty"`
+	TokensPerDay          int64    `json:"tokens_per_day,omitempty"`
+	QuotaOnExceeded       string   `json:"quota_on_exceeded,omitempty"`
+	BudgetUSDMicros       int64    `json:"budget_usd_micros,omitempty"`
+	BudgetUSDMicrosPerDay int64    `json:"budget_usd_micros_per_day,omitempty"`
+	BudgetOnExceeded      string   `json:"budget_on_exceeded,omitempty"`
 	// GuardrailID/GuardrailVersion override the provider's default Bedrock
 	// Guardrail for this team (D6, ADR-019). Empty ID = no override.
 	GuardrailID      string `json:"guardrail_id,omitempty"`
@@ -160,8 +162,8 @@ func validateTeamName(name string) error {
 }
 
 func (b teamWriteBody) validate() error {
-	if b.RPM < 0 || b.TPM < 0 || b.TokensPerDay < 0 || b.BudgetUSDMicros < 0 {
-		return fmt.Errorf("rpm/tpm/tokens_per_day/budget_usd_micros must be non-negative")
+	if b.RPM < 0 || b.TPM < 0 || b.TokensPerDay < 0 || b.BudgetUSDMicros < 0 || b.BudgetUSDMicrosPerDay < 0 {
+		return fmt.Errorf("rpm/tpm/tokens_per_day/budget_usd_micros/budget_usd_micros_per_day must be non-negative")
 	}
 	if !validOnExceeded[b.QuotaOnExceeded] {
 		return fmt.Errorf("quota_on_exceeded must be one of: block, warn")
@@ -259,7 +261,7 @@ func (h *TeamsHandler) upsert(w http.ResponseWriter, r *http.Request, id princip
 	rec := keystore.TeamRecord{
 		Name: name, AllowedModels: body.AllowedModels, RPM: body.RPM, TPM: body.TPM,
 		TokensPerDay: body.TokensPerDay, QuotaOnExceeded: body.QuotaOnExceeded,
-		BudgetUSDMicros: body.BudgetUSDMicros, BudgetOnExceeded: body.BudgetOnExceeded,
+		BudgetUSDMicros: body.BudgetUSDMicros, BudgetUSDMicrosPerDay: body.BudgetUSDMicrosPerDay, BudgetOnExceeded: body.BudgetOnExceeded,
 		GuardrailID: body.GuardrailID, GuardrailVersion: body.GuardrailVersion,
 		AllowedRegions: body.AllowedRegions,
 	}
