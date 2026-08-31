@@ -548,20 +548,97 @@ func TestStreamConverseToolUse(t *testing.T) {
 	}
 }
 
+// The OpenAI gpt-5.6 family on Converse reports inputTokens INCLUSIVE of the
+// cache read/write counts (OpenAI prompt_tokens semantics) — observed on live
+// ap-northeast-2 gateway traffic 2026-08-29→31: input = cacheRead + cacheWrite
+// + Δ held across 20+ consecutive requests (audit fixture below). The
+// Anthropic wire requires the three counts DISJOINT, so passing the inclusive
+// value through double-counts every cached token: the client's context math
+// runs at ~2x the real prompt and settle bills cache tokens twice (full input
+// rate + cache rate) — the egress mirror of the OpenAI-ingress bug ADR-030
+// fixed in usageFromOAI.
+func TestUsageWithCacheInclusiveInputFamilies(t *testing.T) {
+	t.Run("gpt-5.6 flat write total", func(t *testing.T) {
+		// Live audit record 2026-08-31T04:11:53Z: in 50768, cr 40988, cw 9778.
+		u := usageWithCache("global.openai.gpt-5.6-sol", 50768, 210, 40988, 0, 0, 9778)
+		if u.InputTokens == nil || *u.InputTokens != 2 {
+			t.Fatalf("input must become disjoint (50768-40988-9778=2), got %+v", u.InputTokens)
+		}
+		if u.CacheReadInputTokens == nil || *u.CacheReadInputTokens != 40988 {
+			t.Errorf("cache_read must be untouched: %+v", u.CacheReadInputTokens)
+		}
+		if u.CacheCreationInputTokens == nil || *u.CacheCreationInputTokens != 9778 {
+			t.Errorf("cache write total must be untouched: %+v", u.CacheCreationInputTokens)
+		}
+	})
+
+	t.Run("gpt-5.6 TTL split", func(t *testing.T) {
+		u := usageWithCache("global.openai.gpt-5.6-luna", 100, 5, 60, 30, 8, 38)
+		if u.InputTokens == nil || *u.InputTokens != 2 {
+			t.Fatalf("input must become disjoint (100-60-38=2), got %+v", u.InputTokens)
+		}
+	})
+
+	t.Run("subtraction never yields a negative input", func(t *testing.T) {
+		// A listed family reporting counts that contradict inclusive semantics
+		// clamps to 0 (never over-bill — same posture as the unknown-TTL tier).
+		u := usageWithCache("global.openai.gpt-5.6-terra", 10, 5, 40, 0, 0, 24)
+		if u.InputTokens == nil || *u.InputTokens != 0 {
+			t.Fatalf("input must clamp at 0, got %+v", u.InputTokens)
+		}
+	})
+
+	t.Run("unlisted family passes through untouched", func(t *testing.T) {
+		u := usageWithCache("moonshot.kimi-k2", 50768, 210, 40988, 0, 0, 9778)
+		if u.InputTokens == nil || *u.InputTokens != 50768 {
+			t.Fatalf("unverified family must keep upstream semantics, got %+v", u.InputTokens)
+		}
+	})
+
+	t.Run("no cache counts leaves input alone even for a listed family", func(t *testing.T) {
+		u := usageWithCache("global.openai.gpt-5.6-sol", 123, 5, 0, 0, 0, 0)
+		if u.InputTokens == nil || *u.InputTokens != 123 {
+			t.Fatalf("nothing to subtract, got %+v", u.InputTokens)
+		}
+	})
+}
+
+// The disjoint mapping must reach the provider response, not just the helper.
+func TestCompleteConverseDisjointsInclusiveUsage(t *testing.T) {
+	text := "ok"
+	fc := &fakeConverser{resp: ConverseResponse{
+		Content: []schema.ContentBlock{{Type: "text", Text: &text}}, StopReason: "end_turn",
+		InputTokens: 50768, OutputTokens: 210, CacheReadTokens: 40988, CacheWriteTotal: 9778,
+	}}
+	p := &provider{conv: fc, modelAPI: map[string]string{"global.openai.gpt-5.6-sol": "converse"}}
+	raw := []byte(`{"model":"gpt-5.6-sol","max_tokens":64,"messages":[{"role":"user","content":"q"}]}`)
+	resp, err := p.Complete(context.Background(), &providers.ProxyRequest{Model: "gpt-5.6-sol", Upstream: "global.openai.gpt-5.6-sol", RawBody: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := resp.Parsed.Usage
+	if u.InputTokens == nil || *u.InputTokens != 2 {
+		t.Fatalf("provider response input not disjointed: %+v", u.InputTokens)
+	}
+	if u.CacheReadInputTokens == nil || *u.CacheReadInputTokens != 40988 {
+		t.Fatalf("cache_read lost: %+v", u.CacheReadInputTokens)
+	}
+}
+
 // ADR-030: Bedrock reports prompt-cache counts SEPARATELY from InputTokens.
 // Dropping them billed every cache read/write at zero on the Converse path
 // while the InvokeModel passthrough billed them correctly — the same model
 // costing different amounts depending on the API mode.
 func TestUsageWithCache(t *testing.T) {
 	t.Run("no cache keeps the pre-cache shape", func(t *testing.T) {
-		u := usageWithCache(10, 5, 0, 0, 0, 0)
+		u := usageWithCache("moonshot.kimi-k2", 10, 5, 0, 0, 0, 0)
 		if u.CacheReadInputTokens != nil || u.CacheCreation != nil || u.CacheCreationInputTokens != nil {
 			t.Fatalf("zero counts must stay nil so the JSON is unchanged: %+v", u)
 		}
 	})
 
 	t.Run("TTL breakdown maps to the split fields", func(t *testing.T) {
-		u := usageWithCache(10, 5, 40, 20, 4, 24)
+		u := usageWithCache("moonshot.kimi-k2", 10, 5, 40, 20, 4, 24)
 		if u.CacheReadInputTokens == nil || *u.CacheReadInputTokens != 40 {
 			t.Errorf("cache_read: %+v", u.CacheReadInputTokens)
 		}
@@ -582,7 +659,7 @@ func TestUsageWithCache(t *testing.T) {
 	})
 
 	t.Run("untiered total is the fallback", func(t *testing.T) {
-		u := usageWithCache(10, 5, 0, 0, 0, 24)
+		u := usageWithCache("moonshot.kimi-k2", 10, 5, 0, 0, 0, 24)
 		if u.CacheCreation != nil {
 			t.Error("no split available, so cache_creation must stay nil")
 		}
@@ -594,7 +671,7 @@ func TestUsageWithCache(t *testing.T) {
 	// The resolved tiers must round-trip through the settlement helper the
 	// ingress handlers actually call.
 	t.Run("round-trips through CacheWriteTiers", func(t *testing.T) {
-		u := usageWithCache(10, 5, 40, 20, 4, 24)
+		u := usageWithCache("moonshot.kimi-k2", 10, 5, 40, 20, 4, 24)
 		w5, w1h := u.CacheWriteTiers()
 		if w5 != 20 || w1h != 4 {
 			t.Fatalf("CacheWriteTiers = (%d, %d), want (20, 4)", w5, w1h)

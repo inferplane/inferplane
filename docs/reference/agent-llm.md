@@ -87,6 +87,12 @@ Usage settlement is cache-tier aware on every path that returns cache counts:
 Anthropic/Invoke fold `message_start` + `message_delta` frames (`schema.MergeUsage`,
 ADR-030); Converse maps `CacheReadInputTokens`/`CacheDetails` into the canonical
 split (`usageWithCache`); the 5m/1h write tiers are priced separately end to end.
+One family exception: the OpenAI gpt-5.6 family reports Converse `inputTokens`
+INCLUSIVE of the cache counts (verified live 2026-08-29→31: input equals
+read + write + Δ across 20+ requests), while the Anthropic wire requires the three counts
+disjoint — `usageWithCache` subtracts the cache counts back out for the
+`converseInclusiveInputUsage` allow-list (clamped at 0), or a client's context
+math runs at ~2x the real prompt and settle bills every cached token twice.
 
 ### 5. Per-model Converse/Mantle inference-param strip rules
 Some Bedrock models 400 (`ValidationException`) on inference params Claude Code
