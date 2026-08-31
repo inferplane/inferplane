@@ -183,12 +183,51 @@ func TestToConverseRequestToolBlocks(t *testing.T) {
 	}
 }
 
-func TestToConverseRequestFoldsNonUserAssistantRoleIntoSystem(t *testing.T) {
-	// Real Claude Code traffic interleaves a trailing role:"system" message
-	// (hook/session-start output) in the messages array. Anthropic's API
-	// tolerates this; Bedrock's ConversationRole only has user/assistant and
-	// rejects it — and because it's the LAST message, the failure surfaces as
-	// "last turn must be a user message" rather than an obvious role error.
+func TestToConverseRequestKeepsSystemRoleInPlace(t *testing.T) {
+	// Real Claude Code traffic interleaves role:"system" messages (hook
+	// output) in the messages array — including MID-conversation. Bedrock's
+	// ConversationRole only has user/assistant, so they can't pass through —
+	// but folding them into the system prompt (the old behavior) mutates the
+	// HEAD of the prompt on every turn they appear, invalidating the entire
+	// prompt-cache prefix: observed live as cache_creation ≈ full input
+	// (475k tokens) on every request, TTFT long enough that Claude Code
+	// times out and falls back to another model. The content must stay
+	// IN PLACE: merged into the next user message.
+	raw := []byte(`{"system":"be helpful","messages":[
+		{"role":"user","content":"turn 1"},
+		{"role":"assistant","content":"reply 1"},
+		{"role":"system","content":"hook output for turn 2"},
+		{"role":"user","content":"turn 2"}
+	]}`)
+	cr, err := toConverseRequest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(cr.System, "hook output") {
+		t.Fatalf("mid-conversation system role folded into system prompt (cache-busting): %q", cr.System)
+	}
+	if len(cr.Messages) != 3 {
+		t.Fatalf("want 3 messages (user, assistant, user), got %d: %+v", len(cr.Messages), cr.Messages)
+	}
+	last := cr.Messages[2]
+	if last.Role != "user" {
+		t.Fatalf("last role = %q", last.Role)
+	}
+	joined := textOf(last)
+	if !strings.Contains(joined, "hook output for turn 2") || !strings.Contains(joined, "turn 2") {
+		t.Fatalf("system-role content not merged into the next user message: %q", joined)
+	}
+	// In-place order: hook text precedes the user text it preceded on the wire.
+	if strings.Index(joined, "hook output") > strings.Index(joined, "turn 2") {
+		t.Fatalf("merged out of order: %q", joined)
+	}
+}
+
+func TestToConverseRequestTrailingSystemRoleJoinsTheLastUserMessage(t *testing.T) {
+	// A TRAILING system-role message (session-start hook before any reply) has
+	// no following user message to merge into. It must extend the PRECEDING
+	// user turn rather than become a second consecutive user message, a shape
+	// Converse can reject.
 	raw := []byte(`{"system":"be helpful","messages":[
 		{"role":"user","content":"hello"},
 		{"role":"system","content":"SessionStart hook: some info"}
@@ -197,11 +236,38 @@ func TestToConverseRequestFoldsNonUserAssistantRoleIntoSystem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cr.Messages) != 1 || cr.Messages[0].Role != "user" {
-		t.Fatalf("expected the system-role message to be folded away, not passed through: %+v", cr.Messages)
+	if strings.Contains(cr.System, "SessionStart hook") {
+		t.Fatalf("trailing system role folded into system prompt: %q", cr.System)
 	}
-	if !strings.Contains(cr.System, "be helpful") || !strings.Contains(cr.System, "SessionStart hook: some info") {
-		t.Fatalf("system role content not folded into system prompt: %q", cr.System)
+	if len(cr.Messages) != 1 || cr.Messages[0].Role != "user" {
+		t.Fatalf("want one merged user message: %+v", cr.Messages)
+	}
+	joined := textOf(cr.Messages[0])
+	if !strings.Contains(joined, "hello") || !strings.Contains(joined, "SessionStart hook: some info") {
+		t.Fatalf("merged text missing a part: %q", joined)
+	}
+	if strings.Index(joined, "hello") > strings.Index(joined, "SessionStart hook") {
+		t.Fatalf("merged out of order: %q", joined)
+	}
+}
+
+func TestToConverseRequestTrailingSystemRoleAfterAssistantBecomesUserMessage(t *testing.T) {
+	// Same trailing hook, but the last turn is the assistant's — there is no
+	// user message to extend, so the hook text becomes its own user turn.
+	raw := []byte(`{"messages":[
+		{"role":"user","content":"hello"},
+		{"role":"assistant","content":"hi"},
+		{"role":"system","content":"SessionStart hook: some info"}
+	]}`)
+	cr, err := toConverseRequest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cr.Messages) != 3 || cr.Messages[2].Role != "user" {
+		t.Fatalf("want a trailing user message: %+v", cr.Messages)
+	}
+	if !strings.Contains(textOf(cr.Messages[2]), "SessionStart hook: some info") {
+		t.Fatalf("hook text missing: %q", textOf(cr.Messages[2]))
 	}
 }
 
@@ -552,5 +618,129 @@ func TestCacheWriteTiers_splitsByTTL(t *testing.T) {
 	w5, w1h = cacheWriteTiers([]brtypes.CacheDetail{{InputTokens: &unknown, Ttl: brtypes.CacheTTL("99h")}})
 	if w5 != 7 || w1h != 0 {
 		t.Fatalf("unknown TTL: got (%d, %d), want (7, 0)", w5, w1h)
+	}
+}
+
+// Verified against live Bedrock ap-northeast-2 (2026-08-28): OpenAI and xAI
+// models reject temperature/topP/stopSequences in InferenceConfig with a 400
+// ValidationException ("This model doesn't support the temperature field"),
+// and zai models reject stopSequences — so those keys must be stripped
+// per-upstream, while models off the list keep every param untouched.
+func TestStripUnsupportedInference(t *testing.T) {
+	full := func() map[string]any {
+		return map[string]any{
+			"maxTokens": int64(256), "temperature": 1.0, "topP": 0.9,
+			"stopSequences": []string{"END"},
+		}
+	}
+	all := []string{"temperature", "topP", "stopSequences"}
+	stopOnly := []string{"stopSequences"}
+	keepSampling := []string{"maxTokens", "temperature", "topP"}
+	cases := []struct {
+		upstream string
+		stripped []string
+		kept     []string
+	}{
+		// OpenAI gpt-5.6 reasoning models reject every sampling param…
+		{"global.openai.gpt-5.6-sol", all, []string{"maxTokens"}},
+		{"global.openai.gpt-5.6-luna", all, []string{"maxTokens"}},
+		{"global.openai.gpt-5.6-terra", all, []string{"maxTokens"}},
+		// …but gpt-5.4/5.5 (Mantle-only) and gpt-oss ACCEPT sampling params —
+		// neither "openai." nor "openai.gpt-5" is narrow enough.
+		{"openai.gpt-5.4", nil, []string{"maxTokens", "temperature", "topP", "stopSequences"}},
+		{"openai.gpt-5.5", nil, []string{"maxTokens", "temperature", "topP", "stopSequences"}},
+		{"openai.gpt-oss-120b-1:0", stopOnly, keepSampling},
+		{"global.xai.grok-4.6", all, []string{"maxTokens"}},
+		{"zai.glm-5", stopOnly, keepSampling},
+		{"zai.glm-4.7", stopOnly, keepSampling},
+		{"google.gemma-3-27b-it", stopOnly, keepSampling},
+		{"minimax.minimax-m2.5", stopOnly, keepSampling},
+		{"moonshot.kimi-k2-thinking", stopOnly, keepSampling},
+		{"moonshotai.kimi-k2.5", stopOnly, keepSampling},
+		{"qwen.qwen3-coder-next", stopOnly, keepSampling},
+		{"deepseek.v3.2", stopOnly, keepSampling},
+		// deepseek r1 accepts all three — "deepseek.v" must not match it.
+		{"us.deepseek.r1-v1:0", nil, []string{"maxTokens", "temperature", "topP", "stopSequences"}},
+		// Claude goes through invoke_model (apiFor, bedrock.go), never this
+		// path — and must stay untouched even if routed here explicitly.
+		{"global.anthropic.claude-sonnet-5", nil, []string{"maxTokens", "temperature", "topP", "stopSequences"}},
+	}
+	for _, tc := range cases {
+		inf := full()
+		stripUnsupportedInference(tc.upstream, inf)
+		for _, k := range tc.stripped {
+			if _, has := inf[k]; has {
+				t.Errorf("%s: %q not stripped", tc.upstream, k)
+			}
+		}
+		for _, k := range tc.kept {
+			if _, has := inf[k]; !has {
+				t.Errorf("%s: %q wrongly stripped", tc.upstream, k)
+			}
+		}
+	}
+}
+
+func TestCompleteConverseStripsUnsupportedInference(t *testing.T) {
+	text := "ok"
+	fc := &fakeConverser{resp: ConverseResponse{
+		Content: []schema.ContentBlock{{Type: "text", Text: &text}}, StopReason: "end_turn",
+	}}
+	p := &provider{conv: fc, modelAPI: map[string]string{"global.openai.gpt-5.6-sol": "converse"}}
+	raw := []byte(`{"model":"gpt-5.6-sol","max_tokens":64,"temperature":1,"top_p":0.9,"stop_sequences":["END"],"messages":[{"role":"user","content":"q"}]}`)
+	if _, err := p.Complete(context.Background(), &providers.ProxyRequest{Model: "gpt-5.6-sol", Upstream: "global.openai.gpt-5.6-sol", RawBody: raw}); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"temperature", "topP", "stopSequences"} {
+		if _, has := fc.gotReq.Inference[k]; has {
+			t.Errorf("complete: %q reached the upstream request", k)
+		}
+	}
+	if fc.gotReq.Inference["maxTokens"] != int64(64) {
+		t.Errorf("complete: maxTokens wrongly stripped: %v", fc.gotReq.Inference["maxTokens"])
+	}
+}
+
+func TestStreamConverseStripsUnsupportedInference(t *testing.T) {
+	fc := &fakeConverser{streamEv: []ConverseStreamEvent{{Kind: eventMessageStop, StopReason: "end_turn"}, {Kind: eventUsage, InputTokens: 1, OutputTokens: 1}}}
+	p := &provider{conv: fc, modelAPI: map[string]string{"global.xai.grok-4.6": "converse"}}
+	raw := []byte(`{"model":"grok-4.6","max_tokens":64,"temperature":1,"stop_sequences":["END"],"stream":true,"messages":[{"role":"user","content":"q"}]}`)
+	evs, err := p.Stream(context.Background(), &providers.ProxyRequest{Model: "grok-4.6", Upstream: "global.xai.grok-4.6", RawBody: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range evs { // drain so the fake records the request
+	}
+	for _, k := range []string{"temperature", "stopSequences"} {
+		if _, has := fc.gotReq.Inference[k]; has {
+			t.Errorf("stream: %q reached the upstream request", k)
+		}
+	}
+}
+
+// Review follow-up (PR #65, round 2): a hook firing between an assistant
+// tool_use and the user tool_result must not put the merged text BEFORE the
+// tool_result — tool_result blocks must stay first in the user message, or
+// the upstream rejects the shape.
+func TestToConverseRequestSystemRoleMergesAfterToolResults(t *testing.T) {
+	raw := []byte(`{"messages":[
+		{"role":"user","content":"list files"},
+		{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}]},
+		{"role":"system","content":"hook output mid-tool-turn"},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a.go"},{"type":"text","text":"continue"}]}
+	]}`)
+	cr, err := toConverseRequest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := cr.Messages[len(cr.Messages)-1]
+	if last.Role != "user" || len(last.Content) != 3 {
+		t.Fatalf("unexpected last message: %+v", last)
+	}
+	if last.Content[0].Type != "tool_result" {
+		t.Fatalf("tool_result must stay FIRST in the user message, got %q first", last.Content[0].Type)
+	}
+	if last.Content[1].Type != "text" || last.Content[1].Text == nil || !strings.Contains(*last.Content[1].Text, "hook output") {
+		t.Fatalf("hook text must follow the tool_result blocks: %+v", last.Content[1])
 	}
 }

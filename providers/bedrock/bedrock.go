@@ -32,9 +32,17 @@ func factory(cfg providers.Config) (providers.Provider, error) {
 	if raw := cfg.Settings["model_api"]; raw != "" {
 		_ = json.Unmarshal([]byte(raw), &modelAPI)
 	}
-	// awsClient implements both invoker and converser.
+	// Mantle base URL is derived from the region; Settings["mantle_base_url"]
+	// overrides it (tests, private endpoints).
+	mantleBase := cfg.Settings["mantle_base_url"]
+	if mantleBase == "" {
+		mantleBase = fmt.Sprintf("https://bedrock-mantle.%s.api.aws", ac.cfg.Region)
+	}
+	// awsClient implements both invoker and converser; the mantle client
+	// shares its resolved credentials.
 	return &provider{
 		inv: ac, conv: ac, modelAPI: modelAPI,
+		man:              newMantleClient(mantleBase, ac.cfg.Region, ac.cfg.Credentials, cfg.HTTPClient),
 		defaultGuardrail: Guardrail{ID: cfg.Settings["guardrail_id"], Version: cfg.Settings["guardrail_version"]},
 	}, nil
 }
@@ -42,6 +50,7 @@ func factory(cfg providers.Config) (providers.Provider, error) {
 type provider struct {
 	inv              invoker
 	conv             converser
+	man              mantler
 	modelAPI         map[string]string // upstream modelId → "invoke_model"|"converse"|"mantle"
 	defaultGuardrail Guardrail         // provider-level default (D6, ADR-019) — the anti-bypass fix
 }
@@ -61,14 +70,13 @@ func (p *provider) guardrailFor(req *providers.ProxyRequest) Guardrail {
 func (p *provider) Name() string               { return "bedrock" }
 func (p *provider) Models() []schema.ModelInfo { return nil }
 
-// apiFor decides invoke vs converse. Default: Claude models → invoke_model,
-// others → converse. Explicit per-model config overrides. "mantle" falls back
-// to invoke_model in M4 (§10 #2 spike deferred).
+// apiFor decides invoke vs converse vs mantle. Default: Claude models →
+// invoke_model, others → converse. Explicit per-model config overrides.
+// "mantle" routes to the Mantle endpoint (mantle.go) — the former
+// invoke_model fallback (M4/§10 #2) silently sent Mantle-only models
+// (openai.gpt-5.4/-5.5) to an endpoint that has never heard of them.
 func (p *provider) apiFor(upstream string) string {
 	if a, ok := p.modelAPI[upstream]; ok && a != "" {
-		if a == "mantle" {
-			return "invoke_model" // M4: fallback
-		}
 		return a
 	}
 	if strings.Contains(upstream, "anthropic.") || strings.Contains(upstream, "claude") {
@@ -77,18 +85,47 @@ func (p *provider) apiFor(upstream string) string {
 	return "converse"
 }
 
-func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {
-	if p.apiFor(req.Upstream) == "converse" {
-		return p.completeConverse(ctx, req)
+// mantleGuardrailCheck refuses a request whose effective guardrail cannot be
+// enforced on the selected egress path. Mantle has no guardrail parameter at
+// all, so routing a guarded model through it would send the request unguarded —
+// and because the ingress writes ProxyRequest.GuardrailID into the
+// tamper-evident audit chain unconditionally, the record would then ATTEST a
+// guardrail that never ran. A falsified attestation is worse than a bypass, and
+// ADR-019 gives guardrails no per-team opt-out, so `routing.model_api: mantle`
+// must not become one: refuse instead of serving unguarded.
+func (p *provider) mantleGuardrailCheck(req *providers.ProxyRequest) error {
+	if g := p.guardrailFor(req); g.ID != "" {
+		return synthError(400, "bedrock: guardrail cannot be enforced on the mantle egress path for this model — remove the guardrail or route the model via converse/invoke_model")
 	}
-	return p.completeInvoke(ctx, req)
+	return nil
+}
+
+func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+	switch p.apiFor(req.Upstream) {
+	case "converse":
+		return p.completeConverse(ctx, req)
+	case "mantle":
+		if err := p.mantleGuardrailCheck(req); err != nil {
+			return nil, err
+		}
+		return p.man.Complete(ctx, req)
+	default:
+		return p.completeInvoke(ctx, req)
+	}
 }
 
 func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
-	if p.apiFor(req.Upstream) == "converse" {
+	switch p.apiFor(req.Upstream) {
+	case "converse":
 		return p.streamConverse(ctx, req)
+	case "mantle":
+		if err := p.mantleGuardrailCheck(req); err != nil {
+			return nil, err
+		}
+		return p.man.Stream(ctx, req)
+	default:
+		return p.streamInvoke(ctx, req)
 	}
-	return p.streamInvoke(ctx, req)
 }
 
 var _ providers.Provider = (*provider)(nil)

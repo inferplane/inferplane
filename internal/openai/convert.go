@@ -82,7 +82,9 @@ type oaiRequest struct {
 	Stream              *bool           `json:"stream,omitempty"`
 	Temperature         json.RawMessage `json:"temperature,omitempty"`
 	TopP                json.RawMessage `json:"top_p,omitempty"`
+	Stop                json.RawMessage `json:"stop,omitempty"`
 	Tools               json.RawMessage `json:"tools,omitempty"`
+	ToolChoice          json.RawMessage `json:"tool_choice,omitempty"`
 }
 
 type oaiUsage struct {
@@ -233,8 +235,16 @@ func RequestToCanonical(openaiBody []byte) (*schema.ChatRequest, error) {
 			cr.System = raw
 		}
 	}
-	if len(in.Tools) > 0 {
-		cr.Tools = in.Tools
+	// tools/tool_choice are CONVERTED to the canonical (Anthropic) shape,
+	// mirroring CanonicalToRequest's write side — a raw copy left them in
+	// OpenAI shape, which the anthropic-shaped consumers (Bedrock
+	// Converse/Mantle) then dropped wholesale: an OpenAI client's tool
+	// calling silently vanished on every cross-protocol target.
+	if tools := toolsFromOAI(in.Tools); tools != nil {
+		cr.Tools = tools
+	}
+	if tc := toolChoiceFromOAI(in.ToolChoice); tc != nil {
+		cr.ToolChoice = tc
 	}
 
 	extra := map[string]json.RawMessage{}
@@ -243,6 +253,20 @@ func RequestToCanonical(openaiBody []byte) (*schema.ChatRequest, error) {
 	}
 	if len(in.TopP) > 0 {
 		extra["top_p"] = in.TopP
+	}
+	// OpenAI stop may be a string or an array; canonical stop_sequences is an
+	// array. Anything else — null, booleans, numbers, objects — is dropped,
+	// never forwarded: no valid stop_sequences value has those shapes, and
+	// forwarding one 400s downstream (on count_tokens, a non-200 crashes
+	// Claude Code — CLAUDE.md invariant).
+	if len(in.Stop) > 0 {
+		if in.Stop[0] == '"' {
+			if arr, err := json.Marshal([]json.RawMessage{in.Stop}); err == nil {
+				extra["stop_sequences"] = arr
+			}
+		} else if in.Stop[0] == '[' {
+			extra["stop_sequences"] = in.Stop
+		}
 	}
 	if len(extra) > 0 {
 		cr.Extra = extra
@@ -271,6 +295,21 @@ func CanonicalToRequest(cr *schema.ChatRequest) []byte {
 	}
 	if cr.Stream != nil {
 		out["stream"] = *cr.Stream
+	}
+	// Sampling params ride in Extra (canonical keeps them untyped). OpenAI's
+	// names match except stop_sequences → stop.
+	for canonical, oai := range map[string]string{
+		"temperature": "temperature", "top_p": "top_p", "stop_sequences": "stop",
+	} {
+		if v, ok := cr.Extra[canonical]; ok && len(v) > 0 {
+			out[oai] = json.RawMessage(v)
+		}
+	}
+	if tools := toolsToOAI(cr.Tools); tools != nil {
+		out["tools"] = tools
+	}
+	if tc := toolChoiceToOAI(cr.ToolChoice); tc != nil {
+		out["tool_choice"] = tc
 	}
 
 	var msgs []map[string]any
@@ -350,6 +389,72 @@ func CanonicalToRequest(cr *schema.ChatRequest) []byte {
 	out["messages"] = msgs
 	raw, _ := json.Marshal(out)
 	return raw
+}
+
+// toolsToOAI maps Anthropic tool definitions ({name, description,
+// input_schema}) to OpenAI function tools ({type:"function",
+// function:{name, description, parameters}}). Nil on empty or unparsable
+// input — the field is then omitted rather than sent malformed.
+func toolsToOAI(raw json.RawMessage) []map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var tools []struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description,omitempty"`
+		InputSchema json.RawMessage `json:"input_schema,omitempty"`
+	}
+	if json.Unmarshal(raw, &tools) != nil || len(tools) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(tools))
+	for _, t := range tools {
+		if t.Name == "" {
+			continue
+		}
+		fn := map[string]any{"name": t.Name}
+		if t.Description != "" {
+			fn["description"] = t.Description
+		}
+		if len(t.InputSchema) > 0 {
+			fn["parameters"] = json.RawMessage(t.InputSchema)
+		}
+		out = append(out, map[string]any{"type": "function", "function": fn})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// toolChoiceToOAI maps an Anthropic tool_choice to the OpenAI wire:
+// auto → "auto", any → "required", none → "none",
+// {type:"tool", name:N} → {type:"function", function:{name:N}}.
+func toolChoiceToOAI(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var tc struct {
+		Type string `json:"type"`
+		Name string `json:"name"`
+	}
+	if json.Unmarshal(raw, &tc) != nil {
+		return nil
+	}
+	switch tc.Type {
+	case "auto":
+		return "auto"
+	case "any":
+		return "required"
+	case "none":
+		return "none"
+	case "tool":
+		if tc.Name == "" {
+			return nil
+		}
+		return map[string]any{"type": "function", "function": map[string]any{"name": tc.Name}}
+	}
+	return nil
 }
 
 // systemToText flattens cr.System (string OR array of text blocks) into text.
@@ -471,18 +576,24 @@ func usageFromCanonical(u *schema.Usage) map[string]any {
 	if u.OutputTokens != nil {
 		completion = *u.OutputTokens
 	}
+	// Re-expose the cache split the way OpenAI does: prompt_tokens is the
+	// INCLUSIVE total, with the cached read portion broken out underneath. We
+	// hold every cache tier separately from InputTokens, so reads AND writes
+	// have to be added back — folding reads alone under-reported prompt_tokens
+	// on any cache-writing request. CacheWriteTiers picks the split or the flat
+	// total, never both (double-counting guard, ADR-030).
+	var cached int64
+	if u.CacheReadInputTokens != nil {
+		cached = *u.CacheReadInputTokens
+	}
+	w5, w1 := u.CacheWriteTiers()
+	prompt += cached + w5 + w1
 	out := map[string]any{
 		"prompt_tokens":     prompt,
 		"completion_tokens": completion,
 		"total_tokens":      prompt + completion,
 	}
-	// Re-expose the cache split the way OpenAI does: prompt_tokens is the
-	// INCLUSIVE total, with the cached portion broken out underneath. We hold
-	// them separately (InputTokens excludes cache reads), so add them back.
-	if u.CacheReadInputTokens != nil && *u.CacheReadInputTokens != 0 {
-		cached := *u.CacheReadInputTokens
-		out["prompt_tokens"] = prompt + cached
-		out["total_tokens"] = prompt + cached + completion
+	if cached != 0 {
 		out["prompt_tokens_details"] = map[string]any{"cached_tokens": cached}
 	}
 	return out
@@ -544,9 +655,20 @@ func ResponseToCanonical(openaiBody []byte) (*schema.ChatResponse, error) {
 // StreamState carries the minimal cross-event state OpenAI streaming needs:
 // whether the leading role delta was already emitted.
 type StreamState struct {
+	// IncludeUsage mirrors the client's stream_options.include_usage. Usage is
+	// rendered onto the terminal chunk ONLY when the client asked for it — an
+	// OpenAI client that did not request it does not expect a usage object.
+	IncludeUsage bool
+
 	roleSent bool
 	id       string
 	model    string
+	// usage accumulates across frames: the canonical stream keeps Anthropic's
+	// vocabulary, so input/cache counts arrive on message_start while
+	// message_delta commonly carries output alone (ADR-030 — fold, never
+	// overwrite). Rendering message_delta's own usage would report a zero
+	// prompt_tokens.
+	usage *schema.Usage
 }
 
 // ChunkFromCanonical renders one canonical (Anthropic) streaming event to an
@@ -554,6 +676,16 @@ type StreamState struct {
 // content_block_start, content_block_stop, message_stop) return nil — the
 // caller appends the terminal [DONE] line itself.
 func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
+	// message_start merges its usage in its own case below, from exactly ONE
+	// source. Note this is single-source hygiene, not double-count
+	// prevention: MergeUsage folds latest-non-nil per field (never sums), so
+	// merging both message.usage and a top-level c.Usage would be idempotent
+	// today — the structure exists so a future additive merge cannot
+	// silently turn "both set" into a double count. Do not remove the guard
+	// on that reasoning.
+	if c.Usage != nil && c.Type != "message_start" {
+		st.usage = schema.MergeUsage(st.usage, c.Usage)
+	}
 	switch c.Type {
 	case "message_start":
 		if c.Message != nil {
@@ -564,10 +696,18 @@ func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
 				st.model = c.Message.Model
 			}
 		}
+		// Exactly one source: the nested message.usage (the wire's shape)
+		// wins; a bare top-level usage on a start frame is the fallback.
+		switch {
+		case c.Message != nil && c.Message.Usage != nil:
+			st.usage = schema.MergeUsage(st.usage, c.Message.Usage)
+		case c.Usage != nil:
+			st.usage = schema.MergeUsage(st.usage, c.Usage)
+		}
 		// Emit the opening role delta once.
 		if !st.roleSent {
 			st.roleSent = true
-			return chunkJSON(st, map[string]any{"role": "assistant"}, nil)
+			return chunkJSON(st, map[string]any{"role": "assistant"}, nil, nil)
 		}
 		return nil
 
@@ -584,7 +724,7 @@ func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
 				st.roleSent = true
 				delta["role"] = "assistant"
 			}
-			return chunkJSON(st, delta, nil)
+			return chunkJSON(st, delta, nil, nil)
 		case "input_json_delta":
 			// Tool-call argument streaming. Emit a tool_calls delta carrying
 			// the partial arguments string for the block at this index.
@@ -605,7 +745,7 @@ func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
 				st.roleSent = true
 				delta["role"] = "assistant"
 			}
-			return chunkJSON(st, delta, nil)
+			return chunkJSON(st, delta, nil, nil)
 		}
 		return nil
 
@@ -630,7 +770,7 @@ func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
 				st.roleSent = true
 				delta["role"] = "assistant"
 			}
-			return chunkJSON(st, delta, nil)
+			return chunkJSON(st, delta, nil, nil)
 		}
 		return nil
 
@@ -643,7 +783,11 @@ func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
 		if d.StopReason != nil {
 			finish = mapStopToFinish(*d.StopReason)
 		}
-		return chunkJSON(st, map[string]any{}, &finish)
+		var usage map[string]any
+		if st.IncludeUsage {
+			usage = usageFromCanonical(st.usage)
+		}
+		return chunkJSON(st, map[string]any{}, &finish, usage)
 
 	default:
 		// message_stop, ping, error, content_block_stop: no OpenAI chunk.
@@ -652,7 +796,7 @@ func ChunkFromCanonical(c *schema.ChatChunk, st *StreamState) []byte {
 }
 
 // chunkJSON builds a single OpenAI chat.completion.chunk with one choice.
-func chunkJSON(st *StreamState, delta map[string]any, finishReason *string) []byte {
+func chunkJSON(st *StreamState, delta map[string]any, finishReason *string, usage map[string]any) []byte {
 	choice := map[string]any{"index": 0, "delta": delta}
 	if finishReason != nil {
 		choice["finish_reason"] = *finishReason
@@ -665,20 +809,41 @@ func chunkJSON(st *StreamState, delta map[string]any, finishReason *string) []by
 		"model":   st.model,
 		"choices": []map[string]any{choice},
 	}
+	if usage != nil {
+		out["usage"] = usage
+	}
 	raw, _ := json.Marshal(out)
 	return raw
 }
 
+// StreamWantsUsage reports whether an OpenAI chat-completions request body asked
+// for token usage on the stream (stream_options.include_usage). Usage frames are
+// opt-in on this wire, so a client that never asked must not be sent one.
+func StreamWantsUsage(clientBody []byte) bool {
+	var in struct {
+		StreamOptions *struct {
+			IncludeUsage *bool `json:"include_usage"`
+		} `json:"stream_options"`
+	}
+	if json.Unmarshal(clientBody, &in) != nil || in.StreamOptions == nil {
+		return false
+	}
+	return in.StreamOptions.IncludeUsage != nil && *in.StreamOptions.IncludeUsage
+}
+
 // ChunkToCanonical parses one vLLM/OpenAI stream chunk into a canonical
 // ChatChunk for governance observation. delta.content → a content_block_delta
-// text_delta; finish_reason → a message_delta carrying stop_reason; usage (if
-// present, e.g. with stream_options.include_usage) is attached.
-func ChunkToCanonical(openaiChunk []byte) (*schema.ChatChunk, error) {
+// text_delta; delta.tool_calls → a content_block_start (the opener carrying
+// id/name) or a content_block_delta input_json_delta (an argument fragment);
+// finish_reason → a message_delta carrying stop_reason; usage (if present, e.g.
+// with stream_options.include_usage) is attached.
+func ChunkToCanonical(openaiChunk []byte) ([]*schema.ChatChunk, error) {
 	var in struct {
 		Choices []struct {
 			Index int `json:"index"`
 			Delta struct {
-				Content *string `json:"content"`
+				Content   *string       `json:"content"`
+				ToolCalls []oaiToolCall `json:"tool_calls"`
 			} `json:"delta"`
 			FinishReason *string `json:"finish_reason"`
 		} `json:"choices"`
@@ -694,21 +859,66 @@ func ChunkToCanonical(openaiChunk []byte) (*schema.ChatChunk, error) {
 	}
 
 	if len(in.Choices) > 0 {
+		// One OpenAI chunk can carry content, tool_calls, AND finish_reason
+		// together (Ollama-style servers batch the whole tool call into the
+		// final chunk) — every part must convert, in stream order: text,
+		// then tool frames, then the stop. An early return on any one of
+		// them silently drops the others.
 		ch := in.Choices[0]
-		if ch.FinishReason != nil {
-			delta := mustJSON(map[string]any{"stop_reason": mapFinishToStop(*ch.FinishReason)})
-			return &schema.ChatChunk{Type: "message_delta", Delta: delta, Usage: usage}, nil
-		}
-		if ch.Delta.Content != nil {
+		var out []*schema.ChatChunk
+		if ch.Delta.Content != nil && *ch.Delta.Content != "" {
+			// content:"" often rides a tool_calls chunk; an empty text_delta
+			// for it is noise, so only non-empty text converts.
 			idx := ch.Index
 			delta := mustJSON(map[string]any{"type": "text_delta", "text": *ch.Delta.Content})
-			return &schema.ChatChunk{Type: "content_block_delta", Index: &idx, Delta: delta, Usage: usage}, nil
+			out = append(out, &schema.ChatChunk{Type: "content_block_delta", Index: &idx, Delta: delta})
+		}
+		// EVERY tool_calls entry is converted, not just the first: parallel
+		// tool calls arrive as several entries in one chunk, each needing
+		// its own canonical frame at its own block index. Tool indices shift
+		// +1: OpenAI numbers tool calls independently of text, and the
+		// choice's text stream owns canonical block index ch.Index — reusing
+		// tc.Index verbatim opened a tool_use on top of the open text block.
+		// Known theoretical gap: the +1 shift assumes ch.Index == 0 (every
+		// real client single-choice stream); a non-zero ch.Index with
+		// tc.Index = ch.Index-1 would collide. n>1 choices aren't served
+		// through this path today — revisit if that ever changes.
+		for _, tc := range ch.Delta.ToolCalls {
+			idx := ch.Index + 1
+			if tc.Index != nil {
+				idx = *tc.Index + 1
+			}
+			if tc.ID != "" || tc.Function.Name != "" {
+				// Opener. Arguments — complete OR a partial fragment — are
+				// NEVER embedded in the block (a partial fragment failed
+				// json.Valid and was replaced by {}, permanently corrupting
+				// the tool input): the block opens with {} and any arguments
+				// bytes re-emit as an input_json_delta, the same shape the
+				// real Anthropic wire uses.
+				block := &schema.ContentBlock{Type: "tool_use", ID: tc.ID, Name: tc.Function.Name, Input: json.RawMessage(`{}`)}
+				out = append(out, &schema.ChatChunk{Type: "content_block_start", Index: &idx, ContentBlock: block})
+			}
+			if tc.Function.Arguments != "" {
+				argIdx := idx
+				delta := mustJSON(map[string]any{"type": "input_json_delta", "partial_json": tc.Function.Arguments})
+				out = append(out, &schema.ChatChunk{Type: "content_block_delta", Index: &argIdx, Delta: delta})
+			}
+		}
+		if ch.FinishReason != nil {
+			delta := mustJSON(map[string]any{"stop_reason": mapFinishToStop(*ch.FinishReason)})
+			out = append(out, &schema.ChatChunk{Type: "message_delta", Delta: delta})
+		}
+		if len(out) > 0 {
+			// Usage rides the FIRST frame only — consumers fold usage per
+			// frame, so repeating it across the fan-out double-counts.
+			out[0].Usage = usage
+			return out, nil
 		}
 	}
 
 	if usage != nil {
 		// A usage-only chunk (include_usage) with no choice deltas.
-		return &schema.ChatChunk{Type: "message_delta", Delta: json.RawMessage(`{}`), Usage: usage}, nil
+		return []*schema.ChatChunk{{Type: "message_delta", Delta: json.RawMessage(`{}`), Usage: usage}}, nil
 	}
 	return nil, nil
 }
@@ -742,4 +952,114 @@ func usageFromOAI(u *oaiUsage) *schema.Usage {
 		out.CacheReadInputTokens = &cached
 	}
 	return out
+}
+
+// toolsFromOAI maps OpenAI function tools ({type:"function", function:{name,
+// description, parameters}}) to the canonical Anthropic shape ({name,
+// description, input_schema}) — the inverse of toolsToOAI. Nil on empty or
+// unparsable input, so the field is omitted rather than forwarded malformed.
+func toolsFromOAI(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	var tools []struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description,omitempty"`
+			Parameters  json.RawMessage `json:"parameters,omitempty"`
+		} `json:"function"`
+	}
+	if json.Unmarshal(raw, &tools) != nil || len(tools) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(tools))
+	for _, t := range tools {
+		if t.Function.Name == "" {
+			continue
+		}
+		m := map[string]any{"name": t.Function.Name}
+		if t.Function.Description != "" {
+			m["description"] = t.Function.Description
+		}
+		if len(t.Function.Parameters) > 0 {
+			m["input_schema"] = json.RawMessage(t.Function.Parameters)
+		}
+		out = append(out, m)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// toolChoiceFromOAI maps an OpenAI tool_choice to the canonical Anthropic
+// shape — the inverse of toolChoiceToOAI: "auto" → {type:auto},
+// "required" → {type:any}, "none" → {type:none},
+// {type:"function", function:{name:N}} → {type:"tool", name:N}.
+func toolChoiceFromOAI(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	if raw[0] == '"' {
+		var s string
+		if json.Unmarshal(raw, &s) != nil {
+			return nil
+		}
+		switch s {
+		case "auto":
+			return json.RawMessage(`{"type":"auto"}`)
+		case "required":
+			return json.RawMessage(`{"type":"any"}`)
+		case "none":
+			return json.RawMessage(`{"type":"none"}`)
+		}
+		return nil
+	}
+	var tc struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if json.Unmarshal(raw, &tc) != nil || tc.Type != "function" || tc.Function.Name == "" {
+		return nil
+	}
+	b, err := json.Marshal(map[string]any{"type": "tool", "name": tc.Function.Name})
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// EnsureIncludeUsage sets stream_options.include_usage=true on a top-level
+// OpenAI request map, MERGING into any stream_options object already present
+// rather than replacing the key wholesale. CanonicalToRequest emits no
+// stream_options today, so replacement happened to be lossless — but a future
+// field riding that object would be silently clobbered by a wholesale write
+// (review finding, PR #65). A non-object stream_options value is replaced:
+// it was invalid on this wire to begin with.
+func EnsureIncludeUsage(top map[string]json.RawMessage) {
+	so := map[string]json.RawMessage{}
+	if prev, has := top["stream_options"]; has {
+		_ = json.Unmarshal(prev, &so)
+	}
+	so["include_usage"] = json.RawMessage("true")
+	if raw, err := json.Marshal(so); err == nil {
+		top["stream_options"] = raw
+	}
+}
+
+// IsUsageOnlyFrame matches the canonical form ChunkToCanonical gives a
+// usage-only OpenAI chunk (choices:[] + usage — what include_usage appends at
+// stream end): a message_delta whose delta is empty and whose usage is set. A
+// finish frame carries stop_reason in its delta and never matches. Providers
+// that inject include_usage use this to strip the frame's Raw from client
+// tees the client never asked to receive.
+func IsUsageOnlyFrame(c *schema.ChatChunk) bool {
+	return c != nil && c.Type == "message_delta" && c.Usage != nil && string(c.Delta) == "{}"
 }

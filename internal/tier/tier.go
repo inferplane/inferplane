@@ -150,6 +150,15 @@ func (l *Latch) Evaluate(key, window string, thresholds []int, percentUtilized i
 	if crossed > e.tierIndex {
 		e.tierIndex = crossed
 	}
+	// A latch survives a policy reload by design (ADR-041 D2), so a rule
+	// edited to FEWER tiers can hold an index past the new slice — both
+	// consumers index thresholds' companion tier list unchecked, so an
+	// unclamped return is a per-heartbeat (control plane) or per-request
+	// (standalone mayu) panic. Clamp to the deepest tier that still exists;
+	// monotonicity within the window is unaffected.
+	if e.tierIndex >= len(thresholds) {
+		e.tierIndex = len(thresholds) - 1
+	}
 	l.state[key] = e
 	return e.tierIndex
 }

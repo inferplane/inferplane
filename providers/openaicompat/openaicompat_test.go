@@ -96,3 +96,313 @@ func TestStreamForwardsOpenAISSE(t *testing.T) {
 	}
 	_ = sawContent
 }
+
+// A non-OpenAI ingress (Anthropic, Bedrock) tees RawBody to its client, so a
+// 2xx completion must be re-rendered in Anthropic shape under the PUBLIC
+// model name — while the OpenAI ingress keeps the verbatim OpenAI wire.
+func TestCompleteRerendersRawBodyForCrossProtocolIngress(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"c1","object":"chat.completion","model":"upstream-m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hey"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}`))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	var cr schema.ChatRequest
+	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+		t.Fatal(err)
+	}
+	req := &providers.ProxyRequest{Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), Parsed: &cr, IngressProtocol: "bedrock"}
+	resp, err := p.Complete(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(resp.RawBody, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["type"] != "message" || body["model"] != "public-m" {
+		t.Fatalf("cross-protocol RawBody not anthropic-shaped/public-model: type=%v model=%v", body["type"], body["model"])
+	}
+
+	// OpenAI ingress: verbatim OpenAI wire preserved.
+	req.IngressProtocol = "openai"
+	resp, err = p.Complete(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = map[string]any{}
+	if err := json.Unmarshal(resp.RawBody, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["object"] != "chat.completion" {
+		t.Fatalf("openai ingress RawBody must stay verbatim OpenAI wire: %v", body)
+	}
+}
+
+// An unparseable 2xx must FAIL on a non-OpenAI ingress instead of teeing
+// through: Parsed would stay nil, the Bedrock ingress skips settle when it is
+// (zero billing, no token counts in the audit record), and the client would
+// get raw OpenAI JSON in answer to an Anthropic-shaped request. The OpenAI
+// ingress is unaffected — it tees the same wire it asked for.
+func TestCompleteUnparseableBodyFailsForCrossProtocolIngress(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html>502 from a load balancer</html>"))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	var cr schema.ChatRequest
+	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+		t.Fatal(err)
+	}
+	req := &providers.ProxyRequest{Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), Parsed: &cr, IngressProtocol: "bedrock"}
+	if _, err := p.Complete(context.Background(), req); err == nil {
+		t.Fatal("want an error for an unparseable 2xx on a bedrock ingress, got nil")
+	}
+
+	// OpenAI ingress: the body is the client's own wire, so it still tees.
+	req.IngressProtocol = "openai"
+	resp, err := p.Complete(context.Background(), req)
+	if err != nil {
+		t.Fatalf("openai ingress must still tee an unparsed body: %v", err)
+	}
+	if string(resp.RawBody) != "<html>502 from a load balancer</html>" {
+		t.Fatalf("RawBody = %q", resp.RawBody)
+	}
+}
+
+// A cross-protocol Stream must ask the upstream for usage in the final chunk
+// (stream_options.include_usage) — without it vLLM emits no usage frame and
+// every streamed request settles with zero billable tokens.
+func TestStreamRequestsUsageForCrossProtocolIngress(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	var cr schema.ChatRequest
+	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := p.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), Parsed: &cr, IngressProtocol: "bedrock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range evs {
+	}
+	if gotBody["stream"] != true {
+		t.Errorf("stream flag missing: %v", gotBody["stream"])
+	}
+	so, ok := gotBody["stream_options"].(map[string]any)
+	if !ok || so["include_usage"] != true {
+		t.Errorf("stream_options.include_usage missing: %v", gotBody["stream_options"])
+	}
+}
+
+// Review follow-up (PR #65): a nil Parsed on the conversion path must be a
+// typed error, not a panic — the Bedrock-ingress path is a new caller
+// surface, and the mantle sibling already guards this.
+func TestCrossProtocolNilParsedIsErrorNotPanic(t *testing.T) {
+	p := &provider{baseURL: "http://127.0.0.1:0"}
+	req := &providers.ProxyRequest{Model: "m", Upstream: "u", IngressProtocol: "bedrock"}
+	if _, err := p.buildBody(req, false); err == nil {
+		t.Fatal("nil Parsed must error, not panic or succeed")
+	}
+}
+
+// Review follow-up (PR #65): Complete fails closed when a 2xx body cannot be
+// parsed for a non-openai ingress; Stream must match — a stream whose every
+// frame fails ChunkToCanonical would otherwise exit cleanly with zero
+// billable tokens.
+func TestStreamFailsClosedWhenNothingParsesForCrossProtocolIngress(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {not json\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	var cr schema.ChatRequest
+	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := p.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), Parsed: &cr, IngressProtocol: "bedrock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawErr bool
+	for ev, serr := range evs {
+		if serr != nil {
+			sawErr = true
+		}
+		_ = ev
+	}
+	if !sawErr {
+		t.Fatal("a cross-protocol stream with zero parseable frames must surface an error, not end cleanly")
+	}
+}
+
+// An upstream that dies before any parseable frame yields ONE error (the IO
+// error itself). A consumer that keeps ranging past it must not receive the
+// synthetic no-parseable-frames error stacked on top.
+func TestStreamDoesNotDoubleErrorAfterUpstreamIOFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		// Claim a body longer than what is sent, then drop the connection:
+		// the client reader gets an unexpected-EOF style transport error.
+		w.Header().Set("Content-Length", "1000")
+		_, _ = w.Write([]byte("data: {not json\n\n"))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	var cr schema.ChatRequest
+	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := p.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), Parsed: &cr, IngressProtocol: "bedrock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var errs int
+	for _, serr := range evs { // keep ranging past errors on purpose
+		if serr != nil {
+			errs++
+		}
+	}
+	if errs != 1 {
+		t.Fatalf("got %d errors, want exactly 1 (the IO error, no synthetic duplicate)", errs)
+	}
+}
+
+// Native OpenAI-ingress streaming without stream_options.include_usage: the
+// upstream body must gain it (order-preserving splice — zero-billing guard,
+// review finding PR #65 round 4), the usage must still be OBSERVED for
+// settlement, and the usage-only frame must NOT reach the client tee — the
+// client opted out, and its empty choices array crashes naive indexing.
+func TestStreamInjectsAndStripsUsageForNativeOpenAIIngress(t *testing.T) {
+	var upstreamBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+				"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2}}\n\n" +
+				"data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	evs, err := p.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), IngressProtocol: "openai",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var teed []byte
+	var sawUsage bool
+	for ev, serr := range evs {
+		if serr != nil {
+			t.Fatal(serr)
+		}
+		teed = append(teed, ev.Raw...)
+		if ev.Chunk != nil && ev.Chunk.Usage != nil {
+			sawUsage = true
+		}
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(upstreamBody, &top); err != nil {
+		t.Fatal(err)
+	}
+	if string(top["stream_options"]) != `{"include_usage":true}` {
+		t.Errorf("upstream stream_options = %s, want injected include_usage", top["stream_options"])
+	}
+	if !strings.HasPrefix(string(upstreamBody), `{"model":"upstream-m","stream":true`) {
+		t.Errorf("injection must preserve top-level key order: %s", upstreamBody)
+	}
+	if !sawUsage {
+		t.Error("usage frame must still be observed for settlement")
+	}
+	if strings.Contains(string(teed), `"usage"`) || strings.Contains(string(teed), `"choices":[]`) {
+		t.Errorf("injected usage-only frame leaked to the client tee: %s", teed)
+	}
+	if !strings.Contains(string(teed), "data: [DONE]") {
+		t.Errorf("terminal [DONE] must still tee: %s", teed)
+	}
+
+	// A client that ASKED for usage keeps the frame on its tee, byte-verbatim.
+	raw = `{"model":"public-m","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"hi"}]}`
+	evs, err = p.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), IngressProtocol: "openai",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	teed = nil
+	for ev, serr := range evs {
+		if serr != nil {
+			t.Fatal(serr)
+		}
+		teed = append(teed, ev.Raw...)
+	}
+	if !strings.Contains(string(teed), `"usage"`) {
+		t.Errorf("opted-in client must receive the usage frame: %s", teed)
+	}
+}
+
+// Cross-protocol callers get include_usage injected unconditionally — the
+// resulting usage-only frame must carry NO Raw: the Bedrock ingress ignores
+// Raw, but the Anthropic ingress tees it verbatim, and an Anthropic-wire
+// client must never receive an OpenAI-shaped line (review finding, PR #65
+// round 5).
+func TestStreamStripsInjectedUsageRawForCrossProtocolIngress(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+				"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2}}\n\n" +
+				"data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	var cr schema.ChatRequest
+	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := p.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), Parsed: &cr, IngressProtocol: "anthropic",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawUsage bool
+	for ev, serr := range evs {
+		if serr != nil {
+			t.Fatal(serr)
+		}
+		if ev.Chunk != nil && ev.Chunk.Usage != nil {
+			sawUsage = true
+			if ev.Raw != nil {
+				t.Errorf("injected usage-only frame kept Raw on a cross-protocol stream: %s", ev.Raw)
+			}
+		}
+	}
+	if !sawUsage {
+		t.Error("usage frame must still be observed for settlement")
+	}
+}

@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **BREAKING (only when `pricing.on_missing` is `"block"`):** the gateway now refuses to boot if any configured route has no pricing rate, naming the routes. With the default `allow` it logs them loudly and continues. Migration: declare the missing rates under `pricing.overrides` (two numbers per model — cache rates derive), or set `on_missing` to `"allow"`.
+- **BREAKING:** a `pricing.overrides` entry declaring `0` for both `input_per_mtok` and `output_per_mtok` is now a load error instead of a silently accepted zero rate. `0/0` used to read as "this model is free", which is exactly how unpriced traffic ended up billing nothing. Migration: declare the real rates, or add `"free": true` to the entry — the only way to assert a genuinely zero-cost model.
+- Bedrock's `mantle` egress now REFUSES a request whose model has a Guardrail configured (provider default or per-team override) instead of serving it unguarded. Mantle has no guardrail parameter, and the audit record attests the configured guardrail regardless — a silent bypass was being recorded as compliant. Route guarded models via `converse`/`invoke_model`, or drop the guardrail for that model.
 - `pricing.version` labels the rate table and lands in every audit record's `cost.pricing_version`, which was previously the hardcoded string `"bundled"` even for fully-overridden tables — a disputed invoice can now be pinned to the rates that produced it.
 
 ## [0.2.0] - 2026-06-14

@@ -9,8 +9,12 @@ import (
 
 func servesBedrockIngress(name string) bool {
 	// mock is a test-only allowance, matching openaiapi.providerWire's
-	// treatment of mock as an Anthropic-wire provider.
-	return name == "bedrock" || name == "mock"
+	// treatment of mock as an Anthropic-wire provider. openai_compatible is
+	// first-class (core purpose #1: Claude Code in Bedrock mode reaching
+	// self-hosted vLLM/Ollama): its Complete re-renders RawBody in Anthropic
+	// shape for non-openai ingresses, and this ingress's stream writer
+	// re-renders from ev.Chunk, so both tee paths stay wire-correct.
+	return name == "bedrock" || name == "openai_compatible" || name == "mock"
 }
 
 // resolveModel returns the model to serve, whether that model SUBSTITUTES for
@@ -54,4 +58,20 @@ func resolveModel(r *router.Router, holder *live.Holder, urlID string) (string, 
 		}
 	}
 	return "", false, false
+}
+
+// servableOnBedrockIngress reports whether model resolves to at least one
+// target this ingress can serve — the pre-commit check for an ADR-041
+// budget-tier substitution (see the SubstituteTier call site in invoke.go).
+func servableOnBedrockIngress(r *router.Router, model string) bool {
+	chain, _, err := r.ResolveChain(model)
+	if err != nil {
+		return false
+	}
+	for _, ct := range chain {
+		if servesBedrockIngress(ct.Provider.Name()) {
+			return true
+		}
+	}
+	return false
 }

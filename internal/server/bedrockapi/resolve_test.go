@@ -115,10 +115,14 @@ func TestResolveModelUnknown(t *testing.T) {
 
 func TestServesBedrockIngress(t *testing.T) {
 	cases := map[string]bool{
-		"bedrock":           true,
-		"mock":              true, // test-only allowance, same precedent as openaiapi.providerWire
+		"bedrock": true,
+		"mock":    true, // test-only allowance, same precedent as openaiapi.providerWire
+		// Core purpose #1: Claude Code in Bedrock mode is a first-class
+		// client of self-hosted vLLM/Ollama — openaicompat re-renders its
+		// RawBody in Anthropic shape for non-openai ingresses, so the tee
+		// stays wire-correct.
+		"openai_compatible": true,
 		"anthropic":         false,
-		"openai_compatible": false,
 	}
 	for name, want := range cases {
 		if got := servesBedrockIngress(name); got != want {

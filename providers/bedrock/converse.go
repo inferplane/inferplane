@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"log"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/inferplane/inferplane/pkg/schema"
 	"github.com/inferplane/inferplane/providers"
@@ -43,22 +45,23 @@ func toConverseRequest(raw []byte) (ConverseRequest, error) {
 		cr.Inference["stopSequences"] = body.StopSequences
 	}
 	cr.System = systemText(body.System)
+	// Bedrock's ConversationRole only has user/assistant. Real Claude Code
+	// traffic interleaves other roles (observed: "system", for hook output)
+	// as ordinary messages — Anthropic's API tolerates this, but Bedrock
+	// rejects it outright. The content must stay IN PLACE, merged into the
+	// next user message (or a trailing user message — Bedrock wants the last
+	// turn to be user anyway). Folding it into the system prompt instead
+	// (the previous behavior) mutated the HEAD of the prompt on every turn a
+	// hook fired, invalidating the whole prompt-cache prefix: observed live
+	// as cache_creation ≈ full input (475k tokens) on every request, with
+	// prefill slow enough that Claude Code timed out and fell back to
+	// another model.
+	var pending []schema.ContentBlock
 	for _, m := range body.Messages {
 		if m.Role != "user" && m.Role != "assistant" {
-			// Bedrock's ConversationRole only has user/assistant. Real Claude
-			// Code traffic interleaves other roles (observed: "system", for
-			// hook/session-start output) as ordinary messages — Anthropic's
-			// API tolerates this, but Bedrock rejects it outright and, since
-			// it's usually the LAST message, "role must be user/assistant"
-			// surfaces as the more confusing "last turn must be a user
-			// message". Fold the text into the system prompt instead of
-			// dropping it or passing an invalid role through.
 			if t := flattenText(m.Content); t != "" {
-				if cr.System != "" {
-					cr.System += "\n\n" + t
-				} else {
-					cr.System = t
-				}
+				txt := t
+				pending = append(pending, schema.ContentBlock{Type: "text", Text: &txt})
 			}
 			continue
 		}
@@ -66,7 +69,33 @@ func toConverseRequest(raw []byte) (ConverseRequest, error) {
 		if len(blocks) == 0 {
 			continue // Bedrock rejects a message with zero content blocks
 		}
+		if m.Role == "user" && len(pending) > 0 {
+			// tool_result blocks must stay FIRST in a user message — a hook
+			// firing between an assistant tool_use and the user tool_result
+			// would otherwise put text ahead of them, a shape upstreams
+			// reject. Merge the pending text after any leading tool_results.
+			lead := 0
+			for lead < len(blocks) && blocks[lead].Type == "tool_result" {
+				lead++
+			}
+			merged := make([]schema.ContentBlock, 0, len(blocks)+len(pending))
+			merged = append(merged, blocks[:lead]...)
+			merged = append(merged, pending...)
+			merged = append(merged, blocks[lead:]...)
+			blocks = merged
+			pending = nil
+		}
 		cr.Messages = append(cr.Messages, ConverseMessage{Role: m.Role, Content: blocks})
+	}
+	if len(pending) > 0 {
+		// Trailing hook text with no user turn left to attach to. If the last
+		// message is already a user turn, extend it — a second consecutive
+		// user message is a shape Converse can reject.
+		if n := len(cr.Messages); n > 0 && cr.Messages[n-1].Role == "user" {
+			cr.Messages[n-1].Content = append(cr.Messages[n-1].Content, pending...)
+		} else {
+			cr.Messages = append(cr.Messages, ConverseMessage{Role: "user", Content: pending})
+		}
 	}
 	cr.Tools = parseTools(body.Tools)
 	cr.ToolChoice = resolveToolChoice(parseToolChoice(body.ToolChoice), cr.Tools)
@@ -218,6 +247,7 @@ func (p *provider) completeConverse(ctx context.Context, req *providers.ProxyReq
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: converse req: %w", err)
 	}
+	stripUnsupportedInference(req.Upstream, cr.Inference)
 	cr.Guardrail = p.guardrailFor(req)
 	cresp, err := p.conv.Converse(ctx, req.Upstream, cr)
 	if err != nil {
@@ -254,6 +284,7 @@ func (p *provider) streamConverse(ctx context.Context, req *providers.ProxyReque
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: converse req: %w", err)
 	}
+	stripUnsupportedInference(req.Upstream, cr.Inference)
 	cr.Guardrail = p.guardrailFor(req)
 	evs, err := p.conv.ConverseStream(ctx, req.Upstream, cr)
 	if err != nil {
@@ -415,4 +446,77 @@ func usageWithCache(in, out, cacheRead, write5m, write1h, writeTotal int64) *sch
 		u.CacheCreationInputTokens = &writeTotal
 	}
 	return u
+}
+
+// converseUnsupportedInference is the upstream-model-ID substring list of
+// InferenceConfig keys a model REJECTS with a 400 ValidationException ("This
+// model doesn't support the temperature field. Remove temperature and try
+// again."), probed per-param against live Bedrock (ap-northeast-2 and
+// us-east-1) 2026-08-28. Clients like Claude Code send
+// temperature/stop_sequences on most requests, so without stripping these
+// every such request 400s and the client silently falls back to another
+// model. Same style as legacyThinkingBrokenModels (thinking.go): an
+// evidence-based allow-list, NOT a guess — models not listed keep every
+// param untouched, so an unrecognized future model fails the same way it did
+// before. Extend as models are confirmed broken. Anthropic models are absent
+// deliberately: apiFor (bedrock.go) routes them via invoke_model, and their
+// param rules are the client's contract, not ours to rewrite.
+var converseUnsupportedInference = []struct {
+	match  string
+	params []string
+}{
+	// OpenAI gpt-5.6 reasoning models (gpt-5.6-luna/-sol/-terra) reject all
+	// sampling params. Neither "openai." nor "openai.gpt-5" is narrow
+	// enough: openai.gpt-oss-* ACCEPTS temperature/topP (only stopSequences
+	// rejected, below), and openai.gpt-5.4/-5.5 (served only through
+	// Bedrock Mantle's OpenAI-schema endpoint, not InvokeModel/Converse)
+	// accept every sampling param — probed via
+	// bedrock-mantle.us-east-1.api.aws /openai/v1/chat/completions.
+	{"openai.gpt-5.6", []string{"temperature", "topP", "stopSequences"}},
+	// xai (grok-4.6) rejects all sampling params.
+	{"xai.", []string{"temperature", "topP", "stopSequences"}},
+	// These accept temperature/topP but reject stopSequences:
+	{"openai.gpt-oss", []string{"stopSequences"}},
+	// deepseek v3.x only — deepseek r1 accepts all three, and
+	// "deepseek.v" deliberately does not match "deepseek.r1-v1:0".
+	{"deepseek.v", []string{"stopSequences"}},
+	{"google.gemma-", []string{"stopSequences"}},
+	{"minimax.", []string{"stopSequences"}},
+	{"moonshot", []string{"stopSequences"}}, // moonshot. and moonshotai.
+	{"qwen.", []string{"stopSequences"}},
+	{"zai.", []string{"stopSequences"}},
+}
+
+// stripUnsupportedInference removes InferenceConfig keys the upstream model
+// is known to reject outright (value-independent — gpt-5.6-sol 400s even on
+// temperature 1.0, its own default). Dropping a sampling param silently
+// changes sampling semantics, but the alternative is a hard 400 on every
+// request that carries it.
+func stripUnsupportedInference(upstream string, inf map[string]any) {
+	for _, e := range converseUnsupportedInference {
+		if !strings.Contains(upstream, e.match) {
+			continue
+		}
+		for _, p := range e.params {
+			if _, has := inf[p]; has {
+				delete(inf, p)
+				logStrippedParam("converse", upstream, p)
+			}
+		}
+	}
+}
+
+// strippedParamLogged dedupes logStrippedParam to once per (route, upstream,
+// param) per process: stripping hits every request an affected model serves,
+// so a per-request line is noise — but zero signal left an operator debugging
+// a reproducibility issue with no telemetry that the request was mutated
+// before egress. A per-request signal (audit/metric) is the fuller fix,
+// tracked as P1 "undisclosed request mutation" in docs/enterprise-strategy.md.
+var strippedParamLogged sync.Map
+
+func logStrippedParam(route, upstream, param string) {
+	key := route + "|" + upstream + "|" + param
+	if _, seen := strippedParamLogged.LoadOrStore(key, struct{}{}); !seen {
+		log.Printf("bedrock %s: stripping inference param %q for %s (model rejects it — docs/reference/agent-llm.md §5); logged once per model+param", route, param, upstream)
+	}
 }

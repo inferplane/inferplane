@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -445,5 +446,37 @@ func TestPriceCandidateFrom_dropsWhatItCannotRead(t *testing.T) {
 				t.Errorf("priceCandidateFrom accepted a document it cannot safely read")
 			}
 		})
+	}
+}
+
+// Review follow-up (PR #65, round 2): the tool promises to never emit a 0
+// rate (0 means unpriced, not free — the load-time check now REJECTS 0/0),
+// but ratToConfigNumber renders a zero big.Rat as the JSON number 0. A route
+// whose Price List SKU quotes $0 must be reported UNRESOLVED instead of
+// generating a fragment the gateway then refuses to load.
+func TestSyncZeroPricedSKUIsUnresolvedNotEmitted(t *testing.T) {
+	cands := []priceCandidate{
+		{ModelPart: "vendorfreemodel", Direction: "input", PerMTok: big.NewRat(0, 1), UsageType: "APN1-vendor.free-model-input"},
+		{ModelPart: "vendorfreemodel", Direction: "output", PerMTok: big.NewRat(0, 1), UsageType: "APN1-vendor.free-model-output"},
+	}
+	_, _, reason := resolveTarget(cands, "vendor.free-model")
+	if reason == "" {
+		t.Fatal("a $0/$0 SKU must resolve to a reason (unresolved), not a 0 rate the config loader rejects")
+	}
+}
+
+// resolveTarget's prefix match is ONE direction: the catalog row's model part
+// must be a prefix of the configured id, never the reverse. The reverse
+// direction let a shorter configured id ("vendor.fast") silently bind a
+// longer, more specific catalog row's rate ("vendor.fast-pro" — a different
+// model). This pins the false-positive direction the fix removed.
+func TestSyncShorterConfiguredIDNeverBindsLongerCatalogRow(t *testing.T) {
+	cands := []priceCandidate{
+		{ModelPart: "vendorfastpro", Direction: "input", PerMTok: big.NewRat(3, 1), UsageType: "APN1-vendor.fast-pro-input"},
+		{ModelPart: "vendorfastpro", Direction: "output", PerMTok: big.NewRat(15, 1), UsageType: "APN1-vendor.fast-pro-output"},
+	}
+	in, out, reason := resolveTarget(cands, "vendor.fast")
+	if in != nil || out != nil || reason == "" {
+		t.Fatalf("configured id vendor.fast must NOT bind catalog row vendor.fast-pro: in=%v out=%v reason=%q", in, out, reason)
 	}
 }

@@ -419,7 +419,10 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 	w.WriteHeader(200)
 
 	openaiWire := providerWire(prov.Name()) == "openai"
-	var st openai.StreamState
+	// An anthropic-wire provider's stream is rendered by us, so usage only
+	// reaches the client if we put it there — and only when the client's own
+	// stream_options.include_usage asked for it.
+	st := openai.StreamState{IncludeUsage: openai.StreamWantsUsage(pr.RawBody)}
 	var usage *audit.UsageRef
 	var lastUsage *schema.Usage
 	var ttft float64
