@@ -479,6 +479,22 @@ func TestRequestToCanonicalSkipsNullStop(t *testing.T) {
 	}
 }
 
+// Review follow-up (PR #65, round 3): only a string or an array is a valid
+// stop shape — a boolean, number, or object from a non-conformant client must
+// be dropped, not forwarded as stop_sequences (which 400s downstream; on
+// count_tokens a non-200 crashes Claude Code).
+func TestRequestToCanonicalDropsNonStringNonArrayStop(t *testing.T) {
+	for _, stop := range []string{`false`, `true`, `42`, `{"x":1}`} {
+		cr, err := RequestToCanonical([]byte(`{"model":"m","stop":` + stop + `,"messages":[{"role":"user","content":"hi"}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, has := cr.Extra["stop_sequences"]; has {
+			t.Fatalf("stop:%s must be dropped, got %s", stop, cr.Extra["stop_sequences"])
+		}
+	}
+}
+
 // Local review of PR #65 (CONFIRMED findings) — streaming tool_calls edge
 // cases in ChunkToCanonical:
 //  1. finish_reason on the same chunk as tool_calls must not swallow them.

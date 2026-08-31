@@ -254,14 +254,17 @@ func RequestToCanonical(openaiBody []byte) (*schema.ChatRequest, error) {
 	if len(in.TopP) > 0 {
 		extra["top_p"] = in.TopP
 	}
-	if len(in.Stop) > 0 && in.Stop[0] != 'n' { // skip JSON null — stop_sequences:null 400s downstream
-		// OpenAI stop may be a string or an array; canonical stop_sequences
-		// is an array.
+	// OpenAI stop may be a string or an array; canonical stop_sequences is an
+	// array. Anything else — null, booleans, numbers, objects — is dropped,
+	// never forwarded: no valid stop_sequences value has those shapes, and
+	// forwarding one 400s downstream (on count_tokens, a non-200 crashes
+	// Claude Code — CLAUDE.md invariant).
+	if len(in.Stop) > 0 {
 		if in.Stop[0] == '"' {
 			if arr, err := json.Marshal([]json.RawMessage{in.Stop}); err == nil {
 				extra["stop_sequences"] = arr
 			}
-		} else {
+		} else if in.Stop[0] == '[' {
 			extra["stop_sequences"] = in.Stop
 		}
 	}

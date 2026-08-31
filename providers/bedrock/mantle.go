@@ -126,6 +126,15 @@ func toMantleAnthropicBody(raw []byte, upstream string, stream bool) ([]byte, er
 // temperature (any value but its default)/top_p/stop; gpt-5.4/-5.5,
 // xai.grok-4.3, and the bare-route vendors (deepseek/zai/moonshotai) accepted
 // all of them when probed (2026-08-28).
+//
+// Deliberate asymmetry with converseUnsupportedInference's "xai." entry:
+// grok-4.3 was probed ON THIS ROUTE and accepted every sampling param, while
+// grok-4.6 — which rejects them all on Converse — has not been probed on
+// Mantle. The allow-list posture means an unprobed model keeps its params
+// (and 400s loudly if it turns out to reject them) rather than being
+// silently mutated on a guess; if grok-4.6 or a later xai reasoning model
+// lands on this route and rejects sampling params, probe it and add the
+// entry then.
 var mantleChatStripParams = []struct {
 	match  string
 	params []string
@@ -365,6 +374,17 @@ var _ mantler = (*mantleClient)(nil)
 // anthropicErrorBody re-renders an OpenAI {"error":{...}} envelope in
 // Anthropic shape, preserving the upstream message. Unparseable input gets a
 // fixed message rather than being echoed (it may not be JSON at all).
+//
+// Echoing the message here does NOT violate errors.go's "never echo
+// ErrorMessage()" rule, and the envelope shape is what makes that so: the
+// ARN-bearing error class is the AWS front layer's (auth/throttle —
+// AccessDeniedException naming the caller's assumed-role ARN), and those
+// bodies are AWS-shaped ({"message": ...} + x-amzn-ErrorType), which leaves
+// oai.Error.Message empty and falls back to the fixed string. Only a
+// vendor-emitted OpenAI envelope (error.message nested one level down) is
+// echoed — model-level errors like a rejected parameter, which the client
+// needs verbatim to act on, the same reason the anthropic provider tees
+// upstream error bodies unmodified.
 func anthropicErrorBody(status int, raw []byte) []byte {
 	msg := "bedrock mantle: upstream error"
 	var oai struct {
