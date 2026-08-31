@@ -189,6 +189,25 @@ func TestPreCheckTeamCapacityBlockIsNeverWarnDowngraded(t *testing.T) {
 	}
 }
 
+// TestPreCheckTeamDailyCapacityBlockIsNeverWarnDowngraded is the DAY-window
+// counterpart: PreCheck's daily branch goes through the same mustDenyBudget
+// helper as the monthly one, but only a dedicated test can catch a future
+// refactor that accidentally wires the day check to a different predicate.
+func TestPreCheckTeamDailyCapacityBlockIsNeverWarnDowngraded(t *testing.T) {
+	store := capacityBlockingStore{blockingStore{resets: map[string]time.Time{}}}
+	g := NewGovernor(map[string]TeamPolicy{
+		"t": {BudgetMicrosPerDay: 1_000, BudgetDayExceeded: "warn"},
+	}, limiter.NewMemory(), store, nil)
+
+	dec := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0)
+	if dec.Allowed {
+		t.Fatalf("a capacity-exhaustion block must deny the DAY window too, regardless of on_exceeded=warn: %+v", dec)
+	}
+	if dec.Status != 402 {
+		t.Fatalf("capacity-block deny status = %d, want 402", dec.Status)
+	}
+}
+
 // TestPreCheckUserCapacityBlockIsNeverWarnDowngraded is the same invariant
 // for the per-user scope, which has its own independent warn-downgrade site.
 func TestPreCheckUserCapacityBlockIsNeverWarnDowngraded(t *testing.T) {
@@ -204,6 +223,21 @@ func TestPreCheckUserCapacityBlockIsNeverWarnDowngraded(t *testing.T) {
 	}
 }
 
+// TestPreCheckUserDailyCapacityBlockIsNeverWarnDowngraded is the DAY-window
+// counterpart for the per-user scope.
+func TestPreCheckUserDailyCapacityBlockIsNeverWarnDowngraded(t *testing.T) {
+	store := capacityBlockingStore{blockingStore{resets: map[string]time.Time{}}}
+	g := NewGovernor(map[string]TeamPolicy{"t": {}}, limiter.NewMemory(), store, nil)
+	g.SetUserLookup(func(team, user string) (UserPolicy, bool) {
+		return UserPolicy{BudgetMicrosPerDay: 1_000, BudgetExceeded: "warn"}, true
+	})
+
+	dec := g.PreCheck(Subject{Team: "t", User: "alice"}, KeyPolicy{}, 0)
+	if dec.Allowed {
+		t.Fatalf("a capacity-exhaustion block must deny the user DAY window too, regardless of on_exceeded=warn: %+v", dec)
+	}
+}
+
 // TestPreCheckKeyCapacityBlockDenies pins the key scope, which has no
 // on_exceeded knob at all (a key limit always blocks) — before the fix, an
 // equality check hardcoded to budget.Block meant a capacity refusal for a
@@ -216,6 +250,18 @@ func TestPreCheckKeyCapacityBlockDenies(t *testing.T) {
 	dec := g.PreCheck(Subject{Team: "t", KeyID: "ik_x"}, KeyPolicy{BudgetMicrosPerMonth: 1_000}, 0)
 	if dec.Allowed {
 		t.Fatalf("a capacity-exhaustion block must deny a key-scoped budget too: %+v", dec)
+	}
+}
+
+// TestPreCheckKeyDailyCapacityBlockDenies is the DAY-window counterpart for
+// the key scope.
+func TestPreCheckKeyDailyCapacityBlockDenies(t *testing.T) {
+	store := capacityBlockingStore{blockingStore{resets: map[string]time.Time{}}}
+	g := NewGovernor(map[string]TeamPolicy{"t": {}}, limiter.NewMemory(), store, nil)
+
+	dec := g.PreCheck(Subject{Team: "t", KeyID: "ik_x"}, KeyPolicy{BudgetMicrosPerDay: 1_000}, 0)
+	if dec.Allowed {
+		t.Fatalf("a capacity-exhaustion block must deny a key-scoped daily budget too: %+v", dec)
 	}
 }
 

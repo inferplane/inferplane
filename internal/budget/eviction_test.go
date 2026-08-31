@@ -171,3 +171,12 @@ func TestDebitIsANoOpForAKeyTheStoreNeverAdmitted(t *testing.T) {
 		t.Fatalf("Spent(never-admitted key) after Debit = %d, want 0 (the debit is a documented no-op)", got)
 	}
 }
+
+func TestDecisionString(t *testing.T) {
+	cases := map[Decision]string{Allow: "Allow", Block: "Block", BlockCapacity: "BlockCapacity", Decision(99): "Decision(99)"}
+	for d, want := range cases {
+		if got := d.String(); got != want {
+			t.Errorf("Decision(%d).String() = %q, want %q", int(d), got, want)
+		}
+	}
+}

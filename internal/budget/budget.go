@@ -4,6 +4,7 @@
 package budget
 
 import (
+	"strconv"
 	"sync"
 	"time"
 )
@@ -22,6 +23,21 @@ const (
 	// Check's capacity branch for the full fail-closed rationale.
 	BlockCapacity
 )
+
+// String makes a test failure or log line self-describing (e.g. "want
+// BlockCapacity, got Block") instead of printing the bare underlying int.
+func (d Decision) String() string {
+	switch d {
+	case Allow:
+		return "Allow"
+	case Block:
+		return "Block"
+	case BlockCapacity:
+		return "BlockCapacity"
+	default:
+		return "Decision(" + strconv.Itoa(int(d)) + ")"
+	}
+}
 
 type BudgetStore interface {
 	Check(key string, estimateMicros, limitMicros int64, w Window) Decision
