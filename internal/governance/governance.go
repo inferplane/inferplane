@@ -301,6 +301,20 @@ type GovDecision struct {
 	Code    audit.DenyReason
 }
 
+// mustDenyBudget decides whether a budget.Check result should deny the
+// request. budget.BlockCapacity (the store's at-capacity fail-safe) is
+// UNCONDITIONAL — never downgraded by onExceeded — because a warn policy
+// answers "should a real budget breach still admit the request?", not
+// "should we serve a request the store can never account for?" (AI review,
+// PR #64: a warn-configured budget hitting store capacity used to silently
+// allow the request AND drop its spend, since a Debit on a key the store
+// never admitted is a no-op). budget.Block (a real breach) still honors
+// warn. A key-scoped budget passes onExceeded == "" here, which is never
+// "warn", so its existing always-deny behavior on a real Block is unchanged.
+func mustDenyBudget(dec budget.Decision, onExceeded string) bool {
+	return dec == budget.BlockCapacity || (dec == budget.Block && onExceeded != "warn")
+}
+
 // PreCheck enforces rate limit + quota + budget BEFORE the upstream call.
 // estimateTokens is the request's estimated input tokens. block policy → deny;
 // warn policy → allow (still settled afterward). An unknown team is ungoverned
@@ -352,25 +366,21 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 		if p.BudgetMicrosPerMonth > 0 {
 			mw := g.monthWindow()
 			tbk := budget.Key(budget.ScopeTeam, s.Team, mw)
-			if g.bud.Check(tbk, 0, p.BudgetMicrosPerMonth, mw) == budget.Block {
-				if p.BudgetExceeded != "warn" {
-					resetsAt := g.bud.ResetsAt(tbk, mw)
-					budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("budget", resetsAt, g.budgetLocOrUTC(), p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
-					budgetDenyResets = resetsAt
-				}
+			if dec := g.bud.Check(tbk, 0, p.BudgetMicrosPerMonth, mw); mustDenyBudget(dec, p.BudgetExceeded) {
+				resetsAt := g.bud.ResetsAt(tbk, mw)
+				budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("budget", resetsAt, g.budgetLocOrUTC(), p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
+				budgetDenyResets = resetsAt
 			}
 		}
 		if p.BudgetMicrosPerDay > 0 {
 			dw := g.dayWindow()
 			tbkDay := budget.Key(budget.ScopeTeam, s.Team, dw)
-			if g.bud.Check(tbkDay, 0, p.BudgetMicrosPerDay, dw) == budget.Block {
-				if p.BudgetDayExceeded != "warn" {
-					resetsAt := g.bud.ResetsAt(tbkDay, dw)
-					// Block wins on tie: keep whichever window binds soonest.
-					if budgetDeny.Status == 0 || resetsAt.Before(budgetDenyResets) {
-						budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("daily budget", resetsAt, g.budgetLocOrUTC(), p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
-						budgetDenyResets = resetsAt
-					}
+			if dec := g.bud.Check(tbkDay, 0, p.BudgetMicrosPerDay, dw); mustDenyBudget(dec, p.BudgetDayExceeded) {
+				resetsAt := g.bud.ResetsAt(tbkDay, dw)
+				// Block wins on tie: keep whichever window binds soonest.
+				if budgetDeny.Status == 0 || resetsAt.Before(budgetDenyResets) {
+					budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("daily budget", resetsAt, g.budgetLocOrUTC(), p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
+					budgetDenyResets = resetsAt
 				}
 			}
 		}
@@ -392,7 +402,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 	if kp.BudgetMicrosPerMonth > 0 {
 		mw := g.monthWindow()
 		kbk := budget.Key(budget.ScopeKey, s.KeyID, mw)
-		if g.bud.Check(kbk, 0, kp.BudgetMicrosPerMonth, mw) == budget.Block {
+		if dec := g.bud.Check(kbk, 0, kp.BudgetMicrosPerMonth, mw); mustDenyBudget(dec, "") {
 			resetsAt := g.bud.ResetsAt(kbk, mw)
 			keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key budget", resetsAt, g.budgetLocOrUTC(), ""), Code: audit.DenyKeyBudgetExceeded}
 			keyBudgetDenyResets = resetsAt
@@ -401,7 +411,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 	if kp.BudgetMicrosPerDay > 0 {
 		dw := g.dayWindow()
 		kbkDay := budget.Key(budget.ScopeKey, s.KeyID, dw)
-		if g.bud.Check(kbkDay, 0, kp.BudgetMicrosPerDay, dw) == budget.Block {
+		if dec := g.bud.Check(kbkDay, 0, kp.BudgetMicrosPerDay, dw); mustDenyBudget(dec, "") {
 			resetsAt := g.bud.ResetsAt(kbkDay, dw)
 			if keyBudgetDeny.Status == 0 || resetsAt.Before(keyBudgetDenyResets) {
 				keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key daily budget", resetsAt, g.budgetLocOrUTC(), ""), Code: audit.DenyKeyBudgetExceeded}
@@ -430,7 +440,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 			if up.BudgetMicrosPerMonth > 0 {
 				mw := g.monthWindow()
 				ubk := budget.Key(budget.ScopeUser, uid, mw)
-				if g.bud.Check(ubk, 0, up.BudgetMicrosPerMonth, mw) == budget.Block && up.BudgetExceeded != "warn" {
+				if dec := g.bud.Check(ubk, 0, up.BudgetMicrosPerMonth, mw); mustDenyBudget(dec, up.BudgetExceeded) {
 					resetsAt := g.bud.ResetsAt(ubk, mw)
 					userDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("user budget", resetsAt, g.budgetLocOrUTC(), up.AdminContact), Code: audit.DenyUserBudgetExceeded}
 					userDenyResets = resetsAt
@@ -439,7 +449,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 			if up.BudgetMicrosPerDay > 0 {
 				dw := g.dayWindow()
 				ubkDay := budget.Key(budget.ScopeUser, uid, dw)
-				if g.bud.Check(ubkDay, 0, up.BudgetMicrosPerDay, dw) == budget.Block && up.BudgetExceeded != "warn" {
+				if dec := g.bud.Check(ubkDay, 0, up.BudgetMicrosPerDay, dw); mustDenyBudget(dec, up.BudgetExceeded) {
 					resetsAt := g.bud.ResetsAt(ubkDay, dw)
 					if userDeny.Status == 0 || resetsAt.Before(userDenyResets) {
 						userDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("user daily budget", resetsAt, g.budgetLocOrUTC(), up.AdminContact), Code: audit.DenyUserBudgetExceeded}

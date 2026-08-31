@@ -4,6 +4,7 @@
 package budget
 
 import (
+	"strconv"
 	"sync"
 	"time"
 )
@@ -13,7 +14,30 @@ type Decision int
 const (
 	Allow Decision = iota
 	Block
+	// BlockCapacity is the store's at-capacity fail-safe (Check could not
+	// admit a genuinely new counter) — distinct from Block (a real
+	// budget/quota breach) because a caller's on_exceeded=warn policy answers
+	// "should a real breach still admit the request?", not "should we serve
+	// a request the store can never account for?" A caller (governance) MUST
+	// treat BlockCapacity as unconditional: never downgrade it via warn. See
+	// Check's capacity branch for the full fail-closed rationale.
+	BlockCapacity
 )
+
+// String makes a test failure or log line self-describing (e.g. "want
+// BlockCapacity, got Block") instead of printing the bare underlying int.
+func (d Decision) String() string {
+	switch d {
+	case Allow:
+		return "Allow"
+	case Block:
+		return "Block"
+	case BlockCapacity:
+		return "BlockCapacity"
+	default:
+		return "Decision(" + strconv.Itoa(int(d)) + ")"
+	}
+}
 
 type BudgetStore interface {
 	Check(key string, estimateMicros, limitMicros int64, w Window) Decision
@@ -163,11 +187,12 @@ func (b *Memory) Check(key string, estimateMicros, limitMicros int64, w Window) 
 		//     spent again — the store silently under-counts spend. Forbidden.
 		//   - Refusing the new key and returning Allow leaves that cap
 		//     unenforced — also silently under-counts. Forbidden.
-		//   - Refusing the new key and returning Block denies the request
-		//     instead of serving one the store cannot account for — the same
+		//   - Refusing the new key and denying the request instead of
+		//     serving one the store cannot account for — the same
 		//     fail-closed posture SetLeaseGate takes when a hard-cap lease
-		//     expires. This is the choice.
-		return Block
+		//     expires. This is the choice — as BlockCapacity, not Block, so a
+		//     caller's warn policy can never downgrade it back to Allow.
+		return BlockCapacity
 	}
 	if bkt.spent+estimateMicros > limitMicros {
 		return Block
