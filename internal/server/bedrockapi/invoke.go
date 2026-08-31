@@ -298,7 +298,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 		var ue *providers.UpstreamError
 		if errors.As(err, &ue) {
 			st := ue.HTTPStatus()
-			writeErr(w, st, "bedrock upstream error")
+			writeErr(w, st, upstreamErrMessage(ue.Body, "bedrock upstream error"))
 			h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, st, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 			recordSpanResponse(req, prov.Name(), upstream, nil, false)
 			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, st, time.Since(start).Seconds(), 0)
@@ -376,7 +376,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		var ue *providers.UpstreamError
 		if errors.As(err, &ue) {
 			st := ue.HTTPStatus()
-			writeErr(w, st, "bedrock upstream error")
+			writeErr(w, st, upstreamErrMessage(ue.Body, "bedrock upstream error"))
 			h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, st, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 			recordSpanResponse(req, prov.Name(), upstream, nil, false)
 			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, st, time.Since(start).Seconds(), 0)

@@ -560,3 +560,22 @@ func TestChunkToCanonicalOpenerWithPartialArguments(t *testing.T) {
 		t.Fatalf("the partial fragment must re-emit as input_json_delta, got %s", frames[1].Delta)
 	}
 }
+
+// Review follow-up (PR #65, round 4): include_usage injection must MERGE into
+// an existing stream_options object, not replace the key wholesale.
+func TestEnsureIncludeUsageMergesExistingStreamOptions(t *testing.T) {
+	top := map[string]json.RawMessage{
+		"stream_options": json.RawMessage(`{"include_usage_on_tool_use":true}`),
+	}
+	EnsureIncludeUsage(top)
+	var so map[string]json.RawMessage
+	if err := json.Unmarshal(top["stream_options"], &so); err != nil {
+		t.Fatal(err)
+	}
+	if string(so["include_usage"]) != "true" {
+		t.Errorf("include_usage = %s, want true", so["include_usage"])
+	}
+	if string(so["include_usage_on_tool_use"]) != "true" {
+		t.Errorf("pre-existing stream_options field clobbered: %s", top["stream_options"])
+	}
+}

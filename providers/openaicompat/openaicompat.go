@@ -69,7 +69,7 @@ func (p *provider) buildBody(req *providers.ProxyRequest, stream bool) ([]byte, 
 			return nil, err
 		}
 		top["stream"] = json.RawMessage("true")
-		top["stream_options"] = json.RawMessage(`{"include_usage":true}`)
+		openai.EnsureIncludeUsage(top)
 		var err error
 		if converted, err = json.Marshal(top); err != nil {
 			return nil, err
@@ -251,7 +251,7 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 		resp.Body.Close()
 		return nil, &providers.UpstreamError{StatusCode: resp.StatusCode, Body: body, Header: resp.Header}
 	}
-	inner := openai.ReadChatSSE(resp.Body)
+	inner := openai.ReadChatSSE(resp.Body, req.Model)
 	return func(yield func(*providers.StreamEvent, error) bool) {
 		defer resp.Body.Close()
 		// Fail-closed parity with Complete: a cross-protocol ingress ignores

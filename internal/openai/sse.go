@@ -22,7 +22,17 @@ import (
 // terminator yields Raw="data: [DONE]\n\n" with Chunk=nil. Shared by the
 // openaicompat provider (vLLM/Ollama) and the Bedrock Mantle chat-completions
 // routes.
-func ReadChatSSE(r io.Reader) iter.Seq2[*providers.StreamEvent, error] {
+//
+// model is the PUBLIC model name (req.Model) stamped into the synthesized
+// message_start: the OpenAI wire has no message_start/message_stop, but the
+// canonical consumers re-render the Anthropic frame vocabulary, whose contract
+// opens with message_start and ends with message_stop — a strict client may
+// reject or mistrack a stream that starts at a bare delta. Both frames are
+// synthesized here (Chunk-only, Raw nil — an OpenAI-wire ingress tees Raw and
+// must see no invented lines): message_start lazily before the FIRST parsed
+// chunk, so a stream with zero parseable frames still emits nothing and the
+// callers' fail-closed no-frames check stays intact; message_stop at [DONE].
+func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, error] {
 	return func(yield func(*providers.StreamEvent, error) bool) {
 		br := bufio.NewReader(r)
 		// Tool blocks ChunkToCanonical opened (content_block_start) that no
@@ -34,6 +44,15 @@ func ReadChatSSE(r io.Reader) iter.Seq2[*providers.StreamEvent, error] {
 		// ChunkToCanonical is stateless per chunk, so the closes are
 		// synthesized here, where the whole stream passes through.
 		openTools := map[int]bool{}
+		started := false // message_start emitted (implies ≥1 parsed chunk)
+		startMessage := func() bool {
+			if started {
+				return true
+			}
+			started = true
+			msg := &schema.ChatResponse{Type: "message", Role: "assistant", Model: model, Content: []schema.ContentBlock{}}
+			return yield(&providers.StreamEvent{Chunk: &schema.ChatChunk{Type: "message_start", Message: msg}}, nil)
+		}
 		closeOpenTools := func() bool {
 			for _, idx := range slices.Sorted(maps.Keys(openTools)) {
 				i := idx
@@ -53,8 +72,11 @@ func ReadChatSSE(r io.Reader) iter.Seq2[*providers.StreamEvent, error] {
 				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
 				if payload == "[DONE]" {
 					// A stream that ended without a finish_reason still must
-					// not leave blocks open.
+					// not leave blocks open, and a started message must close.
 					if !closeOpenTools() {
+						return
+					}
+					if started && !yield(&providers.StreamEvent{Chunk: &schema.ChatChunk{Type: "message_stop"}}, nil) {
 						return
 					}
 					if !yield(&providers.StreamEvent{Raw: []byte("data: [DONE]\n\n")}, nil) {
@@ -75,6 +97,9 @@ func ReadChatSSE(r io.Reader) iter.Seq2[*providers.StreamEvent, error] {
 						// The else is structural — it must stay impossible to
 						// emit raw AND frames for one line.
 						for i, c := range chunks {
+							if !startMessage() {
+								return
+							}
 							if c.Type == "content_block_start" && c.Index != nil {
 								openTools[*c.Index] = true
 							}

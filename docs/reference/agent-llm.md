@@ -73,6 +73,15 @@ the system prompt (the pre-2026-08-28 behavior) mutated the prompt head on every
 turn a hook fired and invalidated the entire cached prefix (observed live:
 cache_creation ≈ full 475k-token input on every request).
 
+OpenAI-wire streams (openai_compatible, Mantle chat routes) are re-rendered by
+canonical consumers into the Anthropic frame vocabulary, and the OpenAI wire
+has no message_start/message_stop and no per-block close — `ReadChatSSE`
+(`internal/openai/sse.go`) synthesizes all three (message_start lazily before
+the first parsed chunk, stamped with the PUBLIC model name; content_block_stop
+per opened tool block before the stop-bearing message_delta; message_stop at
+[DONE]), Chunk-only with Raw nil so an OpenAI-wire ingress tees no invented
+lines.
+
 Usage settlement is cache-tier aware on every path that returns cache counts:
 Anthropic/Invoke fold `message_start` + `message_delta` frames (`schema.MergeUsage`,
 ADR-030); Converse maps `CacheReadInputTokens`/`CacheDetails` into the canonical

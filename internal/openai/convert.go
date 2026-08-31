@@ -1019,3 +1019,21 @@ func toolChoiceFromOAI(raw json.RawMessage) json.RawMessage {
 	}
 	return b
 }
+
+// EnsureIncludeUsage sets stream_options.include_usage=true on a top-level
+// OpenAI request map, MERGING into any stream_options object already present
+// rather than replacing the key wholesale. CanonicalToRequest emits no
+// stream_options today, so replacement happened to be lossless — but a future
+// field riding that object would be silently clobbered by a wholesale write
+// (review finding, PR #65). A non-object stream_options value is replaced:
+// it was invalid on this wire to begin with.
+func EnsureIncludeUsage(top map[string]json.RawMessage) {
+	so := map[string]json.RawMessage{}
+	if prev, has := top["stream_options"]; has {
+		_ = json.Unmarshal(prev, &so)
+	}
+	so["include_usage"] = json.RawMessage("true")
+	if raw, err := json.Marshal(so); err == nil {
+		top["stream_options"] = raw
+	}
+}

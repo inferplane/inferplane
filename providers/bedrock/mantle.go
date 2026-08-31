@@ -190,7 +190,7 @@ func toMantleChatBody(req *providers.ProxyRequest, upstream string, stream bool)
 	}
 	if stream {
 		top["stream"] = json.RawMessage("true")
-		top["stream_options"] = json.RawMessage(`{"include_usage":true}`)
+		openai.EnsureIncludeUsage(top)
 	} else {
 		delete(top, "stream")
 	}
@@ -325,7 +325,7 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 	if path == "/anthropic/v1/messages" {
 		inner = anthropicsse.ReadSSE(resp.Body)
 	} else {
-		inner = openai.ReadChatSSE(resp.Body)
+		inner = openai.ReadChatSSE(resp.Body, req.Model)
 	}
 	return func(yield func(*providers.StreamEvent, error) bool) {
 		defer resp.Body.Close()
