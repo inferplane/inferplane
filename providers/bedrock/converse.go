@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"log"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/inferplane/inferplane/pkg/schema"
 	"github.com/inferplane/inferplane/providers"
@@ -496,7 +498,25 @@ func stripUnsupportedInference(upstream string, inf map[string]any) {
 			continue
 		}
 		for _, p := range e.params {
-			delete(inf, p)
+			if _, has := inf[p]; has {
+				delete(inf, p)
+				logStrippedParam("converse", upstream, p)
+			}
 		}
+	}
+}
+
+// strippedParamLogged dedupes logStrippedParam to once per (route, upstream,
+// param) per process: stripping hits every request an affected model serves,
+// so a per-request line is noise — but zero signal left an operator debugging
+// a reproducibility issue with no telemetry that the request was mutated
+// before egress. A per-request signal (audit/metric) is the fuller fix,
+// tracked as P1 "undisclosed request mutation" in docs/enterprise-strategy.md.
+var strippedParamLogged sync.Map
+
+func logStrippedParam(route, upstream, param string) {
+	key := route + "|" + upstream + "|" + param
+	if _, seen := strippedParamLogged.LoadOrStore(key, struct{}{}); !seen {
+		log.Printf("bedrock %s: stripping inference param %q for %s (model rejects it — docs/reference/agent-llm.md §5); logged once per model+param", route, param, upstream)
 	}
 }

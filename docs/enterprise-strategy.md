@@ -57,24 +57,34 @@ S3 anchoring (ADR-012/018) · optional Postgres usage analytics (ADR-036).
 
 ### P0 — blocks the enterprise-ready claim
 
-**Guardrail bypass on the Mantle egress path, recorded as applied.**
-`guardrailFor` is called at `providers/bedrock/converse.go:230,267` and
-`providers/bedrock/invoke.go:93,113` only; the Mantle paths
-(`providers/bedrock/mantle.go` `Complete`/`Stream`) never call it.
-`internal/server/bedrockapi/invoke.go:356` writes `pr.GuardrailID` into the
-tamper-evident record unconditionally, from the team record — so a
-`model_api: {"<model>": "mantle"}` entry disables a mandated guardrail **and
-the audit chain attests that it was applied.** No boot rejection, no warning,
-no audit distinction. `providers/CLAUDE.md` states this control has no
-per-team opt-out; routing config is now one.
+**Guardrails on the Mantle egress path: refused, not applied.**
+Original bug: `guardrailFor` was called on the Converse and InvokeModel paths
+only; the Mantle paths (`providers/bedrock/mantle.go` `Complete`/`Stream`)
+never called it, while `internal/server/bedrockapi/invoke.go` writes
+`pr.GuardrailID` into the tamper-evident record unconditionally — so a
+`model_api: {"<model>": "mantle"}` entry silently disabled a mandated
+guardrail **and the audit chain attested that it was applied.** Fixed:
+`mantleGuardrailCheck` (`providers/bedrock/bedrock.go`) now refuses any
+guarded request routed to Mantle with a 400 naming the conflict, before
+egress — the bypass and the falsified attestation are gone. Remaining gap
+(why the contract row stays ❌): Mantle has no guardrail parameter, so the
+requirement "a configured guardrail *applies* on every egress path" is still
+unmet — a guarded team simply cannot use Mantle-only models until guardrail
+evaluation exists off the InvokeModel/Converse APIs (or the refusal is
+accepted as the permanent posture and documented as such).
 
-**A 200 response can bill zero on the Mantle path.**
-`internal/server/bedrockapi/invoke.go:334` settles only when
-`resp.Parsed != nil`. `providers/bedrock/mantle.go:212-226` drops Parsed on any
-unmarshal/conversion failure, so a malformed-but-200 upstream response is
-served with no debit, no cost, and empty audit usage. Converse and InvokeModel
-build Parsed from typed fields and cannot reach this state. This is the
-ADR-030 zero-cost class re-entering through a new path.
+**A 200 response could bill zero on the Mantle path.**
+Original bug: the Bedrock ingress settles only when `resp.Parsed != nil`, and
+Mantle's `Complete` dropped `Parsed` on any unmarshal/conversion failure — a
+malformed-but-200 upstream response was served with no debit, no cost, and
+empty audit usage (the ADR-030 zero-cost class re-entering through a new
+path; Converse and InvokeModel build Parsed from typed fields and cannot
+reach this state). Fixed: that path is now fail-closed — an unparseable 2xx
+returns a synthesized 502 (`providers/bedrock/mantle.go` `Complete`), and the
+stream path errors when a 200 stream yields no parseable frame, so nothing is
+served unbilled. Remaining gap: fail-closed conversion is a per-path
+discipline, not a structural guarantee — a future egress that builds `Parsed`
+from re-parsed JSON must repeat it (no test fences the invariant generically).
 
 **Per-user governance is absent.** `internal/policy/store.go:168-169` rejects
 `budget`/`rate` rules unless the subject is team-only. Per-key limits are keyed

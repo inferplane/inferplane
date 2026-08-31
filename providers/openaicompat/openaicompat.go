@@ -260,8 +260,11 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 		// frames — and settle zero billable tokens (ADR-030's zero-cost
 		// class). Surface an error instead of a silent empty stream.
 		crossProtocol := req.IngressProtocol != "openai"
-		var sawChunk bool
+		var sawChunk, sawErr bool
 		for ev, err := range inner {
+			if err != nil {
+				sawErr = true
+			}
 			if ev != nil && ev.Chunk != nil {
 				sawChunk = true
 			}
@@ -269,7 +272,10 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 				return
 			}
 		}
-		if crossProtocol && !sawChunk {
+		// !sawErr: an upstream that died before any parseable frame already
+		// yielded its own error — a consumer that keeps ranging past it must
+		// not receive this synthetic one on top.
+		if crossProtocol && !sawChunk && !sawErr {
 			yield(nil, fmt.Errorf("openaicompat: upstream stream for %s produced no parseable frames", req.Upstream))
 		}
 	}, nil

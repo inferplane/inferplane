@@ -508,3 +508,61 @@ func TestMantleAnthropicStreamRewritesModelInChunkAndRaw(t *testing.T) {
 		t.Fatal("no message_start frame observed")
 	}
 }
+
+// An OpenAI-ingress request routed to Mantle's Anthropic route must be
+// re-rendered from the canonical form: RawBody is the ingress's native
+// OpenAI JSON (OpenAI roles, {"type":"function"} tool shapes), which the
+// route would reject or misparse — the verbatim top-level rewrite is only
+// correct for the Anthropic-wire ingresses (anthropic, bedrock).
+func TestMantleAnthropicBodyFromOpenAIIngress(t *testing.T) {
+	var parsed schema.ChatRequest
+	if err := json.Unmarshal([]byte(`{"model":"claude-opus-5","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	req := &providers.ProxyRequest{
+		Upstream:        "anthropic.claude-opus-5",
+		IngressProtocol: "openai",
+		// What the OpenAI ingress actually carries in RawBody — forwarding
+		// this verbatim is the bug this test fences.
+		RawBody: []byte(`{"model":"claude-opus-5","max_tokens":64,"messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"f","parameters":{}}}]}`),
+		Parsed:  &parsed,
+	}
+	m := &mantleClient{}
+	body, err := m.buildBody(req, "/anthropic/v1/messages", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatal(err)
+	}
+	if string(out["model"]) != `"anthropic.claude-opus-5"` {
+		t.Errorf("model = %s, want upstream id", out["model"])
+	}
+	if string(out["stream"]) != "true" {
+		t.Errorf("stream = %s, want true", out["stream"])
+	}
+	if strings.Contains(string(body), `"function"`) {
+		t.Errorf("OpenAI tool shape leaked into the Anthropic-route body: %s", body)
+	}
+
+	// Same route, bedrock ingress: the verbatim path stays byte-preserving —
+	// the canonical render must not replace it (cache invariant).
+	req.IngressProtocol = "bedrock"
+	req.RawBody = []byte(`{"anthropic_version":"bedrock-2023-05-31","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`)
+	body, err = m.buildBody(req, "/anthropic/v1/messages", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "anthropic_version") {
+		t.Errorf("anthropic_version not dropped on the verbatim path: %s", body)
+	}
+
+	// No parsed body on the openai ingress is an error, never a garbled
+	// forward.
+	req.IngressProtocol = "openai"
+	req.Parsed = nil
+	if _, err := m.buildBody(req, "/anthropic/v1/messages", true); err == nil {
+		t.Error("nil Parsed on openai ingress must fail, not forward OpenAI JSON")
+	}
+}

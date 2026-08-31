@@ -251,3 +251,38 @@ func TestStreamFailsClosedWhenNothingParsesForCrossProtocolIngress(t *testing.T)
 		t.Fatal("a cross-protocol stream with zero parseable frames must surface an error, not end cleanly")
 	}
 }
+
+// An upstream that dies before any parseable frame yields ONE error (the IO
+// error itself). A consumer that keeps ranging past it must not receive the
+// synthetic no-parseable-frames error stacked on top.
+func TestStreamDoesNotDoubleErrorAfterUpstreamIOFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		// Claim a body longer than what is sent, then drop the connection:
+		// the client reader gets an unexpected-EOF style transport error.
+		w.Header().Set("Content-Length", "1000")
+		_, _ = w.Write([]byte("data: {not json\n\n"))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	var cr schema.ChatRequest
+	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := p.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), Parsed: &cr, IngressProtocol: "bedrock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var errs int
+	for _, serr := range evs { // keep ranging past errors on purpose
+		if serr != nil {
+			errs++
+		}
+	}
+	if errs != 1 {
+		t.Fatalf("got %d errors, want exactly 1 (the IO error, no synthetic duplicate)", errs)
+	}
+}

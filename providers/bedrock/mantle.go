@@ -133,6 +133,31 @@ var mantleChatStripParams = []struct {
 	{"openai.gpt-5.6", []string{"temperature", "top_p", "stop"}},
 }
 
+// toMantleAnthropicBodyFromCanonical renders the canonical request onto the
+// Anthropic Messages wire for a NON-Anthropic-wire ingress (today: openai).
+// There RawBody is the ingress's native OpenAI JSON — OpenAI roles, function
+// tool shapes — which Mantle's /anthropic route would reject or misparse, so
+// the verbatim path above is wrong for it. The canonical schema IS the
+// Anthropic shape (pkg/schema), so this is a marshal plus the same
+// model/stream fixups toMantleAnthropicBody applies; the cache prefix is
+// already lost to cross-protocol conversion, no byte-stability to preserve.
+// max_tokens stays absent when the OpenAI client omitted it — the route's own
+// "max_tokens: field required" beats fabricating a limit the client never set.
+func toMantleAnthropicBodyFromCanonical(req *providers.ProxyRequest, stream bool) ([]byte, error) {
+	if req.Parsed == nil {
+		return nil, fmt.Errorf("bedrock mantle: request for %s has no parsed body", req.Upstream)
+	}
+	cr := *req.Parsed
+	cr.Model = req.Upstream
+	if stream {
+		t := true
+		cr.Stream = &t
+	} else {
+		cr.Stream = nil
+	}
+	return json.Marshal(&cr)
+}
+
 // toMantleChatBody renders the canonical request onto Mantle's OpenAI
 // chat-completions wire: internal/openai's conversion plus three Mantle
 // specifics — the model is the upstream id, max_tokens is renamed
@@ -165,7 +190,10 @@ func toMantleChatBody(req *providers.ProxyRequest, upstream string, stream bool)
 			continue
 		}
 		for _, p := range e.params {
-			delete(top, p)
+			if _, has := top[p]; has {
+				delete(top, p)
+				logStrippedParam("mantle", upstream, p)
+			}
 		}
 	}
 	return json.Marshal(top)
@@ -201,6 +229,11 @@ func (m *mantleClient) do(ctx context.Context, path string, body []byte, sse boo
 
 func (m *mantleClient) buildBody(req *providers.ProxyRequest, path string, stream bool) ([]byte, error) {
 	if path == "/anthropic/v1/messages" {
+		// The verbatim top-level rewrite assumes RawBody is Anthropic-wire —
+		// true for the anthropic and bedrock ingresses, not for openai.
+		if req.IngressProtocol == "openai" {
+			return toMantleAnthropicBodyFromCanonical(req, stream)
+		}
 		return toMantleAnthropicBody(req.RawBody, req.Upstream, stream)
 	}
 	return toMantleChatBody(req, req.Upstream, stream)
@@ -292,8 +325,11 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 		// every frame fails to parse would otherwise end cleanly with zero
 		// canonical frames — and settle zero billable tokens for a served
 		// request (ADR-030's zero-cost class).
-		var sawChunk bool
+		var sawChunk, sawErr bool
 		for ev, serr := range inner {
+			if serr != nil {
+				sawErr = true
+			}
 			if ev != nil && ev.Chunk != nil {
 				sawChunk = true
 				// Echo the PUBLIC model name, matching Complete: streamed
@@ -315,7 +351,10 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 				return
 			}
 		}
-		if !sawChunk {
+		// !sawErr: an upstream that died before any parseable frame already
+		// yielded its own error — a consumer that keeps ranging past it must
+		// not receive this synthetic one on top.
+		if !sawChunk && !sawErr {
 			yield(nil, fmt.Errorf("bedrock mantle: upstream stream for %s produced no parseable frames", req.Upstream))
 		}
 	}, nil
