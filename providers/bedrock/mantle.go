@@ -78,16 +78,20 @@ func newMantleClient(baseURL, region string, creds aws.CredentialsProvider, clie
 
 // mantlePathFor picks the vendor route for an upstream model id. The
 // partitioning is exact, not a preference — a model sent to another vendor's
-// route gets "isn't supported on this route" (400).
+// route gets "isn't supported on this route" (400). The vendor is matched as
+// a whole dot-separated segment (not a substring), so a geo prefix still
+// routes ("us.anthropic.…") while an id that merely CONTAINS a vendor name
+// ("notanthropic.…") cannot be captured by another vendor's route.
 func mantlePathFor(upstream string) string {
-	switch {
-	case strings.Contains(upstream, "anthropic."):
-		return "/anthropic/v1/messages"
-	case strings.Contains(upstream, "openai.") || strings.Contains(upstream, "xai."):
-		return "/openai/v1/chat/completions"
-	default:
-		return "/v1/chat/completions"
+	for _, seg := range strings.Split(upstream, ".") {
+		switch seg {
+		case "anthropic":
+			return "/anthropic/v1/messages"
+		case "openai", "xai":
+			return "/openai/v1/chat/completions"
+		}
 	}
+	return "/v1/chat/completions"
 }
 
 // toMantleAnthropicBody rewrites a Bedrock-ingress Anthropic body for Mantle's

@@ -29,6 +29,12 @@ func TestMantlePathFor(t *testing.T) {
 		"deepseek.v3.2":              "/v1/chat/completions",
 		"zai.glm-5":                  "/v1/chat/completions",
 		"moonshotai.kimi-k2.5":       "/v1/chat/completions",
+		// A geo prefix is a leading segment, still vendor-routed.
+		"us.anthropic.claude-opus-5": "/anthropic/v1/messages",
+		// Vendor match is per-SEGMENT: an id that merely contains a vendor
+		// name inside a segment must not be captured by that vendor's route.
+		"notanthropic.some-model":   "/v1/chat/completions",
+		"myvendor.openai-compat.v1": "/v1/chat/completions",
 	}
 	for upstream, want := range cases {
 		if got := mantlePathFor(upstream); got != want {

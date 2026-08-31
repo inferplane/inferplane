@@ -464,3 +464,19 @@ func TestSyncZeroPricedSKUIsUnresolvedNotEmitted(t *testing.T) {
 		t.Fatal("a $0/$0 SKU must resolve to a reason (unresolved), not a 0 rate the config loader rejects")
 	}
 }
+
+// resolveTarget's prefix match is ONE direction: the catalog row's model part
+// must be a prefix of the configured id, never the reverse. The reverse
+// direction let a shorter configured id ("vendor.fast") silently bind a
+// longer, more specific catalog row's rate ("vendor.fast-pro" — a different
+// model). This pins the false-positive direction the fix removed.
+func TestSyncShorterConfiguredIDNeverBindsLongerCatalogRow(t *testing.T) {
+	cands := []priceCandidate{
+		{ModelPart: "vendorfastpro", Direction: "input", PerMTok: big.NewRat(3, 1), UsageType: "APN1-vendor.fast-pro-input"},
+		{ModelPart: "vendorfastpro", Direction: "output", PerMTok: big.NewRat(15, 1), UsageType: "APN1-vendor.fast-pro-output"},
+	}
+	in, out, reason := resolveTarget(cands, "vendor.fast")
+	if in != nil || out != nil || reason == "" {
+		t.Fatalf("configured id vendor.fast must NOT bind catalog row vendor.fast-pro: in=%v out=%v reason=%q", in, out, reason)
+	}
+}
