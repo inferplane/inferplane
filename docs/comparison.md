@@ -223,14 +223,21 @@ self-hosted fleets.
   cache (LiteLLM's field bug) means full-price, full-latency prefills on
   every turn.
 
+**Measured.** [`benchmarks/streaming`](../benchmarks/README.md) runs the
+real `mayu` binary on its full governed hot path (key auth, routing,
+PreCheck/Settle, hash-chained audit) against a mock SSE upstream, next to
+a pipelined-transit simulation of a central gateway's network position.
+Illustrative run (loopback, 2026-09-01): mayu adds **+0.8ms TTFT p50**;
+a lossless 8ms-one-way hop — the low end of Portkey's self-reported
+10–20ms P50, with the gateway's own processing deliberately *not*
+modeled — adds **+17ms TTFT p50**. The asymmetry favors the competitor
+and inferplane still wins by an order of magnitude. See the methodology
+notes in `benchmarks/README.md` before quoting numbers.
+
 **Honest gaps.**
-- **No reproducible benchmark exists in the repo.** "Faster than Portkey"
-  is structurally almost certain (localhost vs network hop) but currently
-  unproven — README §"Why not a central gateway" asserts measurability
-  without shipping the measurement. Needed: a `benchmarks/` harness
-  (proxied-vs-direct TTFT and inter-chunk p50/p99 on a streamed Messages
-  request, plus mayu CPU/RSS under concurrency) run in CI on a fixed
-  fixture, quoted with hardware caveats.
+- The central hop is simulated, not a measured Portkey/LiteLLM deployment;
+  a side-by-side against real installations (plus mayu CPU/RSS under
+  concurrency) remains to be published.
 - Single-replica `mayu` per node is by design, but the shared-K8s-gateway
   profile (later, per strategy §1) will need the ADR-013 successor.
 
@@ -312,7 +319,7 @@ the competitive angle. No new workstream is invented here.
 
 | # | Gap (dimension it blocks) | Existing tracker | Competitive stake |
 |---|---|---|---|
-| 1 | Streaming benchmark harness, proxied-vs-direct + vs central-hop baseline (Performance) | new — smallest item, no ADR needed (`benchmarks/`) | Converts "faster than Portkey" from architecture argument to published number |
+| 1 | ~~Streaming benchmark harness~~ **shipped** (`benchmarks/streaming`); remaining: side-by-side vs real Portkey/LiteLLM installs (Performance) | this document | Converts "faster than Portkey" from architecture argument to measured number — the harness now shows mayu +0.8ms vs +17ms for a best-case central hop |
 | 2 | Durable identity `(issuer, sub)` + admin roles + mutation audit (Auth, Security, Admin) | strategy Phase 0b (P0) | Both competitors' enterprise tiers have stable identity; without it "per-user budget" claims don't survive key rotation |
 | 3 | Global rate/quota accuracy — rate shares (Cost control) | roadmap ① / S1 | The one row where LiteLLM-with-Redis beats us today |
 | 4 | Durable ledger + window IDs (Cost control, Cost accuracy) | roadmap ② / S1, strategy Phase 1 | Makes "bounded overspend" a durable guarantee, not an in-memory one |
@@ -323,8 +330,8 @@ the competitive angle. No new workstream is invented here.
 
 Sequencing already decided elsewhere stands: strategy §4 orders 0a → 0b →
 1 → 2 → 3 → 4 by trust boundary; roadmap sprints S1–S3 order the
-distributed-enforcement work. Item 1 (benchmarks) fits anywhere and should
-land first — it is days of work and no protocol risk.
+distributed-enforcement work. Item 1's harness landed with this document;
+the rest follow their existing trackers.
 
 ## Sources
 
