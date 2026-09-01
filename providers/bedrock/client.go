@@ -94,11 +94,15 @@ type ConverseResponse struct {
 	StopReason   string
 	InputTokens  int64
 	OutputTokens int64
-	// Prompt-cache counts. Bedrock reports these SEPARATELY from InputTokens,
-	// so dropping them billed every cache read and write at zero on the
-	// Converse path while the InvokeModel passthrough (which forwards
-	// Anthropic's own body) billed them correctly — the same model costing
-	// different amounts depending on the API mode (ADR-030). CacheWrite5m /
+	// Prompt-cache counts. For Claude models Bedrock reports these SEPARATELY
+	// from InputTokens (ADR-030), so dropping them billed every cache read and
+	// write at zero on the Converse path while the InvokeModel passthrough
+	// (which forwards Anthropic's own body) billed them correctly — the same
+	// model costing different amounts depending on the API mode. That
+	// disjointness is NOT universal: the OpenAI gpt-5.6 family reports
+	// InputTokens INCLUSIVE of the cache counts, which usageWithCache
+	// (converse.go) subtracts back out per converseInclusiveInputUsage —
+	// these raw fields carry whatever the upstream sent. CacheWrite5m /
 	// CacheWrite1h come from TokenUsage.CacheDetails, which Bedrock already
 	// splits by TTL; CacheWriteTotal is the untiered fallback for responses
 	// that omit the breakdown.

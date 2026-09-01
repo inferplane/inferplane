@@ -264,7 +264,7 @@ func (p *provider) completeConverse(ctx context.Context, req *providers.ProxyReq
 		Type: "message", Role: "assistant", Model: req.Model,
 		Content:    content,
 		StopReason: &stop,
-		Usage: usageWithCache(in, out,
+		Usage: usageWithCache(req.Upstream, in, out,
 			cresp.CacheReadTokens, cresp.CacheWrite5m, cresp.CacheWrite1h, cresp.CacheWriteTotal),
 	}
 	rawBody, _ := json.Marshal(resp)
@@ -331,7 +331,7 @@ func (p *provider) streamConverse(ctx context.Context, req *providers.ProxyReque
 				}
 			}
 			delta, _ := json.Marshal(map[string]any{"stop_reason": stopReason, "stop_sequence": nil})
-			u := usageWithCache(usageIn, usageOut, usageCacheRead, usageWrite5m, usageWrite1h, usageWriteTotal)
+			u := usageWithCache(req.Upstream, usageIn, usageOut, usageCacheRead, usageWrite5m, usageWrite1h, usageWriteTotal)
 			if !emit(&schema.ChatChunk{Type: "message_delta", Delta: delta, Usage: u}) {
 				return
 			}
@@ -418,15 +418,50 @@ func (p *provider) streamConverse(ctx context.Context, req *providers.ProxyReque
 	}, nil
 }
 
+// converseInclusiveInputUsage lists upstream-id substrings whose Converse
+// TokenUsage.InputTokens INCLUDES the cache read/write counts (OpenAI
+// prompt_tokens semantics), verified against live gateway traffic
+// (ap-northeast-2, 2026-08-29→31): input = cacheRead + cacheWrite + Δ held
+// across 20+ consecutive gpt-5.6-sol requests. The Anthropic wire requires
+// the three counts DISJOINT — passing the inclusive value through makes a
+// client's context math run at ~2x the real prompt and settle bill every
+// cached token twice (full input rate + cache rate), the egress mirror of
+// the OpenAI-ingress bug ADR-030 fixed in usageFromOAI. Same evidence-based
+// allow-list posture as converseUnsupportedInference: an unlisted family
+// passes through untouched (Claude on Converse reports disjoint counts —
+// ADR-030 — and other implicit-caching families are unverified).
+var converseInclusiveInputUsage = []string{"openai.gpt-5.6"}
+
 // usageWithCache builds a schema.Usage carrying Bedrock's prompt-cache counts
-// alongside input/output. Zero counts are left nil so the emitted JSON stays
-// byte-identical to the pre-cache shape for responses without caching.
+// alongside input/output for the upstream model id. Zero counts are left nil
+// so the emitted JSON stays byte-identical to the pre-cache shape for
+// responses without caching.
 //
 // Bedrock reports a per-TTL breakdown (CacheDetails) and an untiered total; the
 // breakdown wins when present, matching how schema.Usage.CacheWriteTiers
 // resolves the same ambiguity on the Anthropic wire. Never both, or every cache
 // write would be double-counted.
-func usageWithCache(in, out, cacheRead, write5m, write1h, writeTotal int64) *schema.Usage {
+//
+// For converseInclusiveInputUsage families the cache counts are subtracted
+// back out of InputTokens so the emitted counts are disjoint; a subtraction
+// that would go negative clamps to 0 (never over-bill — the unknown-TTL
+// posture of cacheWriteTiers).
+func usageWithCache(upstream string, in, out, cacheRead, write5m, write1h, writeTotal int64) *schema.Usage {
+	writes := writeTotal
+	if writes == 0 {
+		writes = write5m + write1h
+	}
+	if cacheRead != 0 || writes != 0 {
+		for _, m := range converseInclusiveInputUsage {
+			if strings.Contains(upstream, m) {
+				in -= cacheRead + writes
+				if in < 0 {
+					in = 0
+				}
+				break
+			}
+		}
+	}
 	u := &schema.Usage{InputTokens: &in, OutputTokens: &out}
 	if cacheRead != 0 {
 		u.CacheReadInputTokens = &cacheRead
