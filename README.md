@@ -220,6 +220,7 @@ The project targets CNCF Sandbox.
   [ADR-031](docs/decisions/ADR-031-monorepo-control-plane-data-plane-split.md),
   the control-plane/data-plane split
 - [docs/roadmap.md](docs/roadmap.md) — open gaps vs. central-proxy gateways (global rate limits, durable ledger, self-update, embeddings)
+- [docs/comparison.md](docs/comparison.md) — dimension-by-dimension competitive comparison vs LiteLLM and Portkey, with the consolidated close-the-gap list
 - [CHANGELOG.md](CHANGELOG.md) · [GOVERNANCE.md](GOVERNANCE.md) · [MAINTAINERS.md](MAINTAINERS.md)
 
 ## Contributing
