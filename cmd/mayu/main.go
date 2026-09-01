@@ -62,6 +62,11 @@ func main() {
 		if err := logoutCmd(os.Args[2:]); err != nil {
 			os.Exit(1) // logoutCmd already wrote its own stderr warning
 		}
+	case "version":
+		if err := versionCmd(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -82,6 +87,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  mayu login --gateway <url> [--team <t>] [--issuer <url> --client-id <id>] [--id-token-command <cmd>]")
 	fmt.Fprintln(os.Stderr, "  mayu token [--export] [--raw]")
 	fmt.Fprintln(os.Stderr, "  mayu logout")
+	fmt.Fprintln(os.Stderr, "  mayu version")
 }
 
 // run assembles the gateway (gateway.go) and serves until SIGINT/SIGTERM.

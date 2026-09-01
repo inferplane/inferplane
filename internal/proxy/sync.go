@@ -151,10 +151,20 @@ type Syncer struct {
 	// OnError receives loop errors (logged by the caller); never fatal —
 	// control-plane outage must not take the data plane down.
 	OnError func(error)
+	// Version is this build's version, reported in every heartbeat
+	// (roadmap ③ phase 1 — fleet version visibility). "" is fine: the
+	// control plane shows the plane as version-unknown.
+	Version string
+	// OnUpdateAdvice fires when the control plane judges this build below
+	// its configured fleet minimum — once per DISTINCT advice, not per
+	// heartbeat, so a 10s cadence doesn't turn one stale binary into a log
+	// flood. Advice only: nothing here fetches or applies an update.
+	OnUpdateAdvice func(policy.UpdateAdvice)
 
 	client     *http.Client
 	generation string
 	pending    []policy.Rejection
+	lastAdvice *policy.UpdateAdvice
 }
 
 // Run heartbeats until ctx is done. The first sync fires immediately so a
@@ -208,6 +218,7 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 	req := policy.SyncRequest{
 		Dataplane:   s.Dataplane,
 		APIVersions: policy.SupportedAPIVersions,
+		Version:     s.Version,
 		Generation:  s.generation,
 		Rejections:  s.pending,
 	}
@@ -283,6 +294,11 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 	if s.Tiers != nil {
 		s.Tiers.Set(resp.ActiveTiers)
 	}
+	if resp.UpdateAdvice != nil && s.OnUpdateAdvice != nil &&
+		(s.lastAdvice == nil || *s.lastAdvice != *resp.UpdateAdvice) {
+		s.OnUpdateAdvice(*resp.UpdateAdvice)
+	}
+	s.lastAdvice = resp.UpdateAdvice
 
 	next := time.Duration(resp.SyncIntervalSeconds) * time.Second
 	if next < time.Second {

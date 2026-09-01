@@ -60,6 +60,21 @@ type Server struct {
 
 	policyStore policystore.Store    // nil ⇒ file-authoritative; PUT/DELETE ⇒ 405
 	updated     map[string]time.Time // policy name → store updated_at (nil on the file path)
+
+	// minVersion/updateURL (roadmap ③ phase 1): when minVersion is set, a
+	// heartbeat reporting an older (or unparseable, e.g. "dev") build gets
+	// UpdateAdvice in its SyncResponse. Advice only — the control plane can
+	// never push executable content, only a version pin the operator set.
+	minVersion, updateURL string
+}
+
+// SetUpdateAdvice configures the fleet's advisory minimum data-plane version
+// and the URL a stale plane should fetch a newer build from. Empty
+// minVersion disables the advice channel entirely.
+func (s *Server) SetUpdateAdvice(minVersion, url string) {
+	s.mu.Lock()
+	s.minVersion, s.updateURL = minVersion, url
+	s.mu.Unlock()
 }
 
 type ruleKey struct{ policy, rule string }
@@ -119,6 +134,7 @@ type tierRule struct {
 
 type dpInfo struct {
 	APIVersions []string           `json:"apiVersions"`
+	Version     string             `json:"version,omitempty"`
 	Generation  string             `json:"generation"`
 	LastSeen    time.Time          `json:"lastSeen"`
 	Rejections  []policy.Rejection `json:"rejections,omitempty"`
@@ -343,7 +359,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		dp = &dpInfo{}
 		s.dataplanes[req.Dataplane] = dp
 	}
-	dp.APIVersions, dp.Generation, dp.LastSeen = req.APIVersions, req.Generation, now
+	dp.APIVersions, dp.Version, dp.Generation, dp.LastSeen = req.APIVersions, req.Version, req.Generation, now
 	dp.Rejections = append(dp.Rejections, req.Rejections...)
 	if len(dp.Rejections) > maxRejections {
 		dp.Rejections = dp.Rejections[len(dp.Rejections)-maxRejections:]
@@ -463,6 +479,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	if req.Generation != s.generation {
 		resp.Policies = s.wire
 	}
+	// Update advice (roadmap ③ phase 1): judged per data plane against the
+	// operator-set minimum. A version the comparison can't parse ("dev", or
+	// an old build reporting none) is treated as stale — the operator set a
+	// fleet minimum precisely to smoke out builds of unknown provenance.
+	if s.minVersion != "" && versionBelow(req.Version, s.minVersion) {
+		resp.UpdateAdvice = &policy.UpdateAdvice{MinVersion: s.minVersion, URL: s.updateURL}
+	}
 	s.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -483,6 +506,7 @@ func (s *Server) handleDataplanes(w http.ResponseWriter, _ *http.Request) {
 		if now.Sub(dp.LastSeen) <= staleAfter {
 			out[id] = dpInfo{
 				APIVersions: append([]string(nil), dp.APIVersions...),
+				Version:     dp.Version,
 				Generation:  dp.Generation,
 				LastSeen:    dp.LastSeen,
 				Rejections:  append([]policy.Rejection(nil), dp.Rejections...),

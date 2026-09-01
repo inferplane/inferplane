@@ -630,6 +630,16 @@ func newGateway(cfgPath string) (*gateway, error) {
 			OnError: func(err error) {
 				fmt.Fprintln(os.Stderr, "inferplane:", err)
 			},
+			Version: version,
+			OnUpdateAdvice: func(a policy.UpdateAdvice) {
+				// Loud by design (roadmap ③ phase 1) — and advice only:
+				// nothing here fetches or applies anything.
+				msg := fmt.Sprintf("inferplane: WARNING: this build (%s) is below the fleet minimum version %s set by the control plane", version, a.MinVersion)
+				if a.URL != "" {
+					msg += " — update from " + a.URL
+				}
+				fmt.Fprintln(os.Stderr, msg)
+			},
 		}
 	}
 	// Per-team record lookup for NON-governance overrides (D6/ADR-019's

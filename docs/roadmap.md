@@ -146,13 +146,21 @@ difference between modes until standalone also adopts windowIDs.
 mechanism. Version skew is *detected* (heartbeat + `/v1alpha1/dataplanes`)
 but the tail of stale planes can only shrink by hand today.
 
-**Phase 1 — visibility & advice (S2, ~1 day).**
-- Embed version via `-ldflags -X` at build; add `version` to `SyncRequest`;
-  dataplane view shows the version distribution (the operator's "can I ship
-  this rule yet" check gets a second axis besides apiVersions).
-- Control plane config `minimumVersion`: sync responses include
-  `updateAdvice {minVersion, url}`; mayu logs a loud warning and exposes it
-  on `mayu version --check`. Advice only — nothing auto-applies.
+**Phase 1 — visibility & advice — ✅ shipped 2026-09-01.**
+- Version embedded via `-ldflags -X main.version` (Dockerfile `ARG VERSION`,
+  un-stamped builds report `dev`); `SyncRequest.version` (additive,
+  omitempty); `/v1alpha1/dataplanes` shows the per-plane version next to
+  apiVersions (`internal/controlplane` `dpInfo.Version`) — the operator's
+  "can I ship this rule yet" check has its second axis.
+- `INFERPLANED_MINIMUM_VERSION` (+ optional `INFERPLANED_UPDATE_URL`, env-only
+  per the `INFERPLANED_TOKEN` precedent): a heartbeat from an older — or
+  unparseable, e.g. `dev` — build gets `updateAdvice {minVersion, url}` in
+  its SyncResponse (`versionBelow`, lenient numeric compare); mayu logs a
+  loud warning once per distinct advice (`Syncer.OnUpdateAdvice`, deduped
+  across heartbeats) and `mayu version` prints the build version +
+  supported apiVersions. Advice only — nothing auto-applies. (The original
+  sketch's `mayu version --check` remote query is folded into Phase 2's CLI
+  work; the serve-path warning covers the fleet case.)
 
 **Phase 2 — signed manual update (S3).**
 - Release pipeline: goreleaser + minisign/cosign signatures on artifacts;

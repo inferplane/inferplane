@@ -230,6 +230,16 @@ func buildMux(policies, token string, oidc *oidcEnv) (mux *http.ServeMux, cp *co
 		if err != nil {
 			return nil, nil, closePG, fmt.Errorf("policies: %w", err)
 		}
+		// Fleet minimum data-plane version (roadmap ③ phase 1) — the
+		// INFERPLANED_TOKEN precedent: env-only, no config file. When set,
+		// a heartbeat from an older (or unparseable, e.g. "dev") build gets
+		// updateAdvice in its sync response; advice only, nothing
+		// auto-applies — the control plane can never push executable
+		// content, only this version pin.
+		if minVer := os.Getenv("INFERPLANED_MINIMUM_VERSION"); minVer != "" {
+			cp.SetUpdateAdvice(minVer, os.Getenv("INFERPLANED_UPDATE_URL"))
+			log.Printf("inferplaned: advising data planes below minimum version %s to update (INFERPLANED_MINIMUM_VERSION set)", minVer)
+		}
 		if policyDSN != "" {
 			ps, err := policystore.NewPostgres(policyDSN)
 			if err != nil {

@@ -328,7 +328,7 @@ the competitive angle. No new workstream is invented here.
 | 4 | Durable ledger + window IDs (Cost control, Cost accuracy) | roadmap ② / S1, strategy Phase 1 | Makes "bounded overspend" a durable guarantee, not an in-memory one |
 | 5 | ~~Codex/OpenCode wire fixtures~~ **shipped** (`internal/server/openaiapi/agent_wire_test.go`); remaining: recorded captures from real client sessions (Model compatibility) | Core Purpose #1 (🔶) | Both agents' documented wire shapes — agentic tools, tool-call round trips, `include_usage` — now pass on both provider wires; a real-client capture closes Purpose #1 |
 | 6 | Guardrail-on-every-egress + PII egress ceiling (Security) | strategy Phase 0a/2 (P0) | LiteLLM's guardrail bypass is our best sales evidence — only if we provably don't have one |
-| 7 | `mayu doctor` + fleet version ops (Admin) | roadmap ③④ / S2 | The self-hosted-fleet operability Portkey's SaaS won't build |
+| 7 | `mayu doctor` + fleet version ops (Admin) — version visibility (roadmap ③ phase 1) **shipped**: per-plane version in the dataplanes view + `INFERPLANED_MINIMUM_VERSION` update advice; doctor and signed self-update remain | roadmap ③④ / S2 | The self-hosted-fleet operability Portkey's SaaS won't build |
 | 8 | Benchmark-backed cache-efficiency reporting (Cost accuracy) | strategy Phase 3 | Turns the anti-LiteLLM caching story into a dashboard, not an anecdote |
 
 Sequencing already decided elsewhere stands: strategy §4 orders 0a → 0b →

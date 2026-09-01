@@ -28,6 +28,10 @@ type SyncRequest struct {
 	// plane exposes the distribution so an operator can check coverage
 	// before propagating rules that need a newer generation.
 	APIVersions []string `json:"apiVersions"`
+	// Version is this data-plane build's version (roadmap ③ phase 1:
+	// fleet version visibility). Additive/omitempty: an older build simply
+	// doesn't report one, and the control plane shows it as unknown.
+	Version string `json:"version,omitempty"`
 	// Generation is the policy-set generation last applied ("" = none);
 	// the control plane omits the policy payload when it matches.
 	Generation string `json:"generation,omitempty"`
@@ -89,6 +93,20 @@ type SyncResponse struct {
 	// SyncIntervalSeconds is the control plane's requested heartbeat
 	// cadence (derived from the tightest lease renew interval).
 	SyncIntervalSeconds int `json:"syncIntervalSeconds"`
+	// UpdateAdvice is present when the control plane's configured
+	// minimumVersion judges THIS data plane's reported version stale (or
+	// unparseable, e.g. a "dev" build). Advice only — nothing auto-applies;
+	// the control plane must never be able to push executable content
+	// (roadmap ③, the security constraint). Additive/omitempty.
+	UpdateAdvice *UpdateAdvice `json:"updateAdvice,omitempty"`
+}
+
+// UpdateAdvice tells a stale data plane the fleet's minimum version and
+// where to fetch a newer build. It is advisory by design — see the
+// SyncResponse field comment.
+type UpdateAdvice struct {
+	MinVersion string `json:"minVersion"`
+	URL        string `json:"url,omitempty"`
 }
 
 // ActiveTier is the currently-active budget tier for one budgetTiers routing
