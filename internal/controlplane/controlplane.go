@@ -6,15 +6,21 @@
 // coverage before propagating rules that need a newer schema generation.
 //
 // Inference traffic NEVER passes through here — this is the off-request-path
-// half of the split (ADR-031). Ledger state is in-memory in this iteration:
+// half of the split (ADR-031). Ledger state is in-memory by default —
 // a control-plane restart re-learns spend from the next heartbeats'
 // cumulative reports (they are cumulative precisely so restarts and lost
-// heartbeats never lose spend).
+// heartbeats never lose spend) — and optionally durable (roadmap ②
+// durability half): with a LedgerStore attached, spent/allowance and
+// data-plane liveness persist write-behind at heartbeat cadence, a restart
+// resumes grants exactly, and a plane that died before the restart keeps
+// its spend on the books. The cumulative-report self-healing stays as the
+// fallback either way.
 package controlplane
 
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"sync"
@@ -67,6 +73,51 @@ type Server struct {
 	// UpdateAdvice in its SyncResponse. Advice only — the control plane can
 	// never push executable content, only a version pin the operator set.
 	minVersion, updateURL string
+
+	// ledgerStore, when attached (roadmap ② durability half), persists the
+	// lease ledger write-behind at heartbeat cadence so a restart resumes
+	// grants exactly and a dead plane's spend survives. nil = in-memory
+	// only, byte-identical to the pre-store behavior. A save failure is
+	// logged and never fails the heartbeat — enforcement continues from
+	// memory. onStoreErr is the log seam (defaults to log.Print).
+	ledgerStore LedgerStore
+	onStoreErr  func(error)
+}
+
+// SetLedgerStore attaches a durable ledger and loads its state: persisted
+// spent/allowance restore into rules that still exist WITH an unchanged
+// period (a row measured against a different window is stale currency —
+// the same rule applyWire's carry-forward applies), and persisted data
+// planes restore their LastSeen so an outstanding allowance from a plane
+// that was alive at shutdown keeps counting against the pool. Call before
+// serving; a load failure is returned, not logged — claiming durability
+// over an unreadable store is worse than not booting (the policy-store
+// posture, ADR-038).
+func (s *Server) SetLedgerStore(ls LedgerStore) error {
+	rows, planes, err := ls.Load()
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ledgerStore = ls
+	if s.onStoreErr == nil {
+		s.onStoreErr = func(err error) { log.Print("inferplaned: ", err) }
+	}
+	for _, dp := range planes {
+		if _, ok := s.dataplanes[dp.ID]; !ok {
+			s.dataplanes[dp.ID] = &dpInfo{LastSeen: dp.LastSeen}
+		}
+	}
+	for _, r := range rows {
+		l, ok := s.ledger[ruleKey{policy: r.Policy, rule: r.Rule}]
+		if !ok || l.period != r.Period {
+			continue // rule gone, or its window changed: stale currency
+		}
+		l.spent[r.Dataplane] = r.Spent
+		l.allowance[r.Dataplane] = r.Allowance
+	}
+	return nil
 }
 
 // SetUpdateAdvice configures the fleet's advisory minimum data-plane version
@@ -428,6 +479,11 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 				delete(l.spent, id)
 				delete(l.allowance, id)
 			}
+			if s.ledgerStore != nil {
+				if err := s.ledgerStore.DeleteDataplane(id); err != nil {
+					s.onStoreErr(err)
+				}
+			}
 		}
 	}
 
@@ -527,6 +583,24 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 				RPM: shareOf(rr.rpm), TPM: shareOf(rr.tpm),
 				ExpiresAt: now.Add(horizon),
 			})
+		}
+	}
+
+	// Write-behind (roadmap ② durability half): persist this heartbeat's
+	// effect — the requester's liveness and its spent/allowance across all
+	// rules — in one transaction. Synchronous under the server mutex by
+	// design: QPS is heartbeat-rate × planes, and a failure is logged, never
+	// surfaced to the data plane (enforcement continues from memory).
+	if s.ledgerStore != nil {
+		rows := make([]LedgerRow, 0, len(s.ledger))
+		for k, l := range s.ledger {
+			rows = append(rows, LedgerRow{
+				Policy: k.policy, Rule: k.rule, Dataplane: req.Dataplane, Period: l.period,
+				Spent: l.spent[req.Dataplane], Allowance: l.allowance[req.Dataplane],
+			})
+		}
+		if err := s.ledgerStore.SaveDataplane(DataplaneRow{ID: req.Dataplane, LastSeen: now}, rows); err != nil {
+			s.onStoreErr(err)
 		}
 	}
 

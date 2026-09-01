@@ -108,7 +108,26 @@ briefly while holding a small share — acceptable; document. Bursty split
 
 ---
 
-## ② Durable ledger + control-plane-owned budget windows (ADR candidate — unassigned; ADR-037 has since shipped as inferplaned console SSO)
+## ② Durable ledger + control-plane-owned budget windows — durability half ✅ shipped 2026-09-01
+
+**Shipped (durability):** `INFERPLANED_LEDGER_PATH` (env-only, opt-in;
+unset = in-memory, byte-identical) attaches a SQLite `LedgerStore`
+(`internal/controlplane/ledgersqlite.go` — modernc, CGO stays off, WAL +
+busy_timeout per the keystore convention; interface mirrors `bodystore`'s
+sqlite/postgres split so Postgres can land later). Per-(rule, dataplane)
+spent/allowance and data-plane last-seen persist write-behind on each
+heartbeat (one transaction; a save failure logs and never fails the
+heartbeat); boot load restores rows into rules that still exist with an
+unchanged `period` and restores liveness so outstanding grants keep
+counting; the 24h prune deletes a dead plane's rows. Restart resumes
+grants exactly — `TestLedgerStoreRestartPreservesSpendAndOutstanding`
+pins that a fully-committed budget stays committed across a restart
+instead of re-granting spent money. The cumulative-report self-healing
+stays as the fallback. **Still open:** control-plane-owned `windowID`
+epochs (the decrease-detection rollover heuristic is still in place),
+which also replaces `tier.Latch`'s interim calendar-month key.
+
+### Original design (windowID half still open)
 
 **Gap.** The lease ledger is in-memory: restart re-learns from cumulative
 reports, grants issued moments before a crash are re-derived, and — the real

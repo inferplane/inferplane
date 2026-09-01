@@ -259,6 +259,26 @@ func buildMux(policies, token string, oidc *oidcEnv) (mux *http.ServeMux, cp *co
 			}
 			log.Print("inferplaned: GovernancePolicy documents are postgres-authoritative (INFERPLANED_POLICY_DSN set); --policies is seed-only and no longer watched")
 		}
+		// Durable lease ledger (roadmap ② durability half) — env-only per
+		// the INFERPLANED_TOKEN precedent. Opt-in: unset keeps the ledger
+		// in-memory, byte-identical behavior. Attached AFTER the policy
+		// store so persisted rows restore into the AUTHORITATIVE document
+		// set's ledger, not the file seed's. A load failure fails boot —
+		// claiming durability over an unreadable store is worse than not
+		// booting (the ADR-038 policy-store posture).
+		if ledgerPath := os.Getenv("INFERPLANED_LEDGER_PATH"); ledgerPath != "" {
+			ls, err := controlplane.NewSQLiteLedger(ledgerPath)
+			if err != nil {
+				return nil, nil, closePG, err
+			}
+			if err := cp.SetLedgerStore(ls); err != nil {
+				ls.Close()
+				return nil, nil, closePG, err
+			}
+			closePrev := closePG
+			closePG = func() { ls.Close(); closePrev() }
+			log.Printf("inferplaned: lease ledger persisting to %s (INFERPLANED_LEDGER_PATH set)", ledgerPath)
+		}
 		cp.Mount(mux)
 	}
 	return mux, cp, closePG, nil
