@@ -181,12 +181,29 @@ non-negotiable and goes in the ADR's security section.
 
 ---
 
-## ④ `mayu doctor` (S2, ~1–2 days)
+## ④ `mayu doctor` (S2, ~1–2 days) — CLI half ✅ shipped 2026-09-01
 
 **Gap.** Distributed debugging: "it fails only on my machine" requires
 inspecting that node's state, and today that means grepping logs.
 
-**Design.** One command, human output + `--json` for support tickets:
+**Shipped** (`cmd/mayu/doctor.go`): `mayu doctor --config <path> [--json]
+[--no-probe]` — config parse vs secret-ref resolution diagnosed separately,
+policy source (files parsed+counted / control plane / none), listen-port
+status, pricing coverage (`live.UnpricedTargets`, the ADR-030 guard),
+provider construction + ADR-014 `HealthChecker` probes (`--no-probe` skips
+the real upstream calls; a broker-mode construction failure is a warn with
+context, since it needs the serve-time fetcher), and control plane
+reachability/latency via `/readyz`, apiVersion overlap, and a token check
+against `/v1alpha1/dataplanes` — deliberately never a sync POST, which
+would register the doctor run as a data plane in the lease ledger. Every
+check reuses the exact function the gateway runs at boot, so doctor can
+never disagree with `serve`. **Still open from the original design:**
+governance state (lease table / applied policies — needs `Governor` access
+a fresh CLI process doesn't have; belongs with the remote endpoint below),
+clock-skew vs control plane (needs a server timestamp), and the
+`GET /admin/debug/governance` remote endpoint.
+
+**Original design** — one command, human output + `--json` for support tickets:
 
 - config: parse/validation result, which policy source (files vs control
   plane), secret refs resolvable (never the values);
