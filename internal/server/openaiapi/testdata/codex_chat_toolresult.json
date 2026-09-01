@@ -1,0 +1,53 @@
+{
+  "model": "gpt-x",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer."
+    },
+    {
+      "role": "user",
+      "content": "list the files in this directory"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_shell_1",
+          "type": "function",
+          "function": {
+            "name": "shell",
+            "arguments": "{\"command\":[\"ls\",\"-la\"],\"workdir\":\"/home/dev/project\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_shell_1",
+      "content": "total 12\ndrwxr-xr-x 3 dev dev 4096 README.md go.mod main.go\n"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "shell",
+        "description": "Runs a shell command and returns its output",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": { "type": "array", "items": { "type": "string" } },
+            "workdir": { "type": "string" },
+            "timeout_ms": { "type": "number" }
+          },
+          "required": ["command"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "stream": true
+}

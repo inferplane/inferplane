@@ -268,12 +268,15 @@ document.
   three families and **chat-only** — no embeddings/images/audio (roadmap
   ⑤ starts the embeddings lane). This is a deliberate non-goal (README),
   but it is a real loss for any buyer scoring provider-count checkboxes.
-- **Codex is unverified** — Core Purpose #1 is 🔶: zero Codex-specific
-  code, fixture, or test in the tree. The OpenAI-compat ingress is the
-  presumed path. For a product whose stated target includes Codex, an
-  e2e fixture test against real Codex wire traffic is table stakes and
-  currently missing. OpenCode similarly rides the Anthropic/OpenAI
-  ingresses without a dedicated fixture.
+- **Codex is fixture-verified, not client-verified** — Core Purpose #1
+  stays 🔶. Wire-shape fixture tests
+  (`internal/server/openaiapi/agent_wire_test.go`) now prove the Chat
+  Completions ingress accepts the Codex `wire_api: "chat"` shape (agentic
+  tools, the turn-2 tool-call round trip) and OpenCode's
+  `stream_options.include_usage`, on both the verbatim and the
+  Claude-translated paths — but the fixtures are constructed from the
+  clients' documented payloads, and a recorded capture from a real
+  Codex/OpenCode session is still the bar for closing Purpose #1.
 
 **Verdict.** Behind on breadth, ahead on depth-where-it-counts. The
 winning frame is "the gateway that doesn't corrupt your coding agent's
@@ -323,7 +326,7 @@ the competitive angle. No new workstream is invented here.
 | 2 | Durable identity `(issuer, sub)` + admin roles + mutation audit (Auth, Security, Admin) | strategy Phase 0b (P0) | Both competitors' enterprise tiers have stable identity; without it "per-user budget" claims don't survive key rotation |
 | 3 | Global rate/quota accuracy — rate shares (Cost control) | roadmap ① / S1 | The one row where LiteLLM-with-Redis beats us today |
 | 4 | Durable ledger + window IDs (Cost control, Cost accuracy) | roadmap ② / S1, strategy Phase 1 | Makes "bounded overspend" a durable guarantee, not an in-memory one |
-| 5 | Codex e2e fixture + OpenCode fixture (Model compatibility) | Core Purpose #1 (🔶) | The product targets Codex by name; today that's unverified |
+| 5 | ~~Codex/OpenCode wire fixtures~~ **shipped** (`internal/server/openaiapi/agent_wire_test.go`); remaining: recorded captures from real client sessions (Model compatibility) | Core Purpose #1 (🔶) | Both agents' documented wire shapes — agentic tools, tool-call round trips, `include_usage` — now pass on both provider wires; a real-client capture closes Purpose #1 |
 | 6 | Guardrail-on-every-egress + PII egress ceiling (Security) | strategy Phase 0a/2 (P0) | LiteLLM's guardrail bypass is our best sales evidence — only if we provably don't have one |
 | 7 | `mayu doctor` + fleet version ops (Admin) | roadmap ③④ / S2 | The self-hosted-fleet operability Portkey's SaaS won't build |
 | 8 | Benchmark-backed cache-efficiency reporting (Cost accuracy) | strategy Phase 3 | Turns the anti-LiteLLM caching story into a dashboard, not an anecdote |

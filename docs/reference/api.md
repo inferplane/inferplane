@@ -44,6 +44,8 @@ contract is in [docs/api-reference.md](../api-reference.md).
 
 - **Budget windows (ADR-042).** A GovernancePolicy `budget` rule carries an optional `period` — `CalendarDay` or `CalendarMonth`; omitting it means `CalendarMonth`, so every existing document keeps its meaning. It must not be combined with `unlimited: true` ("no cap" has no window). A daily cap and a monthly cap are TWO rules in `spec.rules`, never two fields on one rule — `hardCap`/`failurePolicy`/`lease`/`adminContact` are per-rule, so each window carries its own.
 
+- **Agent wire-shape fixtures (Core Purpose #1).** `internal/server/openaiapi/agent_wire_test.go` + `testdata/` pin the Codex (`wire_api: "chat"`) and OpenCode request shapes against the Chat Completions ingress on BOTH provider wires (openai verbatim tee, anthropic conversion): system prompt + agentic function tools + streaming, the turn-2 tool-call round trip (null assistant content beside `tool_calls`, `role: "tool"` keyed by `tool_call_id`), and OpenCode's `stream_options.include_usage` on a converted stream. Fixtures are constructed from the clients' documented payloads, not recorded captures — recording real captures upgrades Purpose #1 to "client-verified" (see roadmap).
+
 ### 4. Code Pointers
 - `internal/server/anthropicapi/messages.go` — Messages handler, streaming tee, cardinality-safe labels
 - `internal/server/openaiapi/chat.go` — Chat Completions handler

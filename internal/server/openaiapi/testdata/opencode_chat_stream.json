@@ -1,0 +1,51 @@
+{
+  "model": "gpt-x",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are opencode, an autonomous coding agent."
+    },
+    {
+      "role": "user",
+      "content": "read the README and summarize it"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read",
+        "description": "Reads a file from the local filesystem",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "filePath": { "type": "string", "description": "The path to the file to read" },
+            "offset": { "type": "number" },
+            "limit": { "type": "number" }
+          },
+          "required": ["filePath"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "bash",
+        "description": "Executes a bash command",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": { "type": "string" },
+            "timeout": { "type": "number" },
+            "description": { "type": "string" }
+          },
+          "required": ["command", "description"]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "temperature": 0,
+  "stream": true,
+  "stream_options": { "include_usage": true }
+}

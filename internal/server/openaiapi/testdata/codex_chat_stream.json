@@ -1,0 +1,76 @@
+{
+  "model": "gpt-x",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer."
+    },
+    {
+      "role": "user",
+      "content": "<environment_context>\n<cwd>/home/dev/project</cwd>\n<approval_policy>on-request</approval_policy>\n<sandbox_mode>workspace-write</sandbox_mode>\n</environment_context>"
+    },
+    {
+      "role": "user",
+      "content": "list the files in this directory"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "shell",
+        "description": "Runs a shell command and returns its output",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "The command to execute"
+            },
+            "workdir": {
+              "type": "string",
+              "description": "The working directory to execute the command in"
+            },
+            "timeout_ms": {
+              "type": "number",
+              "description": "The timeout for the command in milliseconds"
+            }
+          },
+          "required": ["command"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "update_plan",
+        "description": "Updates the task plan",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "explanation": { "type": "string" },
+            "plan": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "step": { "type": "string" },
+                  "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] }
+                },
+                "required": ["step", "status"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["plan"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "stream": true
+}
