@@ -65,6 +65,18 @@ func (t *ShareTable) Get(team string) (Share, bool) {
 	return sh, ok
 }
 
+// Snapshot returns a copy of every team's current share — the operator's
+// debug view (`GET /admin/debug/governance`), never the request path.
+func (t *ShareTable) Snapshot() map[string]Share {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	out := make(map[string]Share, len(t.byTeam))
+	for team, sh := range t.byTeam {
+		out[team] = sh
+	}
+	return out
+}
+
 func minNonZeroShare(a, b int64) int64 {
 	if a == 0 {
 		return b

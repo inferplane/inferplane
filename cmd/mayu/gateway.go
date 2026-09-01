@@ -39,6 +39,7 @@ import (
 	"github.com/inferplane/inferplane/internal/server/analyticsapi"
 	"github.com/inferplane/inferplane/internal/server/authapi"
 	"github.com/inferplane/inferplane/internal/server/configapi"
+	"github.com/inferplane/inferplane/internal/server/debugapi"
 	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/internal/tier"
 	"github.com/inferplane/inferplane/internal/tracing"
@@ -901,7 +902,59 @@ func newGateway(cfgPath string) (*gateway, error) {
 		}
 		return recs
 	}
-	g.adminSrv = &http.Server{Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore != nil), auditFileSinks, aud, m, writer, liveExport(holder), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), cfg.Probe.AllowedHosts...)}
+	// Governance debug snapshot (roadmap ④, doctor's remote half): the
+	// union of policy-declared, leased, and share-clamped teams, each with
+	// its TEAM-subject usage view (key- and user-free by construction),
+	// lease windows, and rate share. Config-only teams appear once they
+	// hold a lease or share; their counters are reachable via /v1/usage.
+	govDebug := func() debugapi.Snapshot {
+		snap := debugapi.Snapshot{PolicySource: "none", Teams: map[string]debugapi.Team{}}
+		switch {
+		case len(raw.Policies) > 0:
+			snap.PolicySource = "files"
+		case raw.ControlPlane != nil:
+			snap.PolicySource = "control_plane"
+		}
+		teams := map[string]bool{}
+		if polStore != nil {
+			for _, p := range polStore.Policies() {
+				if p.Subject.Team != "" {
+					teams[p.Subject.Team] = true
+				}
+			}
+		}
+		var leaseSnap map[string]map[v1alpha1.BudgetPeriod]proxy.Lease
+		if leases != nil {
+			leaseSnap = leases.Snapshot()
+			for t := range leaseSnap {
+				teams[t] = true
+			}
+		}
+		var shareSnap map[string]proxy.Share
+		if shares != nil {
+			shareSnap = shares.Snapshot()
+			for t := range shareSnap {
+				teams[t] = true
+			}
+		}
+		for team := range teams {
+			te := debugapi.Team{Usage: gov.UsageOf(governance.Subject{Team: team}, governance.KeyPolicy{})}
+			for _, period := range []v1alpha1.BudgetPeriod{v1alpha1.PeriodCalendarDay, v1alpha1.PeriodCalendarMonth} {
+				if l, ok := leaseSnap[team][period]; ok {
+					te.Leases = append(te.Leases, debugapi.Lease{
+						Period: string(period), AllowanceUSDMicros: l.AllowanceMicroUSD,
+						ExpiresAt: l.ExpiresAt, HardCap: l.HardCap,
+					})
+				}
+			}
+			if sh, ok := shareSnap[team]; ok {
+				te.Share = &debugapi.Share{RPM: sh.RPM, TPM: sh.TPM}
+			}
+			snap.Teams[team] = te
+		}
+		return snap
+	}
+	g.adminSrv = &http.Server{Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore != nil), auditFileSinks, aud, m, writer, liveExport(holder), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), govDebug, cfg.Probe.AllowedHosts...)}
 	return g, nil
 }
 

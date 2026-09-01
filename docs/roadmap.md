@@ -215,7 +215,7 @@ non-negotiable and goes in the ADR's security section.
 
 ---
 
-## ④ `mayu doctor` (S2, ~1–2 days) — CLI half ✅ shipped 2026-09-01
+## ④ `mayu doctor` (S2, ~1–2 days) — ✅ shipped 2026-09-01 (CLI + remote snapshot)
 
 **Gap.** Distributed debugging: "it fails only on my machine" requires
 inspecting that node's state, and today that means grepping logs.
@@ -231,11 +231,13 @@ reachability/latency via `/readyz`, apiVersion overlap, and a token check
 against `/v1alpha1/dataplanes` — deliberately never a sync POST, which
 would register the doctor run as a data plane in the lease ledger. Every
 check reuses the exact function the gateway runs at boot, so doctor can
-never disagree with `serve`. **Still open from the original design:**
-governance state (lease table / applied policies — needs `Governor` access
-a fresh CLI process doesn't have; belongs with the remote endpoint below),
-clock-skew vs control plane (needs a server timestamp), and the
-`GET /admin/debug/governance` remote endpoint.
+never disagree with `serve`. **Also shipped:** `GET /admin/debug/governance`
+(`internal/server/debugapi`, same AdminAuth + secret-free discipline as
+`/admin/config`) — the running gateway's governance snapshot: policy
+source, per-team usage (TEAM subject only, key- and user-free by
+construction), ADR-034 lease windows, and ADR-043 rate shares; asserted
+live in the two-gateway rate-share e2e. **Still open:** clock-skew vs
+control plane (needs a server timestamp in the heartbeat).
 
 **Original design** — one command, human output + `--json` for support tickets:
 

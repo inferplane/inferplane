@@ -5,6 +5,7 @@ package main
 // appears at the configured rpm, not N× it.
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -122,6 +123,30 @@ func TestE2ERateSharesBoundFleetAggregate(t *testing.T) {
 				t.Fatalf("%s: unexpected status %d", plane.name, r.StatusCode)
 			}
 		}
+	}
+
+	// The remote debug snapshot (roadmap ④) shows the same state doctor
+	// would: the team, its 2-rpm share, and a lease.
+	dreq, _ := http.NewRequest(http.MethodGet, admin1+"/admin/debug/governance", nil)
+	dreq.Header.Set("Authorization", "Bearer "+e2eAdminToken)
+	dresp, err := http.DefaultClient.Do(dreq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap struct {
+		PolicySource string `json:"policy_source"`
+		Teams        map[string]struct {
+			Share  *struct{ RPM int64 }      `json:"share"`
+			Leases []struct{ Period string } `json:"leases"`
+		} `json:"teams"`
+	}
+	if err := json.NewDecoder(dresp.Body).Decode(&snap); err != nil {
+		t.Fatal(err)
+	}
+	dresp.Body.Close()
+	team, ok := snap.Teams["cp-team"]
+	if snap.PolicySource != "control_plane" || !ok || team.Share == nil || team.Share.RPM != 2 || len(team.Leases) == 0 {
+		t.Fatalf("debug snapshot missing live governance state: %+v", snap)
 	}
 
 	total := okPerPlane["dp1"] + okPerPlane["dp2"]

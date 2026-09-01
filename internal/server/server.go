@@ -25,6 +25,7 @@ import (
 	"github.com/inferplane/inferplane/internal/server/authapi"
 	"github.com/inferplane/inferplane/internal/server/bedrockapi"
 	"github.com/inferplane/inferplane/internal/server/configapi"
+	"github.com/inferplane/inferplane/internal/server/debugapi"
 	"github.com/inferplane/inferplane/internal/server/openaiapi"
 	"github.com/inferplane/inferplane/internal/server/usageapi"
 	"github.com/inferplane/inferplane/internal/telemetry"
@@ -177,7 +178,7 @@ func negotiateModels(anthropicH, openaiH http.Handler) http.Handler {
 // receives admin-action audit records (key create/revoke + denials, §5.5
 // "admin API calls are audit events"); nil skips. When m is nil the /metrics
 // endpoint is omitted.
-func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier, mapping adminauth.MappingConfig, configView func() configapi.View, auditFileSinks []string, aud *audit.Writer, m *metrics.Metrics, writer configapi.Writer, configExport func() configapi.ExportDoc, capabilities func() configapi.Capabilities, analyticsQ analyticsapi.Querier, teamStore keystore.TeamStore, configTeams func() []keystore.TeamRecord, alertFires func() []alert.Fire, healthSnapshot func() map[string]configapi.HealthRecord, bodiesRec *bodystore.Recorder, authConfig func() *AuthConfigView, connectSrc []string, probeAllowedHosts ...string) http.Handler {
+func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier, mapping adminauth.MappingConfig, configView func() configapi.View, auditFileSinks []string, aud *audit.Writer, m *metrics.Metrics, writer configapi.Writer, configExport func() configapi.ExportDoc, capabilities func() configapi.Capabilities, analyticsQ analyticsapi.Querier, teamStore keystore.TeamStore, configTeams func() []keystore.TeamRecord, alertFires func() []alert.Fire, healthSnapshot func() map[string]configapi.HealthRecord, bodiesRec *bodystore.Recorder, authConfig func() *AuthConfigView, connectSrc []string, govDebug func() debugapi.Snapshot, probeAllowedHosts ...string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
@@ -202,6 +203,11 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 	// Read-only provider/model topology (ADR-005), behind the same AdminAuth —
 	// secret-free, so it carries no governance weight beyond authentication.
 	mux.Handle("/admin/config", AdminAuth(adminTokens, verifier, mapping, denied, configapi.Handler(configView)))
+	// Governance debug snapshot (roadmap ④, doctor's remote half) — same
+	// AdminAuth, same secret-free discipline as /admin/config.
+	if govDebug != nil {
+		mux.Handle("GET /admin/debug/governance", AdminAuth(adminTokens, verifier, mapping, denied, debugapi.Handler(govDebug)))
+	}
 	// Capability map (spec §4.4), behind the same AdminAuth — secret-free
 	// booleans/enums the console reads on bootstrap to render each section's
 	// enabled/disabled affordance (degradation contract §9.1). nil → omitted.

@@ -56,6 +56,23 @@ func (t *LeaseTable) Get(team string, period v1alpha1.BudgetPeriod) (Lease, bool
 	return l, ok
 }
 
+// Snapshot returns a copy of every team's current leases keyed by budget
+// window — the operator's debug view (`GET /admin/debug/governance`), never
+// the request path.
+func (t *LeaseTable) Snapshot() map[string]map[v1alpha1.BudgetPeriod]Lease {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	out := make(map[string]map[v1alpha1.BudgetPeriod]Lease, len(t.byTeam))
+	for team, windows := range t.byTeam {
+		cp := make(map[v1alpha1.BudgetPeriod]Lease, len(windows))
+		for p, l := range windows {
+			cp[p] = l
+		}
+		out[team] = cp
+	}
+	return out
+}
+
 // Blocked implements the governor's lease gate (ADR-034). A HARD-cap team
 // fails closed when its lease EXPIRED (the global budget can no longer be
 // verified locally) or its allowance is zero (the global budget is already
