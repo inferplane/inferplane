@@ -103,7 +103,8 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// enforcing it. Watched for changes in serve.
 	var polStore *policy.Store
 	var leases *proxy.LeaseTable
-	var tiers *tier.Table // ADR-041: not a gateway field, same three-sharer lifetime as leases below
+	var tiers *tier.Table        // ADR-041: not a gateway field, same three-sharer lifetime as leases below
+	var shares *proxy.ShareTable // ADR-043: rate shares, same lifetime pattern
 	if len(raw.Policies) > 0 {
 		polStore, err = policy.NewStore(raw.Policies...)
 		if err != nil {
@@ -122,6 +123,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		// built below — the three places that share it.
 		leases = proxy.NewLeaseTable()
 		tiers = tier.NewTable()
+		shares = proxy.NewShareTable()
 	}
 
 	// Prometheus metrics sink: owned by main, threaded into the audit writer,
@@ -408,6 +410,25 @@ func newGateway(cfgPath string) (*gateway, error) {
 		// here would not deny the team; it would make it UNGOVERNED, which
 		// is strictly worse than enforcing the declared budget/rate.
 		rpm, tpm := tl.RPM, tl.TPM
+		// Rate-share clamp (ADR-043): this plane's slice of the policy
+		// rule's GLOBAL rpm/tpm, so N data planes admit the configured
+		// limit in aggregate, not N× it. Narrows-only (min of policy limit
+		// and share — a control plane can never RAISE admission above the
+		// policy document), and only on dimensions the policy layer
+		// declares: a stale share left by a removed rate rule must not
+		// constrain a config/keystore-only rate. Applied BEFORE
+		// PolicyFromLimits so the token-bucket burst follows the clamped
+		// rate automatically.
+		if shares != nil {
+			if sh, ok := shares.Get(team); ok {
+				if rpm > 0 && sh.RPM > 0 && sh.RPM < rpm {
+					rpm = sh.RPM
+				}
+				if tpm > 0 && sh.TPM > 0 && sh.TPM < tpm {
+					tpm = sh.TPM
+				}
+			}
+		}
 		if rpm == 0 {
 			rpm = base.RatePerMin
 		}
@@ -610,6 +631,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 			Store:     polStore,
 			Leases:    leases,
 			Tiers:     tiers,
+			Shares:    shares,
 			SpentOf: func(team string, period v1alpha1.BudgetPeriod) int64 {
 				// Team-scoped read: no KeyID and deliberately no User, so this
 				// reports the TEAM counter only. A user-subject rule is never

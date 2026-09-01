@@ -53,6 +53,7 @@ type Server struct {
 	interval   int                     // heartbeat cadence handed to data planes, seconds
 	ledger     map[ruleKey]*ruleLedger // one per lease-managed budget rule
 	tiers      map[ruleKey]*tierRule   // one per budgetTiers routing rule (ADR-041)
+	rates      map[ruleKey]*rateRule   // one per team rate rule (ADR-043 rate shares)
 	tierLatch  *tier.Latch             // survives applyWire — NOT rebuilt there
 	dataplanes map[string]*dpInfo
 	files      map[string]time.Time
@@ -132,6 +133,15 @@ type tierRule struct {
 	tiers         []policy.BudgetTier
 }
 
+// rateRule is one team rate rule the control plane divides into per-plane
+// shares (ADR-043). Unlike a ruleLedger there is no cumulative state: rate
+// is a flow, so the share is recomputed from the live-plane count on every
+// heartbeat.
+type rateRule struct {
+	team     string
+	rpm, tpm int64
+}
+
 type dpInfo struct {
 	APIVersions []string           `json:"apiVersions"`
 	Version     string             `json:"version,omitempty"`
@@ -151,6 +161,7 @@ func NewServer(token, path string, opts ...Option) (*Server, error) {
 		authOpts:   newAuthOptions(opts),
 		ledger:     map[ruleKey]*ruleLedger{},
 		tiers:      map[ruleKey]*tierRule{},
+		rates:      map[ruleKey]*rateRule{},
 		tierLatch:  tier.NewLatch(),
 		dataplanes: map[string]*dpInfo{},
 		now:        time.Now,
@@ -189,6 +200,7 @@ func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]t
 	defer s.mu.Unlock()
 	ledger := map[ruleKey]*ruleLedger{}
 	tiers := map[ruleKey]*tierRule{}
+	rates := map[ruleKey]*rateRule{}
 	minRenew := time.Duration(0)
 	for i := range wire {
 		doc := &wire[i]
@@ -197,6 +209,14 @@ func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]t
 			return err // unreachable: LoadWirePaths already validated
 		}
 		for _, r := range internal.Rules {
+			// ADR-043: every TEAM rate rule with a real limit gets shared.
+			// User-subject rate is rejected by the data plane's gate
+			// (checkEnforceable) and unlimited has nothing to divide.
+			if r.Rate != nil && !r.Rate.Unlimited && internal.Subject.Team != "" && internal.Subject.User == "" {
+				rates[ruleKey{policy: internal.Name, rule: r.Name}] = &rateRule{
+					team: internal.Subject.Team, rpm: r.Rate.RPM, tpm: r.Rate.TPM,
+				}
+			}
 			if r.Routing != nil && r.Routing.BudgetTiers != nil {
 				bt := r.Routing.BudgetTiers
 				tiers[ruleKey{policy: internal.Name, rule: r.Name}] = &tierRule{
@@ -268,7 +288,7 @@ func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]t
 	}
 
 	s.wire, s.generation = wire, policy.GenerationOf(wire)
-	s.ledger, s.tiers, s.interval, s.files = ledger, tiers, interval, mtimes
+	s.ledger, s.tiers, s.rates, s.interval, s.files = ledger, tiers, rates, interval, mtimes
 	return nil
 }
 
@@ -474,6 +494,40 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			Policy: tr.policy, Rule: tr.rule, BudgetRef: tr.budgetRuleKey.rule, Team: tr.team,
 			ThresholdPercent: active.ThresholdPercent, Substitute: active.Substitute,
 		})
+	}
+
+	// ADR-043: divide each team rate rule's global rpm/tpm equally among
+	// live data planes (v1 split; proportional-to-EWMA is the designed
+	// follow-up). Liveness horizon = 3× the heartbeat interval, the same
+	// tolerance leases use, so a dead plane's slice returns to the pool
+	// within one horizon. The requester itself was refreshed above, so
+	// n ≥ 1 always. Floor division keeps Σ shares ≤ limit; the min-1 floor
+	// (never starve a plane outright) deliberately wins over exactness when
+	// limit < n — see the ADR.
+	if len(s.rates) > 0 {
+		horizon := 3 * time.Duration(s.interval) * time.Second
+		n := int64(0)
+		for _, dp := range s.dataplanes {
+			if now.Sub(dp.LastSeen) <= horizon {
+				n++
+			}
+		}
+		shareOf := func(limit int64) int64 {
+			if limit == 0 {
+				return 0 // dimension not limited by this rule
+			}
+			if sh := limit / n; sh > 0 {
+				return sh
+			}
+			return 1
+		}
+		for k, rr := range s.rates {
+			resp.RateShares = append(resp.RateShares, policy.RateShare{
+				Policy: k.policy, Rule: k.rule, Team: rr.team,
+				RPM: shareOf(rr.rpm), TPM: shareOf(rr.tpm),
+				ExpiresAt: now.Add(horizon),
+			})
+		}
 	}
 
 	if req.Generation != s.generation {

@@ -43,9 +43,10 @@ Running N node-local data planes removes the SPOF, but in-memory
 per-instance counters mean rate limits and quotas become up to N× the
 configured value unless enforcement is made globally accurate — as ADR-034
 did (with bounded, not exact, overshoot) for team budget in control-plane
-mode, but not yet for rate/quota or standalone budget — see
-`docs/roadmap.md`. Any HA or multi-replica work must close this gap for #4,
-not just add replicas.
+mode, and ADR-043 (rate shares, equal-split v1) did for team policy
+rate rules there — but not yet for token quotas, per-key limits, or
+standalone-mode budget/rate — see `docs/roadmap.md`. Any HA or
+multi-replica work must close this gap for #4, not just add replicas.
 
 ## Tech Stack
 

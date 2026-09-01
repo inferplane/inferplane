@@ -142,6 +142,10 @@ type Syncer struct {
 	// kept in step with every heartbeat's resp.ActiveTiers the same way
 	// Leases tracks resp.Leases. nil = no substitution applied.
 	Tiers *tier.Table
+	// Shares is the ADR-043 rate-share table, applied from every
+	// heartbeat's resp.RateShares. nil = no share clamp (per-plane rate
+	// enforcement, the pre-share behavior).
+	Shares *ShareTable
 	// SpentOf reports a team's cumulative spend in µUSD for ONE budget window
 	// (wired to the governor's usage view). The period argument is load-bearing:
 	// reporting monthly spend against a daily rule's ledger row would starve
@@ -293,6 +297,9 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 	}
 	if s.Tiers != nil {
 		s.Tiers.Set(resp.ActiveTiers)
+	}
+	if s.Shares != nil {
+		s.Shares.Set(resp.RateShares)
 	}
 	if resp.UpdateAdvice != nil && s.OnUpdateAdvice != nil &&
 		(s.lastAdvice == nil || *s.lastAdvice != *resp.UpdateAdvice) {

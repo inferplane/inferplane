@@ -57,15 +57,17 @@ more than one team is on it.
 
 **Single-replica `mayu` only, today.** `internal/keystore` is SQLite-only and
 `internal/limiter`/`internal/budget` are in-memory — running more than one
-`mayu` replica lets each enforce its own copy of every counter, so rate,
-token quota, and (in standalone mode) budget ceilings can each reach up to
+`mayu` replica lets each enforce its own copy of every counter, so token
+quota and (in standalone mode) rate and budget ceilings can each reach up to
 N× the configured value, and key resolution splits across replicas
-(ADR-013, design-only, not yet implemented). Budget is only *partially*
-better: when a control plane is attached, ADR-034's lease pattern bounds
+(ADR-013, design-only, not yet implemented). With a control plane attached,
+two counters are already globally bounded: ADR-034's lease pattern bounds
 team-level overspend across data planes (worst case is the sum of
-outstanding grants, not exact) — but per-key budgets and standalone `mayu`
-get no lease at all. Making rate/quota equally accurate, and closing budget's
-remaining gaps, is the tracked next step — see `docs/roadmap.md`.
+outstanding grants, not exact), and ADR-043's rate shares divide each team
+rate rule's rpm/tpm among live data planes (equal split in v1), so the
+fleet aggregate stays at the configured limit instead of N× it. Per-key
+budgets/rates, token quotas, and standalone `mayu` get no lease or share at
+all — closing those gaps is the tracked next step, see `docs/roadmap.md`.
 
 **Goals 3 and 4 are partially unenforced today.** Per-user *model choice*
 (goal 2) is enforced. Per-user *budget/rate* and policy-driven cost

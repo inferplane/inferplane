@@ -26,7 +26,7 @@ already met by earlier work (ADR-031) outside this roadmap.
 | #3 Cost-driven model substitution via policy (routing) | ✅ done, with caveats (ADR-041) | `routing.budgetTiers` is enforceable: `internal/policy/store.go` `checkEnforceable` now rejects only the cache-affinity half of `routing`; the control plane judges utilization globally from the ADR-034 ledger (`internal/controlplane/controlplane.go` `handleSync`) and latches the active tier per budget window (`internal/tier.Latch`); mayu applies it at ingress via `router.SubstituteTier`, never widening access or turning into a denial. Config-level `model_fallbacks` (`internal/router/router.go` `ResolveModel`) remains the separate availability-triggered substitution. Caveats: the window-latch key is an interim calendar-month-UTC derivation pending item ② below's real `windowID`; providerstore/UI pricing fields for `openai_compatible` GPU targets (ADR-041 item 6) and the full two-plane e2e (item 7) are follow-ups. |
 | #4a Team budget + block | ✅ done, with caveats | ADR-034 lease pattern bounds team-level overspend across data planes when a control plane is attached (worst case = Σ outstanding grants, not exact; window edges are approximate — ADR-034 §Known limits). Per-key budgets are not lease-managed. Standalone `mayu` (no control plane) gets no lease at all — budget is plain in-memory there, like rate. |
 | #4b Per-user budget/rate | 🔶 partial | *Budget* is unblocked (ADR-042 Phase 3): `checkEnforceable` (`internal/policy/store.go`) now rejects only user-subject *rate*; user-subject budget rules are merged by `mergeUserLimits`/`Store.UserLimits` and enforced by the Governor via `governance.SetUserLookup`/`UserPolicy`. *Rate* stays blocked — a per-user rate limit needs the rate-share model (item ① below). And per-user budget has no lease: a user-subject rule is excluded from the control-plane ledger and the consumption report, so with N data planes a user's effective cap is up to N× the configured value (ADR-042 §Accepted limitation, Phase 3) |
-| #4c Rate/quota global accuracy under horizontal scale | ❌ blocked | item ① below — in-memory per-replica buckets; N replicas admit up to N× the configured rate/TPM/quota in aggregate |
+| #4c Rate/quota global accuracy under horizontal scale | 🔶 partial | Team policy RATE rules are globally bounded when a control plane is attached (ADR-043 rate shares, equal-split v1, shipped 2026-09-01): the fleet aggregate stays ≤ the configured rpm/tpm (two-gateway e2e `cmd/mayu/rateshare_e2e_test.go`). Still per-replica: token quotas (tokens/day), per-key rate limits, config/keystore team rate in standalone mode, and the proportional-to-EWMA split (item ① below's full shape) |
 | #4d Spend visibility | ✅ done | `internal/analytics` + console + `GET /admin/logs` (`analyticsapi.LogsHandler`, backed by the same analytics index — its `events` rows carry `cost_micros` per request, `internal/analytics/index.go:40`) |
 | #5 No SPOF (control/data plane split) | ✅ done | ADR-031 — scoped to the control plane not gating the inference path; it does not mean any one `mayu` instance is itself highly available (see #4c and "Current limits") |
 
@@ -45,7 +45,22 @@ Sprint plan (each phase = separate PR(s), reviewed before the next):
 
 ---
 
-## ① Global rate limits via rate shares (ADR candidate — unassigned; ADR-036 has since shipped as control-plane usage telemetry)
+## ① Global rate limits via rate shares — v1 (equal split) ✅ shipped 2026-09-01 as ADR-043
+
+**Shipped** ([ADR-043](decisions/ADR-043-global-rate-shares.md)): the control
+plane divides each team rate rule's rpm/tpm equally among live data planes
+(liveness = 3× heartbeat, the lease horizon; min-1 floor so no plane
+starves) and hands each its share in the heartbeat
+(`SyncResponse.rateShares`, additive). mayu clamps the governor's team
+rpm/tpm to min(policy limit, share) in the same team-lookup closure as the
+budget allowance clamp — narrows-only, so a compromised control plane can
+only reduce throughput. Failure semantics: FailOpen keep-last. Two-gateway
+e2e (`cmd/mayu/rateshare_e2e_test.go`): the 429 appears at the global limit,
+not N× it. **Still open from the design below:** the proportional-to-EWMA
+split (`recentRPM`/`recentTPM` in reports) — the equal split becomes its
+idle floor; and per-user rate rules stay gated on it.
+
+### Original design (EWMA half still open)
 
 **Gap.** `rpm`/`tpm` enforce against per-proxy in-memory buckets
 (`limiter.NewMemory`): a team capped at 300 rpm with 20 connected data planes

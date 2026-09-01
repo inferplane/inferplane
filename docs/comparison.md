@@ -130,10 +130,11 @@ guardrail/PII rows must close before claiming the dimension outright.
   answer to "let people use Opus until the team is at 80%, then Sonnet."
 
 **Honest gaps.**
-- Rate/quota are per-replica in-memory: N data planes admit up to N× the
-  configured rate (roadmap ①). LiteLLM solves this with Redis; our
-  rate-share design exists but hasn't shipped. **This is the one cost-
-  control row where LiteLLM is ahead today.**
+- ~~Rate is per-replica in-memory~~ **closed for team policy rate rules**
+  (ADR-043, 2026-09-01): control-plane rate shares bound the fleet
+  aggregate at the configured rpm/tpm without a Redis dependency —
+  verified by a two-gateway e2e. Still per-replica: token quotas, per-key
+  rates, standalone mode, and the demand-following (EWMA) split.
 - Per-user budget and standalone-mode budget have no lease (N× exposure,
   ADR-042 accepted limitation); premium-pool → fallback → total-cap user
   state machine doesn't exist yet (strategy Phase 1).
@@ -324,7 +325,7 @@ the competitive angle. No new workstream is invented here.
 |---|---|---|---|
 | 1 | ~~Streaming benchmark harness~~ **shipped** (`benchmarks/streaming`); remaining: side-by-side vs real Portkey/LiteLLM installs (Performance) | this document | Converts "faster than Portkey" from architecture argument to measured number — the harness now shows mayu +0.8ms vs +17ms for a best-case central hop |
 | 2 | Durable identity `(issuer, sub)` + admin roles + mutation audit (Auth, Security, Admin) | strategy Phase 0b (P0) | Both competitors' enterprise tiers have stable identity; without it "per-user budget" claims don't survive key rotation |
-| 3 | Global rate/quota accuracy — rate shares (Cost control) | roadmap ① / S1 | The one row where LiteLLM-with-Redis beats us today |
+| 3 | ~~Global rate accuracy — rate shares~~ **shipped** (ADR-043, equal-split v1; two-gateway e2e proves 429 at the global limit); remaining: token quotas, per-key rates, EWMA split (Cost control) | roadmap ① / S1 | Was the one row where LiteLLM-with-Redis beat us — now matched without the Redis dependency |
 | 4 | Durable ledger + window IDs (Cost control, Cost accuracy) | roadmap ② / S1, strategy Phase 1 | Makes "bounded overspend" a durable guarantee, not an in-memory one |
 | 5 | ~~Codex/OpenCode wire fixtures~~ **shipped** (`internal/server/openaiapi/agent_wire_test.go`); remaining: recorded captures from real client sessions (Model compatibility) | Core Purpose #1 (🔶) | Both agents' documented wire shapes — agentic tools, tool-call round trips, `include_usage` — now pass on both provider wires; a real-client capture closes Purpose #1 |
 | 6 | Guardrail-on-every-egress + PII egress ceiling (Security) | strategy Phase 0a/2 (P0) | LiteLLM's guardrail bypass is our best sales evidence — only if we provably don't have one |

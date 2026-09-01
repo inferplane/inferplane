@@ -99,6 +99,28 @@ type SyncResponse struct {
 	// the control plane must never be able to push executable content
 	// (roadmap ③, the security constraint). Additive/omitempty.
 	UpdateAdvice *UpdateAdvice `json:"updateAdvice,omitempty"`
+	// RateShares carries THIS data plane's slice of each team rate rule's
+	// global rpm/tpm (ADR-043). Additive/omitempty: an older build ignores
+	// them and keeps enforcing the full policy limit per plane, exactly the
+	// pre-share behavior.
+	RateShares []RateShare `json:"rateShares,omitempty"`
+}
+
+// RateShare is one data plane's slice of a team rate rule's global limit
+// (ADR-043): the control plane divides the rule's rpm/tpm among live data
+// planes so the fleet aggregate stays bounded by the configured limit. The
+// receiving plane clamps its locally-enforced limit to min(policy limit,
+// share) — a share can only narrow, never widen. A zero dimension means the
+// rule does not limit it. ExpiresAt is observability only in v1: failure
+// semantics are keep-last (FailOpen — a rate limit protects throughput,
+// not money).
+type RateShare struct {
+	Policy    string    `json:"policy"`
+	Rule      string    `json:"rule"`
+	Team      string    `json:"team"`
+	RPM       int64     `json:"rpm,omitempty"`
+	TPM       int64     `json:"tpm,omitempty"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // UpdateAdvice tells a stale data plane the fleet's minimum version and
