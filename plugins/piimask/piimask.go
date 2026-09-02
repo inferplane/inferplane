@@ -60,28 +60,44 @@ func (m *Masker) Name() string { return "pii-mask" }
 // false positives); the others are regex. Order matters: the most specific /
 // structured patterns run before the greedier phone pattern.
 func (m *Masker) Mask(text string) (string, int) {
-	n := 0
-	count := func(re *regexp.Regexp, ph string, enabled bool) {
+	masked, det := m.MaskKinds(text)
+	return masked, det.Redactions
+}
+
+// MaskKinds implements filter.KindReporter (strategy Phase 2 detector
+// evidence): the same pass as Mask, additionally counting redactions per
+// detector kind. Kind names are the fixed constants below — filter-declared,
+// never input text — so they are safe for the audit record.
+func (m *Masker) MaskKinds(text string) (string, filter.Detection) {
+	det := filter.Detection{}
+	hit := func(kind string) {
+		det.Redactions++
+		if det.Kinds == nil {
+			det.Kinds = map[string]int{}
+		}
+		det.Kinds[kind]++
+	}
+	count := func(re *regexp.Regexp, ph, kind string, enabled bool) {
 		if !enabled {
 			return
 		}
-		text = re.ReplaceAllStringFunc(text, func(string) string { n++; return ph })
+		text = re.ReplaceAllStringFunc(text, func(string) string { hit(kind); return ph })
 	}
 	// email & ssn first (distinct shapes), then card (Luhn-gated), then ip, then phone.
-	count(reEmail, phEmail, !m.opt.DisableEmail)
-	count(reSSN, phSSN, !m.opt.DisableSSN)
+	count(reEmail, phEmail, "email", !m.opt.DisableEmail)
+	count(reSSN, phSSN, "ssn", !m.opt.DisableSSN)
 	if !m.opt.DisableCard {
 		text = reCard.ReplaceAllStringFunc(text, func(s string) string {
 			if luhnValid(digitsOnly(s)) {
-				n++
+				hit("card")
 				return phCard
 			}
 			return s // not a valid card number — leave it
 		})
 	}
-	count(reIP, phIP, !m.opt.DisableIP)
-	count(rePhone, phPhone, !m.opt.DisablePhone)
-	return text, n
+	count(reIP, phIP, "ip", !m.opt.DisableIP)
+	count(rePhone, phPhone, "phone", !m.opt.DisablePhone)
+	return text, det
 }
 
 func digitsOnly(s string) string {

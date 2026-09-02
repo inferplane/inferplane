@@ -17,10 +17,12 @@ import (
 
 	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/internal/config"
+	"github.com/inferplane/inferplane/internal/filter"
 	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
 	"github.com/inferplane/inferplane/pkg/schema"
+	"github.com/inferplane/inferplane/plugins/piimask"
 	"github.com/inferplane/inferplane/providers"
 )
 
@@ -117,5 +119,39 @@ func TestMessagesNoStripNoDisclosure(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "params_stripped") {
 		t.Fatalf("audit must omit params_stripped when nothing was stripped: %s", buf.String())
+	}
+}
+
+// TestMessagesAuditCarriesDetectorEvidence (strategy Phase 2 detector
+// evidence): a masked request's audit records carry the typed detection —
+// redaction count plus per-kind breakdown, counts only, never a matched
+// value. Uses the REAL pii-mask filter so the kinds are the real ones.
+func TestMessagesAuditCarriesDetectorEvidence(t *testing.T) {
+	var buf bytes.Buffer
+	w, err := audit.NewWriter("i", filepath.Join(t.TempDir(), "a.wal"), []audit.Sink{audit.NewWriterSink("b", &buf, true)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provs := map[string]providers.Provider{"p": headerProvider{}}
+	models := map[string]config.ModelConfig{"m": {Targets: []config.Target{{Provider: "p", Model: "m"}}}}
+	h := NewMessagesHandlerWithAudit(router.New(holderFor(provs, models)), w)
+	h.SetMasking(&filter.Masking{Filter: piimask.New(piimask.Options{}), Global: true})
+
+	body := `{"model":"m","messages":[{"role":"user","content":"mail alice@example.com and 10.0.0.1"}]}`
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
+	ctx := principal.With(req.Context(), keystore.Principal{KeyID: "ik", Team: "t", AllowedModels: []string{"*"}})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req.WithContext(ctx))
+	w.Close()
+
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"pii":{"redactions":2,"kinds":{"email":1,"ip":1}}`) {
+		t.Fatalf("audit record missing detector evidence: %s", out)
+	}
+	if strings.Contains(out, "alice@example.com") {
+		t.Fatalf("a matched value leaked into the audit chain: %s", out)
 	}
 }

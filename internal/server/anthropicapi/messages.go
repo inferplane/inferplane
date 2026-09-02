@@ -287,10 +287,16 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				writeErr(w, 403, "permission_error", "PII policy requires detector-verified unmodified egress but no detector filter is configured — refusing")
 				return
 			}
-			_, n, derr := maskBody(raw, h.mask.Filter)
-			det := filter.Detection{Redactions: n}
+			_, det, derr := maskBodyDetail(raw, h.mask.Filter)
 			if derr != nil || !det.Clean() {
-				h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: 403, Error: audit.DenyPIIProtectedDetected.Ptr()}, false, traceID)
+				// Detector evidence rides the audit record (counts + kinds
+				// only, never a matched value).
+				kinds := make(map[string]int64, len(det.Kinds))
+				for k, v := range det.Kinds {
+					kinds[k] = int64(v)
+				}
+				dctx := audit.WithPIIDetection(req.Context(), int64(det.Redactions), kinds)
+				h.audit(dctx, p, model, "", &audit.OutcomeRef{Status: 403, Error: audit.DenyPIIProtectedDetected.Ptr()}, false, traceID)
 				h.metrics.ObserveRequest(ingressName, rejectedModelLabel, "", p.Team, 403, time.Since(start).Seconds(), 0)
 				tracing.SetStatus(span, false, "pii protected detected")
 				writeErr(w, 403, "permission_error", "PII policy allows only detector-verified unmodified egress and the detector reported protected content — refusing")
@@ -305,7 +311,7 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// rejects the request; the unmasked body is never forwarded.
 	piiMasked := false
 	if h.mask.Enabled(p.Team) {
-		masked, n, err := maskBody(raw, h.mask.Filter)
+		masked, det, err := maskBodyDetail(raw, h.mask.Filter)
 		if err != nil {
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: 400}, false, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, 400, time.Since(start).Seconds(), 0)
@@ -313,7 +319,7 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			writeErr(w, 400, "invalid_request_error", "request could not be PII-masked")
 			return
 		}
-		if n > 0 {
+		if det.Redactions > 0 {
 			var reparsed schema.ChatRequest
 			if err := json.Unmarshal(masked, &reparsed); err != nil {
 				h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: 400}, false, traceID)
@@ -325,7 +331,14 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			raw = masked
 			parsed = reparsed
 			piiMasked = true
-			h.metrics.ObservePIIMask(p.Team, n)
+			h.metrics.ObservePIIMask(p.Team, det.Redactions)
+			// Detector evidence (counts + kinds, never values) rides every
+			// audit record for this request via the context.
+			kinds := make(map[string]int64, len(det.Kinds))
+			for k, v := range det.Kinds {
+				kinds[k] = int64(v)
+			}
+			req = req.WithContext(audit.WithPIIDetection(req.Context(), int64(det.Redactions), kinds))
 		}
 	}
 	// Pricing table from the SAME generation we resolved on (ADR-006): a reload
@@ -784,6 +797,7 @@ func (h *MessagesHandler) audit(ctx context.Context, p keystore.Principal, model
 		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team, UserID: p.UserID},
 		Request:       audit.RequestRef{Ingress: "anthropic", ModelRequested: model, ModelResolved: upstream, PIIMasked: piiMasked, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx)},
 		Outcome:       outcome,
+		PII:           audit.PIIDetectionFrom(ctx),
 	}
 	if traceID != "" {
 		rec.TraceID = &traceID
@@ -811,6 +825,7 @@ func (h *MessagesHandler) auditCompleted(ctx context.Context, id string, p keyst
 		Outcome:       &audit.OutcomeRef{Status: status},
 		Usage:         usage,
 		Cost:          cost,
+		PII:           audit.PIIDetectionFrom(ctx),
 	}
 	if traceID != "" {
 		rec.TraceID = &traceID
@@ -843,6 +858,7 @@ func (h *MessagesHandler) auditCompletedPartial(ctx context.Context, p keystore.
 		Outcome:       &audit.OutcomeRef{Status: 200, Partial: true},
 		Usage:         usage,
 		Cost:          cost,
+		PII:           audit.PIIDetectionFrom(ctx),
 	}
 	if traceID != "" {
 		rec.TraceID = &traceID

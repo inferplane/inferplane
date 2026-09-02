@@ -251,10 +251,14 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				writeErr(w, http.StatusForbidden, "PII policy requires detector-verified unmodified egress but no detector filter is configured — refusing")
 				return
 			}
-			_, n, derr := maskBody(raw, h.mask.Filter)
-			det := filter.Detection{Redactions: n}
+			_, det, derr := maskBodyDetail(raw, h.mask.Filter)
 			if derr != nil || !det.Clean() {
-				h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: http.StatusForbidden, Error: audit.DenyPIIProtectedDetected.Ptr()}, false, traceID)
+				kinds := make(map[string]int64, len(det.Kinds))
+				for k, v := range det.Kinds {
+					kinds[k] = int64(v)
+				}
+				dctx := audit.WithPIIDetection(req.Context(), int64(det.Redactions), kinds)
+				h.audit(dctx, p, model, "", &audit.OutcomeRef{Status: http.StatusForbidden, Error: audit.DenyPIIProtectedDetected.Ptr()}, false, traceID)
 				h.metrics.ObserveRequest(ingressName, model, "", p.Team, http.StatusForbidden, time.Since(start).Seconds(), 0)
 				tracing.SetStatus(span, false, "pii protected detected")
 				writeErr(w, http.StatusForbidden, "PII policy allows only detector-verified unmodified egress and the detector reported protected content — refusing")
@@ -264,7 +268,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	piiMasked := false
 	if h.mask.Enabled(p.Team) {
-		masked, n, err := maskBody(raw, h.mask.Filter)
+		masked, det, err := maskBodyDetail(raw, h.mask.Filter)
 		if err != nil {
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
@@ -272,7 +276,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			writeErr(w, http.StatusBadRequest, "request could not be PII-masked")
 			return
 		}
-		if n > 0 {
+		if det.Redactions > 0 {
 			var reparsed schema.ChatRequest
 			if err := json.Unmarshal(masked, &reparsed); err != nil {
 				h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
@@ -284,7 +288,12 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			raw = masked
 			parsed = reparsed
 			piiMasked = true
-			h.metrics.ObservePIIMask(p.Team, n)
+			h.metrics.ObservePIIMask(p.Team, det.Redactions)
+			kinds := make(map[string]int64, len(det.Kinds))
+			for k, v := range det.Kinds {
+				kinds[k] = int64(v)
+			}
+			req = req.WithContext(audit.WithPIIDetection(req.Context(), int64(det.Redactions), kinds))
 		}
 	}
 
@@ -702,6 +711,7 @@ func (h *InvokeHandler) audit(ctx context.Context, p keystore.Principal, model, 
 			Stream: h.streaming, PIIMasked: piiMasked, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx),
 		},
 		Outcome: outcome,
+		PII:     audit.PIIDetectionFrom(ctx),
 	}
 	if traceID != "" {
 		rec.TraceID = &traceID
@@ -726,6 +736,7 @@ func (h *InvokeHandler) auditCompleted(ctx context.Context, id string, p keystor
 		Outcome: &audit.OutcomeRef{Status: status},
 		Usage:   usage,
 		Cost:    cost,
+		PII:     audit.PIIDetectionFrom(ctx),
 	}
 	if traceID != "" {
 		rec.TraceID = &traceID
@@ -759,6 +770,7 @@ func (h *InvokeHandler) auditCompletedPartial(ctx context.Context, p keystore.Pr
 		Outcome:       &audit.OutcomeRef{Status: 200, Partial: true},
 		Usage:         usage,
 		Cost:          cost,
+		PII:           audit.PIIDetectionFrom(ctx),
 	}
 	if traceID != "" {
 		rec.TraceID = &traceID
@@ -832,79 +844,89 @@ func deref(p *int64) int64 {
 	return *p
 }
 
+// maskBody is the count-only view of maskBodyDetail, kept for callers that
+// need no kind breakdown (count_tokens).
 func maskBody(raw []byte, f filter.RequestFilter) ([]byte, int, error) {
+	out, det, err := maskBodyDetail(raw, f)
+	return out, det.Redactions, err
+}
+
+// maskBodyDetail is maskBody plus detector evidence (strategy Phase 2): the
+// same pass, returning the typed filter.Detection (count + per-kind
+// breakdown when the filter reports kinds) for the audit record.
+func maskBodyDetail(raw []byte, f filter.RequestFilter) ([]byte, filter.Detection, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &top); err != nil {
-		return nil, 0, fmt.Errorf("maskBody: %w", err)
+		return nil, filter.Detection{}, fmt.Errorf("maskBody: %w", err)
 	}
 	messagesRaw, ok := top["messages"]
 	if !ok {
-		return raw, 0, nil
+		return raw, filter.Detection{}, nil
 	}
 	var messages []json.RawMessage
 	if err := json.Unmarshal(messagesRaw, &messages); err != nil {
-		return nil, 0, fmt.Errorf("maskBody messages: %w", err)
+		return nil, filter.Detection{}, fmt.Errorf("maskBody messages: %w", err)
 	}
 
-	total := 0
+	var det filter.Detection
 	for i, messageRaw := range messages {
 		var message map[string]json.RawMessage
 		if err := json.Unmarshal(messageRaw, &message); err != nil {
-			return nil, 0, fmt.Errorf("maskBody message[%d]: %w", i, err)
+			return nil, det, fmt.Errorf("maskBody message[%d]: %w", i, err)
 		}
 		content, ok := message["content"]
 		if !ok {
 			continue
 		}
-		masked, n, err := maskContent(content, f)
+		masked, d, err := maskContent(content, f)
 		if err != nil {
-			return nil, 0, err
+			return nil, det, err
 		}
-		if n > 0 {
+		if d.Redactions > 0 {
 			message["content"] = masked
 			remarshaled, err := json.Marshal(message)
 			if err != nil {
-				return nil, 0, fmt.Errorf("maskBody remarshal message[%d]: %w", i, err)
+				return nil, det, fmt.Errorf("maskBody remarshal message[%d]: %w", i, err)
 			}
 			messages[i] = remarshaled
-			total += n
+			det.Add(d)
 		}
 	}
-	if total == 0 {
-		return raw, 0, nil
+	if det.Redactions == 0 {
+		return raw, det, nil
 	}
 	newMessages, err := json.Marshal(messages)
 	if err != nil {
-		return nil, 0, fmt.Errorf("maskBody remarshal messages: %w", err)
+		return nil, det, fmt.Errorf("maskBody remarshal messages: %w", err)
 	}
 	top["messages"] = newMessages
 	out, err := json.Marshal(top)
 	if err != nil {
-		return nil, 0, fmt.Errorf("maskBody remarshal: %w", err)
+		return nil, det, fmt.Errorf("maskBody remarshal: %w", err)
 	}
-	return out, total, nil
+	return out, det, nil
 }
 
-func maskContent(content json.RawMessage, f filter.RequestFilter) (json.RawMessage, int, error) {
+func maskContent(content json.RawMessage, f filter.RequestFilter) (json.RawMessage, filter.Detection, error) {
 	var text string
 	if err := json.Unmarshal(content, &text); err == nil {
-		masked, n := f.Mask(text)
-		if n == 0 {
-			return content, 0, nil
+		masked, d := filter.Detect(f, text)
+		if d.Redactions == 0 {
+			return content, d, nil
 		}
 		body, err := json.Marshal(masked)
-		return body, n, err
+		return body, d, err
 	}
 
 	var blocks []json.RawMessage
 	if err := json.Unmarshal(content, &blocks); err != nil {
-		return nil, 0, fmt.Errorf("maskContent: %w", err)
+		return nil, filter.Detection{}, fmt.Errorf("maskContent: %w", err)
 	}
-	total := 0
+	var det filter.Detection
 	for i, blockRaw := range blocks {
 		var block map[string]json.RawMessage
 		if err := json.Unmarshal(blockRaw, &block); err != nil {
-			return nil, 0, fmt.Errorf("maskContent block[%d]: %w", i, err)
+			return nil, det, fmt.Errorf("maskContent block[%d]: %w", i, err)
 		}
 		var typ string
 		_ = json.Unmarshal(block["type"], &typ)
@@ -915,27 +937,27 @@ func maskContent(content json.RawMessage, f filter.RequestFilter) (json.RawMessa
 		if err := json.Unmarshal(block["text"], &text); err != nil {
 			continue
 		}
-		masked, n := f.Mask(text)
-		if n == 0 {
+		masked, d := filter.Detect(f, text)
+		if d.Redactions == 0 {
 			continue
 		}
 		maskedBody, err := json.Marshal(masked)
 		if err != nil {
-			return nil, 0, err
+			return nil, det, err
 		}
 		block["text"] = maskedBody
 		remarshaled, err := json.Marshal(block)
 		if err != nil {
-			return nil, 0, err
+			return nil, det, err
 		}
 		blocks[i] = remarshaled
-		total += n
+		det.Add(d)
 	}
-	if total == 0 {
-		return content, 0, nil
+	if det.Redactions == 0 {
+		return content, det, nil
 	}
 	out, err := json.Marshal(blocks)
-	return out, total, err
+	return out, det, err
 }
 
 // pricedTargets projects the resolved chain onto the (provider, upstream) pairs

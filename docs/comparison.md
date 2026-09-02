@@ -101,9 +101,10 @@ called out inline and collected in §8.
 **Honest gaps** (all already P0 in enterprise-strategy §3):
 - Guardrail coverage regressed on the Mantle egress path — currently a
   fail-closed *refusal*, not application (strategy §3 first item).
-- PII detector evidence in the audit record is the deny code only — the
-  typed detector result (`filter.Detection`) and the `external-unmodified`
-  ceiling shipped, but span counts/kinds are not yet recorded, and the
+- ~~PII detector evidence~~ **recorded** (2026-09-02): every masked
+  request's audit records — and every `external-unmodified` refusal —
+  carry the typed detection (`pii: {redactions, kinds}`; counts and
+  filter-declared kind names only, never a matched value). Remaining: the
   OpenAI ingress cannot verify (refuses `external-unmodified` outright).
 - No SOC2/ISO certification — inferplane is alpha; Portkey Enterprise has
   SOC2 Type 2/ISO 27001/GDPR/HIPAA, and post-acquisition carries Palo

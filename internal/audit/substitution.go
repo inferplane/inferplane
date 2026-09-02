@@ -43,3 +43,23 @@ func ParamsStrippedFrom(ctx context.Context) []string {
 	params, _ := ctx.Value(paramsStrippedKey{}).([]string)
 	return params
 }
+
+// piiDetectionKey carries the PII detector's evidence (strategy Phase 2) —
+// redaction count + per-kind breakdown, counts ONLY, never matched values —
+// from the masking/verification point down to the audit call, the same
+// one-way plumbing as the two keys above.
+type piiDetectionKey struct{}
+
+// WithPIIDetection returns a context carrying detector evidence. Call it
+// once, right after the masking pass or the external-unmodified detector
+// pass reports what it found, before continuing (or denying) the request
+// with that context.
+func WithPIIDetection(ctx context.Context, redactions int64, kinds map[string]int64) context.Context {
+	return context.WithValue(ctx, piiDetectionKey{}, &PIIRef{Redactions: redactions, Kinds: kinds})
+}
+
+// PIIDetectionFrom returns the evidence WithPIIDetection set, or nil.
+func PIIDetectionFrom(ctx context.Context) *PIIRef {
+	ref, _ := ctx.Value(piiDetectionKey{}).(*PIIRef)
+	return ref
+}

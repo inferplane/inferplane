@@ -143,6 +143,22 @@ type Record struct {
 	// event (Phase 0b-4, mirroring the control plane's admin_mutation
 	// record). Appended at the END like BodyRef/RecordRef, same rule.
 	Mutation *MutationRef `json:"mutation,omitempty"`
+	// PII is the detector-evidence half of strategy Phase 2: what the PII
+	// detector found on THIS request — masked before egress, or the reason
+	// an external-unmodified ceiling refused. Appended at the END, same
+	// rule as every field above it.
+	PII *PIIRef `json:"pii,omitempty"`
+}
+
+// PIIRef records detector evidence: how many protected spans the filter
+// chain found and (when the filter reports kinds) a per-kind breakdown.
+// Kind names are filter-declared constants (e.g. "email"), NEVER input
+// text, and no matched value is ever recorded — counts only, so the audit
+// chain itself stays PII-free. encoding/json sorts map keys, so the
+// canonical hash-chain bytes stay deterministic.
+type PIIRef struct {
+	Redactions int64            `json:"redactions"`
+	Kinds      map[string]int64 `json:"kinds,omitempty"`
 }
 
 // MutationRef is the tamper-evident what-changed half of an admin-plane
