@@ -88,7 +88,11 @@ called out inline and collected in §8.
   (Customer_needs §2) that made a gateway mandatory for Korean
   manufacturers.
 - PII masking filter, fail-closed on masker error (ADR-009,
-  `plugins/piimask`).
+  `plugins/piimask`) — and, as of 2026-09-02, a policy-selected **PII
+  egress ceiling** (blocked / internal-only / external-masked) enforced
+  fail-closed on the resolved chain, with provider residency
+  classification. Neither competitor has a policy engine choosing the
+  egress action per subject with a no-opt-out ceiling.
 - Blast radius: a compromised or degraded central gateway is an org-wide
   incident; a compromised `mayu` is one node. The control plane can never
   push executable content by design (roadmap ③ security constraint).
@@ -96,8 +100,9 @@ called out inline and collected in §8.
 **Honest gaps** (all already P0 in enterprise-strategy §3):
 - Guardrail coverage regressed on the Mantle egress path — currently a
   fail-closed *refusal*, not application (strategy §3 first item).
-- PII handling is masking-only: no typed detector result, no egress
-  ceiling (strategy Phase 2).
+- PII detector output is still untyped (the ceiling shipped; the
+  typed detector contract and `external-unmodified` remain — strategy
+  Phase 2's second half).
 - No SOC2/ISO certification — inferplane is alpha; Portkey Enterprise has
   SOC2 Type 2/ISO 27001/GDPR/HIPAA, and post-acquisition carries Palo
   Alto's security brand. Certification is a business gate, not a code

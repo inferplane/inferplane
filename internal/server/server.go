@@ -46,13 +46,20 @@ type AuthConfigView struct {
 type DataMuxOption func(*dataMuxOptions)
 
 type dataMuxOptions struct {
-	usage *telemetry.Collector
+	usage         *telemetry.Collector
+	egressCeiling func(team, user string) string
 }
 
 // WithUsageCollector threads the control-plane usage collector into every
 // generation handler's settle path (nil-safe; absent = standalone default).
 func WithUsageCollector(c *telemetry.Collector) DataMuxOption {
 	return func(o *dataMuxOptions) { o.usage = c }
+}
+
+// WithEgressCeiling threads the PII egress-ceiling lookup (strategy Phase 2)
+// into every generation handler; nil-safe (absent = no ceiling).
+func WithEgressCeiling(fn func(team, user string) string) DataMuxOption {
+	return func(o *dataMuxOptions) { o.egressCeiling = fn }
 }
 
 // DataMux builds the data-plane (:8080) handler: Anthropic, Bedrock, and OpenAI
@@ -90,6 +97,7 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	msgs.SetTeamPolicy(teamPolicy)
 	msgs.SetBodyRecorder(bodies)
 	msgs.SetUsageCollector(o.usage)
+	msgs.SetEgressCeiling(o.egressCeiling)
 	mux.Handle("POST /v1/messages", msgs)
 	ct := anthropicapi.NewCountTokensHandler(r)
 	ct.SetMasking(mask)          // mask the count body too (T6); never 500
@@ -100,18 +108,21 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	chat.SetTeamPolicy(teamPolicy)
 	chat.SetBodyRecorder(bodies)
 	chat.SetUsageCollector(o.usage)
+	chat.SetEgressCeiling(o.egressCeiling)
 	mux.Handle("POST /v1/chat/completions", chat)
 	invoke := bedrockapi.NewInvokeHandlerMetrics(r, holder, aud, gov, m, false)
 	invoke.SetMasking(mask)
 	invoke.SetTeamPolicy(teamPolicy)
 	invoke.SetBodyRecorder(bodies)
 	invoke.SetUsageCollector(o.usage)
+	invoke.SetEgressCeiling(o.egressCeiling)
 	mux.Handle("POST /model/{modelId}/invoke", invoke)
 	stream := bedrockapi.NewInvokeHandlerMetrics(r, holder, aud, gov, m, true)
 	stream.SetMasking(mask)
 	stream.SetTeamPolicy(teamPolicy)
 	stream.SetBodyRecorder(bodies)
 	stream.SetUsageCollector(o.usage)
+	stream.SetEgressCeiling(o.egressCeiling)
 	mux.Handle("POST /model/{modelId}/invoke-with-response-stream", stream)
 	bct := bedrockapi.NewCountTokensHandler(r, holder)
 	bct.SetMasking(mask)

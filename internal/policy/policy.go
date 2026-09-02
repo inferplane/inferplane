@@ -104,7 +104,24 @@ type Rule struct {
 	Routing       *Routing
 	ModelAccess   *ModelAccess
 	Rate          *Rate
+	PII           *PII
 }
+
+// PII is the internal form of a PII egress-ceiling rule (strategy Phase 2).
+// Egress is one of EgressBlocked, EgressInternalOnly, EgressExternalMasked —
+// "external-unmodified" is rejected at conversion until the typed detector
+// chain exists.
+type PII struct {
+	Egress string
+}
+
+// The enforceable egress ceilings, ordered most→least restrictive (the
+// request-time fold picks the most restrictive across matching rules).
+const (
+	EgressBlocked        = "blocked"
+	EgressInternalOnly   = "internal-only"
+	EgressExternalMasked = "external-masked"
+)
 
 // Budget is the internal form of a budget rule. All amounts are integer
 // microUSD (converted ×1000 from the wire's milliUSD, defaults applied).
@@ -244,13 +261,13 @@ func FromV1Alpha1(doc *v1alpha1.GovernancePolicy) (*Policy, error) {
 			return nil, reject(wr.Name, fmt.Sprintf("unknown failurePolicy %q", wr.FailurePolicy))
 		}
 		kinds := 0
-		for _, set := range []bool{wr.Budget != nil, wr.Routing != nil, wr.ModelAccess != nil, wr.Rate != nil} {
+		for _, set := range []bool{wr.Budget != nil, wr.Routing != nil, wr.ModelAccess != nil, wr.Rate != nil, wr.PII != nil} {
 			if set {
 				kinds++
 			}
 		}
 		if kinds != 1 {
-			return nil, reject(wr.Name, "exactly one of budget, routing, modelAccess, or rate must be set")
+			return nil, reject(wr.Name, "exactly one of budget, routing, modelAccess, rate, or pii must be set")
 		}
 
 		r := Rule{Name: wr.Name, FailurePolicy: wr.FailurePolicy}
@@ -280,6 +297,15 @@ func FromV1Alpha1(doc *v1alpha1.GovernancePolicy) (*Policy, error) {
 				}
 			}
 			r.ModelAccess = &ModelAccess{Allow: append([]string(nil), wr.ModelAccess.Allow...)}
+		case wr.PII != nil:
+			switch wr.PII.Egress {
+			case EgressBlocked, EgressInternalOnly, EgressExternalMasked:
+				r.PII = &PII{Egress: wr.PII.Egress}
+			case "external-unmodified":
+				return nil, reject(wr.Name, "pii.egress external-unmodified requires the typed detector chain and is not yet enforceable by this build — refusing rather than accepting-and-ignoring")
+			default:
+				return nil, reject(wr.Name, fmt.Sprintf("unknown pii.egress %q (supported: %q, %q, %q)", wr.PII.Egress, EgressBlocked, EgressInternalOnly, EgressExternalMasked))
+			}
 		case wr.Rate != nil:
 			if wr.Rate.RPM < 0 || wr.Rate.TPM < 0 {
 				return nil, reject(wr.Name, "rate.rpm and rate.tpm must be >= 0")

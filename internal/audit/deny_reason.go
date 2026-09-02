@@ -22,6 +22,16 @@ const (
 	// not, and only one of those is fixed by raising the team's cap.
 	DenyUserBudgetExceeded DenyReason = "user_budget_exceeded"
 	DenyRegionBlocked      DenyReason = "region_blocked"
+	// DenyPIIBlocked / DenyPIINoInternalTarget / DenyPIIMaskUnavailable:
+	// the PII egress ceiling (strategy Phase 2) refused the request —
+	// respectively a "blocked" ceiling, an "internal-only" ceiling with no
+	// internal-classified target in the resolved chain, and an
+	// "external-masked" ceiling on a team whose masking filter is not
+	// active (a mandated mask that cannot run must never silently go
+	// external — fail closed).
+	DenyPIIBlocked          DenyReason = "pii_blocked"
+	DenyPIINoInternalTarget DenyReason = "pii_no_internal_target"
+	DenyPIIMaskUnavailable  DenyReason = "pii_mask_unavailable"
 	// DenyPricingMissing: pricing.on_missing is "block" and the resolved
 	// (provider, upstream) has no rate, so serving the request would bill 0
 	// (ADR-030). Distinct from a budget denial — nothing was exceeded; the

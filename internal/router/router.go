@@ -213,6 +213,10 @@ type ChainTarget struct {
 	// to detect the boundary and re-check RBAC (FilterModelAllowed) before
 	// ever sending a request there.
 	Model string
+	// Internal marks a provider explicitly classified "internal" (strategy
+	// Phase 2 PII egress ceiling); unlabeled providers are EXTERNAL by
+	// default, so an internal-only request can never reach one.
+	Internal bool
 	// Region is the target provider's configured region label (D7, ADR-020),
 	// captured from the generation this was resolved on. Empty = unlabeled.
 	Region string
@@ -248,7 +252,7 @@ func (r *Router) ResolveChain(model string) ([]ChainTarget, *live.State, error) 
 				continue // config drift: target points at unknown provider
 			}
 			id, _ := st.Identity(t.Provider)
-			ct := ChainTarget{Provider: p, ProviderName: t.Provider, Identity: id, Upstream: t.Model, Model: m, Region: st.Region(t.Provider)}
+			ct := ChainTarget{Provider: p, ProviderName: t.Provider, Identity: id, Upstream: t.Model, Model: m, Region: st.Region(t.Provider), Internal: st.Classification(t.Provider) == "internal"}
 			all = append(all, ct)
 			if r.brk.Allow(id) {
 				allowed = append(allowed, ct)
@@ -302,6 +306,21 @@ func FilterRegions(chain []ChainTarget, allowed []string) []ChainTarget {
 	var out []ChainTarget
 	for _, ct := range chain {
 		if ct.Region != "" && set[ct.Region] {
+			out = append(out, ct)
+		}
+	}
+	return out
+}
+
+// FilterInternal drops every target whose provider is not explicitly
+// classified "internal" (strategy Phase 2: an internal-only PII ceiling
+// must hold under budget substitution and provider fallback alike, so it
+// filters the RESOLVED chain — the same enforcement point as
+// FilterRegions, and the same fail-closed rule for unlabeled providers).
+func FilterInternal(chain []ChainTarget) []ChainTarget {
+	var out []ChainTarget
+	for _, ct := range chain {
+		if ct.Internal {
 			out = append(out, ct)
 		}
 	}

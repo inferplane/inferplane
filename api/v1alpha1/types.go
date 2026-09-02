@@ -96,6 +96,7 @@ type Rule struct {
 	Routing       *RoutingRule     `json:"routing,omitempty"`
 	ModelAccess   *ModelAccessRule `json:"modelAccess,omitempty"`
 	Rate          *RateRule        `json:"rate,omitempty"`
+	PII           *PIIRule         `json:"pii,omitempty"`
 }
 
 // BudgetPeriod is the calendar window a budget rule's limit applies to. It is
@@ -164,6 +165,18 @@ type BudgetRule struct {
 
 // LeaseSpec sizes a budget lease. Both fields are optional; defaults are
 // fixed by ADR-032 and applied in internal/policy.
+// PIIRule selects the PII egress ceiling for the subject (strategy
+// Phase 2): the policy engine, not the plugin, picks the action, and later
+// stages may only narrow it. "blocked" refuses every generation request;
+// "internal-only" restricts the resolved chain to internal-classified
+// providers; "external-masked" requires the PII masking filter to be
+// active for the team (fail-closed when it is not). "external-unmodified"
+// is part of the schema but not yet enforceable — it requires the typed
+// detector chain — and is REJECTED at load rather than accepted-and-ignored.
+type PIIRule struct {
+	Egress string `json:"egress"`
+}
+
 // PremiumPool is the premium half of a two-pool user budget (Phase 1).
 type PremiumPool struct {
 	// LimitMilliUSD is the premium pool, carved out of (and at most equal

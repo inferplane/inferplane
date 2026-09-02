@@ -52,14 +52,15 @@ const (
 const rejectedModelLabel = "_rejected"
 
 type ChatHandler struct {
-	r          *router.Router
-	aud        *audit.Writer                                 // nil-safe: unit tests may omit
-	gov        *governance.Governor                          // nil-safe: governance disabled when nil
-	metrics    *metrics.Metrics                              // nil-safe: no-op when nil
-	mask       *filter.Masking                               // nil-safe: masking off when nil (ADR-009)
-	teamPolicy func(team string) (keystore.TeamRecord, bool) // nil-safe: no per-team overrides when nil (D6/D7, ADR-016 fresh-read pattern)
-	bodies     *bodystore.Recorder                           // nil-safe: body capture off when nil (D4, ADR-018)
-	usage      *telemetry.Collector                          // nil-safe: usage telemetry off when nil (control-plane mode)
+	r             *router.Router
+	aud           *audit.Writer                                 // nil-safe: unit tests may omit
+	gov           *governance.Governor                          // nil-safe: governance disabled when nil
+	metrics       *metrics.Metrics                              // nil-safe: no-op when nil
+	mask          *filter.Masking                               // nil-safe: masking off when nil (ADR-009)
+	teamPolicy    func(team string) (keystore.TeamRecord, bool) // nil-safe: no per-team overrides when nil (D6/D7, ADR-016 fresh-read pattern)
+	bodies        *bodystore.Recorder                           // nil-safe: body capture off when nil (D4, ADR-018)
+	usage         *telemetry.Collector                          // nil-safe: usage telemetry off when nil (control-plane mode)
+	egressCeiling func(team, user string) string                // nil-safe: PII egress ceiling off when nil (strategy Phase 2)
 }
 
 // SetMasking wires the masking decision. v1 does NOT mask the OpenAI ingress, so
@@ -82,6 +83,10 @@ func (h *ChatHandler) SetTeamPolicy(fn func(team string) (keystore.TeamRecord, b
 func (h *ChatHandler) SetUsageCollector(c *telemetry.Collector) { h.usage = c }
 
 func (h *ChatHandler) SetBodyRecorder(r *bodystore.Recorder) { h.bodies = r }
+
+// SetEgressCeiling installs the PII egress-ceiling lookup (strategy Phase 2);
+// nil-safe, mirrors anthropicapi.
+func (h *ChatHandler) SetEgressCeiling(fn func(team, user string) string) { h.egressCeiling = fn }
 
 func NewChatHandler(r *router.Router) *ChatHandler { return &ChatHandler{r: r} }
 
@@ -247,6 +252,40 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		} else {
 			chain = filtered
+		}
+	}
+	// PII egress ceiling (strategy Phase 2): enforced fail-closed at the
+	// SAME point as the region lock — on the fully resolved chain, so
+	// budget substitution and provider fallback cannot route around it.
+	// external-masked: a mask-enabled team is already rejected on this
+	// ingress (v1 masks the Anthropic ingress only), so only the
+	// mask-NOT-active case needs a check here.
+	if h.egressCeiling != nil {
+		switch h.egressCeiling(p.Team, identityOf(p)) {
+		case "blocked":
+			h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: 403, Error: audit.DenyPIIBlocked.Ptr()}, traceID)
+			h.metrics.ObserveRequest(ingressName, rejectedModelLabel, "", p.Team, 403, time.Since(start).Seconds(), 0)
+			tracing.SetStatus(span, false, "pii blocked")
+			writeErr(w, 403, "permission_error", "generation requests are blocked for this subject by PII policy")
+			return
+		case "internal-only":
+			if filtered := router.FilterInternal(chain); len(filtered) == 0 {
+				h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: 403, Error: audit.DenyPIINoInternalTarget.Ptr()}, traceID)
+				h.metrics.ObserveRequest(ingressName, rejectedModelLabel, "", p.Team, 403, time.Since(start).Seconds(), 0)
+				tracing.SetStatus(span, false, "pii internal-only")
+				writeErr(w, 403, "permission_error", "PII policy restricts this subject to internal providers and no internal target serves model: "+model)
+				return
+			} else {
+				chain = filtered
+			}
+		case "external-masked":
+			if !h.mask.Enabled(p.Team) {
+				h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: 403, Error: audit.DenyPIIMaskUnavailable.Ptr()}, traceID)
+				h.metrics.ObserveRequest(ingressName, rejectedModelLabel, "", p.Team, 403, time.Since(start).Seconds(), 0)
+				tracing.SetStatus(span, false, "pii mask unavailable")
+				writeErr(w, 403, "permission_error", "PII policy mandates masking for this subject but the masking filter is not active for this team — refusing to send unmasked text externally")
+				return
+			}
 		}
 	}
 	// Governance pre-check (rate/quota/budget) BEFORE the upstream call.

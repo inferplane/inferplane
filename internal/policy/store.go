@@ -337,6 +337,36 @@ func (s *Store) UserLimits(team, user string) (UserLimits, bool) {
 	return UserLimits{}, false
 }
 
+// EgressCeiling folds every PII rule matching (team, user) into the single
+// most-restrictive egress ceiling (strategy Phase 2): blocked >
+// internal-only > external-masked > "" (no ceiling). Later stages may only
+// narrow — this fold IS the narrowing, and the ingress enforces the result.
+func (s *Store) EgressCeiling(team, user string) string {
+	rank := func(e string) int {
+		switch e {
+		case EgressBlocked:
+			return 3
+		case EgressInternalOnly:
+			return 2
+		case EgressExternalMasked:
+			return 1
+		}
+		return 0
+	}
+	ceiling := ""
+	for _, p := range s.snap.Load().policies {
+		if !p.Subject.matches(team, user) {
+			continue
+		}
+		for _, r := range p.Rules {
+			if r.PII != nil && rank(r.PII.Egress) > rank(ceiling) {
+				ceiling = r.PII.Egress
+			}
+		}
+	}
+	return ceiling
+}
+
 // ModelAllowed reports whether every modelAccess rule matching the request's
 // team and user allows the (already-canonicalized) model. ALL matching rules
 // must allow — most-restrictive-wins across team- and user-subject policies

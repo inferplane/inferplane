@@ -69,7 +69,13 @@ type ProviderConfig struct {
 	// region; Auth selects the credential mode (irsa|pod_identity|profile|
 	// static|default) and, for "profile", the named shared-config profile.
 	Region string `json:"region,omitempty"`
-	Auth   struct {
+	// Classification labels the provider's data-residency posture for the
+	// PII egress ceiling (strategy Phase 2): "internal" (self-hosted /
+	// inside the trust boundary) or "external". Empty means EXTERNAL — the
+	// conservative default; an internal-only ceiling reaches only
+	// explicitly-labeled internal providers (the D7 unlabeled-region rule).
+	Classification string `json:"classification,omitempty"`
+	Auth           struct {
 		Mode    string `json:"mode"`
 		Profile string `json:"profile,omitempty"`
 	} `json:"auth,omitempty"`
@@ -1122,6 +1128,18 @@ func ResolveProviders(cfg *Config) error {
 			if err != nil || n < 1 || strconv.Itoa(n) != p.GuardrailVersion {
 				return fmt.Errorf("config: provider %q guardrail_version must be \"\", \"DRAFT\", or a positive integer with no leading zero/sign, got %q", name, p.GuardrailVersion)
 			}
+		}
+		// classification is a residency CONTROL input (strategy Phase 2):
+		// an unrecognized value silently meaning "external" would be
+		// harmless, but one silently meaning nothing on a value the
+		// operator INTENDED as "internal" would flip an internal-only
+		// ceiling to deny-everything (fail closed, at least) — and a typo
+		// like "internel" deserves a load error either way, the
+		// auth.mode/on_missing closed-set posture.
+		switch p.Classification {
+		case "", "internal", "external":
+		default:
+			return fmt.Errorf("config: provider %q classification %q is not a known value (allowed: internal, external; empty means external)", name, p.Classification)
 		}
 		if p.GuardrailID != "" && p.Type != "bedrock" {
 			// Same reasoning as auth_header above: only live.go's bedrock

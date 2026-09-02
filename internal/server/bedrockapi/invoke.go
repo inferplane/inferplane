@@ -38,16 +38,17 @@ const (
 )
 
 type InvokeHandler struct {
-	r          *router.Router
-	holder     *live.Holder
-	aud        *audit.Writer
-	gov        *governance.Governor
-	metrics    *metrics.Metrics
-	mask       *filter.Masking
-	teamPolicy func(team string) (keystore.TeamRecord, bool)
-	bodies     *bodystore.Recorder
-	usage      *telemetry.Collector // nil-safe: usage telemetry off when nil (control-plane mode)
-	streaming  bool
+	r             *router.Router
+	holder        *live.Holder
+	aud           *audit.Writer
+	gov           *governance.Governor
+	metrics       *metrics.Metrics
+	mask          *filter.Masking
+	teamPolicy    func(team string) (keystore.TeamRecord, bool)
+	bodies        *bodystore.Recorder
+	usage         *telemetry.Collector           // nil-safe: usage telemetry off when nil (control-plane mode)
+	egressCeiling func(team, user string) string // nil-safe: PII egress ceiling off when nil (strategy Phase 2)
+	streaming     bool
 }
 
 func NewInvokeHandler(r *router.Router, holder *live.Holder, streaming bool) *InvokeHandler {
@@ -71,6 +72,10 @@ func (h *InvokeHandler) SetTeamPolicy(fn func(team string) (keystore.TeamRecord,
 func (h *InvokeHandler) SetUsageCollector(c *telemetry.Collector) { h.usage = c }
 
 func (h *InvokeHandler) SetBodyRecorder(r *bodystore.Recorder) { h.bodies = r }
+
+// SetEgressCeiling installs the PII egress-ceiling lookup (strategy Phase 2);
+// nil-safe, mirrors anthropicapi.
+func (h *InvokeHandler) SetEgressCeiling(fn func(team, user string) string) { h.egressCeiling = fn }
 
 func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
@@ -204,6 +209,37 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
+	// PII egress ceiling (strategy Phase 2): enforced fail-closed at the
+	// SAME point as the region lock — on the fully resolved chain, so
+	// budget substitution and provider fallback cannot route around it.
+	if h.egressCeiling != nil {
+		switch h.egressCeiling(p.Team, identityOf(p)) {
+		case "blocked":
+			h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: http.StatusForbidden, Error: audit.DenyPIIBlocked.Ptr()}, false, traceID)
+			h.metrics.ObserveRequest(ingressName, model, "", p.Team, http.StatusForbidden, time.Since(start).Seconds(), 0)
+			tracing.SetStatus(span, false, "pii blocked")
+			writeErr(w, http.StatusForbidden, "generation requests are blocked for this subject by PII policy")
+			return
+		case "internal-only":
+			if filtered := router.FilterInternal(chain); len(filtered) == 0 {
+				h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: http.StatusForbidden, Error: audit.DenyPIINoInternalTarget.Ptr()}, false, traceID)
+				h.metrics.ObserveRequest(ingressName, model, "", p.Team, http.StatusForbidden, time.Since(start).Seconds(), 0)
+				tracing.SetStatus(span, false, "pii internal-only")
+				writeErr(w, http.StatusForbidden, "PII policy restricts this subject to internal providers and no internal target serves model: "+model)
+				return
+			} else {
+				chain = filtered
+			}
+		case "external-masked":
+			if !h.mask.Enabled(p.Team) {
+				h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: http.StatusForbidden, Error: audit.DenyPIIMaskUnavailable.Ptr()}, false, traceID)
+				h.metrics.ObserveRequest(ingressName, model, "", p.Team, http.StatusForbidden, time.Since(start).Seconds(), 0)
+				tracing.SetStatus(span, false, "pii mask unavailable")
+				writeErr(w, http.StatusForbidden, "PII policy mandates masking for this subject but the masking filter is not active for this team — refusing to send unmasked text externally")
+				return
+			}
+		}
+	}
 	piiMasked := false
 	if h.mask.Enabled(p.Team) {
 		masked, n, err := maskBody(raw, h.mask.Filter)

@@ -225,6 +225,13 @@ func (s *State) Region(name string) string {
 	return s.providerConfigs[name].Region
 }
 
+// Classification returns the provider's data-residency label (strategy
+// Phase 2 PII egress ceiling): "internal" | "external" | "" (= external,
+// the conservative default).
+func (s *State) Classification(name string) string {
+	return s.providerConfigs[name].Classification
+}
+
 // ProviderConfigs returns a copy of the source provider configs, for deriving
 // the secret-free admin view (live never imports the view package). The
 // returned configs still carry the resolved APIKey — the view layer drops it.

@@ -619,7 +619,22 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// and user-subject rules both apply, user matched on the key's Owner.
 	if polStore != nil {
 		r.SetPolicyGate(func(p keystore.Principal, model string, canonical func(string) string) bool {
-			return polStore.ModelAllowed(p.Team, p.Owner, model, canonical)
+			// Phase 0b-2 identity rule: the durable UserID is the policy
+			// identity (Owner the pre-migration fallback), and a policy may
+			// name either the canonical iss#sub or the bare sub — ALL rules
+			// matching either form must allow (ANDing the two lookups is
+			// exactly most-restrictive-wins across both spellings).
+			user := p.UserID
+			if user == "" {
+				user = p.Owner
+			}
+			if !polStore.ModelAllowed(p.Team, user, model, canonical) {
+				return false
+			}
+			if i := strings.Index(user, "#"); i >= 0 {
+				return polStore.ModelAllowed(p.Team, user[i+1:], model, canonical)
+			}
+			return true
 		})
 	}
 	// ADR-041 budget-tier substitution. Control-plane mode: tiers is
@@ -899,7 +914,24 @@ func newGateway(cfgPath string) (*gateway, error) {
 	if pstore != nil {
 		writer = g
 	}
-	g.dataSrv = &http.Server{Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol))}
+	// PII egress ceiling (strategy Phase 2): folded most-restrictive by the
+	// policy store; identity derivation matches subjectOf (UserID, Owner
+	// fallback), and both the canonical iss#sub and bare-sub policy
+	// spellings apply — the more restrictive of the two wins, same rule as
+	// the model-access gate above. nil polStore = no ceiling anywhere.
+	egressCeiling := func(team, user string) string { return "" }
+	if polStore != nil {
+		egressCeiling = func(team, user string) string {
+			c := polStore.EgressCeiling(team, user)
+			if i := strings.Index(user, "#"); i >= 0 {
+				if c2 := polStore.EgressCeiling(team, user[i+1:]); egressRank(c2) > egressRank(c) {
+					c = c2
+				}
+			}
+			return c
+		}
+	}
+	g.dataSrv = &http.Server{Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol), server.WithEgressCeiling(egressCeiling))}
 	// Capability map the console reads on bootstrap (spec §4.4). Phase 0a:
 	// analytics index not built yet; provider_store + guardrails reflect what
 	// this assembly already knows. Later phases flip the rest on as they land.
@@ -1817,4 +1849,19 @@ func standaloneActiveTierSubstitutions(store *policy.Store, gov *governance.Gove
 	table := tier.NewTable()
 	table.Set(active)
 	return table.Get(team)
+}
+
+// egressRank orders PII egress ceilings most→least restrictive, mirroring
+// policy.Store.EgressCeiling's fold so the two-spelling merge above cannot
+// disagree with the store's own.
+func egressRank(e string) int {
+	switch e {
+	case policy.EgressBlocked:
+		return 3
+	case policy.EgressInternalOnly:
+		return 2
+	case policy.EgressExternalMasked:
+		return 1
+	}
+	return 0
 }

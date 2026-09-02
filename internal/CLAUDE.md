@@ -32,6 +32,13 @@ in the code and in `docs/decisions/`.
   sentinel on pre-resolution rejects).
 - A policy from `policy/`/`policystore/` can only **narrow** a key's allow-list or
   budget, never widen one already set elsewhere (`router.SetPolicyGate`).
+- PII egress ceilings (strategy Phase 2 v1) are enforced on the RESOLVED chain at
+  the same point as the region lock, in every ingress: `Store.EgressCeiling`
+  folds `pii: {egress}` rules most-restrictive (blocked > internal-only >
+  external-masked); `router.FilterInternal` keeps only providers explicitly
+  `classification: "internal"` (unlabeled = external, the D7 fail-closed
+  rule); an `external-masked` ceiling on a team without an active ADR-009
+  mask refuses — a mandated mask that cannot run never goes external.
 - RBAC re-check after routing: `router.FilterModelAllowed`/`FilterRegions` must run
   right after `ResolveChain` in every ingress handler — the router has no `Principal`
   in scope, so a model-fallback or region-filtered target appended *after* the
