@@ -49,32 +49,50 @@ opencode run 'say ok'
 - Note: OpenCode fetches its provider catalog from models.dev at startup —
   it needs outbound network once, unrelated to the gateway path.
 
-## Codex 0.152.1 — ❌ blocked: requires the Responses API
+## Codex 0.152.1 — ✅ full turn served (via the new `/v1/responses` ingress)
+
+The first attempt EXPOSED the gap this record exists to catch: current
+Codex has REMOVED the Chat Completions wire for custom providers
+(openai/codex discussion #7782) —
+
+```
+Error loading config.toml: `wire_api = "chat"` is no longer supported.
+How to fix: set `wire_api = "responses"` in your provider config.
+```
+
+— superseding the Chat-shape Codex fixtures in `agent_wire_test.go`, which
+pin a wire current Codex no longer speaks. The gap was closed the same day:
+`internal/server/responsesapi` serves `POST /v1/responses` as an adapter
+over the chat ingress, built against Codex's REAL captured request (the
+trimmed capture is that package's test fixture). With
+`wire_api = "responses"`:
 
 ```bash
 # ~/.codex/config.toml: model_provider mayu, base_url http://127.0.0.1:9102/v1,
-# wire_api = "chat"
-codex exec 'say ok'
-# → Error loading config.toml: `wire_api = "chat"` is no longer supported.
-#   How to fix: set `wire_api = "responses"` in your provider config.
+# wire_api = "responses", env_key MAYU_API_KEY = the virtual key
+codex exec --skip-git-repo-check 'say ok'
+# → exit 0, zero protocol errors, printed the upstream's reply:
+#   benchmark response
+#   tokens used: 31   (usage carried through response.completed)
 ```
 
-Current Codex has REMOVED the Chat Completions wire for custom providers
-(openai/codex discussion #7782): a provider must serve the OpenAI
-**Responses API** (`POST /v1/responses`). mayu does not serve it, so Codex
-cannot use inferplane today, full stop. This finding supersedes the
-Chat-shape Codex fixtures in `agent_wire_test.go` — those pin a wire current
-Codex no longer speaks. Purpose #1's Codex claim therefore requires a
-`/v1/responses` ingress; tracked as the top model-compatibility gap
-(docs/comparison.md §6, roadmap Purpose table).
+Codex's 9-tool agentic request (exec_command + 8 more, 17KB instructions,
+`reasoning`/`include`/`prompt_cache_key` knobs) streams through the full
+pipeline; untranslatable params are dropped WITH disclosure
+(`x-inferplane-responses-params-dropped`), and function tools survive the
+round trip (the package's tests pin the tool-call reassembly from split
+SSE deltas). Non-function tools (`namespace`, `web_search`) have no chat
+equivalent and are disclosed as dropped — Codex's core exec loop does not
+depend on them.
 
 ## What this does and does not prove
 
-Proves: the two working clients complete real turns through the full
+Proves: all THREE target clients complete real turns through the full
 pipeline — key auth, RBAC, governance PreCheck with budget reservation,
 provider egress, settle with integer-µUSD cost, hash-chained audit — with
-zero client-side patches, and the failure mode for the third is precisely
-identified from the client's own error, not guessed. Does not prove:
+zero client-side patches, and the one protocol gap found was identified
+from the client's own error and closed against its own captured wire, not
+guessed from documentation. Does not prove:
 production adoption, real-provider traffic, or performance under a real
 model (see `benchmarks/gwcompare/README.md` for what the latency numbers do
 and don't cover).

@@ -303,15 +303,17 @@ no-network-hop advantage.
   but it is a real loss for any buyer scoring provider-count checkboxes.
 - **Real-client verification (2026-09-02,
   [docs/verification/coding-agents.md](verification/coding-agents.md)):**
-  Claude Code 2.1.258 and OpenCode 1.18.26 each completed a REAL turn
-  through a running mayu with a virtual key — served, settled in µUSD, and
-  hash-chain-audited, zero client-side patches. **Codex 0.152.1 is
-  BLOCKED**: current Codex has removed `wire_api = "chat"` for custom
-  providers and requires the OpenAI **Responses API**
-  (`POST /v1/responses`), which mayu does not serve — the Chat-shape Codex
-  fixtures in `agent_wire_test.go` pin a wire current Codex no longer
-  speaks. Closing Purpose #1 for Codex now means a `/v1/responses`
-  ingress, the top model-compatibility work item.
+  ALL THREE target clients — Claude Code 2.1.258, OpenCode 1.18.26, and
+  Codex 0.152.1 — completed REAL turns through a running mayu with a
+  virtual key: served, settled in µUSD, hash-chain-audited, zero
+  client-side patches. Codex initially exposed a genuine gap (current
+  Codex removed `wire_api = "chat"` and requires the OpenAI Responses
+  API), closed the same day: `POST /v1/responses`
+  (`internal/server/responsesapi`) adapts the Responses wire onto the
+  chat pipeline, built and tested against Codex's own captured request.
+  Neither LiteLLM nor Portkey advertises coding-agent client verification
+  at this level; against a real provider (vs this mock upstream) is the
+  remaining verification step.
 
 **Verdict.** Behind on breadth, ahead on depth-where-it-counts. The
 winning frame is "the gateway that doesn't corrupt your coding agent's

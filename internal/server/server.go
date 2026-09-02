@@ -27,6 +27,7 @@ import (
 	"github.com/inferplane/inferplane/internal/server/configapi"
 	"github.com/inferplane/inferplane/internal/server/debugapi"
 	"github.com/inferplane/inferplane/internal/server/openaiapi"
+	"github.com/inferplane/inferplane/internal/server/responsesapi"
 	"github.com/inferplane/inferplane/internal/server/usageapi"
 	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/pkg/ulid"
@@ -110,6 +111,11 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	chat.SetUsageCollector(o.usage)
 	chat.SetEgressCeiling(o.egressCeiling)
 	mux.Handle("POST /v1/chat/completions", chat)
+	// OpenAI Responses API (POST /v1/responses): the wire current Codex
+	// requires for custom providers. An ADAPTER over the chat ingress —
+	// same auth/RBAC/governance/PII/audit pipeline, translated both ways —
+	// see internal/server/responsesapi.
+	mux.Handle("POST /v1/responses", responsesapi.New(chat))
 	invoke := bedrockapi.NewInvokeHandlerMetrics(r, holder, aud, gov, m, false)
 	invoke.SetMasking(mask)
 	invoke.SetTeamPolicy(teamPolicy)
