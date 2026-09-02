@@ -35,10 +35,18 @@ in the code and in `docs/decisions/`.
 - PII egress ceilings (strategy Phase 2 v1) are enforced on the RESOLVED chain at
   the same point as the region lock, in every ingress: `Store.EgressCeiling`
   folds `pii: {egress}` rules most-restrictive (blocked > internal-only >
-  external-masked); `router.FilterInternal` keeps only providers explicitly
-  `classification: "internal"` (unlabeled = external, the D7 fail-closed
-  rule); an `external-masked` ceiling on a team without an active ADR-009
-  mask refuses — a mandated mask that cannot run never goes external.
+  external-masked > external-unmodified); `router.FilterInternal` keeps only
+  providers explicitly `classification: "internal"` (unlabeled = external,
+  the D7 fail-closed rule); an `external-masked` ceiling on a team without
+  an active ADR-009 mask refuses — a mandated mask that cannot run never
+  goes external. `external-unmodified` egresses VERBATIM only after a
+  completed detector pass reports nothing protected: the detector is the
+  SAME `maskBody` pass masking uses, run detect-only into the typed
+  `filter.Detection` result, so detection and transformation can never
+  disagree; no configured detector, a detector error, or a hit all refuse
+  (`pii_detector_unavailable` / `pii_protected_detected`), and the OpenAI
+  ingress refuses it outright in v1 (no `maskBody` there — the same posture
+  as its masked-team rejection).
 - RBAC re-check after routing: `router.FilterModelAllowed`/`FilterRegions` must run
   right after `ResolveChain` in every ingress handler — the router has no `Principal`
   in scope, so a model-fallback or region-filtered target appended *after* the

@@ -238,6 +238,28 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				writeErr(w, http.StatusForbidden, "PII policy mandates masking for this subject but the masking filter is not active for this team — refusing to send unmasked text externally")
 				return
 			}
+		case "external-unmodified":
+			// Requires a COMPLETED detector chain reporting nothing
+			// protected: the detector is the SAME maskBody pass masking
+			// uses, run detect-only (output discarded) so detection and
+			// transformation can never disagree. No detector, a detector
+			// error, or a hit all refuse — fail closed, per the contract.
+			if h.mask == nil || h.mask.Filter == nil {
+				h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: http.StatusForbidden, Error: audit.DenyPIIDetectorUnavailable.Ptr()}, false, traceID)
+				h.metrics.ObserveRequest(ingressName, model, "", p.Team, http.StatusForbidden, time.Since(start).Seconds(), 0)
+				tracing.SetStatus(span, false, "pii detector unavailable")
+				writeErr(w, http.StatusForbidden, "PII policy requires detector-verified unmodified egress but no detector filter is configured — refusing")
+				return
+			}
+			_, n, derr := maskBody(raw, h.mask.Filter)
+			det := filter.Detection{Redactions: n}
+			if derr != nil || !det.Clean() {
+				h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: http.StatusForbidden, Error: audit.DenyPIIProtectedDetected.Ptr()}, false, traceID)
+				h.metrics.ObserveRequest(ingressName, model, "", p.Team, http.StatusForbidden, time.Since(start).Seconds(), 0)
+				tracing.SetStatus(span, false, "pii protected detected")
+				writeErr(w, http.StatusForbidden, "PII policy allows only detector-verified unmodified egress and the detector reported protected content — refusing")
+				return
+			}
 		}
 	}
 	piiMasked := false

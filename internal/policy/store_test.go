@@ -529,3 +529,43 @@ func TestEmptyStoreRejectsReloadAndWatch(t *testing.T) {
 		t.Fatal("Watch on a control-plane-fed store must report and return")
 	}
 }
+
+// All four egress ceilings load, and the (team, user) fold picks the most
+// restrictive across matching rules — external-unmodified is the loosest
+// non-empty ceiling, so any other matching ceiling overrides it.
+func TestEgressCeilingFold(t *testing.T) {
+	dir := t.TempDir()
+	writePolicy(t, dir, "pii.yaml", `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: pii-team }
+spec:
+  subject: { team: sec }
+  rules:
+  - name: verify
+    failurePolicy: FailClosed
+    pii: { egress: external-unmodified }
+---
+apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: pii-user }
+spec:
+  subject: { user: strict }
+  rules:
+  - name: wall
+    failurePolicy: FailClosed
+    pii: { egress: internal-only }
+`)
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if got := s.EgressCeiling("sec", "anyone"); got != EgressExternalUnmodified {
+		t.Fatalf("team-only fold: got %q, want %q", got, EgressExternalUnmodified)
+	}
+	if got := s.EgressCeiling("sec", "strict"); got != EgressInternalOnly {
+		t.Fatalf("user rule must override the looser team ceiling: got %q, want %q", got, EgressInternalOnly)
+	}
+	if got := s.EgressCeiling("other", "nobody"); got != "" {
+		t.Fatalf("unmatched subject: got %q, want empty", got)
+	}
+}

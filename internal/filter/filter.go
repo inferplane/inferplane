@@ -18,6 +18,18 @@ type RequestFilter interface {
 	Mask(text string) (masked string, redactions int)
 }
 
+// Detection is the typed detector result (strategy Phase 2): the number of
+// protected spans the filter chain found in the request text. It is
+// derived from the SAME Mask pass enforcement uses (run detect-only, output
+// discarded), so detection and transformation can never disagree about
+// what counts as protected.
+type Detection struct {
+	Redactions int
+}
+
+// Clean reports whether the detector chain found nothing protected.
+func (d Detection) Clean() bool { return d.Redactions == 0 }
+
 // Masking is the resolved, per-request masking decision the assembly builds from
 // the `plugins` config + the registry, and injects into the request handlers.
 // It pairs the resolved filter with the team scope (Global = all teams). A nil

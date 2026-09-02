@@ -4,9 +4,13 @@ package main
 // action; the ingress enforces it fail-closed on the RESOLVED chain —
 // blocked refuses outright, internal-only reaches only explicitly
 // internal-classified providers, external-masked refuses when the masking
-// filter is not active for the team.
+// filter is not active for the team, and external-unmodified egresses
+// verbatim only after a completed detector pass reports nothing protected
+// (no detector, a detector error, or a hit all refuse).
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -126,5 +130,77 @@ spec:
 	r.Body.Close()
 	if r.StatusCode != http.StatusOK {
 		t.Fatalf("unrestricted subject: status %d, want 200", r.StatusCode)
+	}
+}
+
+// postMessagesContent is postMessages with a caller-chosen user message, for
+// driving the PII detector.
+func postMessagesContent(t *testing.T, dataURL, key, model, content string) (int, string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{
+		"model": model, "max_tokens": 16,
+		"messages": []any{map[string]any{"role": "user", "content": content}},
+	})
+	req, _ := http.NewRequest(http.MethodPost, dataURL+"/v1/messages", bytes.NewReader(body))
+	req.Header.Set("x-api-key", key)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Anthropic-Version", "2023-06-01")
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /v1/messages: %v", err)
+	}
+	b, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	return r.StatusCode, string(b)
+}
+
+const piiUnmodifiedPolicy = `apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata: { name: pii-verified }
+spec:
+  subject: { user: sub-verified }
+  rules:
+  - name: verify
+    failurePolicy: FailClosed
+    pii: { egress: external-unmodified }
+`
+
+func TestE2EPIIExternalUnmodifiedCeiling(t *testing.T) {
+	up := newAnthropicUpstream(t)
+	dataURL, adminURL, _ := bootGateway(t, func(cfg map[string]any, dir string) {
+		teamsAPIConfig(up.srv.URL)(cfg, dir)
+		cfg["teams"] = map[string]any{"pii-team": map[string]any{"allowed_models": []any{"*"}}}
+		cfg["plugins"] = []any{map[string]any{"name": "pii-mask", "teams": []any{"pii-team"}}}
+		polDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(polDir, "pii.yaml"), []byte(piiUnmodifiedPolicy), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg["policies"] = []any{polDir}
+	})
+	_, key := createOwnedKey(t, adminURL, "pii-team", "sub-verified", []string{"*"})
+
+	// Detector-verified clean: served, and the upstream saw the text verbatim.
+	st, body := postMessagesContent(t, dataURL, key, "claude-test", "summarize the quarterly report")
+	if st != http.StatusOK {
+		t.Fatalf("clean request under external-unmodified: status %d, want 200: %s", st, body)
+	}
+
+	// Detector hit (an email address): must never leave, modified or not.
+	st, body = postMessagesContent(t, dataURL, key, "claude-test", "email alice@example.com the report")
+	if st != http.StatusForbidden || !strings.Contains(body, "protected") {
+		t.Fatalf("PII under external-unmodified: status %d body %s, want 403 naming protected content", st, body)
+	}
+}
+
+func TestE2EPIIExternalUnmodifiedWithoutDetectorRefuses(t *testing.T) {
+	up := newAnthropicUpstream(t)
+	// No plugins block at all: the "nothing protected" claim cannot be
+	// verified, so every request under the ceiling refuses.
+	dataURL, adminURL := piiGateway(t, up.srv.URL, piiUnmodifiedPolicy)
+	_, key := createOwnedKey(t, adminURL, "pii-team", "sub-verified", []string{"*"})
+
+	st, body := postMessagesContent(t, dataURL, key, "claude-test", "summarize the quarterly report")
+	if st != http.StatusForbidden || !strings.Contains(body, "detector") {
+		t.Fatalf("external-unmodified without a detector: status %d body %s, want 403 naming the detector", st, body)
 	}
 }

@@ -163,16 +163,15 @@ type BudgetRule struct {
 	Period BudgetPeriod `json:"period,omitempty"`
 }
 
-// LeaseSpec sizes a budget lease. Both fields are optional; defaults are
-// fixed by ADR-032 and applied in internal/policy.
 // PIIRule selects the PII egress ceiling for the subject (strategy
 // Phase 2): the policy engine, not the plugin, picks the action, and later
 // stages may only narrow it. "blocked" refuses every generation request;
 // "internal-only" restricts the resolved chain to internal-classified
 // providers; "external-masked" requires the PII masking filter to be
-// active for the team (fail-closed when it is not). "external-unmodified"
-// is part of the schema but not yet enforceable — it requires the typed
-// detector chain — and is REJECTED at load rather than accepted-and-ignored.
+// active for the team (fail-closed when it is not); "external-unmodified"
+// requires a COMPLETED detector pass reporting nothing protected — no
+// configured detector, a detector error, or a detector hit all refuse
+// (fail-closed), and only a verified-clean request egresses verbatim.
 type PIIRule struct {
 	Egress string `json:"egress"`
 }
@@ -193,6 +192,8 @@ type PremiumPool struct {
 	Fallback []string `json:"fallback"`
 }
 
+// LeaseSpec sizes a budget lease. Both fields are optional; defaults are
+// fixed by ADR-032 and applied in internal/policy.
 type LeaseSpec struct {
 	// GrantMilliUSD is how much budget one lease grants one data plane.
 	// 0 = default: 0.1% of LimitMilliUSD, floored at 1 milliUSD.

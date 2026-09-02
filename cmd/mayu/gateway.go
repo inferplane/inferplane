@@ -1857,10 +1857,12 @@ func standaloneActiveTierSubstitutions(store *policy.Store, gov *governance.Gove
 func egressRank(e string) int {
 	switch e {
 	case policy.EgressBlocked:
-		return 3
+		return 4
 	case policy.EgressInternalOnly:
-		return 2
+		return 3
 	case policy.EgressExternalMasked:
+		return 2
+	case policy.EgressExternalUnmodified:
 		return 1
 	}
 	return 0

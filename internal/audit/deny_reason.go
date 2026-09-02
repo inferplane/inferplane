@@ -32,6 +32,14 @@ const (
 	DenyPIIBlocked          DenyReason = "pii_blocked"
 	DenyPIINoInternalTarget DenyReason = "pii_no_internal_target"
 	DenyPIIMaskUnavailable  DenyReason = "pii_mask_unavailable"
+	// DenyPIIDetectorUnavailable / DenyPIIProtectedDetected: an
+	// "external-unmodified" ceiling requires a COMPLETED detector chain
+	// reporting nothing protected — no configured detector means the claim
+	// cannot be verified (refuse), and a detector hit means the request
+	// must not leave unmodified (refuse; the operator's remedy is an
+	// external-masked policy for maskable flows).
+	DenyPIIDetectorUnavailable DenyReason = "pii_detector_unavailable"
+	DenyPIIProtectedDetected   DenyReason = "pii_protected_detected"
 	// DenyPricingMissing: pricing.on_missing is "block" and the resolved
 	// (provider, upstream) has no rate, so serving the request would bill 0
 	// (ADR-030). Distinct from a budget denial — nothing was exceeded; the

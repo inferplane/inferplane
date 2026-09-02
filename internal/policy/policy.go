@@ -108,9 +108,8 @@ type Rule struct {
 }
 
 // PII is the internal form of a PII egress-ceiling rule (strategy Phase 2).
-// Egress is one of EgressBlocked, EgressInternalOnly, EgressExternalMasked —
-// "external-unmodified" is rejected at conversion until the typed detector
-// chain exists.
+// Egress is one of the Egress* constants below; conversion rejects anything
+// else rather than accepting-and-ignoring it.
 type PII struct {
 	Egress string
 }
@@ -118,9 +117,10 @@ type PII struct {
 // The enforceable egress ceilings, ordered most→least restrictive (the
 // request-time fold picks the most restrictive across matching rules).
 const (
-	EgressBlocked        = "blocked"
-	EgressInternalOnly   = "internal-only"
-	EgressExternalMasked = "external-masked"
+	EgressBlocked            = "blocked"
+	EgressInternalOnly       = "internal-only"
+	EgressExternalMasked     = "external-masked"
+	EgressExternalUnmodified = "external-unmodified"
 )
 
 // Budget is the internal form of a budget rule. All amounts are integer
@@ -299,12 +299,10 @@ func FromV1Alpha1(doc *v1alpha1.GovernancePolicy) (*Policy, error) {
 			r.ModelAccess = &ModelAccess{Allow: append([]string(nil), wr.ModelAccess.Allow...)}
 		case wr.PII != nil:
 			switch wr.PII.Egress {
-			case EgressBlocked, EgressInternalOnly, EgressExternalMasked:
+			case EgressBlocked, EgressInternalOnly, EgressExternalMasked, EgressExternalUnmodified:
 				r.PII = &PII{Egress: wr.PII.Egress}
-			case "external-unmodified":
-				return nil, reject(wr.Name, "pii.egress external-unmodified requires the typed detector chain and is not yet enforceable by this build — refusing rather than accepting-and-ignoring")
 			default:
-				return nil, reject(wr.Name, fmt.Sprintf("unknown pii.egress %q (supported: %q, %q, %q)", wr.PII.Egress, EgressBlocked, EgressInternalOnly, EgressExternalMasked))
+				return nil, reject(wr.Name, fmt.Sprintf("unknown pii.egress %q (supported: %q, %q, %q, %q)", wr.PII.Egress, EgressBlocked, EgressInternalOnly, EgressExternalMasked, EgressExternalUnmodified))
 			}
 		case wr.Rate != nil:
 			if wr.Rate.RPM < 0 || wr.Rate.TPM < 0 {

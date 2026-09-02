@@ -286,6 +286,16 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				writeErr(w, 403, "permission_error", "PII policy mandates masking for this subject but the masking filter is not active for this team — refusing to send unmasked text externally")
 				return
 			}
+		case "external-unmodified":
+			// v1 runs the detector on the Anthropic and Bedrock ingresses
+			// only (this ingress has no maskBody — the same reason masked
+			// teams are rejected here). No detector ⇒ the "nothing
+			// protected" claim cannot be verified ⇒ refuse, fail closed.
+			h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: 403, Error: audit.DenyPIIDetectorUnavailable.Ptr()}, traceID)
+			h.metrics.ObserveRequest(ingressName, rejectedModelLabel, "", p.Team, 403, time.Since(start).Seconds(), 0)
+			tracing.SetStatus(span, false, "pii detector unavailable")
+			writeErr(w, 403, "permission_error", "PII policy requires detector-verified unmodified egress, which this ingress cannot verify — use the Anthropic ingress or an internal-only/masked policy")
+			return
 		}
 	}
 	// Governance pre-check (rate/quota/budget) BEFORE the upstream call.

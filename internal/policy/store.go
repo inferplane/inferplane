@@ -339,16 +339,19 @@ func (s *Store) UserLimits(team, user string) (UserLimits, bool) {
 
 // EgressCeiling folds every PII rule matching (team, user) into the single
 // most-restrictive egress ceiling (strategy Phase 2): blocked >
-// internal-only > external-masked > "" (no ceiling). Later stages may only
-// narrow — this fold IS the narrowing, and the ingress enforces the result.
+// internal-only > external-masked > external-unmodified > "" (no ceiling).
+// Later stages may only narrow — this fold IS the narrowing, and the
+// ingress enforces the result.
 func (s *Store) EgressCeiling(team, user string) string {
 	rank := func(e string) int {
 		switch e {
 		case EgressBlocked:
-			return 3
+			return 4
 		case EgressInternalOnly:
-			return 2
+			return 3
 		case EgressExternalMasked:
+			return 2
+		case EgressExternalUnmodified:
 			return 1
 		}
 		return 0
