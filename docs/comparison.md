@@ -150,12 +150,16 @@ guardrail/PII rows must close before claiming the dimension outright.
   EWMA flow, half stays the idle floor. Still per-replica: token quotas,
   per-key rates, and standalone mode.
 - Per-user budget and standalone-mode budget have no lease (N× exposure,
-  ADR-042 accepted limitation); premium-pool → fallback → total-cap user
-  state machine doesn't exist yet (strategy Phase 1).
+  ADR-042 accepted limitation). The user ladder itself shipped (premium
+  pool → approved fallback → total cap, 2026-09-02), and budget windows
+  now reserve a request's cost upper bound atomically from pre-check to
+  settle — concurrent near-cap requests cannot bypass a block-posture cap
+  on one plane; the cross-plane half is the lease/user-key gap above.
 
-**Verdict.** Ahead on architecture and on substitution; behind on global
-rate accuracy until roadmap ① ships. Winning the dimension outright =
-S1 (rate shares + durable ledger) plus strategy Phase 1.
+**Verdict.** Ahead on architecture, on substitution, and now on global
+rate accuracy (roadmap ① shipped) and single-plane budget atomicity.
+The remaining cost-control caveats are user-keyed leases and
+standalone-mode leases.
 
 ## 3. Cost accuracy
 

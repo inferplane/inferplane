@@ -314,8 +314,13 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeErr(w, dec.Status, govErrType(dec.Status), dec.Reason)
 		return
 	}
+	// Cost upper bound for reserve/settle (strategy Phase 1) — see the
+	// anthropicapi twin for the full rationale: estimated input plus the
+	// request's own max_tokens of output at the FIRST target's rate,
+	// computed once so hold and release always match.
+	estCost := governance.CostUpperBound(table, chain[0].ProviderName, chain[0].Upstream, estimateTokens(raw), deref(canonical.MaxTokens))
 	if h.gov != nil {
-		dec := h.gov.PreCheck(subjectOf(p), keyPolicyOf(p), estimateTokens(raw))
+		dec := h.gov.PreCheckCost(subjectOf(p), keyPolicyOf(p), estimateTokens(raw), estCost)
 		if !dec.Allowed {
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
@@ -355,9 +360,9 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		var retriable bool
 		if stream {
-			retriable = h.serveStream(w, req, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
+			retriable = h.serveStream(w, req, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table, estCost)
 		} else {
-			retriable = h.serveComplete(w, req, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
+			retriable = h.serveComplete(w, req, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table, estCost)
 		}
 		if !retriable {
 			return
@@ -374,7 +379,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // serveComplete proxies one non-streaming target. It returns retriable=true on a
 // pre-TTFT failure (transport error or upstream 5xx/429) when a next target
 // exists (!last); otherwise it writes the response/error and returns false.
-func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
+func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table, estCost int64) (retriable bool) {
 	pr.ParamsStripped = nil // per-attempt: a failed target's strips must not leak into this one's disclosure
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
@@ -449,7 +454,7 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 	var cost *audit.CostRef
 	if resp.Parsed != nil {
 		usage = usageRef(resp.Parsed.Usage)
-		cost = h.settle(p, providerName, upstream, resp.Parsed.Usage, table, estimateTokens(pr.RawBody))
+		cost = h.settle(p, providerName, upstream, resp.Parsed.Usage, table, estimateTokens(pr.RawBody), estCost)
 		h.observeTokens(model, providerName, p.Team, resp.Parsed.Usage)
 	}
 	// Body capture (D4, ADR-018): copy-only, AFTER the response was already
@@ -469,7 +474,7 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 // serveStream proxies one streaming target. Fallback is PRE-TTFT ONLY: Stream()
 // erroring before any event with a next target available (!last) returns
 // retriable=true. Once the first event is rendered the response is committed.
-func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
+func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table, estCost int64) (retriable bool) {
 	pr.ParamsStripped = nil // per-attempt: a failed target's strips must not leak into this one's disclosure
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
@@ -538,7 +543,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 			// cost — bill them (ADR-030). Before this, a stream that broke
 			// mid-flight skipped settle() entirely and everything already
 			// streamed was free, with no pricing_missing flag to show it.
-			partialCost := h.settle(p, providerName, upstream, lastUsage, table, estimateTokens(pr.RawBody))
+			partialCost := h.settle(p, providerName, upstream, lastUsage, table, estimateTokens(pr.RawBody), estCost)
 			// …and count them, on the same usage settle() just billed (see
 			// messages.go's twin: metering only the clean path left the token
 			// counters below the billed spend for every interrupted stream).
@@ -584,7 +589,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 		w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
 	}
-	cost := h.settle(p, providerName, upstream, lastUsage, table, estimateTokens(pr.RawBody))
+	cost := h.settle(p, providerName, upstream, lastUsage, table, estimateTokens(pr.RawBody), estCost)
 	h.observeTokens(model, providerName, p.Team, lastUsage)
 	// Body capture (D4, ADR-018): REQUEST ONLY for streams (no buffered
 	// response bytes exist to capture — see messages.go's serveStream).
@@ -629,7 +634,7 @@ func govErrType(status int) string {
 // CostRef. nil when governance is disabled or there is no usage. The cost key is
 // (providerName, upstream-model) to match the pricing table. Cache writes are
 // TTL-tiered via schema.Usage.CacheWriteTiers (ADR-030).
-func (h *ChatHandler) settle(p keystore.Principal, providerName, upstream string, u *schema.Usage, table *pricing.Table, estimatedTokens int64) *audit.CostRef {
+func (h *ChatHandler) settle(p keystore.Principal, providerName, upstream string, u *schema.Usage, table *pricing.Table, estimatedTokens, estCost int64) *audit.CostRef {
 	if h.gov == nil || u == nil {
 		return nil
 	}
@@ -641,7 +646,7 @@ func (h *ChatHandler) settle(p keystore.Principal, providerName, upstream string
 		CacheWrite5m: write5m,
 		CacheWrite1h: write1h,
 	}
-	cost, missing := h.gov.Settle(subjectOf(p), keyPolicyOf(p), providerName, upstream, pu, table, estimatedTokens)
+	cost, missing := h.gov.SettleCost(subjectOf(p), keyPolicyOf(p), providerName, upstream, pu, table, estimatedTokens, estCost)
 	if h.usage != nil {
 		// Attribute to the UPSTREAM model — the name pricing billed.
 		h.usage.Record(p.Team, identityOf(p), upstream, pu, cost)

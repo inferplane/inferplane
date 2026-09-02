@@ -270,8 +270,12 @@ type blockingStore struct{ resets map[string]time.Time }
 func (b blockingStore) Check(string, int64, int64, budget.Window) budget.Decision {
 	return budget.Block
 }
-func (b blockingStore) Debit(string, int64, budget.Window) {}
-func (b blockingStore) Spent(string, budget.Window) int64  { return 0 }
+func (b blockingStore) TryReserve(string, int64, int64, budget.Window, time.Duration) budget.Decision {
+	return budget.Block
+}
+func (b blockingStore) Release(string, int64, budget.Window) {}
+func (b blockingStore) Debit(string, int64, budget.Window)   {}
+func (b blockingStore) Spent(string, budget.Window) int64    { return 0 }
 func (b blockingStore) ResetsAt(_ string, w budget.Window) time.Time {
 	return b.resets[w.Tag()]
 }

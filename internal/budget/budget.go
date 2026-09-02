@@ -41,6 +41,18 @@ func (d Decision) String() string {
 
 type BudgetStore interface {
 	Check(key string, estimateMicros, limitMicros int64, w Window) Decision
+	// TryReserve is the atomic check-and-reserve half of reserve/settle
+	// (strategy Phase 1): it admits the request only if spent + every
+	// OUTSTANDING reservation + estimateMicros fits limitMicros, and on
+	// Allow records a reservation of estimateMicros that expires at ttl —
+	// so N concurrent near-cap requests cannot all pass the same remaining
+	// balance. The caller releases the reservation at settle (Release) and
+	// the TTL self-heals a leak (a crash between reserve and settle);
+	// estimateMicros <= 0 degrades to a plain Check (nothing to reserve).
+	TryReserve(key string, estimateMicros, limitMicros int64, w Window, ttl time.Duration) Decision
+	// Release removes ONE outstanding reservation of exactly estimateMicros
+	// (a no-op when none matches — already expired, or the window rolled).
+	Release(key string, estimateMicros int64, w Window)
 	Debit(key string, actualMicros int64, w Window)
 	// Spent reports µUSD debited in the current window (0 if none or elapsed).
 	// Used for the budget-utilization gauge and alert threshold evaluation
@@ -131,6 +143,33 @@ func (w Window) loc() *time.Location {
 type win struct {
 	spent     int64
 	windowEnd time.Time
+	// reservations are the window's outstanding reserve/settle holds
+	// (strategy Phase 1): estimated-cost upper bounds admitted by
+	// TryReserve and not yet released. The slice stays short — its length
+	// is the number of requests currently IN FLIGHT for one counter — so a
+	// linear walk beats a second indexed structure that could disagree
+	// with it (the sweepEvery rationale, again).
+	reservations []reservation
+}
+
+type reservation struct {
+	amount  int64
+	expires time.Time
+}
+
+// reserved sums the window's outstanding reservations, pruning expired ones
+// in place — the lazy half of TTL self-healing (the caller holds b.mu).
+func (bkt *win) reserved(now time.Time) int64 {
+	var sum int64
+	kept := bkt.reservations[:0]
+	for _, r := range bkt.reservations {
+		if now.Before(r.expires) {
+			sum += r.amount
+			kept = append(kept, r)
+		}
+	}
+	bkt.reservations = kept
+	return sum
 }
 
 // sweepEvery amortizes the expired-entry scan: every sweepEvery-th cur call
@@ -198,6 +237,47 @@ func (b *Memory) Check(key string, estimateMicros, limitMicros int64, w Window) 
 		return Block
 	}
 	return Allow
+}
+
+func (b *Memory) TryReserve(key string, estimateMicros, limitMicros int64, w Window, ttl time.Duration) Decision {
+	if limitMicros <= 0 {
+		return Allow // unlimited: no counter needed, so capacity cannot bite
+	}
+	if estimateMicros <= 0 {
+		return b.Check(key, 0, limitMicros, w) // nothing to reserve
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	bkt := b.cur(key, w)
+	if bkt == nil {
+		return BlockCapacity // same fail-closed rationale as Check
+	}
+	now := b.now()
+	if bkt.spent+bkt.reserved(now)+estimateMicros > limitMicros {
+		return Block
+	}
+	bkt.reservations = append(bkt.reservations, reservation{amount: estimateMicros, expires: now.Add(ttl)})
+	return Allow
+}
+
+func (b *Memory) Release(key string, estimateMicros int64, w Window) {
+	if estimateMicros <= 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	// Read the bucket WITHOUT cur(): releasing must never create or roll a
+	// counter — if the window rolled, the reservation died with it.
+	bkt := b.m[key]
+	if bkt == nil || !b.now().Before(bkt.windowEnd) {
+		return
+	}
+	for i, r := range bkt.reservations {
+		if r.amount == estimateMicros {
+			bkt.reservations = append(bkt.reservations[:i], bkt.reservations[i+1:]...)
+			return
+		}
+	}
 }
 
 func (b *Memory) Debit(key string, actualMicros int64, w Window) {

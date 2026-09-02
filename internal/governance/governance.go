@@ -353,13 +353,67 @@ func mustDenyBudget(dec budget.Decision, onExceeded string) bool {
 	return dec == budget.BlockCapacity || (dec == budget.Block && onExceeded != "warn")
 }
 
+// reserveTTL bounds a leaked budget reservation (a crash or dropped request
+// between PreCheck and Settle): after this long the hold self-heals back
+// into the window. Generous by design — a stream outliving it merely loses
+// its hold early (bounded overshoot, the pre-reservation posture), while a
+// short TTL would leak capacity DENIALS, the worse failure for a money gate.
+const reserveTTL = 15 * time.Minute
+
+// resTracker collects the budget reservations one PreCheckCost takes so a
+// later deny — another window, another scope, a key rate limit — releases
+// every hold already placed instead of leaking it until the TTL.
+type resTracker struct {
+	g     *Governor
+	est   int64 // per-request cost upper bound, µUSD; 0 = plain checks
+	taken []func()
+}
+
+// check is the reserve-aware replacement for a block-posture budget window's
+// bud.Check: it atomically counts spent + outstanding holds + the estimate,
+// and places a hold on Allow. A warn window keeps the plain spent-only check —
+// it never denies, so holding capacity there would only starve block windows
+// sharing the counter.
+func (r *resTracker) check(key string, limit int64, w budget.Window, onExceeded string) budget.Decision {
+	if onExceeded == "warn" {
+		return r.g.bud.Check(key, 0, limit, w)
+	}
+	dec := r.g.bud.TryReserve(key, r.est, limit, w, reserveTTL)
+	if dec == budget.Allow && r.est > 0 && limit > 0 {
+		k, e, win := key, r.est, w
+		r.taken = append(r.taken, func() { r.g.bud.Release(k, e, win) })
+	}
+	return dec
+}
+
+func (r *resTracker) rollback() {
+	for _, f := range r.taken {
+		f()
+	}
+}
+
 // PreCheck enforces rate limit + quota + budget BEFORE the upstream call.
 // estimateTokens is the request's estimated input tokens. block policy → deny;
 // warn policy → allow (still settled afterward). An unknown team is ungoverned
 // (but a key limit, if any, still applies — see KeyPolicy). Subject.KeyID
 // scopes the key-level counters; Subject.User, when set and a UserPolicy is
-// found, adds a third scope (see below).
+// found, adds a third scope (see below). Equivalent to PreCheckCost with no
+// cost estimate — plain spent-only budget checks, no reservation.
 func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDecision {
+	return g.PreCheckCost(s, kp, estimateTokens, 0)
+}
+
+// PreCheckCost is PreCheck plus atomic reserve/settle (strategy Phase 1):
+// estimateCostMicros is the request's cost UPPER BOUND in µUSD (estimated
+// input at the resolved target's rate plus max_tokens of output; 0 = unknown,
+// degrading to plain checks). Every BLOCK-posture budget window admits the
+// request only if spent + outstanding reservations + the bound fits its
+// limit, and holds the bound until SettleCost releases it — so N concurrent
+// near-cap requests cannot all pass on the same remaining balance, and a
+// bound exceeding the balance denies BEFORE egress. A deny after some
+// windows already reserved rolls those holds back.
+func (g *Governor) PreCheckCost(s Subject, kp KeyPolicy, estimateTokens, estimateCostMicros int64) GovDecision {
+	res := &resTracker{g: g, est: estimateCostMicros}
 	// Budget-lease gate (ADR-034) first: an expired hard-cap lease means the
 	// global budget can no longer be verified locally — fail closed before
 	// charging any rate/quota counter.
@@ -404,7 +458,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 		if p.BudgetMicrosPerMonth > 0 {
 			mw := g.monthWindow()
 			tbk := budget.Key(budget.ScopeTeam, s.Team, mw)
-			if dec := g.bud.Check(tbk, 0, p.BudgetMicrosPerMonth, mw); mustDenyBudget(dec, p.BudgetExceeded) {
+			if dec := res.check(tbk, p.BudgetMicrosPerMonth, mw, p.BudgetExceeded); mustDenyBudget(dec, p.BudgetExceeded) {
 				resetsAt := g.bud.ResetsAt(tbk, mw)
 				budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("budget", resetsAt, g.budgetLocOrUTC(), p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
 				budgetDenyResets = resetsAt
@@ -413,7 +467,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 		if p.BudgetMicrosPerDay > 0 {
 			dw := g.dayWindow()
 			tbkDay := budget.Key(budget.ScopeTeam, s.Team, dw)
-			if dec := g.bud.Check(tbkDay, 0, p.BudgetMicrosPerDay, dw); mustDenyBudget(dec, p.BudgetDayExceeded) {
+			if dec := res.check(tbkDay, p.BudgetMicrosPerDay, dw, p.BudgetDayExceeded); mustDenyBudget(dec, p.BudgetDayExceeded) {
 				resetsAt := g.bud.ResetsAt(tbkDay, dw)
 				// Block wins on tie: keep whichever window binds soonest.
 				if budgetDeny.Status == 0 || resetsAt.Before(budgetDenyResets) {
@@ -423,14 +477,17 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 			}
 		}
 		if budgetDeny.Status != 0 {
+			res.rollback()
 			return budgetDeny
 		}
 	}
 	// Per-key limits (§8 D2) — independent of team governance, always block.
 	if kp.RatePerMin > 0 && !g.lim.AllowRate("rate:key:"+s.KeyID, 1, kp.RatePerMin, kp.RatePerMin) {
+		res.rollback()
 		return GovDecision{Status: 429, Reason: "key rate limit exceeded", Code: audit.DenyKeyRateLimited}
 	}
 	if kp.TokensPerMinute > 0 && !g.lim.AllowRate("tpm:key:"+s.KeyID, estimateTokens, kp.TokensPerMinute, kp.TokensPerMinute) {
+		res.rollback()
 		return GovDecision{Status: 429, Reason: "key token rate limit exceeded", Code: audit.DenyKeyTokenRateLimited}
 	}
 	// Per-key budget: same two-window shape as the team block above, minus the
@@ -440,7 +497,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 	if kp.BudgetMicrosPerMonth > 0 {
 		mw := g.monthWindow()
 		kbk := budget.Key(budget.ScopeKey, s.KeyID, mw)
-		if dec := g.bud.Check(kbk, 0, kp.BudgetMicrosPerMonth, mw); mustDenyBudget(dec, "") {
+		if dec := res.check(kbk, kp.BudgetMicrosPerMonth, mw, ""); mustDenyBudget(dec, "") {
 			resetsAt := g.bud.ResetsAt(kbk, mw)
 			keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key budget", resetsAt, g.budgetLocOrUTC(), ""), Code: audit.DenyKeyBudgetExceeded}
 			keyBudgetDenyResets = resetsAt
@@ -449,7 +506,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 	if kp.BudgetMicrosPerDay > 0 {
 		dw := g.dayWindow()
 		kbkDay := budget.Key(budget.ScopeKey, s.KeyID, dw)
-		if dec := g.bud.Check(kbkDay, 0, kp.BudgetMicrosPerDay, dw); mustDenyBudget(dec, "") {
+		if dec := res.check(kbkDay, kp.BudgetMicrosPerDay, dw, ""); mustDenyBudget(dec, "") {
 			resetsAt := g.bud.ResetsAt(kbkDay, dw)
 			if keyBudgetDeny.Status == 0 || resetsAt.Before(keyBudgetDenyResets) {
 				keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key daily budget", resetsAt, g.budgetLocOrUTC(), ""), Code: audit.DenyKeyBudgetExceeded}
@@ -458,6 +515,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 		}
 	}
 	if keyBudgetDeny.Status != 0 {
+		res.rollback()
 		return keyBudgetDeny
 	}
 	// Per-USER budget (ADR-042 Phase 3): the third scope, after team and key.
@@ -478,7 +536,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 			if up.BudgetMicrosPerMonth > 0 {
 				mw := g.monthWindow()
 				ubk := budget.Key(budget.ScopeUser, uid, mw)
-				if dec := g.bud.Check(ubk, 0, up.BudgetMicrosPerMonth, mw); mustDenyBudget(dec, up.BudgetExceeded) {
+				if dec := res.check(ubk, up.BudgetMicrosPerMonth, mw, up.BudgetExceeded); mustDenyBudget(dec, up.BudgetExceeded) {
 					resetsAt := g.bud.ResetsAt(ubk, mw)
 					userDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("user budget", resetsAt, g.budgetLocOrUTC(), up.AdminContact), Code: audit.DenyUserBudgetExceeded}
 					userDenyResets = resetsAt
@@ -487,7 +545,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 			if up.BudgetMicrosPerDay > 0 {
 				dw := g.dayWindow()
 				ubkDay := budget.Key(budget.ScopeUser, uid, dw)
-				if dec := g.bud.Check(ubkDay, 0, up.BudgetMicrosPerDay, dw); mustDenyBudget(dec, up.BudgetExceeded) {
+				if dec := res.check(ubkDay, up.BudgetMicrosPerDay, dw, up.BudgetExceeded); mustDenyBudget(dec, up.BudgetExceeded) {
 					resetsAt := g.bud.ResetsAt(ubkDay, dw)
 					if userDeny.Status == 0 || resetsAt.Before(userDenyResets) {
 						userDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("user daily budget", resetsAt, g.budgetLocOrUTC(), up.AdminContact), Code: audit.DenyUserBudgetExceeded}
@@ -496,11 +554,50 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 				}
 			}
 			if userDeny.Status != 0 {
+				res.rollback()
 				return userDeny
 			}
 		}
 	}
 	return GovDecision{Allowed: true}
+}
+
+// releaseReservations releases the budget holds PreCheckCost placed for this
+// request, mirroring its reserving conditions exactly: every BLOCK-posture
+// window with a real limit, across the team, key, and user scopes. Policy
+// edits between reserve and settle can un-mirror a window; the release then
+// no-ops there (Release matches by amount) and the hold self-heals at
+// reserveTTL — bounded by design.
+func (g *Governor) releaseReservations(s Subject, kp KeyPolicy, est int64) {
+	if est <= 0 {
+		return
+	}
+	mw, dw := g.monthWindow(), g.dayWindow()
+	if p, ok := g.policyOf(s.Team); ok {
+		if p.BudgetMicrosPerMonth > 0 && p.BudgetExceeded != "warn" {
+			g.bud.Release(budget.Key(budget.ScopeTeam, s.Team, mw), est, mw)
+		}
+		if p.BudgetMicrosPerDay > 0 && p.BudgetDayExceeded != "warn" {
+			g.bud.Release(budget.Key(budget.ScopeTeam, s.Team, dw), est, dw)
+		}
+	}
+	if kp.BudgetMicrosPerMonth > 0 {
+		g.bud.Release(budget.Key(budget.ScopeKey, s.KeyID, mw), est, mw)
+	}
+	if kp.BudgetMicrosPerDay > 0 {
+		g.bud.Release(budget.Key(budget.ScopeKey, s.KeyID, dw), est, dw)
+	}
+	if s.User != "" && g.userLookup != nil {
+		if up, ok := g.userLookup(s.Team, s.User); ok {
+			uid := userBudgetID(s)
+			if up.BudgetMicrosPerMonth > 0 && up.BudgetExceeded != "warn" {
+				g.bud.Release(budget.Key(budget.ScopeUser, uid, mw), est, mw)
+			}
+			if up.BudgetMicrosPerDay > 0 && up.BudgetExceeded != "warn" {
+				g.bud.Release(budget.Key(budget.ScopeUser, uid, dw), est, dw)
+			}
+		}
+	}
 }
 
 // PremiumExhausted reports whether the subject's PREMIUM pool (Phase 1
@@ -656,6 +753,19 @@ func (g *Governor) UsageOf(s Subject, kp KeyPolicy) UsageStatus {
 // Key-level spend is deliberately NOT added to /metrics: metric labels are
 // config-bounded (CLAUDE.md) and must never carry a key_id.
 func (g *Governor) Settle(s Subject, kp KeyPolicy, provider, model string, u pricing.Usage, table *pricing.Table, estimatedTokens int64) (costMicros int64, pricingMissing bool) {
+	return g.SettleCost(s, kp, provider, model, u, table, estimatedTokens, 0)
+}
+
+// SettleCost is Settle plus the release half of reserve/settle (strategy
+// Phase 1): estimateCostMicros must be the SAME cost upper bound the
+// request's PreCheckCost reserved — the holds it placed are released here,
+// on the same block-posture windows, before the actual debits land. A
+// request settled with a different (or zero) estimate than it reserved
+// leaks its holds until reserveTTL — bounded, self-healing, and impossible
+// when the ingress passes one variable to both calls (the estimatedTokens
+// pattern).
+func (g *Governor) SettleCost(s Subject, kp KeyPolicy, provider, model string, u pricing.Usage, table *pricing.Table, estimatedTokens, estimateCostMicros int64) (costMicros int64, pricingMissing bool) {
+	g.releaseReservations(s, kp, estimateCostMicros)
 	p, _ := g.policyOf(s.Team)
 	// Total tokens actually processed, including cache tiers — the same
 	// figure both the daily quota debit and the TPM true-up below use.
@@ -825,6 +935,25 @@ func max64(a, b int64) int64 {
 // A nil table means pricing is unconfigured entirely — treated as "allow",
 // since refusing every request would be a worse failure than reporting zero.
 // Returns the zero (allowed) decision when the table permits missing rates.
+// CostUpperBound is the ingress helper computing a request's per-request
+// cost UPPER BOUND for reserve/settle (PreCheckCost/SettleCost): estimated
+// input tokens plus the request's own max_tokens of output, priced at the
+// FIRST resolved target's rate. Unpriced (or no table) returns 0 — plain
+// spent-only checks, the pre-reservation posture; the ADR-030 pricing guard
+// owns that case. Cache tiers are deliberately excluded: a cache read costs
+// LESS than the input rate this bound already charges, so the bound stays an
+// upper bound without them.
+func CostUpperBound(table *pricing.Table, provider, upstream string, estimateInputTokens, maxTokens int64) int64 {
+	if table == nil {
+		return 0
+	}
+	cost, missing := table.CostUSDMicros(provider, upstream, pricing.Usage{Input: estimateInputTokens, Output: maxTokens})
+	if missing {
+		return 0
+	}
+	return cost
+}
+
 func PricingGuard(table *pricing.Table, targets []PricedTarget) GovDecision {
 	if table == nil || table.OnMissing() != pricing.OnMissingBlock {
 		return GovDecision{Allowed: true}
