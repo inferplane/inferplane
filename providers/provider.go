@@ -114,6 +114,39 @@ type CredentialSource interface {
 	Credentials(ctx context.Context) (id, secret, session string, expires time.Time, err error)
 }
 
+// Embedder is the OPTIONAL embeddings lane (roadmap ⑤): a governed
+// PASSTHROUGH, not a canonical one — embeddings structurally don't fit the
+// Messages-superset schema, and forcing them through it would violate the
+// lossless-round-trip invariant. Discovered by type assertion like
+// TokenCounter/HealthChecker, so existing provider packages and the §8
+// zero-core-diff rule survive: a provider that doesn't implement it simply
+// cannot serve /v1/embeddings (clean 404 per model).
+type Embedder interface {
+	Embed(ctx context.Context, req *EmbedRequest) (*EmbedResponse, error)
+}
+
+// EmbedRequest is one embeddings request resolved to a target. RawBody is
+// the client's OpenAI-wire /v1/embeddings body; the provider may rewrite
+// ONLY the top-level model field (to Upstream) before forwarding — every
+// other byte is preserved.
+type EmbedRequest struct {
+	Model    string // resolved model name (routing/observation)
+	Upstream string // target model id at the upstream
+	RawBody  []byte
+	Headers  http.Header
+}
+
+// EmbedResponse is the upstream's embeddings response. RawBody is teed to
+// the client verbatim; PromptTokens is the parsed usage.prompt_tokens (0
+// when the body carried none — the ingress's zero-bill fence refuses a 2xx
+// it cannot account, same class as chat's Parsed==nil rule).
+type EmbedResponse struct {
+	StatusCode   int
+	Headers      http.Header
+	RawBody      []byte
+	PromptTokens int64
+}
+
 // Config is the per-provider settings slice the registry hands to a factory.
 // Kept minimal for M2; providers read what they need.
 type Config struct {

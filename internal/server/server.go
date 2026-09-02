@@ -26,6 +26,7 @@ import (
 	"github.com/inferplane/inferplane/internal/server/bedrockapi"
 	"github.com/inferplane/inferplane/internal/server/configapi"
 	"github.com/inferplane/inferplane/internal/server/debugapi"
+	"github.com/inferplane/inferplane/internal/server/embeddingsapi"
 	"github.com/inferplane/inferplane/internal/server/openaiapi"
 	"github.com/inferplane/inferplane/internal/server/responsesapi"
 	"github.com/inferplane/inferplane/internal/server/usageapi"
@@ -116,6 +117,13 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	// same auth/RBAC/governance/PII/audit pipeline, translated both ways —
 	// see internal/server/responsesapi.
 	mux.Handle("POST /v1/responses", responsesapi.New(chat))
+	// Embeddings lane (roadmap ⑤): governed OpenAI-wire passthrough for
+	// providers implementing the optional providers.Embedder capability.
+	embed := embeddingsapi.New(r, aud, gov, m)
+	embed.SetTeamPolicy(teamPolicy)
+	embed.SetUsageCollector(o.usage)
+	embed.SetEgressCeiling(o.egressCeiling)
+	mux.Handle("POST /v1/embeddings", embed)
 	invoke := bedrockapi.NewInvokeHandlerMetrics(r, holder, aud, gov, m, false)
 	invoke.SetMasking(mask)
 	invoke.SetTeamPolicy(teamPolicy)

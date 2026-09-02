@@ -298,9 +298,13 @@ no-network-hop advantage.
 
 **Honest gaps.**
 - Breadth: LiteLLM claims 100+ providers, Portkey similar. inferplane has
-  three families and **chat-only** — no embeddings/images/audio (roadmap
-  ⑤ starts the embeddings lane). This is a deliberate non-goal (README),
-  but it is a real loss for any buyer scoring provider-count checkboxes.
+  three families; embeddings shipped (roadmap ⑤, 2026-09-02:
+  `POST /v1/embeddings`, a governed passthrough over the optional
+  `providers.Embedder` capability — `openai_compatible` serves it, RBAC/
+  budget/PII/audit apply in full, and a 2xx without usage is refused). No
+  images/audio/rerank — deliberate non-goals (README) — and no Bedrock
+  Titan/Cohere embed mapping yet. Still a real loss for any buyer scoring
+  provider-count checkboxes.
 - **Real-client verification (2026-09-02,
   [docs/verification/coding-agents.md](verification/coding-agents.md)):**
   ALL THREE target clients — Claude Code 2.1.258, OpenCode 1.18.26, and

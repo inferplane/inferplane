@@ -294,7 +294,25 @@ discipline; `key_id`/owner stay out of the JSON by default.
 
 ---
 
-## ⑤ Provider coverage: embeddings first (ADR candidate — unassigned; next available slot is ADR-040 as of 2026-08-14)
+## ⑤ Provider coverage: embeddings first — ✅ v1 shipped 2026-09-02 (lane pattern + openai_compatible)
+
+**Shipped:** `POST /v1/embeddings` (`internal/server/embeddingsapi`) as the
+designed governed passthrough: KeyAuth → model RBAC (with the post-routing
+re-check) → region lock → PII egress ceiling (blocked/internal-only
+enforced; external-masked/unmodified REFUSE — this lane has no
+masker/detector) → PreCheck with cost reservation → priority fallback over
+`providers.Embedder` targets only → Settle on `usage.prompt_tokens` at the
+(provider, upstream) input rate → hash-chained audit (ingress
+"embeddings"). The optional-interface pattern held: `openai_compatible`
+opts in with ~50 lines (`embed.go`, verbatim body + top-level model
+rewrite), anthropic/bedrock don't implement it and 404 cleanly, zero core
+diff to any provider package. The Phase 0a zero-bill fence applies: a 2xx
+without usage is refused, never served free (e2e-pinned,
+`cmd/mayu/embeddings_e2e_test.go`). **Still open:** the bedrock
+Titan/Cohere embed mapping (swappable detail per the design); images/
+audio/rerank stay explicit non-goals until the lane pattern earns them.
+
+### Original design (implemented — kept for rationale)
 
 **Gap.** Three provider types, chat-only. The canonical schema is a
 Messages-superset — embeddings structurally don't fit it, and forcing them
