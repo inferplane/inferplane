@@ -107,11 +107,15 @@ activates a per-team substitution map from a referenced team budget;
 not allowed. Premium-pool exhaustion → user-specific fallback → total hard cap
 does not exist.
 
-**Management authorization is coarse.** The control plane grants whole-console
-authority to any accepted OIDC identity or static token, and policy
-PUT/DELETE (`internal/controlplane/policies.go:170-174`) sits behind that same
-layer with no mutation audit. Provider/model writes on the `mayu` admin plane
-have no dedicated capability gate.
+**Management authorization: mayu plane gated (0b-3, 2026-09-02), control
+plane still coarse.** The mayu admin plane now enforces opt-in duty
+separation: `oidc.role_mappings` grants the fixed roles from the verified
+groups claim, and each management route class sits behind
+`RequireCapability` (an auditor can read audit/logs but not issue keys; a
+team-admin the reverse — negative tests per class; unconfigured deployments
+byte-identical). The control plane still grants whole-console authority to
+any accepted OIDC identity or static token, and policy PUT/DELETE has no
+mutation audit (ADR-038 accepted limitation) — Phase 0b-4.
 
 **Enforcement state is neither durable nor globally accurate.** Key store is
 SQLite; rate/quota/budget counters are process-local; the lease ledger is

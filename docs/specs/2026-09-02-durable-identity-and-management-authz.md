@@ -143,8 +143,11 @@ reuses `internal/audit`'s record shape.
    UserID with bounded Owner fallback (`subjectOf`/`identityOf` per
    ingress); bare-sub policy fallback in the gateway user-lookup closure;
    two keys/devices = one ledger proven end to end.
-3. **0b-3 roles + capability middleware** (both planes), opt-in via
-   mapping config; negative authorization tests per role × route class.
+3. **0b-3 roles + capability middleware — 🔶 mayu plane shipped
+   2026-09-02** (`oidc.role_mappings` → `adminauth.ResolveRoles` →
+   `server.RequireCapability` per route class; negative tests in
+   `internal/server/capability_test.go`; unconfigured = byte-identical).
+   Remaining: the inferplaned plane (policy-write gating), lands with 0b-4.
 4. **0b-4 mutation audit** + console surfacing.
 
 ## 6. Risks / open questions for the gate

@@ -65,6 +65,12 @@ type MappingConfig struct {
 	// group "*" matches every authenticated identity that has at least one
 	// group; it is an explicit opt-in, distinct from "no mapping matched".
 	GroupMappings []GroupMapping
+	// RoleMappings map IdP groups to the FIXED duty-separation roles
+	// (roles.go, Phase 0b-3). Empty = role gating OFF: every authenticated
+	// identity keeps whole-plane authority, byte-identical to pre-roles
+	// behavior. Non-empty = every gated route class requires a matching
+	// capability (RequireCapability in internal/server).
+	RoleMappings []RoleMapping
 }
 
 // GroupMapping maps a single IdP group to gateway teams.

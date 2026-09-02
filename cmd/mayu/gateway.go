@@ -1674,6 +1674,9 @@ func oidcMapping(cfg *config.Config) adminauth.MappingConfig {
 	for _, gm := range o.GroupMappings {
 		mc.GroupMappings = append(mc.GroupMappings, adminauth.GroupMapping{Group: gm.Group, Teams: gm.Teams})
 	}
+	for _, rm := range o.RoleMappings {
+		mc.RoleMappings = append(mc.RoleMappings, adminauth.RoleMapping{Group: rm.Group, Roles: rm.Roles})
+	}
 	return mc
 }
 

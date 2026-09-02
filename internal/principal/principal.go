@@ -36,6 +36,23 @@ type AdminIdentity struct {
 	Teams      []string // teams this identity may issue/revoke keys for (nil for admins)
 	IsAdmin    bool     // admin_groups member or break-glass: entitled to every team
 	AuthMethod string   // "oidc" | "break_glass" — recorded in audit
+	// Roles are the duty-separation roles (Phase 0b-3) resolved from the
+	// verified groups claim; RoleGated says whether role gating is active
+	// for this deployment (RoleMappings configured). With RoleGated false,
+	// Roles is nil and every capability check passes — opt-in.
+	Roles     []string
+	RoleGated bool
+}
+
+// HasRole reports whether the identity holds the role. platform-admin (and
+// break-glass, which authenticates as it) implies every role.
+func (a AdminIdentity) HasRole(role string) bool {
+	for _, r := range a.Roles {
+		if r == role || r == "platform-admin" {
+			return true
+		}
+	}
+	return false
 }
 
 // UserID returns the canonical durable identity `issuer + "#" + subject`

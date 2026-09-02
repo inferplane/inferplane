@@ -193,7 +193,7 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 	// Middleware-level denial audit (authenticated 403s only — 401s never grow
 	// the chain): the middleware knows no team, so Team stays empty.
 	denied := adminDenialEmitter(emit)
-	guard := AdminAuth(adminTokens, verifier, mapping, denied, keys)
+	guard := AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapKeys, denied, keys))
 	mux.Handle("/admin/keys", guard)
 	mux.Handle("/admin/keys/", guard)
 	// Self-service identity (ADR-010): the caller's resolved identity (opaque
@@ -206,7 +206,7 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 	// Governance debug snapshot (roadmap ④, doctor's remote half) — same
 	// AdminAuth, same secret-free discipline as /admin/config.
 	if govDebug != nil {
-		mux.Handle("GET /admin/debug/governance", AdminAuth(adminTokens, verifier, mapping, denied, debugapi.Handler(govDebug)))
+		mux.Handle("GET /admin/debug/governance", AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapDebugRead, denied, debugapi.Handler(govDebug))))
 	}
 	// Capability map (spec §4.4), behind the same AdminAuth — secret-free
 	// booleans/enums the console reads on bootstrap to render each section's
@@ -218,26 +218,26 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 	// views await team records, D3) — same requireAdmin gate as the probe. nil →
 	// omitted (analytics index disabled).
 	if analyticsQ != nil {
-		mux.Handle("GET /admin/analytics/summary", AdminAuth(adminTokens, verifier, mapping, denied,
-			requireAdmin(analyticsapi.SummaryHandler(analyticsQ), emit)))
-		mux.Handle("GET /admin/analytics/timeseries", AdminAuth(adminTokens, verifier, mapping, denied,
-			requireAdmin(analyticsapi.TimeSeriesHandler(analyticsQ), emit)))
-		mux.Handle("GET /admin/analytics/health", AdminAuth(adminTokens, verifier, mapping, denied,
-			requireAdmin(analyticsapi.HealthHandler(analyticsQ), emit)))
-		mux.Handle("POST /admin/analytics/rebuild", AdminAuth(adminTokens, verifier, mapping, denied,
-			requireAdmin(analyticsapi.RebuildHandler(analyticsQ), emit)))
+		mux.Handle("GET /admin/analytics/summary", AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapAuditRead, denied,
+			requireAdmin(analyticsapi.SummaryHandler(analyticsQ), emit))))
+		mux.Handle("GET /admin/analytics/timeseries", AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapAuditRead, denied,
+			requireAdmin(analyticsapi.TimeSeriesHandler(analyticsQ), emit))))
+		mux.Handle("GET /admin/analytics/health", AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapAuditRead, denied,
+			requireAdmin(analyticsapi.HealthHandler(analyticsQ), emit))))
+		mux.Handle("POST /admin/analytics/rebuild", AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapAuditRead, denied,
+			requireAdmin(analyticsapi.RebuildHandler(analyticsQ), emit))))
 		// Logs list (D4, ADR-018): recent request events, id-keyset paginated.
 		// Metadata only — bodies are fetched separately via /admin/bodies/{ref},
 		// gated on the bodiesRec dependency below (may be off even when
 		// analyticsQ is on: logs metadata does not require body capture).
-		mux.Handle("GET /admin/logs", AdminAuth(adminTokens, verifier, mapping, denied,
-			requireAdmin(analyticsapi.LogsHandler(analyticsQ), emit)))
+		mux.Handle("GET /admin/logs", AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapAuditRead, denied,
+			requireAdmin(analyticsapi.LogsHandler(analyticsQ), emit))))
 	}
 	// Body fetch/erase (D4, ADR-018): full-admin only — resolves a decrypted
 	// captured body server-side. nil bodiesRec omits the mount (log_bodies off).
 	if bodiesRec != nil {
 		bodiesH := adminapi.NewBodiesHandler(bodiesRec, emit)
-		mux.Handle("/admin/bodies/", AdminAuth(adminTokens, verifier, mapping, denied, requireAdmin(bodiesH, emit)))
+		mux.Handle("/admin/bodies/", AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapAuditRead, denied, requireAdmin(bodiesH, emit))))
 	}
 	// Team governance records (D3, ADR-016): teams as first-class keystore rows.
 	// Reads are available to any AdminAuth identity; writes are full-admin only
@@ -249,9 +249,9 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 	// read /admin/users.
 	if teamStore != nil {
 		teamsH := adminapi.NewTeamsHandler(teamStore, configTeams, emit)
-		mux.Handle("GET /admin/teams", AdminAuth(adminTokens, verifier, mapping, denied, teamsH))
-		mux.Handle("PUT /admin/teams/", AdminAuth(adminTokens, verifier, mapping, denied, requireAdmin(teamsH, emit)))
-		mux.Handle("DELETE /admin/teams/", AdminAuth(adminTokens, verifier, mapping, denied, requireAdmin(teamsH, emit)))
+		mux.Handle("GET /admin/teams", AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapTeams, denied, teamsH)))
+		mux.Handle("PUT /admin/teams/", AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapTeams, denied, requireAdmin(teamsH, emit))))
+		mux.Handle("DELETE /admin/teams/", AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapTeams, denied, requireAdmin(teamsH, emit))))
 		mux.Handle("GET /admin/users", AdminAuth(adminTokens, verifier, mapping, denied, adminapi.NewUsersHandler(store)))
 	}
 	// Budget-alert recent-fires ring (D5b, ADR-017), FULL-ADMIN only — a fire
@@ -272,9 +272,9 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 	// writer is nil when no provider store is configured → every write returns
 	// 405 (ADR-005 stage-1 posture preserved). Mutations are secret-free (refs
 	// only) and run build-once-swap-once in the assembly.
-	providersW := AdminAuth(adminTokens, verifier, mapping, denied, configapi.WriteHandler("providers", writer, emit))
+	providersW := AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapProviders, denied, configapi.WriteHandler("providers", writer, emit)))
 	mux.Handle("/admin/providers/", providersW)
-	modelsW := AdminAuth(adminTokens, verifier, mapping, denied, configapi.WriteHandler("models", writer, emit))
+	modelsW := AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapProviders, denied, configapi.WriteHandler("models", writer, emit)))
 	mux.Handle("/admin/models/", modelsW)
 	// Connection probe (ADR-014 D2): tests a DRAFT provider's upstream before a
 	// route is trusted. FULL-ADMIN ONLY — it resolves a secret ref to an
@@ -282,8 +282,8 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 	// reach it (requireAdmin). storeEnabled mirrors the write path (405 when no
 	// provider store). The exact POST route is more specific than the
 	// /admin/providers/ prefix, so it wins for POST.
-	probeH := AdminAuth(adminTokens, verifier, mapping, denied,
-		requireAdmin(configapi.ProbeHandler(writer != nil, probeAllowedHosts), emit))
+	probeH := AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapProviders, denied,
+		requireAdmin(configapi.ProbeHandler(writer != nil, probeAllowedHosts), emit)))
 	mux.Handle("POST /admin/providers/test", probeH)
 	// Model catalog (ADR-014 D3): read-only typeahead hints, behind AdminAuth.
 	catalogH := AdminAuth(adminTokens, verifier, mapping, denied, configapi.CatalogHandler())
@@ -296,7 +296,7 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 	}
 	// Audit-chain verification (ADR-003 #2), behind the same AdminAuth: read-only
 	// per-sink hash-chain check, returns no record contents.
-	mux.Handle("/admin/audit/verify", AdminAuth(adminTokens, verifier, mapping, denied, auditapi.Handler(auditFileSinks)))
+	mux.Handle("/admin/audit/verify", AdminAuth(adminTokens, verifier, mapping, denied, RequireCapability(CapAuditRead, denied, auditapi.Handler(auditFileSinks))))
 	// Minimal embedded key console (ADR-001): data-free static assets, served
 	// unauthenticated like /metrics — every data call it makes goes through the
 	// token-gated /admin/keys handlers above.

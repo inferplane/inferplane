@@ -51,15 +51,23 @@ func AdminAuth(tokens []string, verifier OIDCVerifier, mapping adminauth.Mapping
 				writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "invalid OIDC token")
 				return
 			}
+			roleGated := len(mapping.RoleMappings) > 0
+			roles := adminauth.ResolveRoles(claims.Groups, mapping)
 			teams, isAdmin, ok := adminauth.Resolve(claims.Groups, mapping)
 			if !ok {
-				if auditDenied != nil {
-					auditDenied(r, claims.Subject)
+				// Under an active role config, a role-holding identity with
+				// no team mapping is still a legitimate authentication — an
+				// auditor need not belong to any team. Without role config
+				// the pre-roles behavior stands, byte-identical.
+				if !(roleGated && len(roles) > 0) {
+					if auditDenied != nil {
+						auditDenied(r, claims.Subject)
+					}
+					writeAnthropicError(w, http.StatusForbidden, "permission_error", "identity maps to no team")
+					return
 				}
-				writeAnthropicError(w, http.StatusForbidden, "permission_error", "identity maps to no team")
-				return
 			}
-			id := principal.AdminIdentity{Subject: claims.Subject, Issuer: claims.Issuer, Teams: teams, IsAdmin: isAdmin, AuthMethod: "oidc"}
+			id := principal.AdminIdentity{Subject: claims.Subject, Issuer: claims.Issuer, Teams: teams, IsAdmin: isAdmin, AuthMethod: "oidc", Roles: roles, RoleGated: roleGated}
 			next.ServeHTTP(w, r.WithContext(principal.WithAdmin(r.Context(), id)))
 			return
 		}
@@ -79,9 +87,18 @@ func AdminAuth(tokens []string, verifier OIDCVerifier, mapping adminauth.Mapping
 			writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "invalid admin token")
 			return
 		}
-		id := principal.AdminIdentity{Subject: "break-glass", IsAdmin: true, AuthMethod: "break_glass"}
+		// Break-glass is platform-admin by definition — under role gating it
+		// carries the role explicitly so HasRole answers uniformly.
+		id := principal.AdminIdentity{Subject: "break-glass", IsAdmin: true, AuthMethod: "break_glass", RoleGated: len(mapping.RoleMappings) > 0, Roles: breakGlassRoles(mapping)}
 		next.ServeHTTP(w, r.WithContext(principal.WithAdmin(r.Context(), id)))
 	})
+}
+
+func breakGlassRoles(mapping adminauth.MappingConfig) []string {
+	if len(mapping.RoleMappings) == 0 {
+		return nil
+	}
+	return []string{adminauth.RolePlatformAdmin}
 }
 
 // AdminTokenAuth guards the admin plane. Tokens are compared by SHA-256 +

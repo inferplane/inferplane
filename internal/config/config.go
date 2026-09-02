@@ -114,13 +114,17 @@ type AdminAuth struct {
 // / SSRF-by-config guard); client_id is the mandatory expected audience —
 // leaving it optional is the classic cross-app token-reuse hole.
 type OIDCConfig struct {
-	Issuer        string          `json:"issuer"`
-	ClientID      string          `json:"client_id"`
-	GroupsClaim   string          `json:"groups_claim,omitempty"` // default "groups"; top-level claim, no traversal
-	AdminGroups   []string        `json:"admin_groups,omitempty"`
-	GroupMappings []GroupMapping  `json:"group_mappings,omitempty"`
-	LoginOrigins  []string        `json:"login_origins,omitempty"`
-	CLILogin      *CLILoginConfig `json:"cli_login,omitempty"`
+	Issuer        string         `json:"issuer"`
+	ClientID      string         `json:"client_id"`
+	GroupsClaim   string         `json:"groups_claim,omitempty"` // default "groups"; top-level claim, no traversal
+	AdminGroups   []string       `json:"admin_groups,omitempty"`
+	GroupMappings []GroupMapping `json:"group_mappings,omitempty"`
+	// RoleMappings map IdP groups to the FIXED duty-separation roles
+	// (Phase 0b-3). Empty = role gating off (pre-roles authority,
+	// byte-identical). Validated against the fixed role set at load.
+	RoleMappings []RoleMapping   `json:"role_mappings,omitempty"`
+	LoginOrigins []string        `json:"login_origins,omitempty"`
+	CLILogin     *CLILoginConfig `json:"cli_login,omitempty"`
 }
 
 // CLILoginConfig opts in to `mayu login` (ADR-028): a data-plane
@@ -155,6 +159,12 @@ func (c *CLILoginConfig) KeyTTLDuration() time.Duration {
 type GroupMapping struct {
 	Group string   `json:"group"`
 	Teams []string `json:"teams"`
+}
+
+// RoleMapping maps one IdP group to fixed duty-separation roles (Phase 0b-3).
+type RoleMapping struct {
+	Group string   `json:"group"`
+	Roles []string `json:"roles"`
 }
 
 // TLSConfig optionally terminates TLS on the data plane (non-K8s single binary,
@@ -1237,6 +1247,24 @@ func validateOIDC(aa *AdminAuth) error {
 			return fmt.Errorf("config: oidc.group_mappings has duplicate group %q", m.Group)
 		}
 		seen[m.Group] = true
+	}
+	seenRole := map[string]bool{}
+	for _, m := range o.RoleMappings {
+		if m.Group == "" {
+			return fmt.Errorf("config: oidc.role_mappings entry missing group")
+		}
+		if seenRole[m.Group] {
+			return fmt.Errorf("config: oidc.role_mappings has duplicate group %q", m.Group)
+		}
+		seenRole[m.Group] = true
+		if len(m.Roles) == 0 {
+			return fmt.Errorf("config: oidc.role_mappings[%q] names no roles", m.Group)
+		}
+		for _, role := range m.Roles {
+			if !adminauth.ValidRole(role) {
+				return fmt.Errorf("config: oidc.role_mappings[%q] names unknown role %q — a typo here would silently grant nothing", m.Group, role)
+			}
+		}
 	}
 	for i, tok := range aa.Tokens {
 		if adminauth.IsOIDCBearerShape(tok) {
