@@ -27,8 +27,14 @@ func TestMantlePathFor(t *testing.T) {
 		"openai.gpt-5.6-sol":         "/openai/v1/chat/completions",
 		"xai.grok-4.3":               "/openai/v1/chat/completions",
 		"deepseek.v3.2":              "/v1/chat/completions",
-		"zai.glm-5":                  "/v1/chat/completions",
-		"moonshotai.kimi-k2.5":       "/v1/chat/completions",
+		// Route splits WITHIN a vendor: gemma-3 lives on the bare route,
+		// gemma-4 only answers on /openai/v1 (probed live 2026-09-02 —
+		// the bare route 400s "isn't supported on this route", and the
+		// model card documents the /openai/v1 endpoint).
+		"google.gemma-3-27b-it": "/v1/chat/completions",
+		"google.gemma-4-31b":    "/openai/v1/chat/completions",
+		"zai.glm-5":             "/v1/chat/completions",
+		"moonshotai.kimi-k2.5":  "/v1/chat/completions",
 		// A geo prefix is a leading segment, still vendor-routed.
 		"us.anthropic.claude-opus-5": "/anthropic/v1/messages",
 		// Vendor match is per-SEGMENT: an id that merely contains a vendor

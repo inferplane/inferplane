@@ -81,7 +81,13 @@ whole lifecycle (message_start lazily before the first parsed chunk, stamped
 with the PUBLIC model name; a text content_block_start at any index no opener
 claimed; content_block_stop per opened block before ANY message_delta;
 message_stop at [DONE]), Chunk-only with Raw nil so an OpenAI-wire ingress
-tees no invented lines.
+tees no invented lines. `message_delta` is the only Anthropic frame carrying
+`stop_reason`, so an upstream that ends a stream with neither a `finish_reason`
+nor a usage-only chunk gets one synthesized (`end_turn`) at [DONE] — without it
+a client cannot tell a completed turn from a truncated one. Exactly one is ever
+synthesized: an upstream message-level frame of any kind (stop-bearing or
+usage-only) suppresses it, since a consumer may treat the first `message_delta`
+it sees as end-of-message.
 
 Usage settlement is cache-tier aware on every path that returns cache counts:
 Anthropic/Invoke fold `message_start` + `message_delta` frames (`schema.MergeUsage`,
@@ -129,6 +135,13 @@ Mantle chat additionally renames `max_tokens` → `max_completion_tokens` for ev
 model on that route (the gpt-5.6 family rejects `max_tokens` outright; all probed
 models accept the newer name), and streaming requests set
 `stream_options.include_usage` so the final chunk carries billable counts.
+
+Route selection is per-VENDOR segment (`anthropic.*` → `/anthropic/v1/messages`,
+`openai.*`/`xai.*` → `/openai/v1/chat/completions`, everything else → the bare
+`/v1/chat/completions`) with one probed per-MODEL exception: `google.gemma-4-*`
+answers only on `/openai/v1/chat/completions` — the bare route 400s "isn't
+supported on this route" (probed live 2026-09-02, matching its model card) while
+`google.gemma-3-*` still answers on the bare route.
 
 ### 6. Code Pointers
 - `internal/tracing/tracing.go` — `SetGenAIRequest`/`SetGenAIResponse` (semconv) + `SetUsageDetail`/`SetCost`/`SetPartial` (`inferplane.*`) + `SetStatus`

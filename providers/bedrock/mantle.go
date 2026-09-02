@@ -83,6 +83,13 @@ func newMantleClient(baseURL, region string, creds aws.CredentialsProvider, clie
 // routes ("us.anthropic.…") while an id that merely CONTAINS a vendor name
 // ("notanthropic.…") cannot be captured by another vendor's route.
 func mantlePathFor(upstream string) string {
+	// Route splits exist WITHIN a vendor too: google.gemma-3-* answers on the
+	// bare route while google.gemma-4-* only answers on /openai/v1 (probed
+	// live 2026-09-02 — the bare route rejects it with "isn't supported on
+	// this route", matching its model card's documented /openai/v1 endpoint).
+	if strings.Contains(upstream, "gemma-4") {
+		return "/openai/v1/chat/completions"
+	}
 	for _, seg := range strings.Split(upstream, ".") {
 		switch seg {
 		case "anthropic":
