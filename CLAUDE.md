@@ -24,8 +24,11 @@ stated explicitly (see the HA vs. rate-limit-accuracy tension below).
 1. **A single entry point for coding-assistant traffic** — Claude Code,
    OpenCode, and Codex users route through inferplane to reach Anthropic,
    Amazon Bedrock, and OpenAI-compatible (vLLM/Ollama/etc.) providers.
-   Codex support is the goal, not yet verified — no Codex-specific code or
-   test exists (`docs/roadmap.md` Purpose alignment).
+   All three clients are REAL-client verified against a running mayu
+   (docs/verification/coding-agents.md); Codex requires the OpenAI
+   Responses API, served by `internal/server/responsesapi`
+   (`POST /v1/responses`, an adapter over the chat ingress). Remaining
+   caveat: verified against a mock upstream, not a real provider session.
 2. **Per-user model choice** — each user can pick which model they talk to.
 3. **Cost-driven model substitution** — swap to a cheaper model (e.g.
    Sonnet → GLM) when cost, not just capability, is the deciding factor.
@@ -65,7 +68,8 @@ when a change spans packages:
 
 1. **KeyAuth** (`internal/server/auth.go`) — `x-api-key` OR `Authorization:
    Bearer`, SHA-256 lookup in `keystore` → `Principal` on the request context.
-2. **Ingress parse** (`internal/server/{anthropicapi,openaiapi,bedrockapi}`) —
+2. **Ingress parse** (`internal/server/{anthropicapi,openaiapi,bedrockapi}`;
+   `responsesapi` adapts `POST /v1/responses` onto the openai pipeline) —
    protocol-specific; the raw body is kept for verbatim forwarding.
 3. **Routing** (`internal/router`) — alias canonicalization → `ResolveModel`
    (config `model_fallbacks` when the requested model has no route) →

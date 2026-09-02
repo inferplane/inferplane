@@ -1,4 +1,4 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: f7a5a043641f · generated-at: 2026-09-01 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 5f8abd1e0807 · generated-at: 2026-09-02 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
 > from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
 > per-AI copy).
@@ -13,7 +13,10 @@ Go 1.25; each of the two binaries below is itself a single static binary
 Kubernetes-native, Apache-2.0, CNCF Sandbox aspirant.
 
 **Core purpose (judge diffs against this):** (1) a single entry point for
-coding-assistant traffic, (2) per-user model choice, (3) cost-driven model
+coding-assistant traffic — Claude Code, OpenCode, AND Codex are real-client
+verified against a running mayu (docs/verification/coding-agents.md); Codex
+uses the OpenAI Responses API served by `internal/server/responsesapi`
+(`POST /v1/responses`, an adapter over the chat ingress) — (2) per-user model choice, (3) cost-driven model
 substitution — enforceable via `routing.budgetTiers` (ADR-041): a budget
 rule crossing a threshold substitutes a cheaper target for a requested
 model name, judged globally by the control plane, never widening access
