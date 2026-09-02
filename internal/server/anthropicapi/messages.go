@@ -398,6 +398,22 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	if !last && (resp.StatusCode >= 500 || resp.StatusCode == 429 || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
 		return true
 	}
+	// Phase 0a invariant (enterprise-strategy: a settled cost is mandatory
+	// for every 2xx — the ADR-030 zero-cost class): a success the gateway
+	// cannot parse cannot settle, and serving it would bill 0 µUSD with
+	// empty audit usage. Fail closed — next target if one exists, else a
+	// synthesized 502 — never an unbilled success. Non-2xx responses settle
+	// nothing by design and tee through below unchanged.
+	if resp.StatusCode < 400 && resp.Parsed == nil {
+		if !last {
+			return true
+		}
+		writeErr(w, 502, "api_error", "upstream returned a success with no accountable body; refusing to serve it unbilled")
+		h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, 502, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
+		recordSpanResponse(req, prov.Name(), upstream, nil, false)
+		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 502, time.Since(start).Seconds(), 0)
+		return false
+	}
 	if resp.Headers != nil {
 		copyUpstreamHeaders(w.Header(), resp.Headers)
 	}

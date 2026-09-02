@@ -268,6 +268,7 @@ func (headerProvider) Complete(context.Context, *providers.ProxyRequest) (*provi
 		StatusCode: 200,
 		Headers:    http.Header{"Request-Id": {"req_123"}, "Anthropic-Ratelimit-Requests-Remaining": {"42"}, "Content-Type": {"application/json"}},
 		RawBody:    []byte(`{"id":"msg_x","type":"message","role":"assistant","model":"m","content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`),
+		Parsed:     &schema.ChatResponse{ID: "msg_x", Type: "message", Role: "assistant", Model: "m", Content: []schema.ContentBlock{}},
 	}, nil
 }
 func (headerProvider) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {

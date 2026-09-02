@@ -82,9 +82,13 @@ path; Converse and InvokeModel build Parsed from typed fields and cannot
 reach this state). Fixed: that path is now fail-closed — an unparseable 2xx
 returns a synthesized 502 (`providers/bedrock/mantle.go` `Complete`), and the
 stream path errors when a 200 stream yields no parseable frame, so nothing is
-served unbilled. Remaining gap: fail-closed conversion is a per-path
-discipline, not a structural guarantee — a future egress that builds `Parsed`
-from re-parsed JSON must repeat it (no test fences the invariant generically).
+served unbilled. The structural half (Phase 0a) is now also in place for the
+non-streaming paths: every ingress refuses a 2xx whose `Parsed` is nil —
+falling back to the next target when one exists, else a synthesized 502 —
+with fence tests per ingress (`zero_bill_fence_test.go` ×3), so a future
+egress that builds `Parsed` from re-parsed JSON fails in CI instead of
+review. Remaining: an equivalent generic fence for a 2xx STREAM that yields
+no settleable frame (today per-provider discipline, Mantle's fixed).
 
 **Per-user governance is absent.** `internal/policy/store.go:168-169` rejects
 `budget`/`rate` rules unless the subject is team-only. Per-key limits are keyed

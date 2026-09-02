@@ -13,6 +13,7 @@ import (
 	"github.com/inferplane/inferplane/internal/bodystore"
 	"github.com/inferplane/inferplane/internal/config"
 	"github.com/inferplane/inferplane/internal/keystore"
+	"github.com/inferplane/inferplane/internal/openai"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
 	"github.com/inferplane/inferplane/pkg/schema"
@@ -29,7 +30,11 @@ func (p *recProvider) Name() string               { return "openai_compatible" }
 func (p *recProvider) Models() []schema.ModelInfo { return nil }
 func (p *recProvider) Complete(_ context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {
 	p.last = req
-	return &providers.ProxyResponse{StatusCode: 200, RawBody: []byte(`{"id":"x","object":"chat.completion","choices":[],"usage":{}}`)}, nil
+	// Parsed is set like every real provider does on a parseable 2xx —
+	// the ingress now refuses to serve an unbilled success without it.
+	raw := []byte(`{"id":"x","object":"chat.completion","choices":[],"usage":{}}`)
+	parsed, _ := openai.ResponseToCanonical(raw)
+	return &providers.ProxyResponse{StatusCode: 200, RawBody: raw, Parsed: parsed}, nil
 }
 func (p *recProvider) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
 	return nil, nil

@@ -28,7 +28,13 @@ func (p *recProvider) Name() string               { return "rec" }
 func (p *recProvider) Models() []schema.ModelInfo { return nil }
 func (p *recProvider) Complete(_ context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {
 	p.last = req
-	return &providers.ProxyResponse{StatusCode: 200, RawBody: []byte(`{"id":"x","type":"message","role":"assistant","model":"m","content":[]}`)}, nil
+	// Parsed is set like every real provider does on a parseable 2xx —
+	// the ingress now refuses to serve an unbilled success without it.
+	return &providers.ProxyResponse{
+		StatusCode: 200,
+		RawBody:    []byte(`{"id":"x","type":"message","role":"assistant","model":"m","content":[]}`),
+		Parsed:     &schema.ChatResponse{ID: "x", Type: "message", Role: "assistant", Model: "m", Content: []schema.ContentBlock{}},
+	}, nil
 }
 func (p *recProvider) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
 	return nil, nil

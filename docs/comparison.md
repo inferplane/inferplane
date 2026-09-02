@@ -165,8 +165,9 @@ S1 (rate shares + durable ledger) plus strategy Phase 1.
 
 **Honest gaps.** Invoice reconciliation is partial (strategy contract row
 🔶); cache *efficiency* is measured as tokens, not outcomes (hit ratio,
-write-without-reuse — strategy Phase 3); fail-closed conversion is
-per-path discipline without a generic CI fence (strategy §3).
+write-without-reuse — strategy Phase 3). The unbilled-2xx class is now
+structurally fenced at every ingress on the non-streaming path (Phase 0a,
+2026-09-02); the streaming equivalent remains per-provider discipline.
 
 **Verdict.** Ahead of both. This is the dimension where the codebase is
 strongest relative to the field evidence; Phase 3 turns it from accurate
