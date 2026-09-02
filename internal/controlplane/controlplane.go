@@ -82,6 +82,9 @@ type Server struct {
 	// memory. onStoreErr is the log seam (defaults to log.Print).
 	ledgerStore LedgerStore
 	onStoreErr  func(error)
+
+	// mutations is the Phase 0b-4 admin_mutation sink (mutationlog.go).
+	mutations mutationLog
 }
 
 // SetLedgerStore attaches a durable ledger and loads its state: persisted

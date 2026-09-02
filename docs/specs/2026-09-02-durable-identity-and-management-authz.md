@@ -147,8 +147,15 @@ reuses `internal/audit`'s record shape.
    2026-09-02** (`oidc.role_mappings` → `adminauth.ResolveRoles` →
    `server.RequireCapability` per route class; negative tests in
    `internal/server/capability_test.go`; unconfigured = byte-identical).
-   Remaining: the inferplaned plane (policy-write gating), lands with 0b-4.
-4. **0b-4 mutation audit** + console surfacing.
+   The inferplaned half landed with 0b-4 (below).
+4. **0b-4 control-plane gating + mutation audit — ✅ shipped 2026-09-02:**
+   `INFERPLANED_OIDC_ROLE_MAPPINGS` (JSON, typo-rejected) gates policy
+   PUT/DELETE on policy-admin (static token = break-glass); every policy
+   write records an `admin_mutation` — actor (`iss#sub` / static-token),
+   capability, action, scope, before/after sha256, generation — to
+   `INFERPLANED_MUTATION_LOG` JSONL or the process log (never silent).
+   Still open from this section: mutation records for mayu-plane
+   provider/team writes (admin_key events exist), console surfacing.
 
 ## 6. Risks / open questions for the gate
 

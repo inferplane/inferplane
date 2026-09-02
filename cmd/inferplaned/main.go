@@ -259,6 +259,20 @@ func buildMux(policies, token string, oidc *oidcEnv) (mux *http.ServeMux, cp *co
 			}
 			log.Print("inferplaned: GovernancePolicy documents are postgres-authoritative (INFERPLANED_POLICY_DSN set); --policies is seed-only and no longer watched")
 		}
+		// Mutation audit sink (Phase 0b-4) — env-only per the
+		// INFERPLANED_TOKEN precedent. Unset: admin_mutation records go to
+		// the process log (a mutation is never silent); set: append-only
+		// JSONL at this path.
+		if mutPath := os.Getenv("INFERPLANED_MUTATION_LOG"); mutPath != "" {
+			f, err := os.OpenFile(mutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+			if err != nil {
+				return nil, nil, closePG, fmt.Errorf("mutation log: %w", err)
+			}
+			cp.SetMutationLog(f)
+			closePrev := closePG
+			closePG = func() { f.Close(); closePrev() }
+			log.Printf("inferplaned: admin mutations appending to %s (INFERPLANED_MUTATION_LOG set)", mutPath)
+		}
 		// Durable lease ledger (roadmap ② durability half) — env-only per
 		// the INFERPLANED_TOKEN precedent. Opt-in: unset keeps the ledger
 		// in-memory, byte-identical behavior. Attached AFTER the policy

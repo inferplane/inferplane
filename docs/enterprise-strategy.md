@@ -30,7 +30,7 @@ authorization languages, MCP traffic routing.
 | Contract | Requirement | Status |
 |---|---|---|
 | Durable identity | `UserID = (OIDC issuer, subject)`. Key rotation, re-login, restart, and a second device must not split policy, budget, quota, or audit attribution. Email/owner strings/key IDs are not identities. | 🔶 phases 0b-1/0b-2 shipped 2026-09-02 per the [design spec](specs/2026-09-02-durable-identity-and-management-authz.md): canonical `iss#sub` minted at CLI login and admin issuance (keys.user_id, ALTER-migrated), enforcement + usage attribution key on it with a bounded Owner fallback, audit `principal.user_id`, bare-sub policy fallback; e2e proves two keys/devices = one ledger. Remaining: config-declared metadata paths adopt it fleet-wide, and the acceptance suite's remaining identity rows |
-| Duty separation | Fixed roles (`platform-admin`, `policy-admin`, `provider-admin`, `budget-admin`, `auditor`, `team-admin`) with org/team scope. Every control-plane endpoint authorizes after authenticating. Every policy/provider/pricing/budget/role mutation records actor, capability, scope, before/after hash, generation. | ❌ P0 — [design spec proposed](specs/2026-09-02-durable-identity-and-management-authz.md) (Phase 0b gate input) |
+| Duty separation | Fixed roles (`platform-admin`, `policy-admin`, `provider-admin`, `budget-admin`, `auditor`, `team-admin`) with org/team scope. Every control-plane endpoint authorizes after authenticating. Every policy/provider/pricing/budget/role mutation records actor, capability, scope, before/after hash, generation. | 🔶 phases 0b-3/0b-4 shipped 2026-09-02 per the [design spec](specs/2026-09-02-durable-identity-and-management-authz.md): mayu-plane capability middleware per route class (opt-in `oidc.role_mappings`, audited 403s, unconfigured = byte-identical); control-plane policy writes gated on policy-admin (`INFERPLANED_OIDC_ROLE_MAPPINGS`) with `admin_mutation` records (actor, capability, scope, before/after sha256, generation → `INFERPLANED_MUTATION_LOG` or process log). Remaining: mutation records for mayu provider/team writes; acceptance-suite Administration rows |
 | Two-pool user budget | Premium pool + total hard cap in one explicit window. Premium exhausted → first compatible model in an admin-approved fallback set; total exhausted → deny before egress. Token quotas must state fallback-or-block explicitly, never inherit monetary behavior. | ❌ P0 |
 | Pre-egress PII policy | Typed detector result; the policy engine (not the plugin) picks `external-unmodified` \| `external-masked` \| `internal-only` \| `blocked` and attaches it as an **egress ceiling**. Later stages may only narrow it. Detector/masker failure is fail-closed. `external-unmodified` requires a completed detector chain reporting nothing protected. | ❌ P0 |
 | Fleet enforcement accuracy | Enforcement key ≥ `(org, UserID, pool, windowID)` in a durable ledger. A lease is spend authority already reserved centrally — non-overlapping, immediately reducing central balance, expiry returning only provably-uncommitted authority. Rate/quota must not multiply by data-plane count. | ❌ P0 |
@@ -113,9 +113,11 @@ separation: `oidc.role_mappings` grants the fixed roles from the verified
 groups claim, and each management route class sits behind
 `RequireCapability` (an auditor can read audit/logs but not issue keys; a
 team-admin the reverse — negative tests per class; unconfigured deployments
-byte-identical). The control plane still grants whole-console authority to
-any accepted OIDC identity or static token, and policy PUT/DELETE has no
-mutation audit (ADR-038 accepted limitation) — Phase 0b-4.
+byte-identical). The control plane now gates policy writes on policy-admin
+(`INFERPLANED_OIDC_ROLE_MAPPINGS`, 0b-4) and records every policy mutation
+(actor, capability, scope, before/after sha256, generation) — closing the
+ADR-038 accepted limitation. Remaining: mutation records for mayu-plane
+provider/team writes beyond the existing admin_key audit events.
 
 **Enforcement state is neither durable nor globally accurate.** Key store is
 SQLite; rate/quota/budget counters are process-local; the lease ledger is

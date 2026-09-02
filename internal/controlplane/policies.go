@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/inferplane/inferplane/internal/adminauth"
 	"io"
 	"net/http"
 	"time"
@@ -169,8 +170,10 @@ func (s *Server) ApplyDelete(ctx context.Context, name string) error {
 
 func (s *Server) mountPolicies(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1alpha1/policies", authn(s.token, s.authOpts, s.handlePolicyList))
-	mux.HandleFunc("PUT /v1alpha1/policies/{name}", authn(s.token, s.authOpts, s.handlePolicyPut))
-	mux.HandleFunc("DELETE /v1alpha1/policies/{name}", authn(s.token, s.authOpts, s.handlePolicyDelete))
+	// Writes require policy-admin when role gating is configured
+	// (Phase 0b-4); the static token stays platform-admin break-glass.
+	mux.HandleFunc("PUT /v1alpha1/policies/{name}", authnCap(s.token, s.authOpts, []string{adminauth.RolePolicyAdmin}, s.handlePolicyPut))
+	mux.HandleFunc("DELETE /v1alpha1/policies/{name}", authnCap(s.token, s.authOpts, []string{adminauth.RolePolicyAdmin}, s.handlePolicyDelete))
 }
 
 // policyView is one document as the console consumes it: the wire document
@@ -220,18 +223,37 @@ func (s *Server) handlePolicyPut(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "could not read request body")
 		return
 	}
+	before := s.canonicalPolicyJSON(name)
 	if err := s.ApplyWrite(r.Context(), name, body); err != nil {
 		writePolicyError(w, err)
 		return
 	}
+	s.mu.Lock()
+	generation := s.generation
+	s.mu.Unlock()
+	s.recordMutation(MutationRecord{
+		Actor: Actor(r.Context()), Capability: "policies", Action: "put", Scope: name,
+		BeforeSHA256: sha256Hex(before), AfterSHA256: sha256Hex(s.canonicalPolicyJSON(name)),
+		Generation: generation,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handlePolicyDelete(w http.ResponseWriter, r *http.Request) {
-	if err := s.ApplyDelete(r.Context(), r.PathValue("name")); err != nil {
+	name := r.PathValue("name")
+	before := s.canonicalPolicyJSON(name)
+	if err := s.ApplyDelete(r.Context(), name); err != nil {
 		writePolicyError(w, err)
 		return
 	}
+	s.mu.Lock()
+	generation := s.generation
+	s.mu.Unlock()
+	s.recordMutation(MutationRecord{
+		Actor: Actor(r.Context()), Capability: "policies", Action: "delete", Scope: name,
+		BeforeSHA256: sha256Hex(before),
+		Generation:   generation,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -25,6 +26,11 @@ type oidcEnv struct {
 	// first-deploy mistake: the CSP silently blocks the token exchange and
 	// the console falls back to the manual-token screen with no clear error.
 	LoginOrigins []string
+	// RoleMappings (Phase 0b-4) come from INFERPLANED_OIDC_ROLE_MAPPINGS —
+	// JSON, e.g. [{"group":"grp-policy","roles":["policy-admin"]}]. Empty =
+	// role gating off (any allowed identity keeps whole-console authority).
+	// Role names are validated against the fixed set at load.
+	RoleMappings []adminauth.RoleMapping
 }
 
 // loadOIDCEnv parses the five INFERPLANED_OIDC_* vars via getenv (injected —
@@ -36,9 +42,32 @@ func loadOIDCEnv(getenv func(string) string) (*oidcEnv, error) {
 	groupsClaim := getenv("INFERPLANED_OIDC_GROUPS_CLAIM")
 	allowedGroups := splitTrim(getenv("INFERPLANED_OIDC_ALLOWED_GROUPS"))
 	loginOrigins := splitTrim(getenv("INFERPLANED_OIDC_LOGIN_ORIGINS"))
+	roleMappingsRaw := getenv("INFERPLANED_OIDC_ROLE_MAPPINGS")
 
-	if issuer == "" && clientID == "" && groupsClaim == "" && len(allowedGroups) == 0 && len(loginOrigins) == 0 {
+	if issuer == "" && clientID == "" && groupsClaim == "" && len(allowedGroups) == 0 && len(loginOrigins) == 0 && roleMappingsRaw == "" {
 		return nil, nil
+	}
+
+	var roleMappings []adminauth.RoleMapping
+	if roleMappingsRaw != "" {
+		var rms []struct {
+			Group string   `json:"group"`
+			Roles []string `json:"roles"`
+		}
+		if err := json.Unmarshal([]byte(roleMappingsRaw), &rms); err != nil {
+			return nil, fmt.Errorf("inferplaned: INFERPLANED_OIDC_ROLE_MAPPINGS must be JSON like [{\"group\":\"g\",\"roles\":[\"policy-admin\"]}]: %v", err)
+		}
+		for _, rm := range rms {
+			if rm.Group == "" || len(rm.Roles) == 0 {
+				return nil, fmt.Errorf("inferplaned: INFERPLANED_OIDC_ROLE_MAPPINGS entry missing group or roles")
+			}
+			for _, role := range rm.Roles {
+				if !adminauth.ValidRole(role) {
+					return nil, fmt.Errorf("inferplaned: INFERPLANED_OIDC_ROLE_MAPPINGS names unknown role %q — a typo here would silently grant nothing", role)
+				}
+			}
+			roleMappings = append(roleMappings, adminauth.RoleMapping{Group: rm.Group, Roles: rm.Roles})
+		}
 	}
 
 	if issuer == "" {
@@ -84,6 +113,7 @@ func loadOIDCEnv(getenv func(string) string) (*oidcEnv, error) {
 		GroupsClaim:   groupsClaim,
 		AllowedGroups: allowedGroups,
 		LoginOrigins:  loginOrigins,
+		RoleMappings:  roleMappings,
 	}, nil
 }
 
@@ -105,7 +135,7 @@ func splitTrim(s string) []string {
 // member of an allowed group gets admin-equivalent (whole-console) access —
 // there is no per-team model on the control plane to map into (v1 scope).
 func (o *oidcEnv) mapping() adminauth.MappingConfig {
-	return adminauth.MappingConfig{AdminGroups: o.AllowedGroups}
+	return adminauth.MappingConfig{AdminGroups: o.AllowedGroups, RoleMappings: o.RoleMappings}
 }
 
 // connectSrc returns the CSP connect-src widening: nil when the browser flow

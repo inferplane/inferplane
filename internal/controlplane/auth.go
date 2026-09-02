@@ -63,6 +63,28 @@ func newAuthOptions(opts []Option) authOptions {
 // token — an SSO-only deploy (empty token, verifier configured) is a
 // legitimate posture, not a break-glass gap.
 func authn(token string, opts authOptions, next http.HandlerFunc) http.HandlerFunc {
+	return authnCap(token, opts, nil, next)
+}
+
+// actorKey carries the authenticated actor down to mutation-audit records
+// (Phase 0b-4): the durable identity `issuer#sub` on the OIDC path,
+// "static-token" on the shared-token path, "" when unauthenticated
+// (loopback-only posture).
+type actorKey struct{}
+
+// Actor returns the authenticated actor authnCap stamped, if any.
+func Actor(ctx context.Context) string {
+	a, _ := ctx.Value(actorKey{}).(string)
+	return a
+}
+
+// authnCap is authn plus an optional capability requirement (Phase 0b-4):
+// when requiredRoles is non-empty AND role gating is configured
+// (mapping.RoleMappings non-empty), an OIDC identity must hold one of the
+// roles (or platform-admin); the static token is platform-admin break-glass
+// and always passes. With no RoleMappings configured, requiredRoles is
+// inert — pre-roles authority, byte-identical (the mayu-plane opt-in rule).
+func authnCap(token string, opts authOptions, requiredRoles []string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if token == "" && opts.verifier == nil {
 			next(w, r)
@@ -81,11 +103,37 @@ func authn(token string, opts authOptions, next http.HandlerFunc) http.HandlerFu
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
+			roles := adminauth.ResolveRoles(claims.Groups, opts.mapping)
 			if _, _, ok := adminauth.Resolve(claims.Groups, opts.mapping); !ok {
-				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
-				return
+				// Under active role gating a role-holding identity with no
+				// group→access mapping still authenticates (mirrors the
+				// mayu-plane rule: an auditor need not map to a team).
+				if !(len(opts.mapping.RoleMappings) > 0 && len(roles) > 0) {
+					http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+					return
+				}
 			}
-			next(w, r)
+			if len(requiredRoles) > 0 && len(opts.mapping.RoleMappings) > 0 {
+				allowed := false
+				for _, have := range roles {
+					if have == adminauth.RolePlatformAdmin {
+						allowed = true
+						break
+					}
+					for _, want := range requiredRoles {
+						if have == want {
+							allowed = true
+							break
+						}
+					}
+				}
+				if !allowed {
+					http.Error(w, `{"error":"missing capability"}`, http.StatusForbidden)
+					return
+				}
+			}
+			actor := claims.Issuer + "#" + claims.Subject
+			next(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, actor)))
 			return
 		}
 
@@ -98,6 +146,7 @@ func authn(token string, opts authOptions, next http.HandlerFunc) http.HandlerFu
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
-		next(w, r)
+		// The static token is platform-admin break-glass: never role-gated.
+		next(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, "static-token")))
 	}
 }
