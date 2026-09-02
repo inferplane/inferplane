@@ -34,7 +34,7 @@ authorization languages, MCP traffic routing.
 | Two-pool user budget | Premium pool + total hard cap in one explicit window. Premium exhausted → first compatible model in an admin-approved fallback set; total exhausted → deny before egress. Token quotas must state fallback-or-block explicitly, never inherit monetary behavior. | ❌ P0 |
 | Pre-egress PII policy | Typed detector result; the policy engine (not the plugin) picks `external-unmodified` \| `external-masked` \| `internal-only` \| `blocked` and attaches it as an **egress ceiling**. Later stages may only narrow it. Detector/masker failure is fail-closed. `external-unmodified` requires a completed detector chain reporting nothing protected. | ❌ P0 |
 | Fleet enforcement accuracy | Enforcement key ≥ `(org, UserID, pool, windowID)` in a durable ledger. A lease is spend authority already reserved centrally — non-overlapping, immediately reducing central balance, expiry returning only provably-uncommitted authority. Rate/quota must not multiply by data-plane count. | ❌ P0 |
-| Guardrail / residency | A configured guardrail and region lock apply on **every** egress path, with no opt-out reachable from routing config. | ❌ P0 (regressed) |
+| Guardrail / residency | A configured guardrail and region lock apply on **every** egress path, with no opt-out reachable from routing config. | 🔶 fenced 2026-09-02: `providers/bedrock/guardrail_fence_test.go` proves every egress in `egressAPIs` either APPLIES the guardrail upstream or REFUSES a guarded request pre-egress (Mantle — no guardrail parameter; the refusal is hereby the documented permanent posture: a guarded team cannot use Mantle-only models, and the audit chain never attests a guardrail that did not run); the bedrock INGRESS gained the region-lock + guardrail-override wire tests the other two ingresses already had. Remaining before ✅: accept-or-replace decision on the Mantle refusal by a maintainer, and guardrail evaluation off the InvokeModel/Converse APIs if replacement is chosen |
 | Cost explainability | Every served request settles observed usage against an immutable pricing version; every request mutation the gateway performs is recorded. Cache reads, 5m/1h writes, hit ratio, write-without-reuse, and masking/model-switch cache loss are reported. | 🔶 partial |
 
 A hard cap governs admission against a versioned pricing table; it is not a
@@ -69,9 +69,14 @@ guarded request routed to Mantle with a 400 naming the conflict, before
 egress — the bypass and the falsified attestation are gone. Remaining gap
 (why the contract row stays ❌): Mantle has no guardrail parameter, so the
 requirement "a configured guardrail *applies* on every egress path" is still
-unmet — a guarded team simply cannot use Mantle-only models until guardrail
-evaluation exists off the InvokeModel/Converse APIs (or the refusal is
-accepted as the permanent posture and documented as such).
+unmet in the "applies" sense. As of 2026-09-02 the refusal is the DOCUMENTED
+permanent posture (guardrail_fence_test.go, the ADR-019 comment on
+mantleGuardrailCheck): a guarded team cannot use Mantle-only models, and the
+audit chain never attests a guardrail that did not run. The fence also makes
+the posture structural — every egress in `egressAPIs` must either apply or
+refuse, so a fourth egress cannot ship guard-unchecked. A maintainer may
+still supersede the refusal with real off-API guardrail evaluation; until
+then this row is fenced-refusal, not silent regression.
 
 **A 200 response could bill zero on the Mantle path.**
 Original bug: the Bedrock ingress settles only when `resp.Parsed != nil`, and

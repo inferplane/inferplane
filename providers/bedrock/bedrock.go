@@ -75,6 +75,15 @@ func (p *provider) Models() []schema.ModelInfo { return nil }
 // "mantle" routes to the Mantle endpoint (mantle.go) — the former
 // invoke_model fallback (M4/§10 #2) silently sent Mantle-only models
 // (openai.gpt-5.4/-5.5) to an endpoint that has never heard of them.
+// egressAPIs enumerates every egress path the Complete/Stream dispatch
+// below can route to. The guardrail-coverage fence
+// (guardrail_fence_test.go) iterates this list and proves each path either
+// APPLIES the effective guardrail on the upstream call or REFUSES a
+// guarded request before egress — adding a new case to the dispatch
+// switches without extending both this list and the fence is the
+// regression the strategy's "Guardrail / residency" P0 exists to prevent.
+var egressAPIs = []string{"invoke_model", "converse", "mantle"}
+
 func (p *provider) apiFor(upstream string) string {
 	if a, ok := p.modelAPI[upstream]; ok && a != "" {
 		return a
