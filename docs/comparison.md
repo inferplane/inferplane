@@ -54,7 +54,7 @@ work rather than a Redis dependency.
 | Cost control | **ahead** (policy-driven tier substitution; leases without Redis) | ahead (budget primitives comparable, substitution is unique) | §2 |
 | Cost accuracy | **ahead** (integer µUSD, cache-tier settlement, fail-closed billing) | ahead | §3 |
 | Admin convenience | mixed (governance-as-code vs their mature UI) | **behind** (their dashboard is the product) | §4 |
-| Performance | **ahead** structurally (unbenchmarked — see gap) | **ahead** structurally (unbenchmarked) | §5 |
+| Performance | **ahead — measured** (9.4× lower overhead p50, 17× on first-token) | **ahead — measured** (2.5× lower overhead p50; plus their network hop) | §5 |
 | Model compatibility | behind on breadth, **ahead** on coding-agent depth | behind on breadth, ahead on depth | §6 |
 | Authentication | **ahead on price** (their paid tier is our OSS); identity durability now matched (Phase 0b-1/0b-2) — duty separation remains | same shape | §7 |
 
@@ -243,27 +243,40 @@ self-hosted fleets.
   cache (LiteLLM's field bug) means full-price, full-latency prefills on
   every turn.
 
-**Measured.** [`benchmarks/streaming`](../benchmarks/README.md) runs the
-real `mayu` binary on its full governed hot path (key auth, routing,
-PreCheck/Settle, hash-chained audit) against a mock SSE upstream, next to
-a pipelined-transit simulation of a central gateway's network position.
-Illustrative run (loopback, 2026-09-01): mayu adds **+0.8ms TTFT p50**;
-a lossless 8ms-one-way hop — the low end of Portkey's self-reported
-10–20ms P50, with the gateway's own processing deliberately *not*
-modeled — adds **+17ms TTFT p50**. The asymmetry favors the competitor
-and inferplane still wins by an order of magnitude. See the methodology
-notes in `benchmarks/README.md` before quoting numbers.
+**Measured — head-to-head (2026-09-02).**
+[`benchmarks/gwcompare`](../benchmarks/gwcompare/README.md) runs the real
+binaries of all three gateways — mayu on its full governed hot path (key
+auth, RBAC, PreCheck with budget reservation, settle, hash-chained audit),
+LiteLLM proxy 1.99.0, Portkey OSS gateway 1.15.2 — against the SAME instant
+mock upstream on loopback, so the numbers are gateway overhead alone:
+
+| p50, c=1 | direct | **mayu** | Portkey | LiteLLM |
+|---|---|---|---|---|
+| non-streaming latency | 0.14ms | **0.94ms** | 2.14ms | 7.67ms |
+| streaming first-content | 0.14ms | **0.81ms** | (500 — see below) | 11.49ms |
+
+At c=8 the spread widens: mayu 4.02ms p50 vs Portkey 12.36ms vs LiteLLM
+47.62ms (non-streaming). Overhead over direct: mayu +0.8ms, Portkey 2.5×
+that, LiteLLM 9.4× that — and on first-token time LiteLLM adds 17× mayu's
+overhead. Portkey OSS on plain Node 22 returned an internal error on every
+STREAMING request in this environment (`TypeError: immutable`), so its
+streaming row is honestly unmeasurable here; its non-streaming rows stand.
+This is the on-box comparison — a hosted Portkey/LiteLLM additionally pays
+its network hop (Portkey self-reports 10–20ms P50), which mayu's node-local
+position never pays. The older
+[`benchmarks/streaming`](../benchmarks/README.md) harness (mayu vs a
+simulated central hop) remains for the network-position argument.
 
 **Honest gaps.**
-- The central hop is simulated, not a measured Portkey/LiteLLM deployment;
-  a side-by-side against real installations (plus mayu CPU/RSS under
-  concurrency) remains to be published.
+- Loopback + mock upstream measures the proxy hop, not a production
+  deployment: no real model, no TLS, one 4-vCPU container. mayu CPU/RSS
+  under sustained concurrency remains to be published.
 - Single-replica `mayu` per node is by design, but the shared-K8s-gateway
   profile (later, per strategy §1) will need the ADR-013 successor.
 
-**Verdict.** Ahead of both by construction; unclaimable until benchmarked.
-The benchmark harness is the cheapest high-leverage item in this entire
-document.
+**Verdict.** Ahead of both — now measured, not just structural: lowest
+overhead of the three at every percentile tested, on top of the structural
+no-network-hop advantage.
 
 ## 6. Model compatibility
 
@@ -288,15 +301,17 @@ document.
   three families and **chat-only** — no embeddings/images/audio (roadmap
   ⑤ starts the embeddings lane). This is a deliberate non-goal (README),
   but it is a real loss for any buyer scoring provider-count checkboxes.
-- **Codex is fixture-verified, not client-verified** — Core Purpose #1
-  stays 🔶. Wire-shape fixture tests
-  (`internal/server/openaiapi/agent_wire_test.go`) now prove the Chat
-  Completions ingress accepts the Codex `wire_api: "chat"` shape (agentic
-  tools, the turn-2 tool-call round trip) and OpenCode's
-  `stream_options.include_usage`, on both the verbatim and the
-  Claude-translated paths — but the fixtures are constructed from the
-  clients' documented payloads, and a recorded capture from a real
-  Codex/OpenCode session is still the bar for closing Purpose #1.
+- **Real-client verification (2026-09-02,
+  [docs/verification/coding-agents.md](verification/coding-agents.md)):**
+  Claude Code 2.1.258 and OpenCode 1.18.26 each completed a REAL turn
+  through a running mayu with a virtual key — served, settled in µUSD, and
+  hash-chain-audited, zero client-side patches. **Codex 0.152.1 is
+  BLOCKED**: current Codex has removed `wire_api = "chat"` for custom
+  providers and requires the OpenAI **Responses API**
+  (`POST /v1/responses`), which mayu does not serve — the Chat-shape Codex
+  fixtures in `agent_wire_test.go` pin a wire current Codex no longer
+  speaks. Closing Purpose #1 for Codex now means a `/v1/responses`
+  ingress, the top model-compatibility work item.
 
 **Verdict.** Behind on breadth, ahead on depth-where-it-counts. The
 winning frame is "the gateway that doesn't corrupt your coding agent's
