@@ -524,3 +524,22 @@ func TestPricingGuard(t *testing.T) {
 		}
 	})
 }
+
+// ADR-043 EWMA split: every settled request feeds the per-team flow meter —
+// requests and TOTAL tokens (cache tiers included, the same figure the quota
+// debits) — which the control-plane syncer differentiates into recent flow.
+func TestSettleFeedsFlowMeter(t *testing.T) {
+	g := NewGovernor(map[string]TeamPolicy{"t": {}}, limiter.NewMemory(), budget.NewMemory(), nil)
+	if r, tok := g.FlowTotals("t"); r != 0 || tok != 0 {
+		t.Fatalf("pre-traffic flow = %d/%d, want 0/0", r, tok)
+	}
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 100, Output: 50, CacheRead: 850}, nil, 0)
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 500}, nil, 0)
+	r, tok := g.FlowTotals("t")
+	if r != 2 || tok != 1500 {
+		t.Fatalf("flow = %d requests / %d tokens, want 2/1500 (cache tiers count)", r, tok)
+	}
+	if r, tok := g.FlowTotals("other"); r != 0 || tok != 0 {
+		t.Fatalf("unrelated team flow = %d/%d, want 0/0", r, tok)
+	}
+}

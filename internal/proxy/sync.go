@@ -231,10 +231,31 @@ type Syncer struct {
 	// flood. Advice only: nothing here fetches or applies an update.
 	OnUpdateAdvice func(policy.UpdateAdvice)
 
+	// FlowOf reports a team's CUMULATIVE settled traffic (requests, total
+	// tokens) since boot — wired to governance.Governor.FlowTotals. The
+	// syncer differentiates it per heartbeat and EWMA-smooths into the
+	// per-minute flow the control plane's proportional rate split consumes
+	// (ADR-043 EWMA half). nil = no flow reporting; the control plane keeps
+	// the equal split for this plane.
+	FlowOf func(team string) (requests, tokens int64)
+
 	client     *http.Client
 	generation string
 	pending    []policy.Rejection
 	lastAdvice *policy.UpdateAdvice
+	flowState  map[string]*teamFlowState
+	nowFn      func() time.Time // injectable clock for flow-differentiation tests
+}
+
+// teamFlowState is the syncer's per-team flow differentiation state: the
+// last cumulative sample and the smoothed per-minute rates. EWMA alpha is
+// 0.5 — responsive enough that a plane going hot converges within a few
+// heartbeats, smooth enough that one bursty heartbeat doesn't seize the
+// whole proportional pool.
+type teamFlowState struct {
+	lastReqs, lastTokens int64
+	lastAt               time.Time
+	ewmaRPM, ewmaTPM     float64
 }
 
 // Run heartbeats until ctx is done. The first sync fires immediately so a
@@ -338,6 +359,53 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 				Policy: p.Name, Rule: r.Name, Team: p.Subject.Team, SpentMicroUSD: spent,
 				Period: r.Budget.Period, WindowID: windowID,
 			})
+		}
+	}
+
+	// Recent-flow report (ADR-043 EWMA split): for every team with a rate
+	// rule in the applied set, differentiate the cumulative settled-traffic
+	// counters against the last heartbeat's sample and EWMA-smooth. The
+	// first sight of a team establishes the baseline and reports nothing —
+	// a rate needs two samples.
+	if s.FlowOf != nil {
+		if s.flowState == nil {
+			s.flowState = map[string]*teamFlowState{}
+		}
+		if s.nowFn == nil {
+			s.nowFn = time.Now
+		}
+		now := s.nowFn()
+		seen := map[string]bool{}
+		for _, p := range s.Store.Policies() {
+			if p.Subject.Team == "" || p.Subject.User != "" {
+				continue
+			}
+			for _, r := range p.Rules {
+				if r.Rate == nil || r.Rate.Unlimited || seen[p.Subject.Team] {
+					continue
+				}
+				seen[p.Subject.Team] = true
+				reqs, tokens := s.FlowOf(p.Subject.Team)
+				st := s.flowState[p.Subject.Team]
+				if st == nil {
+					s.flowState[p.Subject.Team] = &teamFlowState{lastReqs: reqs, lastTokens: tokens, lastAt: now}
+					continue
+				}
+				elapsed := now.Sub(st.lastAt).Minutes()
+				if elapsed > 0 {
+					instRPM := float64(reqs-st.lastReqs) / elapsed
+					instTPM := float64(tokens-st.lastTokens) / elapsed
+					if instRPM < 0 || instTPM < 0 {
+						instRPM, instTPM = 0, 0 // counter restarted; re-baseline
+					}
+					st.ewmaRPM = (st.ewmaRPM + instRPM) / 2
+					st.ewmaTPM = (st.ewmaTPM + instTPM) / 2
+					st.lastReqs, st.lastTokens, st.lastAt = reqs, tokens, now
+				}
+				req.Flows = append(req.Flows, policy.TeamFlow{
+					Team: p.Subject.Team, RPM: int64(st.ewmaRPM), TPM: int64(st.ewmaTPM),
+				})
+			}
 		}
 	}
 

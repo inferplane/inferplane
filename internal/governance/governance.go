@@ -9,6 +9,7 @@ package governance
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/inferplane/inferplane/internal/audit"
@@ -168,6 +169,31 @@ type Governor struct {
 	bud             budget.BudgetStore
 	budgetLoc       *time.Location   // ADR-034-adjacent: budget_timezone; nil = UTC
 	metrics         *metrics.Metrics // nil-safe: no-op when nil
+
+	// flowMu/flows: cumulative SETTLED traffic per team — requests and
+	// total tokens — sampled by the control-plane syncer to compute this
+	// plane's recent consumption for the ADR-043 proportional rate split.
+	// Settled only (a denied request earned no share of the fleet's rate),
+	// and team-keyed (config/admin-bounded cardinality, same bar as the
+	// limiter's team buckets).
+	flowMu sync.Mutex
+	flows  map[string]*flowTotals
+}
+
+// flowTotals is one team's cumulative settled traffic (see Governor.flows).
+type flowTotals struct{ requests, tokens int64 }
+
+// FlowTotals reports a team's cumulative settled traffic — requests and
+// total tokens — since boot. Monotonic per process; the control-plane
+// syncer samples it each heartbeat and differentiates to a recent rate
+// (ADR-043 proportional rate split). Read-only, no state change.
+func (g *Governor) FlowTotals(team string) (requests, tokens int64) {
+	g.flowMu.Lock()
+	defer g.flowMu.Unlock()
+	if ft := g.flows[team]; ft != nil {
+		return ft.requests, ft.tokens
+	}
+	return 0, 0
 }
 
 // NewGovernor builds the Governor. m is the Prometheus metrics sink for
@@ -637,6 +663,21 @@ func (g *Governor) Settle(s Subject, kp KeyPolicy, provider, model string, u pri
 	// (Claude Code's common case) debit far less quota than it actually
 	// consumed, the mirror image of ADR-030's pricing bug in the quota path.
 	actualTokens := u.Input + u.Output + u.CacheRead + u.CacheWrite5m + u.CacheWrite1h
+	// Flow meter (ADR-043 EWMA split): count every settled request and its
+	// full token load, cache tiers included — the same figure the quota
+	// debits — so the syncer's per-heartbeat delta measures real traffic.
+	g.flowMu.Lock()
+	if g.flows == nil {
+		g.flows = map[string]*flowTotals{}
+	}
+	ft := g.flows[s.Team]
+	if ft == nil {
+		ft = &flowTotals{}
+		g.flows[s.Team] = ft
+	}
+	ft.requests++
+	ft.tokens += actualTokens
+	g.flowMu.Unlock()
 	if p.TokensPerDay > 0 {
 		g.lim.DebitQuota("quota:"+s.Team, actualTokens, 24*time.Hour)
 		// Reflect the post-debit daily quota utilization into the gauge (0..1).

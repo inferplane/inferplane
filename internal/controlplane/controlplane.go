@@ -229,6 +229,12 @@ type dpInfo struct {
 	Generation  string             `json:"generation"`
 	LastSeen    time.Time          `json:"lastSeen"`
 	Rejections  []policy.Rejection `json:"rejections,omitempty"`
+	// Flows is the plane's last-reported recent consumption per rate-ruled
+	// team (ADR-043 EWMA split). Replaced wholesale each heartbeat: a plane
+	// that stops reporting contributes zero to the proportional pool and
+	// falls back to the equal floor. Not serialized — /v1alpha1/dataplanes
+	// is a version/liveness view, not a traffic feed.
+	Flows map[string]policy.TeamFlow `json:"-"`
 }
 
 // NewServer loads the policy documents (wire form — the control plane may
@@ -472,6 +478,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		s.dataplanes[req.Dataplane] = dp
 	}
 	dp.APIVersions, dp.Version, dp.Generation, dp.LastSeen = req.APIVersions, req.Version, req.Generation, now
+	dp.Flows = nil
+	if len(req.Flows) > 0 {
+		dp.Flows = make(map[string]policy.TeamFlow, len(req.Flows))
+		for _, f := range req.Flows {
+			dp.Flows[f.Team] = f
+		}
+	}
 	dp.Rejections = append(dp.Rejections, req.Rejections...)
 	if len(dp.Rejections) > maxRejections {
 		dp.Rejections = dp.Rejections[len(dp.Rejections)-maxRejections:]
@@ -620,24 +633,53 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	if len(s.rates) > 0 {
 		horizon := 3 * time.Duration(s.interval) * time.Second
 		n := int64(0)
+		live := make([]*dpInfo, 0, len(s.dataplanes))
 		for _, dp := range s.dataplanes {
 			if now.Sub(dp.LastSeen) <= horizon {
 				n++
+				live = append(live, dp)
 			}
 		}
-		shareOf := func(limit int64) int64 {
-			if limit == 0 {
-				return 0 // dimension not limited by this rule
-			}
-			if sh := limit / n; sh > 0 {
-				return sh
-			}
-			return 1
-		}
+		self := s.dataplanes[req.Dataplane]
 		for k, rr := range s.rates {
+			// EWMA proportional split (ADR-043 second half): half the limit
+			// is reserved as an EQUAL floor — an idle plane can always start
+			// working without waiting a rebalance — and the other half is
+			// divided proportionally to each live plane's reported recent
+			// flow. Σ shares ≤ limit by construction (floor division), the
+			// min-1 floor kept from v1 (never starve a plane; may exceed
+			// only when limit < 2n, the accepted v1 posture). No flow
+			// reported anywhere (older builds, or a cold fleet) degrades to
+			// exactly the v1 equal split.
+			var sumRPM, sumTPM int64
+			for _, dp := range live {
+				if f, ok := dp.Flows[rr.team]; ok {
+					sumRPM += f.RPM
+					sumTPM += f.TPM
+				}
+			}
+			var selfFlow policy.TeamFlow
+			if self != nil {
+				selfFlow = self.Flows[rr.team]
+			}
+			shareOf := func(limit, selfRate, sumRate int64) int64 {
+				if limit == 0 {
+					return 0 // dimension not limited by this rule
+				}
+				var sh int64
+				if sumRate <= 0 {
+					sh = limit / n
+				} else {
+					sh = limit/(2*n) + (limit/2)*selfRate/sumRate
+				}
+				if sh > 0 {
+					return sh
+				}
+				return 1
+			}
 			resp.RateShares = append(resp.RateShares, policy.RateShare{
 				Policy: k.policy, Rule: k.rule, Team: rr.team,
-				RPM: shareOf(rr.rpm), TPM: shareOf(rr.tpm),
+				RPM: shareOf(rr.rpm, selfFlow.RPM, sumRPM), TPM: shareOf(rr.tpm, selfFlow.TPM, sumTPM),
 				ExpiresAt: now.Add(horizon),
 			})
 		}

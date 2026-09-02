@@ -1,6 +1,6 @@
 # ADR-043: Global rate limits via control-plane rate shares
 
-Status: Proposed (2026-09-01) · Implements roadmap ① (v1: equal split)
+Status: Proposed (2026-09-01, EWMA half added 2026-09-02) · Implements roadmap ① (equal split + demand-following EWMA split)
 
 ## Context
 
@@ -73,13 +73,19 @@ grows on its next heartbeat — the same release mechanism as budget grants.
 - A team's fleet-aggregate admission rate is bounded by the configured
   limit (± the min-1 floor case) instead of N× it. The 429 appears at the
   global limit.
-- An unevenly loaded fleet 429s earlier on the hot plane than a perfectly
-  global counter would — the equal split does not follow demand. The
-  designed follow-up (roadmap ①'s full shape) is proportional splitting
-  from EWMA consumption reported in the heartbeat (`recentRPM`/`recentTPM`
-  in `ConsumptionReport`), with the equal split retained as the idle
-  floor. That is additive wire work on top of this ADR and does not
-  change the enforcement seam.
+- The split now FOLLOWS DEMAND (second half, shipped 2026-09-02): mayu
+  differentiates the governor's cumulative settled-traffic counters per
+  heartbeat, EWMA-smooths (α=0.5), and reports per-minute flow in the
+  additive `SyncRequest.flows` — a deliberate deviation from the original
+  sketch's `recentRPM`/`recentTPM` inside `ConsumptionReport`, because
+  reports exist per lease-managed BUDGET rule and a team with only a rate
+  rule would have had nowhere to report. The control plane reserves HALF
+  each rule's limit as the equal floor (an idle plane can always start
+  working without waiting a rebalance) and divides the other half
+  proportionally to reported flow: Σ shares ≤ limit by construction, the
+  min-1 floor kept from v1. A flow-less plane (older build, cold fleet)
+  degrades to the floor, and no flow anywhere degrades to exactly the v1
+  equal split. Settled traffic only — a denied request earns no share.
 - Per-KEY rate limits and standalone mode are unchanged (per-plane, as
   before); user-subject rate rules stay rejected (`checkEnforceable`)
   until shares can be user-keyed.

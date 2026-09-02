@@ -715,6 +715,10 @@ func newGateway(cfgPath string) (*gateway, error) {
 				}
 				return 0
 			},
+			// ADR-043 EWMA split: the syncer differentiates these cumulative
+			// settled-traffic counters into the recent per-minute flow the
+			// control plane's proportional rate split consumes.
+			FlowOf: gov.FlowTotals,
 			OnError: func(err error) {
 				fmt.Fprintln(os.Stderr, "inferplane:", err)
 			},

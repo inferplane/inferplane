@@ -40,6 +40,24 @@ type SyncRequest struct {
 	Rejections []Rejection `json:"rejections,omitempty"`
 	// Reports carries cumulative spend per lease-managed budget rule.
 	Reports []ConsumptionReport `json:"reports,omitempty"`
+	// Flows carries this plane's recent SETTLED traffic per rate-ruled team
+	// (ADR-043 EWMA split): requests/min and tokens/min, EWMA-smoothed on
+	// the data plane over its heartbeats. Appended last with omitempty — an
+	// older build reports none and the control plane keeps the equal split
+	// for it, exactly the ADR-043 v1 behavior. A deliberate deviation from
+	// the original sketch (recentRPM/recentTPM inside ConsumptionReport):
+	// reports exist per lease-managed BUDGET rule, so a team with a rate
+	// rule and no budget rule would have had nowhere to report flow.
+	Flows []TeamFlow `json:"flows,omitempty"`
+}
+
+// TeamFlow is one team's recent consumption on one data plane (ADR-043 EWMA
+// split): requests and total tokens per minute, measured from settled
+// traffic only — a denied request earned no share of the fleet's rate.
+type TeamFlow struct {
+	Team string `json:"team"`
+	RPM  int64  `json:"rpm"`
+	TPM  int64  `json:"tpm"`
 }
 
 // Rejection is one refused policy document (or rule), reported upstream.

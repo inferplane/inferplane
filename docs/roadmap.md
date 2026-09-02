@@ -45,7 +45,7 @@ Sprint plan (each phase = separate PR(s), reviewed before the next):
 
 ---
 
-## ① Global rate limits via rate shares — v1 (equal split) ✅ shipped 2026-09-01 as ADR-043
+## ① Global rate limits via rate shares — ✅ both halves shipped (equal split 2026-09-01, EWMA split 2026-09-02) as ADR-043
 
 **Shipped** ([ADR-043](decisions/ADR-043-global-rate-shares.md)): the control
 plane divides each team rate rule's rpm/tpm equally among live data planes
@@ -56,11 +56,24 @@ rpm/tpm to min(policy limit, share) in the same team-lookup closure as the
 budget allowance clamp — narrows-only, so a compromised control plane can
 only reduce throughput. Failure semantics: FailOpen keep-last. Two-gateway
 e2e (`cmd/mayu/rateshare_e2e_test.go`): the 429 appears at the global limit,
-not N× it. **Still open from the design below:** the proportional-to-EWMA
-split (`recentRPM`/`recentTPM` in reports) — the equal split becomes its
-idle floor; and per-user rate rules stay gated on it.
+not N× it.
 
-### Original design (EWMA half still open)
+**Shipped (EWMA half, 2026-09-02):** the split now follows demand. mayu
+counts settled traffic per team (`governance.Governor.FlowTotals` —
+requests + total tokens, cache tiers included; denied requests earn no
+share), the syncer differentiates it per heartbeat and EWMA-smooths
+(α=0.5) into `SyncRequest.flows` (additive; a deliberate deviation from
+the sketch's `recentRPM`/`recentTPM` inside `ConsumptionReport`, since
+reports exist per BUDGET rule and a rate-only team would have had nowhere
+to report). The control plane reserves HALF each rule's limit as the
+equal floor — an idle plane can always start working without waiting a
+rebalance — and divides the other half proportionally to reported flow:
+Σ ≤ limit by construction, min-1 floor kept, and a flow-less fleet
+degrades to exactly the v1 equal split. **Still open:** per-user rate
+rules (need user-keyed shares — a cardinality design of its own), token
+quotas, per-key rates, standalone mode.
+
+### Original design (both halves now implemented — kept for rationale)
 
 **Gap.** `rpm`/`tpm` enforce against per-proxy in-memory buckets
 (`limiter.NewMemory`): a team capped at 300 rpm with 20 connected data planes

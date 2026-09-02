@@ -151,3 +151,50 @@ spec:
 		t.Fatalf("undeclared tpm dimension must stay 0 (unclamped): %+v", sh)
 	}
 }
+
+// ADR-043 second half: with reported recent flows, half the limit stays an
+// equal floor and half divides proportionally — a hot plane earns more than
+// a quiet one, an idle plane keeps a floor to start working from, and the
+// fleet aggregate stays ≤ the configured limit.
+func TestRateSharesProportionalToReportedFlow(t *testing.T) {
+	_, ts := newRateShareServer(t)
+
+	flows := func(rpm, tpm int64) []policy.TeamFlow {
+		return []policy.TeamFlow{{Team: "alpha", RPM: rpm, TPM: tpm}}
+	}
+	// Register both planes with their flows: dp-hot carries 3× dp-cool's load.
+	doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp-hot", Flows: flows(90, 1800)})
+	doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp-cool", Flows: flows(30, 600)})
+
+	hot := shareFor(t, doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp-hot", Flows: flows(90, 1800)}), "throttle")
+	cool := shareFor(t, doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp-cool", Flows: flows(30, 600)}), "throttle")
+
+	// rpm 300, n=2: floor = 300/(2*2) = 75 each; proportional half = 150,
+	// split 3:1 → hot 75+112=187, cool 75+37=112. Σ=299 ≤ 300.
+	if hot.RPM <= cool.RPM {
+		t.Fatalf("hot plane must earn the larger share: hot %d, cool %d", hot.RPM, cool.RPM)
+	}
+	if hot.RPM+cool.RPM > 300 {
+		t.Fatalf("Σ rpm shares %d exceeds the global limit 300", hot.RPM+cool.RPM)
+	}
+	if hot.RPM != 187 || cool.RPM != 112 {
+		t.Fatalf("hybrid split: hot %d cool %d, want 187/112 (floor 75 + 3:1 proportional)", hot.RPM, cool.RPM)
+	}
+	if hot.TPM+cool.TPM > 6000 || hot.TPM <= cool.TPM {
+		t.Fatalf("tpm shares: hot %d cool %d, want proportional with Σ ≤ 6000", hot.TPM, cool.TPM)
+	}
+
+	// An idle plane (zero flow) keeps the equal floor — never starved by
+	// the busy pair.
+	idle := shareFor(t, doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp-idle", Flows: flows(0, 0)}), "throttle")
+	if idle.RPM != 300/(2*3) {
+		t.Fatalf("idle plane share = %d, want the equal floor %d", idle.RPM, 300/(2*3))
+	}
+
+	// A flow-less report (older build) degrades that plane to the floor as
+	// well — never a divide-by-zero, never the whole limit.
+	old := shareFor(t, doSync(t, ts.URL, "", policy.SyncRequest{Dataplane: "dp-old"}), "throttle")
+	if old.RPM != 300/(2*4) {
+		t.Fatalf("flow-less plane share = %d, want the equal floor %d", old.RPM, 300/(2*4))
+	}
+}
