@@ -31,7 +31,11 @@ type VerifierConfig struct {
 // request context).
 type Claims struct {
 	Subject string
-	Groups  []string
+	// Issuer is the VERIFIED issuer the token was validated against (the
+	// verifier's configured issuer — go-oidc enforces exact match). With
+	// Subject it forms the durable identity (Phase 0b design spec §3.1).
+	Issuer string
+	Groups []string
 }
 
 // Verifier validates externally-acquired ID tokens against the issuer's
@@ -150,7 +154,7 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (Claims, error) {
 	if err != nil {
 		return Claims{}, err
 	}
-	return Claims{Subject: idt.Subject, Groups: groups}, nil
+	return Claims{Subject: idt.Subject, Issuer: v.cfg.Issuer, Groups: groups}, nil
 }
 
 // extractGroups reads the configured TOP-LEVEL claim: a string array, or a

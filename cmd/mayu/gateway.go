@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -168,6 +169,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 			BudgetUSDMicros:       int64(math.Round(vk.BudgetUSDPerMonth * 1_000_000)),
 			BudgetUSDMicrosPerDay: int64(math.Round(vk.BudgetUSDPerDay * 1_000_000)),
 			Owner:                 vk.Owner,
+			UserID:                vk.UserID,
 			Metadata:              metadata,
 		}
 		p, err := store.EnsureKey(context.Background(), vk.Key, vk.Team, vk.AllowedModels, opts)
@@ -545,7 +547,16 @@ func newGateway(cfgPath string) (*gateway, error) {
 		}
 		ul, ok := polStore.UserLimits(team, user)
 		if !ok {
-			return governance.UserPolicy{}, false
+			// Phase 0b-2: a policy may name the bare OIDC sub while the key
+			// carries the canonical issuer#sub — the spec's explicitly weaker
+			// operator convenience. Exact match above wins; the bare-sub
+			// retry matches any issuer.
+			if i := strings.Index(user, "#"); i >= 0 {
+				ul, ok = polStore.UserLimits(team, user[i+1:])
+			}
+			if !ok {
+				return governance.UserPolicy{}, false
+			}
 		}
 		// governance.UserPolicy carries ONE on_exceeded knob for both windows
 		// (unlike TeamPolicy's per-window pair), so the two windows' hardCap

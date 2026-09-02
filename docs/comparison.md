@@ -56,7 +56,7 @@ work rather than a Redis dependency.
 | Admin convenience | mixed (governance-as-code vs their mature UI) | **behind** (their dashboard is the product) | §4 |
 | Performance | **ahead** structurally (unbenchmarked — see gap) | **ahead** structurally (unbenchmarked) | §5 |
 | Model compatibility | behind on breadth, **ahead** on coding-agent depth | behind on breadth, ahead on depth | §6 |
-| Authentication | **ahead on price** (their paid tier is our OSS), behind on identity durability | same shape | §7 |
+| Authentication | **ahead on price** (their paid tier is our OSS); identity durability now matched (Phase 0b-1/0b-2) — duty separation remains | same shape | §7 |
 
 "Ahead structurally" means the architecture guarantees the property but no
 reproducible benchmark or acceptance test yet proves it — those gaps are
@@ -303,10 +303,11 @@ fact.
   ships them under Apache-2.0.
 
 **Honest gaps** (strategy P0 "durable identity" + "duty separation"):
-- Identity is not durable: `UserID = (OIDC issuer, subject)` is not yet
-  first-class, so key rotation, re-login, or a second device can split
-  budget/audit attribution. Both competitors' enterprise tiers handle
-  user identity as a stable entity; this is the most important auth gap.
+- ~~Identity is not durable~~ **closed** (Phase 0b-1/0b-2, 2026-09-02):
+  `UserID = (issuer, subject)` is first-class — minted at CLI login and
+  admin issuance, enforced and attributed through governance and audit —
+  so key rotation and a second device keep one budget ledger and one
+  audit identity (e2e-proven).
 - No fixed admin role set (`platform-admin`, `auditor`, …), no mutation
   audit on management writes.
 - No SAML/SCIM (OIDC only) — some enterprise IdP checklists ask.
@@ -325,7 +326,7 @@ the competitive angle. No new workstream is invented here.
 | # | Gap (dimension it blocks) | Existing tracker | Competitive stake |
 |---|---|---|---|
 | 1 | ~~Streaming benchmark harness~~ **shipped** (`benchmarks/streaming`); remaining: side-by-side vs real Portkey/LiteLLM installs (Performance) | this document | Converts "faster than Portkey" from architecture argument to measured number — the harness now shows mayu +0.8ms vs +17ms for a best-case central hop |
-| 2 | Durable identity `(issuer, sub)` + admin roles + mutation audit (Auth, Security, Admin) | strategy Phase 0b (P0) | Both competitors' enterprise tiers have stable identity; without it "per-user budget" claims don't survive key rotation |
+| 2 | Durable identity ~~`(issuer, sub)`~~ **shipped** (Phase 0b-1/0b-2: rotation-proof per-user budgets + audit attribution); remaining: admin roles + mutation audit (Phase 0b-3/0b-4 per the design spec) | strategy Phase 0b (P0) | Identity now matches both competitors' enterprise tiers; duty separation is the remaining half |
 | 3 | ~~Global rate accuracy — rate shares~~ **shipped** (ADR-043, equal-split v1; two-gateway e2e proves 429 at the global limit); remaining: token quotas, per-key rates, EWMA split (Cost control) | roadmap ① / S1 | Was the one row where LiteLLM-with-Redis beat us — now matched without the Redis dependency |
 | 4 | Durable ledger + window IDs (Cost control, Cost accuracy) — durability half **shipped** (`INFERPLANED_LEDGER_PATH` SQLite ledger: restart resumes grants exactly, dead-plane spend survives); remaining: control-plane-owned windowID epochs | roadmap ② / S1, strategy Phase 1 | "Bounded overspend" is now a durable guarantee, not an in-memory one; window epochs finish the job |
 | 5 | ~~Codex/OpenCode wire fixtures~~ **shipped** (`internal/server/openaiapi/agent_wire_test.go`); remaining: recorded captures from real client sessions (Model compatibility) | Core Purpose #1 (🔶) | Both agents' documented wire shapes — agentic tools, tool-call round trips, `include_usage` — now pass on both provider wires; a real-client capture closes Purpose #1 |

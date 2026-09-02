@@ -288,6 +288,7 @@ type VirtualKeyConfig struct {
 	BudgetUSDPerMonth float64           `json:"budget_usd_per_month,omitempty"`
 	BudgetUSDPerDay   float64           `json:"budget_usd_per_day,omitempty"`
 	Owner             string            `json:"owner,omitempty"`
+	UserID            string            `json:"user_id,omitempty"` // durable identity issuer#sub (Phase 0b), optional
 	Metadata          map[string]string `json:"metadata,omitempty"`
 	Key               string            `json:"-"`
 }

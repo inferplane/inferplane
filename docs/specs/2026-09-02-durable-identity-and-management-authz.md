@@ -135,11 +135,14 @@ reuses `internal/audit`'s record shape.
 
 ## 5. Phasing (each = one PR, reviewed)
 
-1. **0b-1 identity capture:** UserID type + keys column + Principal +
-   CLI-login/admin mint paths + audit/telemetry attribution. Acceptance:
-   re-mint keeps the user budget window (extends the ADR-042 test suite).
-2. **0b-2 enforcement switch:** `Subject.User` = UserID with bounded Owner
-   fallback; policy exact-match; `/v1/usage` user fields keyed by UserID.
+1. **0b-1 identity capture — ✅ shipped 2026-09-02:** UserID type + keys
+   column + Principal + CLI-login/admin mint paths + audit/telemetry
+   attribution (`cmd/mayu/identity_e2e_test.go`,
+   `TestMessagesAuditCarriesDurableIdentity`).
+2. **0b-2 enforcement switch — ✅ shipped 2026-09-02:** `Subject.User` =
+   UserID with bounded Owner fallback (`subjectOf`/`identityOf` per
+   ingress); bare-sub policy fallback in the gateway user-lookup closure;
+   two keys/devices = one ledger proven end to end.
 3. **0b-3 roles + capability middleware** (both planes), opt-in via
    mapping config; negative authorization tests per role × route class.
 4. **0b-4 mutation audit** + console surfacing.

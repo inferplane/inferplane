@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS keys (
     expires_at         TEXT NOT NULL DEFAULT '',
     owner              TEXT NOT NULL DEFAULT '',
     metadata           TEXT NOT NULL DEFAULT '',
-    budget_usd_micros_per_day INTEGER NOT NULL DEFAULT 0
+    budget_usd_micros_per_day INTEGER NOT NULL DEFAULT 0,
+    user_id            TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_keys_hash ON keys(key_hash) WHERE revoked = 0;
 
@@ -140,6 +141,7 @@ func ensureSchema(db *sql.DB) error {
 		{"rpm", `ALTER TABLE keys ADD COLUMN rpm INTEGER NOT NULL DEFAULT 0`},
 		{"expires_at", `ALTER TABLE keys ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`},
 		{"owner", `ALTER TABLE keys ADD COLUMN owner TEXT NOT NULL DEFAULT ''`},
+		{"user_id", `ALTER TABLE keys ADD COLUMN user_id TEXT NOT NULL DEFAULT ''`},
 		{"metadata", `ALTER TABLE keys ADD COLUMN metadata TEXT NOT NULL DEFAULT ''`},
 		{"budget_usd_micros_per_day", `ALTER TABLE keys ADD COLUMN budget_usd_micros_per_day INTEGER NOT NULL DEFAULT 0`},
 	}
@@ -230,9 +232,9 @@ func (s *SQLiteStore) CreateWithOptions(ctx context.Context, team string, allowe
 	}
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO keys (key_id, key_hash, team, allowed_models, created_at,
-		 budget_usd_micros, tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 budget_usd_micros, tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day, user_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		keyID, hashHex, team, joinModels(allowedModels), nowRFC3339(),
-		opts.BudgetUSDMicros, opts.TPM, opts.RPM, encodeExpiry(opts.ExpiresAt), opts.Owner, metaJSON, opts.BudgetUSDMicrosPerDay)
+		opts.BudgetUSDMicros, opts.TPM, opts.RPM, encodeExpiry(opts.ExpiresAt), opts.Owner, metaJSON, opts.BudgetUSDMicrosPerDay, opts.UserID)
 	if err != nil {
 		return "", Principal{}, fmt.Errorf("keystore: insert: %w", err)
 	}
@@ -249,13 +251,13 @@ func (s *SQLiteStore) EnsureKey(ctx context.Context, plaintext, team string, all
 	}
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO keys (key_id, key_hash, team, allowed_models, created_at,
-		 budget_usd_micros, tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+		 budget_usd_micros, tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day, user_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(key_hash) DO UPDATE SET
 		   team=excluded.team, allowed_models=excluded.allowed_models,
 		   budget_usd_micros=excluded.budget_usd_micros, budget_usd_micros_per_day=excluded.budget_usd_micros_per_day, tpm=excluded.tpm, rpm=excluded.rpm,
-		   expires_at=excluded.expires_at, owner=excluded.owner, metadata=excluded.metadata`,
+		   expires_at=excluded.expires_at, owner=excluded.owner, metadata=excluded.metadata, user_id=excluded.user_id`,
 		keyID, hashHex, team, joinModels(allowedModels), nowRFC3339(),
-		opts.BudgetUSDMicros, opts.TPM, opts.RPM, encodeExpiry(opts.ExpiresAt), opts.Owner, metaJSON, opts.BudgetUSDMicrosPerDay)
+		opts.BudgetUSDMicros, opts.TPM, opts.RPM, encodeExpiry(opts.ExpiresAt), opts.Owner, metaJSON, opts.BudgetUSDMicrosPerDay, opts.UserID)
 	if err != nil {
 		return Principal{}, fmt.Errorf("keystore: ensure key: %w", err)
 	}
@@ -272,7 +274,7 @@ var ErrKeyNotFound = errors.New("keystore: key not found")
 // login` rather than suspect a typo (ADR-028).
 var ErrKeyExpired = errors.New("keystore: key expired")
 
-const keyColumns = `key_id, team, allowed_models, budget_usd_micros, tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day`
+const keyColumns = `key_id, team, allowed_models, budget_usd_micros, tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day, user_id`
 
 // scanPrincipal reads one keyColumns-shaped row. Expiry is checked by the
 // caller (Resolve treats an expired key as not-found; List shows it as-is so
@@ -282,7 +284,7 @@ const keyColumns = `key_id, team, allowed_models, budget_usd_micros, tpm, rpm, e
 func scanPrincipal(row interface{ Scan(...any) error }) (Principal, error) {
 	var p Principal
 	var models, expiresAt, metaJSON string
-	if err := row.Scan(&p.KeyID, &p.Team, &models, &p.BudgetUSDMicros, &p.TPM, &p.RPM, &expiresAt, &p.Owner, &metaJSON, &p.BudgetUSDMicrosPerDay); err != nil {
+	if err := row.Scan(&p.KeyID, &p.Team, &models, &p.BudgetUSDMicros, &p.TPM, &p.RPM, &expiresAt, &p.Owner, &metaJSON, &p.BudgetUSDMicrosPerDay, &p.UserID); err != nil {
 		return Principal{}, err
 	}
 	p.AllowedModels = splitModels(models)

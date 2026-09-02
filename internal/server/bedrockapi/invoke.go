@@ -527,7 +527,7 @@ func (h *InvokeHandler) settle(p keystore.Principal, providerName, model, upstre
 	cost, missing := h.gov.Settle(subjectOf(p), keyPolicyOf(p), providerName, upstream, pu, table, estimatedTokens)
 	if h.usage != nil {
 		// Attribute to the UPSTREAM model — the name pricing billed.
-		h.usage.Record(p.Team, p.Owner, upstream, pu, cost)
+		h.usage.Record(p.Team, identityOf(p), upstream, pu, cost)
 	}
 	return &audit.CostRef{
 		AmountUSDMicros: cost,
@@ -544,7 +544,24 @@ func (h *InvokeHandler) settle(p keystore.Principal, providerName, model, upstre
 // deliberately-duplicated-per-package shape as keyPolicyOf below, and for the
 // same reason: governance stays a leaf and does not import keystore.
 func subjectOf(p keystore.Principal) governance.Subject {
-	return governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.Owner}
+	// Phase 0b-2: the durable UserID (issuer#sub) is the enforcement
+	// identity when the key carries one; Owner is the bounded fallback for
+	// pre-migration keys, so their budget windows keep counting unchanged.
+	user := p.UserID
+	if user == "" {
+		user = p.Owner
+	}
+	return governance.Subject{Team: p.Team, KeyID: p.KeyID, User: user}
+}
+
+// identityOf is subjectOf's attribution twin: the durable UserID when the
+// key carries one, else the display Owner — so control-plane usage rolls up
+// per person across key rotations (Phase 0b-2).
+func identityOf(p keystore.Principal) string {
+	if p.UserID != "" {
+		return p.UserID
+	}
+	return p.Owner
 }
 
 func keyPolicyOf(p keystore.Principal) governance.KeyPolicy {
@@ -597,7 +614,7 @@ func (h *InvokeHandler) audit(ctx context.Context, p keystore.Principal, model, 
 		Event:         "request_started",
 		ID:            ulid.New(),
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
-		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
+		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team, UserID: p.UserID},
 		Request: audit.RequestRef{
 			Ingress: "bedrock", ModelRequested: model, ModelResolved: upstream,
 			Stream: h.streaming, PIIMasked: piiMasked, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx),
@@ -619,7 +636,7 @@ func (h *InvokeHandler) auditCompleted(ctx context.Context, id string, p keystor
 		Event:         "request_completed",
 		ID:            id,
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
-		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
+		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team, UserID: p.UserID},
 		Request: audit.RequestRef{
 			Ingress: "bedrock", ModelRequested: model, ModelResolved: upstream, Stream: h.streaming,
 			ModelSubstitutedFrom: audit.SubstitutedFrom(ctx),
@@ -655,7 +672,7 @@ func (h *InvokeHandler) auditCompletedPartial(ctx context.Context, p keystore.Pr
 		Event:         "request_completed",
 		ID:            ulid.New(),
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
-		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
+		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team, UserID: p.UserID},
 		Request:       audit.RequestRef{Ingress: "bedrock", ModelRequested: model, ModelResolved: upstream, Stream: h.streaming, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), ParamsStripped: audit.ParamsStrippedFrom(ctx)},
 		Outcome:       &audit.OutcomeRef{Status: 200, Partial: true},
 		Usage:         usage,

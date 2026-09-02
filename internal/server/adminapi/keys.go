@@ -78,6 +78,7 @@ type keyOptionsBody struct {
 	RPM                   int64             `json:"rpm,omitempty"`
 	ExpiresAt             string            `json:"expires_at,omitempty"`
 	Owner                 string            `json:"owner,omitempty"`
+	UserID                string            `json:"user_id,omitempty"` // durable identity issuer#sub (Phase 0b); full-admin provisioning only — non-admin callers always get their own
 	Metadata              map[string]string `json:"metadata,omitempty"`
 }
 
@@ -97,12 +98,15 @@ func (b keyOptionsBody) toKeyOptions() (keystore.KeyOptions, error) {
 	if len(b.Owner) > maxOwnerBytes {
 		return keystore.KeyOptions{}, fmt.Errorf("owner exceeds %d bytes", maxOwnerBytes)
 	}
+	if len(b.UserID) > maxOwnerBytes*4 {
+		return keystore.KeyOptions{}, fmt.Errorf("user_id exceeds %d bytes", maxOwnerBytes*4)
+	}
 	if len(b.Metadata) > 0 {
 		if size, err := json.Marshal(b.Metadata); err != nil || len(size) > maxMetadataBytes {
 			return keystore.KeyOptions{}, fmt.Errorf("metadata exceeds %d bytes serialized", maxMetadataBytes)
 		}
 	}
-	opts := keystore.KeyOptions{BudgetUSDMicros: b.BudgetUSDMicros, BudgetUSDMicrosPerDay: b.BudgetUSDMicrosPerDay, TPM: b.TPM, RPM: b.RPM, Owner: b.Owner, Metadata: b.Metadata}
+	opts := keystore.KeyOptions{BudgetUSDMicros: b.BudgetUSDMicros, BudgetUSDMicrosPerDay: b.BudgetUSDMicrosPerDay, TPM: b.TPM, RPM: b.RPM, Owner: b.Owner, UserID: b.UserID, Metadata: b.Metadata}
 	if b.ExpiresAt != "" {
 		// RFC3339Nano parses both plain RFC3339 and sub-second timestamps.
 		t, err := time.Parse(time.RFC3339Nano, b.ExpiresAt)
@@ -187,6 +191,9 @@ func (h *KeysHandler) create(w http.ResponseWriter, r *http.Request, id principa
 	// of someone else). ADR-028.
 	if id.AuthMethod == "oidc" && !id.IsAdmin {
 		opts.Owner = id.Subject
+		// Phase 0b: the durable identity binds the same way — a non-admin
+		// can only mint keys attributed to their own verified (issuer, sub).
+		opts.UserID = id.UserID()
 	}
 	plaintext, p, err := h.store.CreateWithOptions(r.Context(), body.Team, body.AllowedModels, opts)
 	if err != nil {

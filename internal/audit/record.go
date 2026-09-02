@@ -18,6 +18,10 @@ type PrincipalRef struct {
 	Team       string  `json:"team"`
 	User       *string `json:"user,omitempty"` // OIDC sub (admin plane) — opaque, never email
 	AuthMethod *string `json:"auth_method,omitempty"`
+	// UserID is the durable identity (issuer#sub, Phase 0b) behind the
+	// virtual key, when the key carries one. Appended at the struct end
+	// (omitempty) so mixed-version chains verify byte-identically.
+	UserID string `json:"user_id,omitempty"`
 }
 
 type RequestRef struct {

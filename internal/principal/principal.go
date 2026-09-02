@@ -32,9 +32,22 @@ func From(ctx context.Context) (keystore.Principal, bool) {
 // the sentinel {Subject: "break-glass", IsAdmin: true}.
 type AdminIdentity struct {
 	Subject    string
+	Issuer     string   // verified OIDC issuer (empty for break-glass) — with Subject, the durable identity (Phase 0b)
 	Teams      []string // teams this identity may issue/revoke keys for (nil for admins)
 	IsAdmin    bool     // admin_groups member or break-glass: entitled to every team
 	AuthMethod string   // "oidc" | "break_glass" — recorded in audit
+}
+
+// UserID returns the canonical durable identity `issuer + "#" + subject`
+// (Phase 0b design spec §3.1): "#" cannot appear in an https issuer URL and
+// is opaque inside sub, so the FIRST "#" is an unambiguous split point.
+// Empty when there is no verified issuer (break-glass) — a durable identity
+// is never fabricated.
+func (a AdminIdentity) UserID() string {
+	if a.Issuer == "" || a.Subject == "" {
+		return ""
+	}
+	return a.Issuer + "#" + a.Subject
 }
 
 // Entitled reports whether the identity may act on the given team.

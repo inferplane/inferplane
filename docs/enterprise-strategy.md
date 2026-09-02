@@ -29,7 +29,7 @@ authorization languages, MCP traffic routing.
 
 | Contract | Requirement | Status |
 |---|---|---|
-| Durable identity | `UserID = (OIDC issuer, subject)`. Key rotation, re-login, restart, and a second device must not split policy, budget, quota, or audit attribution. Email/owner strings/key IDs are not identities. | ❌ P0 — [design spec proposed](specs/2026-09-02-durable-identity-and-management-authz.md) (Phase 0b gate input) |
+| Durable identity | `UserID = (OIDC issuer, subject)`. Key rotation, re-login, restart, and a second device must not split policy, budget, quota, or audit attribution. Email/owner strings/key IDs are not identities. | 🔶 phases 0b-1/0b-2 shipped 2026-09-02 per the [design spec](specs/2026-09-02-durable-identity-and-management-authz.md): canonical `iss#sub` minted at CLI login and admin issuance (keys.user_id, ALTER-migrated), enforcement + usage attribution key on it with a bounded Owner fallback, audit `principal.user_id`, bare-sub policy fallback; e2e proves two keys/devices = one ledger. Remaining: config-declared metadata paths adopt it fleet-wide, and the acceptance suite's remaining identity rows |
 | Duty separation | Fixed roles (`platform-admin`, `policy-admin`, `provider-admin`, `budget-admin`, `auditor`, `team-admin`) with org/team scope. Every control-plane endpoint authorizes after authenticating. Every policy/provider/pricing/budget/role mutation records actor, capability, scope, before/after hash, generation. | ❌ P0 — [design spec proposed](specs/2026-09-02-durable-identity-and-management-authz.md) (Phase 0b gate input) |
 | Two-pool user budget | Premium pool + total hard cap in one explicit window. Premium exhausted → first compatible model in an admin-approved fallback set; total exhausted → deny before egress. Token quotas must state fallback-or-block explicitly, never inherit monetary behavior. | ❌ P0 |
 | Pre-egress PII policy | Typed detector result; the policy engine (not the plugin) picks `external-unmodified` \| `external-masked` \| `internal-only` \| `blocked` and attaches it as an **egress ceiling**. Later stages may only narrow it. Detector/masker failure is fail-closed. `external-unmodified` requires a completed detector chain reporting nothing protected. | ❌ P0 |
@@ -90,11 +90,16 @@ egress that builds `Parsed` from re-parsed JSON fails in CI instead of
 review. Remaining: an equivalent generic fence for a 2xx STREAM that yields
 no settleable frame (today per-provider discipline, Mantle's fixed).
 
-**Per-user governance is absent.** `internal/policy/store.go:168-169` rejects
-`budget`/`rate` rules unless the subject is team-only. Per-key limits are keyed
-by `key_id`, and CLI-minted keys omit them so re-minting cannot reset windows.
-Usage attribution uses the free-form key owner. A stable per-person budget
-cannot survive key rotation or a second device.
+**Per-user governance: budget shipped (ADR-042 Phase 3), identity now durable
+(Phase 0b-1/0b-2, 2026-09-02).** User-subject budget rules are enforced, and
+the enforcement identity is the canonical `UserID = issuer + "#" + subject`
+captured at CLI login (`authapi`) and admin issuance (`keys.user_id` column;
+non-admin callers always get their own verified identity), with the free-form
+Owner string demoted to a display label and a bounded fallback for
+pre-migration keys. A per-person budget now survives key rotation and a
+second device (`cmd/mayu/identity_e2e_test.go`). Remaining in this area:
+user-subject RATE (needs rate shares per user, ADR-043 follow-up) and the
+roles/mutation-audit half of Phase 0b below.
 
 **Substitution is team pressure, not a user fallback contract.** ADR-041
 activates a per-team substitution map from a referenced team budget;

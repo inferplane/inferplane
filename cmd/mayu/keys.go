@@ -34,6 +34,7 @@ func keysCreate(args []string) error {
 	team := fs.String("team", "", "team name (required)")
 	models := fs.String("models", "*", "comma-separated allowed models, or * for all")
 	store := fs.String("store", "", "path to the SQLite key store (required)")
+	userID := fs.String("user-id", "", "durable identity 'issuer#sub' to bind (Phase 0b, optional) — absent means a service key, never a fabricated identity")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -45,7 +46,7 @@ func keysCreate(args []string) error {
 		return err
 	}
 	defer s.Close()
-	plaintext, p, err := s.Create(context.Background(), *team, splitCSV(*models))
+	plaintext, p, err := s.CreateWithOptions(context.Background(), *team, splitCSV(*models), keystore.KeyOptions{UserID: *userID})
 	if err != nil {
 		return err
 	}

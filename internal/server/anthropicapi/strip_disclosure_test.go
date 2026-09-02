@@ -66,6 +66,36 @@ func TestMessagesDisclosesStrippedParams(t *testing.T) {
 	}
 }
 
+// TestMessagesAuditCarriesDurableIdentity (Phase 0b-1): a key bound to a
+// durable UserID stamps it on the request_completed record, so audit
+// attribution survives key rotation.
+func TestMessagesAuditCarriesDurableIdentity(t *testing.T) {
+	var buf bytes.Buffer
+	w, err := audit.NewWriter("i", filepath.Join(t.TempDir(), "a.wal"), []audit.Sink{audit.NewWriterSink("b", &buf, true)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provs := map[string]providers.Provider{"p": headerProvider{}}
+	models := map[string]config.ModelConfig{"m": {Targets: []config.Target{{Provider: "p", Model: "m"}}}}
+	h := NewMessagesHandlerWithAudit(router.New(holderFor(provs, models)), w)
+
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"m","messages":[]}`))
+	ctx := principal.With(req.Context(), keystore.Principal{
+		KeyID: "ik", Team: "t", AllowedModels: []string{"*"},
+		KeyOptions: keystore.KeyOptions{Owner: "alice-laptop", UserID: "https://idp.example#alice"},
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req.WithContext(ctx))
+	w.Close()
+
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(buf.String(), `"user_id":"https://idp.example#alice"`) {
+		t.Fatalf("audit record missing durable identity: %s", buf.String())
+	}
+}
+
 func TestMessagesNoStripNoDisclosure(t *testing.T) {
 	var buf bytes.Buffer
 	w, err := audit.NewWriter("i", filepath.Join(t.TempDir(), "a.wal"), []audit.Sink{audit.NewWriterSink("b", &buf, true)})

@@ -137,7 +137,11 @@ func MintHandler(store keystore.Store, ttl time.Duration, mint limiter.LimiterSt
 		plaintext, p, err := store.CreateWithOptions(r.Context(), team, []string{"*"}, keystore.KeyOptions{
 			ExpiresAt: &expiresAt,
 			Owner:     id.Subject,
-			Metadata:  map[string]string{"source": "cli"},
+			// Phase 0b: the durable identity — issuer#sub from the VERIFIED
+			// token — so a re-mint or second device keeps one budget window
+			// and one audit identity.
+			UserID:   id.UserID(),
+			Metadata: map[string]string{"source": "cli"},
 			// Deliberately no BudgetUSDMicros/TPM/RPM: those key on the
 			// rotating key_id with a fixed-length window (governance.go), so a
 			// per-key limit would reset every time the CLI re-mints. CLI-key

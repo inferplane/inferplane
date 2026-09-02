@@ -25,6 +25,7 @@ type KeyOptions struct {
 	RPM                   int64             // 0 = unlimited
 	ExpiresAt             *time.Time        // nil = never; enforced in Resolve
 	Owner                 string            // opaque identifier, optional — never use as a metric label (unbounded cardinality; CLAUDE.md forbids raw-input metric labels)
+	UserID                string            // durable identity `issuer + "#" + subject` (Phase 0b spec §3.1); empty for service keys and pre-migration keys — same metric-label prohibition as Owner
 	Metadata              map[string]string // optional key/value tags — same caution: never use as a metric label
 }
 
