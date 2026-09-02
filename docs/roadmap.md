@@ -23,7 +23,7 @@ already met by earlier work (ADR-031) outside this roadmap.
 |---|---|---|
 | #1 A single entry point for Claude Code/OpenCode/Codex | 🔶 partial | Codex/OpenCode wire-shape fixture tests now exist (`internal/server/openaiapi/agent_wire_test.go` + `testdata/`, 2026-09-01): the Chat Completions ingress accepts the Codex `wire_api: "chat"` shape (agentic tools, tool-call round-trip turns) and OpenCode's `stream_options.include_usage`, on both verbatim (openai-wire) and converted (anthropic-wire) paths. Still 🔶 because the fixtures are constructed from the clients' documented payloads, not recorded captures — verification against a real Codex/OpenCode client session remains open |
 | #2 Per-user model choice | ✅ done | User-subject `modelAccess` rules are enforced: `Store.ModelAllowed` (`internal/policy/store.go`), wired into the router via `SetPolicyGate` in `cmd/mayu/gateway.go`. (Per-user *rate* is a separate, still-blocked item — see #4b; per-user *budget* is enforced as of ADR-042 Phase 3.) |
-| #3 Cost-driven model substitution via policy (routing) | ✅ done, with caveats (ADR-041) | `routing.budgetTiers` is enforceable: `internal/policy/store.go` `checkEnforceable` now rejects only the cache-affinity half of `routing`; the control plane judges utilization globally from the ADR-034 ledger (`internal/controlplane/controlplane.go` `handleSync`) and latches the active tier per budget window (`internal/tier.Latch`); mayu applies it at ingress via `router.SubstituteTier`, never widening access or turning into a denial. Config-level `model_fallbacks` (`internal/router/router.go` `ResolveModel`) remains the separate availability-triggered substitution. Caveats: the window-latch key is an interim calendar-month-UTC derivation pending item ② below's real `windowID`; providerstore/UI pricing fields for `openai_compatible` GPU targets (ADR-041 item 6) and the full two-plane e2e (item 7) are follow-ups. |
+| #3 Cost-driven model substitution via policy (routing) | ✅ done, with caveats (ADR-041) | `routing.budgetTiers` is enforceable: `internal/policy/store.go` `checkEnforceable` now rejects only the cache-affinity half of `routing`; the control plane judges utilization globally from the ADR-034 ledger (`internal/controlplane/controlplane.go` `handleSync`) and latches the active tier per budget window (`internal/tier.Latch`); mayu applies it at ingress via `router.SubstituteTier`, never widening access or turning into a denial. Config-level `model_fallbacks` (`internal/router/router.go` `ResolveModel`) remains the separate availability-triggered substitution. Caveats: the control-plane tier latch now keys on the referenced budget rule's real `windowID` (item ② shipped); the interim calendar-month-UTC derivation remains only for standalone mode's latch; providerstore/UI pricing fields for `openai_compatible` GPU targets (ADR-041 item 6) and the full two-plane e2e (item 7) are follow-ups. |
 | #4a Team budget + block | ✅ done, with caveats | ADR-034 lease pattern bounds team-level overspend across data planes when a control plane is attached (worst case = Σ outstanding grants, not exact; window edges are approximate — ADR-034 §Known limits). Per-key budgets are not lease-managed. Standalone `mayu` (no control plane) gets no lease at all — budget is plain in-memory there, like rate. |
 | #4b Per-user budget/rate | 🔶 partial | *Budget* is unblocked (ADR-042 Phase 3): `checkEnforceable` (`internal/policy/store.go`) now rejects only user-subject *rate*; user-subject budget rules are merged by `mergeUserLimits`/`Store.UserLimits` and enforced by the Governor via `governance.SetUserLookup`/`UserPolicy`. *Rate* stays blocked — a per-user rate limit needs the rate-share model (item ① below). And per-user budget has no lease: a user-subject rule is excluded from the control-plane ledger and the consumption report, so with N data planes a user's effective cap is up to N× the configured value (ADR-042 §Accepted limitation, Phase 3) |
 | #4c Rate/quota global accuracy under horizontal scale | 🔶 partial | Team policy RATE rules are globally bounded when a control plane is attached (ADR-043 rate shares, equal-split v1, shipped 2026-09-01): the fleet aggregate stays ≤ the configured rpm/tpm (two-gateway e2e `cmd/mayu/rateshare_e2e_test.go`). Still per-replica: token quotas (tokens/day), per-key rate limits, config/keystore team rate in standalone mode, and the proportional-to-EWMA split (item ① below's full shape) |
@@ -108,7 +108,29 @@ briefly while holding a small share — acceptable; document. Bursty split
 
 ---
 
-## ② Durable ledger + control-plane-owned budget windows — durability half ✅ shipped 2026-09-01
+## ② Durable ledger + control-plane-owned budget windows — ✅ both halves shipped (durability 2026-09-01, window epochs 2026-09-02)
+
+**Shipped (window epochs):** the control plane owns the budget window.
+`windowIDFor(period, now)` computes a UTC calendar epoch id (`"2026-09"` /
+`"2026-09-02"`); every heartbeat rolls each ledger to the current epoch
+(`ruleLedger.roll` — spend and allowance drop WHOLESALE when the id changes,
+because the id changed, not because a heuristic guessed), every
+`LeaseGrant` is stamped `windowID`, and a `ConsumptionReport` stamped with
+a previous epoch is refused. mayu bridges the UTC-vs-`budget_timezone`
+phase difference by baselining its local counter at each OBSERVED epoch
+change: reports send (counter − baseline) and the lease clamp allows
+(allowance + baseline); a counter falling below its baseline (the local
+boundary passed) resets it. The tier latch now keys on the referenced
+budget rule's real epoch (the interim `tier.WindowKey` derivation remains
+only in standalone mode, which has no control plane to own an epoch), and
+ledger-store rows persist the epoch so a restart never resurrects a
+rolled-over window's spend. Decrease-detection remains ONLY as the
+fallback for epoch-less reports from pre-epoch builds — both wire fields
+are additive/omitempty, so mixed fleets degrade to exactly the old
+behavior. Still open (accepted): standalone mode keeps rolling local
+calendar windows (documented behavioral difference), and per-RULE spend
+reporting (several rules in one window share a team counter, conservative)
+stays as noted in `internal/proxy/sync.go`.
 
 **Shipped (durability):** `INFERPLANED_LEDGER_PATH` (env-only, opt-in;
 unset = in-memory, byte-identical) attaches a SQLite `LedgerStore`
@@ -123,11 +145,9 @@ counting; the 24h prune deletes a dead plane's rows. Restart resumes
 grants exactly — `TestLedgerStoreRestartPreservesSpendAndOutstanding`
 pins that a fully-committed budget stays committed across a restart
 instead of re-granting spent money. The cumulative-report self-healing
-stays as the fallback. **Still open:** control-plane-owned `windowID`
-epochs (the decrease-detection rollover heuristic is still in place),
-which also replaces `tier.Latch`'s interim calendar-month key.
+stays as the fallback.
 
-### Original design (windowID half still open)
+### Original design (both halves now implemented — kept for rationale)
 
 **Gap.** The lease ledger is in-memory: restart re-learns from cumulative
 reports, grants issued moments before a crash are re-derived, and — the real

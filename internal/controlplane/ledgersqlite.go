@@ -3,6 +3,7 @@ package controlplane
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
@@ -43,11 +44,19 @@ CREATE TABLE IF NOT EXISTS dataplanes (
 		db.Close()
 		return nil, fmt.Errorf("ledger store: schema: %w", err)
 	}
+	// window_id (roadmap ② epochs) is ALTER-migrated like keystore columns:
+	// a pre-epoch store gains the column with '' — rows restore under the
+	// period check alone, exactly what they meant when written.
+	if _, err := db.Exec(`ALTER TABLE lease_ledger ADD COLUMN window_id TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
+		db.Close()
+		return nil, fmt.Errorf("ledger store: migrate window_id: %w", err)
+	}
 	return &sqliteLedger{db: db}, nil
 }
 
 func (l *sqliteLedger) Load() ([]LedgerRow, []DataplaneRow, error) {
-	rows, err := l.db.Query(`SELECT policy, rule, dataplane, period, spent, allowance FROM lease_ledger`)
+	rows, err := l.db.Query(`SELECT policy, rule, dataplane, period, window_id, spent, allowance FROM lease_ledger`)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ledger store: load: %w", err)
 	}
@@ -56,7 +65,7 @@ func (l *sqliteLedger) Load() ([]LedgerRow, []DataplaneRow, error) {
 	for rows.Next() {
 		var r LedgerRow
 		var period string
-		if err := rows.Scan(&r.Policy, &r.Rule, &r.Dataplane, &period, &r.Spent, &r.Allowance); err != nil {
+		if err := rows.Scan(&r.Policy, &r.Rule, &r.Dataplane, &period, &r.WindowID, &r.Spent, &r.Allowance); err != nil {
 			return nil, nil, fmt.Errorf("ledger store: load: %w", err)
 		}
 		r.Period = v1alpha1.BudgetPeriod(period)
@@ -101,10 +110,10 @@ func (l *sqliteLedger) SaveDataplane(dp DataplaneRow, rows []LedgerRow) error {
 	}
 	for _, r := range rows {
 		if _, err := tx.Exec(
-			`INSERT INTO lease_ledger (policy, rule, dataplane, period, spent, allowance) VALUES (?, ?, ?, ?, ?, ?)
+			`INSERT INTO lease_ledger (policy, rule, dataplane, period, window_id, spent, allowance) VALUES (?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(policy, rule, dataplane) DO UPDATE SET
-			   period = excluded.period, spent = excluded.spent, allowance = excluded.allowance`,
-			r.Policy, r.Rule, r.Dataplane, string(r.Period), r.Spent, r.Allowance); err != nil {
+			   period = excluded.period, window_id = excluded.window_id, spent = excluded.spent, allowance = excluded.allowance`,
+			r.Policy, r.Rule, r.Dataplane, string(r.Period), r.WindowID, r.Spent, r.Allowance); err != nil {
 			return fmt.Errorf("ledger store: save: %w", err)
 		}
 	}

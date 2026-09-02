@@ -486,7 +486,12 @@ func newGateway(cfgPath string) (*gateway, error) {
 				if !ok {
 					return limit, exceeded
 				}
-				allowance := l.AllowanceMicroUSD
+				// The local counter still carries the OLD window's spend
+				// until the operator-timezone boundary passes (roadmap ②
+				// epoch skew), so the fresh window's allowance is compared
+				// shifted by the epoch baseline — otherwise old, already-
+				// settled spend would consume the new window's grant.
+				allowance := l.AllowanceMicroUSD + l.BaselineMicroUSD
 				if allowance < 1 {
 					allowance = 1
 				}

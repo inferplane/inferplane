@@ -127,11 +127,16 @@ carry the same evidence inside the hash-chained audit record
 the canonical stored row), so a management mutation on either plane is
 attestable, not just observable.
 
-**Enforcement state is neither durable nor globally accurate.** Key store is
-SQLite; rate/quota/budget counters are process-local; the lease ledger is
-in-memory with approximate window rollover and prunes dead data-plane spend
-(`internal/controlplane/controlplane.go:39`). Standalone and per-key budgets
-get no lease. Helm pins `replicaCount: 1`.
+**Enforcement state: ledger durable with owned window epochs; local
+counters still process-local.** The lease ledger persists opt-in
+(`INFERPLANED_LEDGER_PATH`) and budget windows are control-plane-OWNED
+epochs (roadmap ② complete, 2026-09-02): rollover is a deliberate UTC
+calendar epoch change stamped on every grant, stale-epoch reports are
+refused, and restart resurrects no rolled-over spend — no more
+per-data-plane tumbling windows or decrease-detection heuristics (those
+remain only as the compatibility fallback for pre-epoch builds). Still
+open: key store is SQLite; rate/quota counters and standalone/per-key
+budgets are process-local with no lease; Helm pins `replicaCount: 1`.
 
 **PII policy: all four ceilings shipped (2026-09-02).** The
 policy-selected egress ceiling exists end to end: `pii: {egress}` rules

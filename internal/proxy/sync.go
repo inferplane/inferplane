@@ -27,6 +27,20 @@ type Lease struct {
 	AllowanceMicroUSD int64
 	ExpiresAt         time.Time
 	HardCap           bool
+	// WindowID is the control-plane window epoch this allowance applies to
+	// (roadmap ②; "" from a pre-epoch control plane). BaselineMicroUSD is
+	// this data plane's LOCAL cumulative counter reading at the moment the
+	// epoch last CHANGED: the local counter rolls at the operator-timezone
+	// calendar boundary while the control plane's window is UTC, so during
+	// the skew gap the counter still carries old-window spend. Reports send
+	// (counter − baseline) so old spend never books into the fresh window,
+	// and the gateway's lease clamp allows (allowance + baseline) so the
+	// fresh window's grant isn't consumed by spend the old window already
+	// settled. Baseline moves only on an OBSERVED epoch change (never on
+	// first sight — mid-window attach keeps today's conservative full
+	// report) and resets to 0 when the local counter itself rolls below it.
+	WindowID         string
+	BaselineMicroUSD int64
 }
 
 // LeaseTable is the request-path view of current leases, keyed by
@@ -113,8 +127,12 @@ func (t *LeaseTable) Blocked(team string) (bool, string) {
 // set replaces the table from one heartbeat's grants, merging per (team,
 // window) most-restrictive-first: smallest allowance binds, hard if any rule
 // is hard, earliest expiry wins. Merging never crosses windows — a daily
-// allowance and a monthly allowance are not comparable quantities.
-func (t *LeaseTable) set(grants []policy.LeaseGrant) {
+// allowance and a monthly allowance are not comparable quantities. spentOf
+// (nil-safe) reads the LOCAL cumulative counter, sampled ONCE per (team,
+// window) at the moment a grant's WindowID differs from the table's — the
+// roadmap ② epoch baseline (see Lease); a same-epoch heartbeat carries the
+// existing baseline forward untouched.
+func (t *LeaseTable) set(grants []policy.LeaseGrant, spentOf func(team string, period v1alpha1.BudgetPeriod) int64) {
 	byTeam := make(map[string]map[v1alpha1.BudgetPeriod]Lease, len(grants))
 	for _, g := range grants {
 		// A control plane that predates BudgetRule.period sends no period at
@@ -131,7 +149,22 @@ func (t *LeaseTable) set(grants []policy.LeaseGrant) {
 		}
 		l, ok := windows[period]
 		if !ok {
-			windows[period] = Lease{AllowanceMicroUSD: g.AllowanceMicroUSD, ExpiresAt: g.ExpiresAt, HardCap: g.HardCap}
+			nl := Lease{AllowanceMicroUSD: g.AllowanceMicroUSD, ExpiresAt: g.ExpiresAt, HardCap: g.HardCap, WindowID: g.WindowID}
+			// Baseline: carry the previous table's forward within the same
+			// epoch; snapshot the local counter on an OBSERVED epoch change.
+			// First sight of a (team, window) — or of an epoch id at all —
+			// keeps baseline 0: today's conservative full-report behavior.
+			if prev, had := t.Get(g.Team, period); had {
+				switch {
+				case g.WindowID == "" || prev.WindowID == g.WindowID:
+					nl.BaselineMicroUSD = prev.BaselineMicroUSD
+				case prev.WindowID != "":
+					if spentOf != nil {
+						nl.BaselineMicroUSD = spentOf(g.Team, period)
+					}
+				}
+			}
+			windows[period] = nl
 			continue
 		}
 		if g.AllowanceMicroUSD < l.AllowanceMicroUSD {
@@ -146,6 +179,22 @@ func (t *LeaseTable) set(grants []policy.LeaseGrant) {
 	t.mu.Lock()
 	t.byTeam = byTeam
 	t.mu.Unlock()
+}
+
+// resetBaseline zeroes one window's epoch baseline — called by the report
+// loop when the LOCAL counter itself rolled below the baseline (the
+// operator-timezone boundary passed), at which point the baseline's spend
+// no longer exists in the counter to subtract.
+func (t *LeaseTable) resetBaseline(team string, period v1alpha1.BudgetPeriod) {
+	if period == "" {
+		period = v1alpha1.PeriodCalendarMonth
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if l, ok := t.byTeam[team][period]; ok {
+		l.BaselineMicroUSD = 0
+		t.byTeam[team][period] = l
+	}
 }
 
 // Syncer runs the heartbeat loop against inferplaned.
@@ -268,9 +317,26 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 			if s.SpentOf != nil {
 				spent = s.SpentOf(p.Subject.Team, r.Budget.Period)
 			}
+			// Window epochs (roadmap ②): report spend relative to the epoch
+			// baseline, stamped with the epoch id from the last grant, so
+			// spend the OLD window settled never books into the fresh one.
+			// A local counter below its baseline means the local calendar
+			// boundary passed too — the baseline's spend is gone from the
+			// counter, so it resets and the raw value is window-correct again.
+			var windowID string
+			if s.Leases != nil {
+				if l, ok := s.Leases.Get(p.Subject.Team, r.Budget.Period); ok {
+					windowID = l.WindowID
+					if spent < l.BaselineMicroUSD {
+						s.Leases.resetBaseline(p.Subject.Team, r.Budget.Period)
+					} else {
+						spent -= l.BaselineMicroUSD
+					}
+				}
+			}
 			req.Reports = append(req.Reports, policy.ConsumptionReport{
 				Policy: p.Name, Rule: r.Name, Team: p.Subject.Team, SpentMicroUSD: spent,
-				Period: r.Budget.Period,
+				Period: r.Budget.Period, WindowID: windowID,
 			})
 		}
 	}
@@ -310,7 +376,7 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 		s.generation = resp.Generation
 	}
 	if s.Leases != nil {
-		s.Leases.set(resp.Leases)
+		s.Leases.set(resp.Leases, s.SpentOf)
 	}
 	if s.Tiers != nil {
 		s.Tiers.Set(resp.ActiveTiers)

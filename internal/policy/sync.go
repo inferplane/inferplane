@@ -70,6 +70,13 @@ type ConsumptionReport struct {
 	// or a heartbeat landing right after an in-place period edit): the
 	// number would otherwise be booked in the wrong window's currency.
 	Period v1alpha1.BudgetPeriod `json:"period,omitempty"`
+	// WindowID echoes the LeaseGrant.WindowID this spend was measured
+	// against (roadmap ② window epochs). Appended last with omitempty: an
+	// older build reports none, and the control plane falls back to the
+	// decrease-detection heuristic for that plane. When present and NOT the
+	// rule's current window, the report is skipped — spend from a previous
+	// epoch must never book into the fresh window.
+	WindowID string `json:"windowID,omitempty"`
 }
 
 // SyncResponse is the control plane's answer.
@@ -165,6 +172,15 @@ type LeaseGrant struct {
 	// by (team, period) — a daily allowance and a monthly allowance are not
 	// comparable quantities and must never be merged into one minimum.
 	Period v1alpha1.BudgetPeriod `json:"period,omitempty"`
+	// WindowID is the control-plane-computed budget window epoch this
+	// allowance applies to (roadmap ②): "2026-09" for a CalendarMonth rule,
+	// "2026-09-02" for a CalendarDay rule, both UTC — the control plane
+	// owns the window, so rollover is a deliberate epoch change, not a
+	// heuristic inferred from a decreasing counter. The data plane echoes
+	// it in ConsumptionReport and baselines its local counter when the
+	// epoch changes. Appended last with omitempty: an older control plane
+	// sends none and the data plane behaves exactly as before epochs.
+	WindowID string `json:"windowID,omitempty"`
 }
 
 // GenerationOf fingerprints a policy document set: the sha256 of the

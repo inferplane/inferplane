@@ -117,6 +117,17 @@ func (s *Server) SetLedgerStore(ls LedgerStore) error {
 		if !ok || l.period != r.Period {
 			continue // rule gone, or its window changed: stale currency
 		}
+		// Epoch check (roadmap ②): a row persisted in a previous window is
+		// spend the rollover already forgot — restoring it would resurrect
+		// it into the fresh window. A row without an epoch (pre-epoch
+		// build) restores under the period check alone. Roll the ledger to
+		// the CURRENT epoch first — restoring into a ledger still carrying
+		// its construction-time id would hand the rows to the next
+		// heartbeat's roll() to wipe.
+		l.roll(s.now())
+		if r.WindowID != "" && r.WindowID != l.windowID {
+			continue
+		}
 		l.spent[r.Dataplane] = r.Spent
 		l.allowance[r.Dataplane] = r.Allowance
 	}
@@ -144,8 +155,24 @@ type ruleLedger struct {
 	renew      time.Duration
 	hard       bool
 	period     v1alpha1.BudgetPeriod
+	windowID   string           // current epoch (windowIDFor); "" only before the first roll
 	spent      map[string]int64 // dataplane → cumulative reported µUSD (monotonic)
 	allowance  map[string]int64 // dataplane → cumulative granted µUSD
+}
+
+// roll advances the ledger to the current window epoch: when windowIDFor
+// disagrees with the stored id, every plane's spend and allowance is dropped
+// WHOLESALE — cleanly, because the id changed, not because a heuristic
+// guessed from a decreasing counter (roadmap ② window epochs). Old windows
+// owe the new one nothing: a fresh window starts with the full limit.
+func (l *ruleLedger) roll(now time.Time) {
+	wid := windowIDFor(l.period, now)
+	if l.windowID == wid {
+		return
+	}
+	l.windowID = wid
+	l.spent = map[string]int64{}
+	l.allowance = map[string]int64{}
 }
 
 // totals returns the ledger's global reported spend and outstanding
@@ -312,9 +339,13 @@ func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]t
 			// UNCHANGED. A month's cumulative spend is not the same quantity
 			// as a day's, so an in-place period edit (same policy+rule name)
 			// must start the new window's ledger row at zero rather than
-			// inheriting a number measured against a different window.
+			// inheriting a number measured against a different window. The
+			// windowID rides along — carried spend stays attached to its
+			// epoch, and the next roll() call re-judges it against the clock.
 			if prev, ok := s.ledger[k]; ok && prev.period == l.period {
-				l.spent, l.allowance = prev.spent, prev.allowance
+				l.spent, l.allowance, l.windowID = prev.spent, prev.allowance, prev.windowID
+			} else {
+				l.windowID = windowIDFor(l.period, s.now())
 			}
 			ledger[k] = l
 			if minRenew == 0 || r.Budget.LeaseRenewInterval < minRenew {
@@ -427,6 +458,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	now := s.now()
 
+	// Roll every ledger to the current window epoch FIRST (roadmap ②):
+	// reports must be judged against, and grants stamped with, the window
+	// the clock says is live — never last heartbeat's.
+	for _, l := range s.ledger {
+		l.roll(now)
+	}
+
 	// Register/refresh the data plane (version distribution view).
 	dp, ok := s.dataplanes[req.Dataplane]
 	if !ok {
@@ -462,6 +500,17 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 				repPeriod = v1alpha1.PeriodCalendarMonth
 			}
 			if repPeriod != l.period {
+				continue
+			}
+			// Window epoch check (roadmap ②): a report stamped with a
+			// PREVIOUS window's id is spend in a currency this ledger no
+			// longer holds — booking it would starve the fresh window with
+			// the old one's total. Skip it; the data plane's next heartbeat
+			// carries the new epoch (it learns the id from this response's
+			// grant). An UNSTAMPED report (older build) falls through to
+			// the decrease-detection heuristic below — the pre-epoch wire
+			// meaning, kept as the compatibility fallback.
+			if rep.WindowID != "" && rep.WindowID != l.windowID {
 				continue
 			}
 			if rep.SpentMicroUSD < l.spent[req.Dataplane] {
@@ -522,6 +571,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt: now.Add(3 * l.renew),
 			HardCap:   l.hard,
 			Period:    l.period,
+			WindowID:  l.windowID,
 		})
 	}
 	// ADR-041: judge every budgetTiers rule's referenced budget rule at
@@ -544,7 +594,11 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		for i, t := range tr.tiers {
 			thresholds[i] = t.ThresholdPercent
 		}
-		idx := s.tierLatch.Evaluate(k.policy+"/"+k.rule, tier.WindowKey(now), thresholds, utilizedPercent)
+		// The latch key is the referenced budget rule's REAL window epoch
+		// (roadmap ②) — the interim tier.WindowKey calendar derivation this
+		// replaced could disagree with a CalendarDay budget rule's actual
+		// window, keeping a tier latched across day rollovers.
+		idx := s.tierLatch.Evaluate(k.policy+"/"+k.rule, l.windowID, thresholds, utilizedPercent)
 		if idx < 0 {
 			continue
 		}
@@ -598,7 +652,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		rows := make([]LedgerRow, 0, len(s.ledger))
 		for k, l := range s.ledger {
 			rows = append(rows, LedgerRow{
-				Policy: k.policy, Rule: k.rule, Dataplane: req.Dataplane, Period: l.period,
+				Policy: k.policy, Rule: k.rule, Dataplane: req.Dataplane, Period: l.period, WindowID: l.windowID,
 				Spent: l.spent[req.Dataplane], Allowance: l.allowance[req.Dataplane],
 			})
 		}

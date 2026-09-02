@@ -32,14 +32,20 @@ type LedgerStore interface {
 }
 
 // LedgerRow is one (rule, dataplane) accounting row. Period is the budget
-// window the numbers were measured against — a row whose period no longer
-// matches the rule's current period is stale currency and is skipped at
-// Load, exactly like applyWire's carry-forward rule.
+// window KIND the numbers were measured against — a row whose period no
+// longer matches the rule's current period is stale currency and is skipped
+// at Load, exactly like applyWire's carry-forward rule. WindowID (roadmap ②)
+// is the window EPOCH ("2026-09"): a row from a previous epoch is equally
+// stale — restoring it would resurrect a rolled-over window's spend — so
+// Load skips it too. An empty WindowID (a row written by a pre-epoch build)
+// restores under the period check alone, the meaning the row had when
+// written.
 type LedgerRow struct {
 	Policy    string
 	Rule      string
 	Dataplane string
 	Period    v1alpha1.BudgetPeriod
+	WindowID  string
 	Spent     int64
 	Allowance int64
 }

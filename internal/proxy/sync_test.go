@@ -154,17 +154,17 @@ func TestLeaseTableGate(t *testing.T) {
 	lt := NewLeaseTable()
 
 	// Hard cap, expired → blocked.
-	lt.set([]policy.LeaseGrant{{Team: "a", AllowanceMicroUSD: 10, ExpiresAt: time.Now().Add(-time.Second), HardCap: true}})
+	lt.set([]policy.LeaseGrant{{Team: "a", AllowanceMicroUSD: 10, ExpiresAt: time.Now().Add(-time.Second), HardCap: true}}, nil)
 	if blocked, _ := lt.Blocked("a"); !blocked {
 		t.Fatal("expired hard-cap lease must block")
 	}
 	// Hard cap, zero allowance → blocked (global budget exhausted).
-	lt.set([]policy.LeaseGrant{{Team: "a", AllowanceMicroUSD: 0, ExpiresAt: time.Now().Add(time.Minute), HardCap: true}})
+	lt.set([]policy.LeaseGrant{{Team: "a", AllowanceMicroUSD: 0, ExpiresAt: time.Now().Add(time.Minute), HardCap: true}}, nil)
 	if blocked, _ := lt.Blocked("a"); !blocked {
 		t.Fatal("zero-allowance hard-cap lease must block")
 	}
 	// Soft lease: never blocks, even expired (fails open per rule).
-	lt.set([]policy.LeaseGrant{{Team: "a", AllowanceMicroUSD: 0, ExpiresAt: time.Now().Add(-time.Second), HardCap: false}})
+	lt.set([]policy.LeaseGrant{{Team: "a", AllowanceMicroUSD: 0, ExpiresAt: time.Now().Add(-time.Second), HardCap: false}}, nil)
 	if blocked, _ := lt.Blocked("a"); blocked {
 		t.Fatal("soft lease must fail open")
 	}
@@ -177,7 +177,7 @@ func TestLeaseTableGate(t *testing.T) {
 	lt.set([]policy.LeaseGrant{
 		{Team: "m", AllowanceMicroUSD: 500, ExpiresAt: time.Now().Add(time.Hour), HardCap: false},
 		{Team: "m", AllowanceMicroUSD: 200, ExpiresAt: time.Now().Add(time.Minute), HardCap: true},
-	})
+	}, nil)
 	l, _ := lt.Get("m", v1alpha1.PeriodCalendarMonth)
 	if l.AllowanceMicroUSD != 200 || !l.HardCap {
 		t.Fatalf("merge not most-restrictive: %+v", l)
@@ -344,7 +344,7 @@ func TestLeaseTableKeepsDayAndMonthAllowancesSeparate(t *testing.T) {
 	lt.set([]policy.LeaseGrant{
 		{Team: "t", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 50_000, ExpiresAt: exp},
 		{Team: "t", Period: v1alpha1.PeriodCalendarMonth, AllowanceMicroUSD: 900_000, ExpiresAt: exp, HardCap: true},
-	})
+	}, nil)
 
 	day, ok := lt.Get("t", v1alpha1.PeriodCalendarDay)
 	if !ok {
@@ -366,7 +366,7 @@ func TestLeaseTableKeepsDayAndMonthAllowancesSeparate(t *testing.T) {
 		{Team: "m", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 500, ExpiresAt: exp},
 		{Team: "m", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 200, ExpiresAt: time.Now().Add(time.Minute), HardCap: true},
 		{Team: "m", Period: v1alpha1.PeriodCalendarMonth, AllowanceMicroUSD: 9_000, ExpiresAt: exp},
-	})
+	}, nil)
 	d, _ := lt.Get("m", v1alpha1.PeriodCalendarDay)
 	if d.AllowanceMicroUSD != 200 || !d.HardCap {
 		t.Errorf("within-window merge not most-restrictive: %+v", d)
@@ -383,7 +383,7 @@ func TestLeaseTableEmptyPeriodIsCalendarMonth(t *testing.T) {
 	lt := NewLeaseTable()
 	lt.set([]policy.LeaseGrant{
 		{Team: "old", AllowanceMicroUSD: 4_242, ExpiresAt: time.Now().Add(time.Hour), HardCap: true},
-	})
+	}, nil)
 	l, ok := lt.Get("old", v1alpha1.PeriodCalendarMonth)
 	if !ok || l.AllowanceMicroUSD != 4_242 {
 		t.Fatalf("a period-less grant must land in the CalendarMonth window: %+v ok=%v", l, ok)
@@ -408,7 +408,7 @@ func TestLeaseTableBlockedIsTeamWideAcrossWindows(t *testing.T) {
 	lt.set([]policy.LeaseGrant{
 		{Team: "t", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 0, ExpiresAt: future, HardCap: true},
 		{Team: "t", Period: v1alpha1.PeriodCalendarMonth, AllowanceMicroUSD: 900_000, ExpiresAt: future, HardCap: true},
-	})
+	}, nil)
 	if blocked, reason := lt.Blocked("t"); !blocked {
 		t.Errorf("an exhausted hard DAY lease must block the team even with a healthy month lease (reason=%q)", reason)
 	}
@@ -418,7 +418,7 @@ func TestLeaseTableBlockedIsTeamWideAcrossWindows(t *testing.T) {
 	lt.set([]policy.LeaseGrant{
 		{Team: "t", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 50_000, ExpiresAt: future, HardCap: true},
 		{Team: "t", Period: v1alpha1.PeriodCalendarMonth, AllowanceMicroUSD: 900_000, ExpiresAt: time.Now().Add(-time.Second), HardCap: true},
-	})
+	}, nil)
 	if blocked, _ := lt.Blocked("t"); !blocked {
 		t.Error("an expired hard MONTH lease must block the team")
 	}
@@ -428,7 +428,7 @@ func TestLeaseTableBlockedIsTeamWideAcrossWindows(t *testing.T) {
 	lt.set([]policy.LeaseGrant{
 		{Team: "t", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 50_000, ExpiresAt: future, HardCap: true},
 		{Team: "t", Period: v1alpha1.PeriodCalendarMonth, AllowanceMicroUSD: 900_000, ExpiresAt: future, HardCap: true},
-	})
+	}, nil)
 	if blocked, reason := lt.Blocked("t"); blocked {
 		t.Errorf("two healthy hard leases must not block: %q", reason)
 	}
@@ -437,7 +437,7 @@ func TestLeaseTableBlockedIsTeamWideAcrossWindows(t *testing.T) {
 	lt = NewLeaseTable()
 	lt.set([]policy.LeaseGrant{
 		{Team: "t", Period: v1alpha1.PeriodCalendarDay, AllowanceMicroUSD: 0, ExpiresAt: time.Now().Add(-time.Second)},
-	})
+	}, nil)
 	if blocked, _ := lt.Blocked("t"); blocked {
 		t.Error("a soft lease must fail open on either window")
 	}
