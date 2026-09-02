@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -1280,6 +1281,32 @@ func (g *gateway) DeleteModel(ctx context.Context, name string) error {
 			delete(models, name)
 		},
 	)
+}
+
+// StoredProviderJSON / StoredModelJSON implement configapi.Reader (Phase
+// 0b-4 mutation evidence): the canonical JSON of the STORED row, nil when
+// absent. Rows hold refs only (no secret value ever enters the provider
+// store), so the digest input is safe by construction.
+func (g *gateway) StoredProviderJSON(ctx context.Context, name string) []byte {
+	row, err := g.pstore.GetProvider(ctx, name)
+	if err != nil {
+		return nil
+	}
+	b, _ := json.Marshal(row)
+	return b
+}
+
+func (g *gateway) StoredModelJSON(ctx context.Context, name string) []byte {
+	models, err := g.pstore.ListModels(ctx)
+	if err != nil {
+		return nil
+	}
+	route, ok := models[name]
+	if !ok {
+		return nil
+	}
+	b, _ := json.Marshal(route)
+	return b
 }
 
 // anchorWorker periodically anchors the audit chain head to WORM storage

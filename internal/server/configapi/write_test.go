@@ -394,3 +394,80 @@ func doReqCtx(h http.Handler, method, path, body string) {
 	req = req.WithContext(principal.WithAdmin(req.Context(), principal.AdminIdentity{Subject: "x", AuthMethod: "oidc"}))
 	h.ServeHTTP(httptest.NewRecorder(), req)
 }
+
+// readerStub is stubWriter plus the Reader seam (Phase 0b-4): a tiny
+// in-memory store whose Stored*JSON reports exactly what writes put there.
+type readerStub struct {
+	stubWriter
+	provs  map[string][]byte
+	models map[string][]byte
+}
+
+func (s *readerStub) WriteProvider(ctx context.Context, row providerstore.ProviderRow) error {
+	if err := s.stubWriter.WriteProvider(ctx, row); err != nil {
+		return err
+	}
+	b, _ := json.Marshal(row)
+	s.provs[row.Name] = b
+	return nil
+}
+func (s *readerStub) DeleteProvider(ctx context.Context, name string) error {
+	if err := s.stubWriter.DeleteProvider(ctx, name); err != nil {
+		return err
+	}
+	delete(s.provs, name)
+	return nil
+}
+func (s *readerStub) StoredProviderJSON(_ context.Context, name string) []byte { return s.provs[name] }
+func (s *readerStub) StoredModelJSON(_ context.Context, name string) []byte    { return s.models[name] }
+
+// Phase 0b-4: provider writes through a Reader-capable Writer carry
+// before/after digests of the STORED row; create-before and delete-after
+// are absences (empty), and an update chains before == previous after.
+func TestWriteHandlerMutationEvidence(t *testing.T) {
+	var recs []audit.Record
+	emit := func(r audit.Record) { recs = append(recs, r) }
+	w := &readerStub{provs: map[string][]byte{}, models: map[string][]byte{}}
+	h := WriteHandler("providers", w, emit)
+
+	doReq(h, "PUT", "/admin/providers/p", `{"type":"anthropic","api_key_ref":{"env":"K"}}`)
+	doReq(h, "PUT", "/admin/providers/p", `{"type":"anthropic","api_key_ref":{"env":"K2"}}`)
+	doReq(h, "DELETE", "/admin/providers/p", "")
+	if len(recs) != 3 {
+		t.Fatalf("got %d records, want 3", len(recs))
+	}
+	create, update, del := recs[0].Mutation, recs[1].Mutation, recs[2].Mutation
+	if create == nil || update == nil || del == nil {
+		t.Fatalf("every write must carry a MutationRef: %+v %+v %+v", create, update, del)
+	}
+	for i, m := range []*audit.MutationRef{create, update, del} {
+		if m.Capability != "providers" {
+			t.Fatalf("record %d capability = %q, want providers", i, m.Capability)
+		}
+	}
+	if create.BeforeSHA256 != "" || create.AfterSHA256 == "" {
+		t.Fatalf("create: before must be an absence, after a digest: %+v", create)
+	}
+	if update.BeforeSHA256 != create.AfterSHA256 || update.AfterSHA256 == update.BeforeSHA256 {
+		t.Fatalf("update digests must chain and differ: %+v after create %+v", update, create)
+	}
+	if del.BeforeSHA256 != update.AfterSHA256 || del.AfterSHA256 != "" {
+		t.Fatalf("delete: before chains, after is an absence: %+v", del)
+	}
+}
+
+// A Writer WITHOUT the Reader seam still emits the mutation record — just
+// with no digests (the seam is optional, never a write blocker).
+func TestWriteHandlerMutationEvidenceWithoutReader(t *testing.T) {
+	var recs []audit.Record
+	emit := func(r audit.Record) { recs = append(recs, r) }
+	h := WriteHandler("providers", &stubWriter{}, emit)
+	doReq(h, "PUT", "/admin/providers/p", `{"type":"anthropic","api_key_ref":{"env":"K"}}`)
+	if len(recs) != 1 || recs[0].Mutation == nil {
+		t.Fatalf("want one record with a MutationRef, got %+v", recs)
+	}
+	m := recs[0].Mutation
+	if m.BeforeSHA256 != "" || m.AfterSHA256 != "" || m.Capability != "providers" {
+		t.Fatalf("reader-less writer: digests must be empty, capability set: %+v", m)
+	}
+}

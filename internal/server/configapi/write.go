@@ -198,6 +198,18 @@ type Writer interface {
 	DeleteModel(ctx context.Context, name string) error
 }
 
+// Reader is the OPTIONAL before/after-image seam for mutation evidence
+// (Phase 0b-4): a Writer that also reports the canonical JSON of a STORED
+// row (nil when absent). Digests computed from it attest what the store
+// actually holds — never the request body — and the input is secret-free by
+// construction (provider rows hold refs only, the no-secrets-in-DB
+// invariant). A Writer without it still works; its mutation events just
+// carry no digests.
+type Reader interface {
+	StoredProviderJSON(ctx context.Context, name string) []byte
+	StoredModelJSON(ctx context.Context, name string) []byte
+}
+
 // ErrInvalidTopology wraps a candidate-build failure (the proposed write would
 // not produce a valid topology — unknown type, unresolvable ref, route to a
 // missing provider). The assembly returns it; the handler maps it to 400. Its
@@ -223,6 +235,25 @@ func WriteHandler(resource string, w Writer, emit func(audit.Record)) http.Handl
 			return
 		}
 		isProvider := resource == "providers"
+		// Before-image for the mutation record, when the Writer can report
+		// stored rows (Phase 0b-4). Read BEFORE the write; the after-image
+		// is read back AFTER, so the digests attest actual store states.
+		stored := func(ctx context.Context) []byte { return nil }
+		if rd, ok := w.(Reader); ok {
+			if isProvider {
+				stored = func(ctx context.Context) []byte { return rd.StoredProviderJSON(ctx, name) }
+			} else {
+				stored = func(ctx context.Context) []byte { return rd.StoredModelJSON(ctx, name) }
+			}
+		}
+		before := stored(r.Context())
+		mutation := func(deleted bool) *audit.MutationRef {
+			m := &audit.MutationRef{BeforeSHA256: audit.SHA256Hex(before)}
+			if !deleted {
+				m.AfterSHA256 = audit.SHA256Hex(stored(r.Context()))
+			}
+			return m
+		}
 		switch r.Method {
 		case http.MethodPut:
 			body, err := io.ReadAll(io.LimitReader(r.Body, maxWriteBody))
@@ -238,7 +269,7 @@ func WriteHandler(resource string, w Writer, emit func(audit.Record)) http.Handl
 				}
 				werr := w.WriteProvider(r.Context(), row)
 				if werr == nil {
-					emitEvent(emit, r, "provider_registered", name, "")
+					emitEvent(emit, r, "provider_registered", name, "", mutation(false))
 				}
 				mapWriteResult(rw, werr)
 				return
@@ -250,21 +281,21 @@ func WriteHandler(resource string, w Writer, emit func(audit.Record)) http.Handl
 			}
 			werr := w.WriteModel(r.Context(), name, route)
 			if werr == nil {
-				emitEvent(emit, r, "model_route_updated", "", name)
+				emitEvent(emit, r, "model_route_updated", "", name, mutation(false))
 			}
 			mapWriteResult(rw, werr)
 		case http.MethodDelete:
 			if isProvider {
 				werr := w.DeleteProvider(r.Context(), name)
 				if werr == nil {
-					emitEvent(emit, r, "provider_deleted", name, "")
+					emitEvent(emit, r, "provider_deleted", name, "", mutation(true))
 				}
 				mapWriteResult(rw, werr)
 				return
 			}
 			werr := w.DeleteModel(r.Context(), name)
 			if werr == nil {
-				emitEvent(emit, r, "model_route_deleted", "", name)
+				emitEvent(emit, r, "model_route_deleted", "", name, mutation(true))
 			}
 			mapWriteResult(rw, werr)
 		default:
@@ -274,9 +305,11 @@ func WriteHandler(resource string, w Writer, emit func(audit.Record)) http.Handl
 }
 
 // emitEvent records a secret-free admin-action audit record (§5.5): the event,
-// the actor (opaque OIDC subject / break-glass — never PII), and the resource
-// NAME (provider or model — config-bounded, never a secret value).
-func emitEvent(emit func(audit.Record), r *http.Request, event, provider, model string) {
+// the actor (opaque OIDC subject / break-glass — never PII), the resource
+// NAME (provider or model — config-bounded, never a secret value), and the
+// Phase 0b-4 mutation evidence (before/after digests of the stored row,
+// durable actor identity, capability). mut may be nil.
+func emitEvent(emit func(audit.Record), r *http.Request, event, provider, model string, mut *audit.MutationRef) {
 	if emit == nil {
 		return
 	}
@@ -286,10 +319,17 @@ func emitEvent(emit func(audit.Record), r *http.Request, event, provider, model 
 		ID:            ulid.New(),
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Request:       audit.RequestRef{Ingress: "admin", Provider: provider, ModelRequested: model},
+		Mutation:      mut,
 	}
 	if id, ok := principal.AdminFrom(r.Context()); ok {
 		sub, method := id.Subject, id.AuthMethod
 		rec.Principal = audit.PrincipalRef{User: &sub, AuthMethod: &method}
+		if mut != nil {
+			mut.Actor = id.UserID()
+		}
+	}
+	if mut != nil {
+		mut.Capability = "providers"
 	}
 	emit(rec)
 }

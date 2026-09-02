@@ -5,7 +5,11 @@
 // is computed for real in M3.
 package audit
 
-import "encoding/json"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+)
 
 // PrincipalRef identifies the acting principal. For data-plane records KeyID
 // is the virtual key; for admin-plane records (ADR-004) User carries the
@@ -135,6 +139,39 @@ type Record struct {
 	// old records stay byte-identical.
 	GuardrailID      *string `json:"guardrail_id,omitempty"`
 	GuardrailVersion *string `json:"guardrail_version,omitempty"`
+	// Mutation carries the what-changed evidence of an admin-plane write
+	// event (Phase 0b-4, mirroring the control plane's admin_mutation
+	// record). Appended at the END like BodyRef/RecordRef, same rule.
+	Mutation *MutationRef `json:"mutation,omitempty"`
+}
+
+// MutationRef is the tamper-evident what-changed half of an admin-plane
+// mutation event (admin_team_upserted/deleted, provider_registered/deleted,
+// model_route_updated/deleted): before/after sha256 of the canonical JSON of
+// the STORED record — computed from what the store actually holds, never
+// from the request body, so the digest attests the resulting state. An empty
+// digest is an absence (before on a create, after on a delete), never the
+// hash of the empty string. Actor is the writer's durable identity
+// (issuer#sub) when OIDC-verified — PrincipalRef.User already carries the
+// bare subject, and this field is what survives an IdP migration. Digest
+// inputs are secret-free by construction: team records and provider rows
+// hold refs only (the no-secrets-in-DB invariant).
+type MutationRef struct {
+	Actor        string `json:"actor,omitempty"` // issuer#sub; empty for static-token/loopback (AuthMethod says which)
+	Capability   string `json:"capability,omitempty"`
+	BeforeSHA256 string `json:"before_sha256,omitempty"`
+	AfterSHA256  string `json:"after_sha256,omitempty"`
+}
+
+// SHA256Hex returns the hex sha256 of b, or "" for empty input — an absent
+// record hashes to nothing, not to the hash of the empty string (the control
+// plane's mutationlog rule, shared here for MutationRef digests).
+func SHA256Hex(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 // Canonical returns the deterministic JSON used both for the on-disk record and

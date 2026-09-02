@@ -55,8 +55,20 @@ func (h *TeamsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TeamsHandler) adminEvent(event string, id principal.AdminIdentity, team string) {
+	h.adminMutation(event, id, team, nil)
+}
+
+// adminMutation is adminEvent plus the Phase 0b-4 what-changed evidence:
+// before/after sha256 of the canonical stored team record and the actor's
+// durable identity. mut nil emits a plain event (admin_denied has no
+// mutation to attest).
+func (h *TeamsHandler) adminMutation(event string, id principal.AdminIdentity, team string, mut *audit.MutationRef) {
 	if h.emit == nil {
 		return
+	}
+	if mut != nil {
+		mut.Actor = id.UserID()
+		mut.Capability = "teams"
 	}
 	sub, method := id.Subject, id.AuthMethod
 	h.emit(audit.Record{
@@ -66,7 +78,21 @@ func (h *TeamsHandler) adminEvent(event string, id principal.AdminIdentity, team
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Principal:     audit.PrincipalRef{Team: team, User: &sub, AuthMethod: &method},
 		Request:       audit.RequestRef{Ingress: "admin"},
+		Mutation:      mut,
 	})
+}
+
+// storedTeamJSON returns the canonical JSON of the named team's STORED
+// record (nil when absent or unreadable) — the before/after digest input for
+// mutation records. Team records hold no secret (limits, regions, guardrail
+// names), so the digest input is safe by construction.
+func (h *TeamsHandler) storedTeamJSON(r *http.Request, name string) []byte {
+	rec, ok, err := h.store.GetTeam(r.Context(), name)
+	if err != nil || !ok {
+		return nil
+	}
+	b, _ := json.Marshal(rec)
+	return b
 }
 
 func teamView(t keystore.TeamRecord, source string) map[string]any {
@@ -265,6 +291,7 @@ func (h *TeamsHandler) upsert(w http.ResponseWriter, r *http.Request, id princip
 		GuardrailID: body.GuardrailID, GuardrailVersion: body.GuardrailVersion,
 		AllowedRegions: body.AllowedRegions,
 	}
+	before := h.storedTeamJSON(r, name)
 	if err := h.store.UpsertTeam(r.Context(), rec); err != nil {
 		http.Error(w, `{"error":"upsert failed"}`, http.StatusInternalServerError)
 		return
@@ -278,7 +305,11 @@ func (h *TeamsHandler) upsert(w http.ResponseWriter, r *http.Request, id princip
 		http.Error(w, `{"error":"upsert succeeded but read-back failed"}`, http.StatusInternalServerError)
 		return
 	}
-	h.adminEvent("admin_team_upserted", id, name)
+	after, _ := json.Marshal(got)
+	h.adminMutation("admin_team_upserted", id, name, &audit.MutationRef{
+		BeforeSHA256: audit.SHA256Hex(before),
+		AfterSHA256:  audit.SHA256Hex(after),
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(teamView(got, "record"))
 }
@@ -289,6 +320,7 @@ func (h *TeamsHandler) delete(w http.ResponseWriter, r *http.Request, id princip
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	before := h.storedTeamJSON(r, name)
 	if err := h.store.DeleteTeam(r.Context(), name); err != nil {
 		if errors.Is(err, keystore.ErrTeamNotFound) {
 			http.Error(w, `{"error":"team not found"}`, http.StatusNotFound)
@@ -297,7 +329,9 @@ func (h *TeamsHandler) delete(w http.ResponseWriter, r *http.Request, id princip
 		http.Error(w, `{"error":"delete failed"}`, http.StatusInternalServerError)
 		return
 	}
-	h.adminEvent("admin_team_deleted", id, name)
+	h.adminMutation("admin_team_deleted", id, name, &audit.MutationRef{
+		BeforeSHA256: audit.SHA256Hex(before),
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -3,6 +3,7 @@ package adminapi
 import (
 	"context"
 	"encoding/json"
+	"github.com/inferplane/inferplane/internal/audit"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -371,5 +372,42 @@ func TestUsersHandler_derivesFromKeyOwnersGroupedAcrossTeams(t *testing.T) {
 	}
 	if byOwner["(unowned)"] != 1 {
 		t.Fatalf("ownerless key must collapse under (unowned): %+v", out.Data)
+	}
+}
+
+// Phase 0b-4: team mutations carry tamper-evident what-changed evidence —
+// before/after sha256 of the STORED record (absence = empty digest, never
+// the hash of the empty string) and the actor's durable identity.
+func TestTeamsHandler_mutationEvidence(t *testing.T) {
+	em := &emittedRecords{}
+	h := NewTeamsHandler(newTestStore(t), nil, em.emit)
+	oidcID := principal.AdminIdentity{Subject: "alice", Issuer: "https://idp.example", IsAdmin: true, AuthMethod: "oidc"}
+
+	doAsTeams(t, h, &oidcID, "PUT", "/admin/teams/t", `{"rpm":1}`)
+	doAsTeams(t, h, &oidcID, "PUT", "/admin/teams/t", `{"rpm":2}`)
+	doAsTeams(t, h, &oidcID, "DELETE", "/admin/teams/t", "")
+	if len(em.recs) != 3 {
+		t.Fatalf("got %d records, want 3: %+v", len(em.recs), em.recs)
+	}
+	create, update, del := em.recs[0].Mutation, em.recs[1].Mutation, em.recs[2].Mutation
+	if create == nil || update == nil || del == nil {
+		t.Fatalf("every team mutation must carry a MutationRef: %+v %+v %+v", create, update, del)
+	}
+	for i, m := range []*audit.MutationRef{create, update, del} {
+		if m.Actor != "https://idp.example#alice" || m.Capability != "teams" {
+			t.Fatalf("record %d actor/capability = %q/%q, want durable identity + teams", i, m.Actor, m.Capability)
+		}
+	}
+	if create.BeforeSHA256 != "" || create.AfterSHA256 == "" {
+		t.Fatalf("create: before must be an absence, after a digest: %+v", create)
+	}
+	if update.BeforeSHA256 != create.AfterSHA256 {
+		t.Fatalf("update.before %q must chain to create.after %q", update.BeforeSHA256, create.AfterSHA256)
+	}
+	if update.AfterSHA256 == update.BeforeSHA256 || update.AfterSHA256 == "" {
+		t.Fatalf("update changed rpm, digests must differ: %+v", update)
+	}
+	if del.BeforeSHA256 != update.AfterSHA256 || del.AfterSHA256 != "" {
+		t.Fatalf("delete: before must chain to last state, after must be an absence: %+v", del)
 	}
 }
