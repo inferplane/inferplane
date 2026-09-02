@@ -8,6 +8,10 @@ const (
 	ScopeTeam = "team"
 	ScopeKey  = "key"
 	ScopeUser = "user"
+	// ScopeUserPremium is the PREMIUM pool of a two-pool user budget
+	// (Phase 1 spec): same team/user id as ScopeUser, separate counter —
+	// premium-model spend debits both.
+	ScopeUserPremium = "userprem"
 )
 
 // Key builds the BudgetStore key for one (window, scope, id) counter:

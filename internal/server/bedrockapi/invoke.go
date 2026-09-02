@@ -131,6 +131,25 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			w.Header().Set("x-inferplane-substituted-model", model)
 		}
 	}
+	// Two-pool user budget (Phase 1 spec), after the team tier. On this
+	// ingress a pool fallback must ALSO be servable here; an exhausted pool
+	// whose first-compatible target cannot serve the Bedrock ingress fails
+	// CLOSED (402) — the premium model is never served past the pool, and
+	// silently ignoring the pool would be a money leak, the opposite of the
+	// tier rule above (which protects availability, not a ceiling).
+	if served, poolSubstituted, poolBlocked := h.r.ApplyUserPool(p, model); poolBlocked || (poolSubstituted && !servableOnBedrockIngress(h.r, served)) {
+		h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: http.StatusPaymentRequired, Error: audit.DenyUserBudgetExceeded.Ptr()}, false, traceID)
+		h.metrics.ObserveRequest(ingressName, model, "", p.Team, http.StatusPaymentRequired, time.Since(start).Seconds(), 0)
+		tracing.SetStatus(span, false, "user premium budget exhausted")
+		writeErr(w, http.StatusPaymentRequired, "user premium budget exhausted and no approved fallback model is available for this key")
+		return
+	} else if poolSubstituted {
+		h.metrics.ObserveModelSubstitution(p.Team, model, served)
+		req = req.WithContext(audit.WithSubstitutedFrom(req.Context(), model))
+		model = served
+		tracing.SetGenAIRequest(span, model)
+		w.Header().Set("x-inferplane-substituted-model", model)
+	}
 	if !h.r.Allows(p, model) {
 		h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: http.StatusForbidden, Error: audit.DenyModelNotAllowed.Ptr()}, false, traceID)
 		h.metrics.ObserveRequest(ingressName, model, "", p.Team, http.StatusForbidden, time.Since(start).Seconds(), 0)

@@ -174,6 +174,24 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		tracing.SetGenAIRequest(span, model)
 		w.Header().Set("x-inferplane-substituted-model", model)
 	}
+	// Two-pool user budget (Phase 1 spec): AFTER the team tier so a tier
+	// target is itself pool-checked. Exhausted premium pool → first
+	// compatible approved fallback; none compatible → 402 — the premium
+	// model is never served past the pool (the deliberate asymmetry with
+	// SubstituteTier's never-deny contract).
+	if served, poolSubstituted, poolBlocked := h.r.ApplyUserPool(p, model); poolBlocked {
+		h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: 402, Error: audit.DenyUserBudgetExceeded.Ptr()}, traceID)
+		h.metrics.ObserveRequest(ingressName, model, "", p.Team, 402, time.Since(start).Seconds(), 0)
+		tracing.SetStatus(span, false, "user premium budget exhausted")
+		writeErr(w, 402, "invalid_request_error", "user premium budget exhausted and no approved fallback model is available for this key")
+		return
+	} else if poolSubstituted {
+		h.metrics.ObserveModelSubstitution(p.Team, model, served)
+		req = req.WithContext(audit.WithSubstitutedFrom(req.Context(), model))
+		model = served
+		tracing.SetGenAIRequest(span, model)
+		w.Header().Set("x-inferplane-substituted-model", model)
+	}
 	// Fail closed for masked teams on the OpenAI ingress (ADR-009 round-2
 	// CRITICAL): v1 masks only the Anthropic ingress, so a masked team must not
 	// bypass PII masking by using /v1/chat/completions. Reject until OpenAI-ingress

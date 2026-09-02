@@ -58,6 +58,16 @@ type UserLimits struct {
 	BudgetMicrosPerDay   int64
 	BudgetDayHard        bool
 	AdminContactDay      string
+	// Premium* is the two-pool ladder (Phase 1 spec): the premium pool
+	// carved out of the MONTH window (v1 restricts premium to
+	// CalendarMonth rules), its model set, and the ordered approved
+	// fallback set. When several rules define premium for one user the
+	// LOWEST premium limit wins wholesale (limit + models + fallback
+	// travel together — mixing one rule's pool with another's fallback set
+	// would enforce a contract nobody wrote).
+	PremiumMicros   int64
+	PremiumModels   []string
+	PremiumFallback []string
 }
 
 // Store holds the data plane's currently-loaded local policy set behind an
@@ -511,6 +521,14 @@ func (u UserLimits) narrow(o UserLimits) UserLimits {
 			u.AdminContactDay = o.AdminContactDay
 		}
 	}
+	switch {
+	case o.PremiumMicros == 0:
+		// contributes no premium pool
+	case u.PremiumMicros == 0 || o.PremiumMicros < u.PremiumMicros:
+		// Lowest premium limit wins WHOLESALE — see the UserLimits field
+		// comment for why the triplet travels together.
+		u.PremiumMicros, u.PremiumModels, u.PremiumFallback = o.PremiumMicros, o.PremiumModels, o.PremiumFallback
+	}
 	return u
 }
 
@@ -525,7 +543,10 @@ func userLimitsFromBudget(b *Budget) UserLimits {
 	// zero-value Period: "no period stated" means the month window everywhere
 	// in this schema, so month must be the `default`, never an explicit
 	// `== PeriodCalendarMonth` equality case.
-	return UserLimits{BudgetMicrosPerMonth: b.LimitMicroUSD, BudgetHard: b.HardCap, AdminContact: b.AdminContact}
+	return UserLimits{
+		BudgetMicrosPerMonth: b.LimitMicroUSD, BudgetHard: b.HardCap, AdminContact: b.AdminContact,
+		PremiumMicros: b.PremiumLimitMicroUSD, PremiumModels: b.PremiumModels, PremiumFallback: b.PremiumFallback,
+	}
 }
 
 // mergeUserLimits folds every USER-subject budget rule into one UserLimits

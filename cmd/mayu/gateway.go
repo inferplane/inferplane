@@ -579,7 +579,40 @@ func newGateway(cfgPath string) (*gateway, error) {
 			BudgetMicrosPerDay:   ul.BudgetMicrosPerDay,
 			BudgetExceeded:       exceeded,
 			AdminContact:         contact,
+			PremiumMicros:        ul.PremiumMicros,
+			PremiumModels:        ul.PremiumModels,
 		}, true
+	})
+	// Two-pool user budget (Phase 1 spec): the router's user-pool gate
+	// answers "is this principal's premium pool exhausted for this model,
+	// and what is the approved fallback ladder". Identity derivation matches
+	// subjectOf (UserID, Owner fallback), and the policy lookup matches the
+	// governor closure above (exact iss#sub, then bare-sub) — the three
+	// consumers of a user policy must agree on who the user is.
+	r.SetUserPoolGate(func(p keystore.Principal, canonical string) []string {
+		if polStore == nil {
+			return nil
+		}
+		user := p.UserID
+		if user == "" {
+			user = p.Owner
+		}
+		if user == "" {
+			return nil
+		}
+		ul, ok := polStore.UserLimits(p.Team, user)
+		if !ok {
+			if i := strings.Index(user, "#"); i >= 0 {
+				ul, ok = polStore.UserLimits(p.Team, user[i+1:])
+			}
+		}
+		if !ok || ul.PremiumMicros == 0 || !policy.PremiumMatch(ul.PremiumModels, canonical) {
+			return nil
+		}
+		if !gov.PremiumExhausted(governance.Subject{Team: p.Team, User: user}) {
+			return nil
+		}
+		return ul.PremiumFallback
 	})
 	// modelAccess rules narrow every ingress RBAC decision through the router's
 	// policy gate (key allow-list must pass AND the policy must allow); team-

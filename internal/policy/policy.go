@@ -19,6 +19,7 @@ package policy
 import (
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
@@ -124,6 +125,14 @@ type Budget struct {
 	// v1alpha1.PeriodCalendarMonth here, so no consumer has to re-implement
 	// the default (and none may treat "" as a third window).
 	Period v1alpha1.BudgetPeriod
+	// Premium* is the two-pool half of a USER-subject budget rule (Phase 1
+	// spec): PremiumLimitMicroUSD ∈ (0, LimitMicroUSD]; PremiumModels is
+	// the admin-defined premium set (exact names, or one trailing "*"
+	// prefix); PremiumFallback the ORDERED approved fallback set. All zero
+	// on a rule without a premium block.
+	PremiumLimitMicroUSD int64
+	PremiumModels        []string
+	PremiumFallback      []string
 }
 
 // ModelAccess is the internal form of a model allow-list rule. Entries match
@@ -251,6 +260,9 @@ func FromV1Alpha1(doc *v1alpha1.GovernancePolicy) (*Policy, error) {
 			if err != nil {
 				return nil, err
 			}
+			if b.PremiumLimitMicroUSD > 0 && p.Subject.User == "" {
+				return nil, reject(wr.Name, "budget.premium requires a user subject — the two-pool ladder is a per-person contract (Phase 1 spec)")
+			}
 			r.Budget = b
 		case wr.Routing != nil:
 			rt, err := routingFromV1Alpha1(wr, doc, reject)
@@ -352,14 +364,58 @@ func budgetFromV1Alpha1(wr v1alpha1.Rule, reject func(rule, reason string) *Unsu
 		iv = parsed
 	}
 
-	return &Budget{
+	b := &Budget{
 		LimitMicroUSD:      wb.LimitMilliUSD * microPerMilli,
 		HardCap:            wb.HardCap,
 		LeaseGrantMicroUSD: grantMilli * microPerMilli,
 		LeaseRenewInterval: iv,
 		AdminContact:       wb.AdminContact,
 		Period:             period,
-	}, nil
+	}
+	if wb.Premium != nil {
+		pp := wb.Premium
+		if period == v1alpha1.PeriodCalendarDay {
+			return nil, reject(wr.Name, "budget.premium is supported on CalendarMonth rules only in v1 — a day-window premium pool is a follow-up")
+		}
+		if pp.LimitMilliUSD <= 0 || pp.LimitMilliUSD > wb.LimitMilliUSD {
+			return nil, reject(wr.Name, "budget.premium.limitMilliUSD must be in (0, limitMilliUSD] — the premium pool is carved out of the total")
+		}
+		if len(pp.Models) == 0 || len(pp.Fallback) == 0 {
+			return nil, reject(wr.Name, "budget.premium requires non-empty models and fallback lists")
+		}
+		for _, m := range append(append([]string(nil), pp.Models...), pp.Fallback...) {
+			if m == "" {
+				return nil, reject(wr.Name, "budget.premium models/fallback contains an empty model name")
+			}
+		}
+		for _, f := range pp.Fallback {
+			if PremiumMatch(pp.Models, f) {
+				return nil, reject(wr.Name, fmt.Sprintf("budget.premium.fallback entry %q is itself premium — a premium fallback would loop", f))
+			}
+		}
+		b.PremiumLimitMicroUSD = pp.LimitMilliUSD * microPerMilli
+		b.PremiumModels = append([]string(nil), pp.Models...)
+		b.PremiumFallback = append([]string(nil), pp.Fallback...)
+	}
+	return b, nil
+}
+
+// PremiumMatch reports whether model is in the premium set: exact name, or
+// a set entry with one trailing "*" matching as a prefix. Exported because
+// governance (a leaf that cannot import this package's Store) receives the
+// set through UserPolicy and must classify the SERVED model identically —
+// the gateway wires this exact function in, so the two can never diverge.
+func PremiumMatch(set []string, model string) bool {
+	for _, s := range set {
+		if strings.HasSuffix(s, "*") {
+			if strings.HasPrefix(model, strings.TrimSuffix(s, "*")) {
+				return true
+			}
+		} else if s == model {
+			return true
+		}
+	}
+	return false
 }
 
 // routingFromV1Alpha1 converts the routing rule's exactly-one-of-two halves.

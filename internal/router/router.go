@@ -26,7 +26,8 @@ type Router struct {
 	policyGate func(p keystore.Principal, model string, canonical func(string) string) bool
 	// tierGate is an optional ADR-041 budget-tier substitution source (see
 	// SetTierGate). nil = no substitution.
-	tierGate func(p keystore.Principal) map[string]string
+	tierGate     func(p keystore.Principal) map[string]string
+	userPoolGate func(p keystore.Principal, canonical string) []string
 }
 
 func New(holder *live.Holder) *Router {
@@ -150,6 +151,50 @@ func (r *Router) SubstituteTier(p keystore.Principal, canonical string) (served 
 		return canonical, false
 	}
 	return target, true
+}
+
+// SetUserPoolGate installs the Phase 1 two-pool user-budget gate: given the
+// principal and the (canonicalized, tier-substituted) model, it returns the
+// ORDERED approved fallback candidates when — and only when — the caller's
+// premium pool is exhausted AND the model is in the caller's premium set.
+// nil/empty = the pool does not constrain this request.
+func (r *Router) SetUserPoolGate(gate func(p keystore.Principal, canonical string) []string) {
+	r.userPoolGate = gate
+}
+
+// ApplyUserPool applies the two-pool user budget (Phase 1 spec) to an
+// already-routed model: when the gate says the caller's premium pool is
+// exhausted for this model, the FIRST fallback candidate that is routed on
+// this data plane and passes the caller's RBAC is served instead
+// ("first compatible"). Unlike SubstituteTier, exhaustion with NO compatible
+// candidate BLOCKS — the premium model is never served past the pool; that
+// asymmetry is the contract ("no compatible fallback blocks, never serves
+// the premium model") and is why this is a separate seam rather than a
+// second tier map. A model the caller can't reach anyway is left to the
+// ordinary 403 path.
+func (r *Router) ApplyUserPool(p keystore.Principal, canonical string) (served string, substituted, blocked bool) {
+	if r.userPoolGate == nil || !r.Allows(p, canonical) {
+		return canonical, false, false
+	}
+	candidates := r.userPoolGate(p, canonical)
+	if len(candidates) == 0 {
+		return canonical, false, false
+	}
+	st := r.live.Load()
+	for _, c := range candidates {
+		c = st.Canonical(c)
+		if c == canonical {
+			continue // a candidate equal to the premium model can't relieve the pool
+		}
+		if _, routed := st.Route(c); !routed {
+			continue
+		}
+		if !r.Allows(p, c) {
+			continue
+		}
+		return c, true, false
+	}
+	return canonical, false, true
 }
 
 // ChainTarget is one resolved fallback target: the provider instance, its

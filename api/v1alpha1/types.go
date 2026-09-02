@@ -147,6 +147,13 @@ type BudgetRule struct {
 	// or a Slack channel) — where to go when a hard cap blocks. Optional;
 	// empty means the error carries no contact hint.
 	AdminContact string `json:"adminContact,omitempty"`
+	// Premium (Phase 1, two-pool user budget) carves a premium pool out of
+	// this rule's limit for a USER-subject rule: requests for models in the
+	// premium set debit both pools; once the premium pool is exhausted a
+	// premium request is served by the first compatible entry of Fallback —
+	// or denied if none is compatible, never the premium model. Requires a
+	// user subject and a numeric limit.
+	Premium *PremiumPool `json:"premium,omitempty"`
 	// Period is the calendar window this rule's limit applies to. Empty means
 	// CalendarMonth — the window every budget rule enforced before this field
 	// existed — so omitting it preserves an existing document's meaning
@@ -157,6 +164,22 @@ type BudgetRule struct {
 
 // LeaseSpec sizes a budget lease. Both fields are optional; defaults are
 // fixed by ADR-032 and applied in internal/policy.
+// PremiumPool is the premium half of a two-pool user budget (Phase 1).
+type PremiumPool struct {
+	// LimitMilliUSD is the premium pool, carved out of (and at most equal
+	// to) the parent rule's LimitMilliUSD. 1000 = $1.
+	LimitMilliUSD int64 `json:"limitMilliUSD"`
+	// Models is the admin-defined premium set: canonical configured model
+	// names, exact or with one trailing "*" (prefix match).
+	Models []string `json:"models"`
+	// Fallback is the ORDERED admin-approved fallback set: once the premium
+	// pool is exhausted, a premium request is served by the FIRST entry that
+	// passes RBAC for the caller and is routed on the serving data plane.
+	// None compatible ⇒ the request is denied — the premium model is never
+	// served past the pool. Entries must not themselves be premium.
+	Fallback []string `json:"fallback"`
+}
+
 type LeaseSpec struct {
 	// GrantMilliUSD is how much budget one lease grants one data plane.
 	// 0 = default: 0.1% of LimitMilliUSD, floored at 1 milliUSD.

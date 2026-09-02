@@ -119,7 +119,12 @@ guardrail/PII rows must close before claiming the dimension outright.
   (lease expiry fails closed, per-rule `failurePolicy`) — LiteLLM's
   enforcement dies with its proxy, taking all traffic with it.
 - Per-user budgets enforced (ADR-042 Phase 3); budget alert webhooks
-  (ADR-017).
+  (ADR-017). **Two-pool user ladder** (Phase 1, 2026-09-02): each person
+  gets a premium pool and a total hard cap in one window — premium
+  exhausted, the first compatible admin-approved fallback serves (never
+  the premium model); total exhausted, denied before egress. Neither
+  competitor has a per-person spending ladder with policy-approved
+  fallback.
 - **Budget-tier model substitution (ADR-041) — the unique feature.**
   `routing.budgetTiers` swaps an already-routed premium model to a cheaper
   tier when the referenced team budget crosses a utilization threshold

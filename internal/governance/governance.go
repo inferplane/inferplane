@@ -15,6 +15,7 @@ import (
 	"github.com/inferplane/inferplane/internal/budget"
 	"github.com/inferplane/inferplane/internal/limiter"
 	"github.com/inferplane/inferplane/internal/metrics"
+	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/pricing"
 )
 
@@ -102,6 +103,13 @@ type UserPolicy struct {
 	// AdminContact is surfaced verbatim in the 402 body, same as
 	// TeamPolicy.AdminContact.
 	AdminContact string
+	// Premium* is the two-pool ladder (Phase 1 spec): PremiumMicros is the
+	// premium pool carved out of the MONTH window; PremiumModels the
+	// admin-defined premium set, classified by policy.PremiumMatch
+	// semantics (exact, or one trailing "*" prefix). The fallback set is
+	// the ROUTER's business (ApplyUserPool) — governance only accounts.
+	PremiumMicros int64
+	PremiumModels []string
 }
 
 type BudgetUsage struct {
@@ -136,6 +144,10 @@ type UsageStatus struct {
 	// existing /v1/usage client must keep reading exactly what it read before.
 	UserBudget    *BudgetUsage `json:"user_budget,omitempty"`
 	UserBudgetDay *BudgetUsage `json:"user_budget_day,omitempty"`
+	// UserPremium reports the PREMIUM pool of a two-pool user budget
+	// (Phase 1 spec) — appended with omitempty, the same compat rule as
+	// every field above.
+	UserPremium *BudgetUsage `json:"user_premium,omitempty"`
 }
 
 // Governor enforces rate/quota/budget and settles cost. Its stateful stores
@@ -465,6 +477,23 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 	return GovDecision{Allowed: true}
 }
 
+// PremiumExhausted reports whether the subject's PREMIUM pool (Phase 1
+// two-pool user budget) is spent to (or past) its limit — the read the
+// ingress user-pool gate consults before routing a premium-set model. A
+// subject with no user policy, or one without a premium block, is never
+// exhausted (there is no pool). Read-only: no debit, no state change.
+func (g *Governor) PremiumExhausted(s Subject) bool {
+	if s.User == "" || g.userLookup == nil {
+		return false
+	}
+	up, ok := g.userLookup(s.Team, s.User)
+	if !ok || up.PremiumMicros <= 0 {
+		return false
+	}
+	mw := g.monthWindow()
+	return g.bud.Spent(budget.Key(budget.ScopeUserPremium, userBudgetID(s), mw), mw) >= up.PremiumMicros
+}
+
 // budgetExceededMessage builds the 402 body: when it resets — rendered in the
 // budget window's OWN timezone, so a KST-anchored daily window does not print
 // the previous UTC date — and, if the binding budget rule carries one, where to
@@ -562,6 +591,18 @@ func (g *Governor) UsageOf(s Subject, kp KeyPolicy) UsageStatus {
 					RemainingUSDMicros: max64(0, up.BudgetMicrosPerDay-spent),
 					Window:             "calendar-day",
 					ResetsAt:           g.bud.ResetsAt(ubkDay, dw),
+				}
+			}
+			if up.PremiumMicros > 0 {
+				mw := g.monthWindow()
+				upk := budget.Key(budget.ScopeUserPremium, uid, mw)
+				spent := g.bud.Spent(upk, mw)
+				u.UserPremium = &BudgetUsage{
+					LimitUSDMicros:     up.PremiumMicros,
+					SpentUSDMicros:     spent,
+					RemainingUSDMicros: max64(0, up.PremiumMicros-spent),
+					Window:             "calendar-month",
+					ResetsAt:           g.bud.ResetsAt(upk, mw),
 				}
 			}
 		}
@@ -680,6 +721,14 @@ func (g *Governor) Settle(s Subject, kp KeyPolicy, provider, model string, u pri
 			if up.BudgetMicrosPerDay > 0 {
 				dw := g.dayWindow()
 				g.bud.Debit(budget.Key(budget.ScopeUser, uid, dw), costMicros, dw)
+			}
+			// Premium pool (Phase 1): a request SERVED by a premium model
+			// debits the premium counter beside the total. The served model
+			// is what matters — a request substituted to a fallback was not
+			// served premium and must not drain the pool.
+			if up.PremiumMicros > 0 && policy.PremiumMatch(up.PremiumModels, model) {
+				mw := g.monthWindow()
+				g.bud.Debit(budget.Key(budget.ScopeUserPremium, uid, mw), costMicros, mw)
 			}
 			// Deliberately NO gauge write and NO alert hook, and this is a
 			// HARD RULE rather than an omission: metrics.SetBudgetUtilization
