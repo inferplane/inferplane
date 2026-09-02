@@ -120,13 +120,16 @@ policy-selected action, no destination classification, and no egress ceiling.
 
 ### P1 — operational competitiveness
 
-- **Undisclosed request mutation.** `providers/bedrock/converse.go:443-467`
-  and `providers/bedrock/mantle.go:112-117` are two separate model→param strip
-  tables in different wire vocabularies, both keyed by
-  `strings.Contains(upstream, …)`, both sourced from a one-off manual probe
-  (2026-08-28) with no stored artifact and no CI guard. A dropped
-  `temperature: 0` changes sampling semantics with no audit field, metric, or
-  response header. Pricing has `mayu pricing check`; this has no equivalent.
+- **Undisclosed request mutation.** `providers/bedrock/converse.go` and
+  `providers/bedrock/mantle.go` are two separate model→param strip tables in
+  different wire vocabularies, both keyed by `strings.Contains(upstream, …)`.
+  The stored-artifact + CI-guard half is now in place (Phase 0a):
+  `providers/bedrock/testdata/strip_tables.json` records both tables with
+  their probe date, and `strip_tables_guard_test.go` fails any table edit
+  that doesn't update the artifact in the same commit — every drift is a
+  reviewable diff naming which models lose which params. Still open: a
+  dropped `temperature: 0` changes sampling semantics with no audit field,
+  metric, or response header — the per-request disclosure remains.
 - **Cache behavior differs by path.** Anthropic passthrough and Bedrock Claude
   InvokeModel preserve `cache_control`; Bedrock Converse does not map it to
   `cachePoint`. `internal/cache.VolatileStore` and cache-affinity are

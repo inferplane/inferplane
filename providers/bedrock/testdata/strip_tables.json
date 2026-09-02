@@ -1,0 +1,18 @@
+{
+  "_comment": "Recorded param-strip tables (strategy P1 'undisclosed request mutation' → Phase 0a CI guard, in the `mayu pricing check` mold). Source: live probe of Bedrock Converse and Mantle chat-completions routes, 2026-08-28. Any change to converseUnsupportedInference (converse.go) or mantleChatStripParams (mantle.go) MUST update this artifact in the same commit — strip_tables_guard_test.go fails otherwise — so a strip-table drift is always an explicit, reviewable diff naming which models lose which sampling params.",
+  "probed": "2026-08-28",
+  "converse_unsupported_inference": [
+    { "match": "openai.gpt-5.6", "params": ["temperature", "topP", "stopSequences"] },
+    { "match": "xai.", "params": ["temperature", "topP", "stopSequences"] },
+    { "match": "openai.gpt-oss", "params": ["stopSequences"] },
+    { "match": "deepseek.v", "params": ["stopSequences"] },
+    { "match": "google.gemma-", "params": ["stopSequences"] },
+    { "match": "minimax.", "params": ["stopSequences"] },
+    { "match": "moonshot", "params": ["stopSequences"] },
+    { "match": "qwen.", "params": ["stopSequences"] },
+    { "match": "zai.", "params": ["stopSequences"] }
+  ],
+  "mantle_chat_strip_params": [
+    { "match": "openai.gpt-5.6", "params": ["temperature", "top_p", "stop"] }
+  ]
+}
