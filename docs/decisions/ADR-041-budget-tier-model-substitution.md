@@ -1,8 +1,8 @@
 # ADR-041: Budget-tier model substitution (routing.budgetTiers)
 
 **Date:** 2026-08-26
-**Status:** Accepted (implemented — work items 1–5; item 6, providerstore/UI
-pricing fields, and item 7's full two-plane e2e are follow-ups)
+**Status:** Accepted (implemented — work items 1–5 and item 7's full
+two-plane e2e; item 6, providerstore/UI pricing fields, remains a follow-up)
 **Related:** ADR-008 (providerstore — the UI write path that registers a vLLM
 endpoint and its models), ADR-017 (budget alert webhooks — the utilization
 thresholds this ADR reuses as a routing trigger), ADR-029 (model-level
@@ -235,11 +235,20 @@ recording:
   around the same policy the Anthropic/OpenAI ingresses enforce.
 
 Deferred to follow-up work: item 6 (providerstore/UI pricing fields
-alongside the `openai_compatible` endpoint write path, ADR-008 extension)
-and item 7's full two-data-plane + tool-calling-fidelity e2e (a
-control-plane-level "activates on the global sum, not any one plane's local
-view" test is covered today,
-`TestActiveTierFiresOnGlobalUtilizationNotPerPlane`).
+alongside the `openai_compatible` endpoint write path, ADR-008 extension).
+Item 7 shipped 2026-09-02
+(`cmd/mayu/tier_twoplane_e2e_test.go`,
+`TestE2EBudgetTierActivatesFleetWideWithToolFidelity`): two mayu planes
+against one inferplaned — spend on plane 1 crosses the threshold GLOBALLY
+and the plane that spent nothing substitutes too, through the full
+heartbeat loop; the substituted request's tools reach the upstream intact
+under the substituted model and the tool_use response round-trips
+unmodified. The test's economics respect atomic reserve/settle: each
+request's cost upper bound fits its lease grant, and outstanding grants
+stay below the tier threshold so only settled spend trips it — the
+pre-reservation "one huge request overshoots a tiny grant" shortcut is
+exactly what reservation now refuses. (The control-plane-level unit view
+remains `TestActiveTierFiresOnGlobalUtilizationNotPerPlane`.)
 
 ## Explicitly not in this ADR
 
