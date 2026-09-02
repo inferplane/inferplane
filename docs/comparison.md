@@ -211,12 +211,14 @@ to *explainable*.
 
 **Honest gaps.**
 - Portkey's dashboard is genuinely better: it is the product. inferplane's
-  console is functional, not polished, and the ADR-038 policy write path
-  is experimental with no per-rule authorization or change audit yet.
-- No `mayu doctor` (roadmap ④) — fleet debugging is grep-on-node today;
-  version skew is visible but not actionable (roadmap ③).
-- Admin roles are coarse (whole-console authority — strategy P0
-  "management authorization").
+  console is functional, not polished. (The ADR-038 policy write path now
+  carries policy-admin authorization and admin_mutation records — Phase
+  0b-4 — and duty-separation roles gate the mayu admin plane; the
+  remaining softness is UI polish, not authorization.)
+- ~~No `mayu doctor`~~ shipped (roadmap ④, CLI + remote snapshot), and
+  version skew is now actionable: `INFERPLANED_MINIMUM_VERSION` advice +
+  `mayu update` with build-embedded-key signature verification (roadmap ③
+  phases 1–2).
 
 **Verdict.** Ahead of LiteLLM OSS tier, behind Portkey's dashboard.
 The winning move is not out-polishing a funded SaaS UI — it is doubling
@@ -371,7 +373,7 @@ the competitive angle. No new workstream is invented here.
 | 4 | Durable ledger + window IDs (Cost control, Cost accuracy) — **both halves shipped**: `INFERPLANED_LEDGER_PATH` SQLite ledger (restart resumes grants exactly, dead-plane spend survives) + control-plane-owned windowID epochs (UTC calendar ids on every grant, wholesale ledger reset on epoch change, stale-epoch reports refused, mayu baselines timezone skew) | roadmap ② / S1, strategy Phase 1 | "Bounded overspend" is now a durable, fleet-wide-single-window guarantee — rollover is deterministic, not a per-plane heuristic |
 | 5 | ~~Codex/OpenCode wire fixtures~~ **shipped** (`internal/server/openaiapi/agent_wire_test.go`); remaining: recorded captures from real client sessions (Model compatibility) | Core Purpose #1 (🔶) | Both agents' documented wire shapes — agentic tools, tool-call round trips, `include_usage` — now pass on both provider wires; a real-client capture closes Purpose #1 |
 | 6 | Guardrail-on-every-egress + PII egress ceiling (Security) | strategy Phase 0a/2 (P0) | LiteLLM's guardrail bypass is our best sales evidence — only if we provably don't have one |
-| 7 | ~~`mayu doctor` + fleet version ops (Admin)~~ **shipped in full**: version visibility (roadmap ③ phase 1), the `mayu doctor` CLI, and `GET /admin/debug/governance` (roadmap ④ complete); remaining: signed self-update (③ phase 2) | roadmap ③④ / S2 | The self-hosted-fleet operability Portkey's SaaS won't build |
+| 7 | ~~`mayu doctor` + fleet version ops (Admin)~~ **shipped in full**: version visibility (③ phase 1), `mayu doctor` + `GET /admin/debug/governance` (④), and signed manual self-update (③ phase 2: `mayu update` verifies an ed25519-signed, sha256-pinned release manifest against the build-embedded key — a compromised control plane or mirror yields a refusal, never code) | roadmap ③④ / S2+S3 | The self-hosted-fleet operability Portkey's SaaS won't build |
 | 8 | Benchmark-backed cache-efficiency reporting (Cost accuracy) | strategy Phase 3 | Turns the anti-LiteLLM caching story into a dashboard, not an anecdote |
 
 Sequencing already decided elsewhere stands: strategy §4 orders 0a → 0b →

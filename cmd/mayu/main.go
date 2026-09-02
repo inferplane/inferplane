@@ -69,6 +69,11 @@ func main() {
 		}
 	case "doctor":
 		os.Exit(doctorCmd(os.Args[2:]))
+	case "update":
+		if err := updateCmd(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -91,6 +96,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  mayu logout")
 	fmt.Fprintln(os.Stderr, "  mayu version")
 	fmt.Fprintln(os.Stderr, "  mayu doctor --config <path> [--json] [--no-probe]")
+	fmt.Fprintln(os.Stderr, "  mayu update --url <release base url> [--yes]")
 }
 
 // run assembles the gateway (gateway.go) and serves until SIGINT/SIGTERM.

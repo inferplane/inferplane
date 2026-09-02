@@ -229,13 +229,26 @@ but the tail of stale planes can only shrink by hand today.
   sketch's `mayu version --check` remote query is folded into Phase 2's CLI
   work; the serve-path warning covers the fleet case.)
 
-**Phase 2 — signed manual update (S3).**
-- Release pipeline: goreleaser + minisign/cosign signatures on artifacts;
-  public key embedded in the binary at build.
-- `mayu update [--channel stable]`: fetch → verify signature → atomic swap
-  (write sibling, rename, keep previous as `.old`) → user restarts. No
-  root: installs to the user-writable location it runs from. K8s is
-  excluded — the image pipeline owns node upgrades there.
+**Phase 2 — signed manual update — ✅ binary half shipped 2026-09-02.**
+- `mayu update --url <base> [--yes]` (`cmd/mayu/update.go`): fetches
+  `manifest.json` + `manifest.json.sig`, verifies the ed25519 signature
+  against the public key stamped at build (`-ldflags -X
+  main.updatePubKeyHex=…`; an UN-stamped build refuses — fail closed),
+  checks the artifact's manifest-pinned sha256, then swaps atomically
+  (sibling write → rename, previous kept as `.old`, rollback on a failed
+  rename) — nothing restarts automatically. One signature covers the
+  manifest; artifacts are hash-pinned inside it, so a mirror cannot swap
+  one platform's binary without breaking the chain. URL rule:
+  https-or-loopback (the ADR-040 transport precedent). Without `--yes` it
+  verifies and reports only. Deviation from the sketch, recorded:
+  stdlib `crypto/ed25519` detached signatures instead of minisign/cosign —
+  the same primitive, zero new dependencies; `scripts/signrelease`
+  (genkey/sign) is the pipeline-side tool and the round trip is verified
+  end to end (signrelease-signed dir consumed by a stamped mayu build).
+  **Still open:** wiring signrelease into the actual release CI
+  (goreleaser job + key custody), and `--channel` (one manifest URL per
+  channel serves the need for now). K8s stays excluded — the image
+  pipeline owns node upgrades there.
 
 **Phase 3 — auto-update channel (later).** Idle-window self-update with
 health self-check + rollback to `.old` on boot failure.
