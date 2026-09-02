@@ -362,6 +362,7 @@ func govErrType(status int) string {
 // target exists (!last) — the caller then falls back. Otherwise it writes the
 // response/error to the client and returns false (committed).
 func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
+	pr.ParamsStripped = nil // per-attempt: a failed target's strips must not leak into this one's disclosure
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last {
@@ -414,6 +415,13 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 502, time.Since(start).Seconds(), 0)
 		return false
 	}
+	// Strip disclosure (strategy P1 "undisclosed request mutation"): the
+	// provider dropped request params the upstream rejects — say so, on the
+	// wire and in the audit record.
+	if len(pr.ParamsStripped) > 0 {
+		w.Header().Set("x-inferplane-params-stripped", strings.Join(pr.ParamsStripped, ","))
+		req = req.WithContext(audit.WithParamsStripped(req.Context(), pr.ParamsStripped))
+	}
 	if resp.Headers != nil {
 		copyUpstreamHeaders(w.Header(), resp.Headers)
 	}
@@ -461,6 +469,7 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 // response is committed; a mid-stream error terminates the stream (no
 // fallback). Returns false in all committed cases.
 func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
+	pr.ParamsStripped = nil // per-attempt: a failed target's strips must not leak into this one's disclosure
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last {
@@ -498,6 +507,12 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 	}
 	// Stream() succeeded → the target is healthy (breaker success, post-TTFT).
 	h.r.RecordResult(providerName, identity, true)
+	// Strip disclosure (strategy P1) — the provider strips before opening
+	// the stream, so the fact is known pre-commit.
+	if len(pr.ParamsStripped) > 0 {
+		w.Header().Set("x-inferplane-params-stripped", strings.Join(pr.ParamsStripped, ","))
+		req = req.WithContext(audit.WithParamsStripped(req.Context(), pr.ParamsStripped))
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(200)
@@ -689,7 +704,7 @@ func (h *MessagesHandler) auditCompleted(ctx context.Context, id string, p keyst
 		ID:            id,
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
-		Request:       audit.RequestRef{Ingress: "anthropic", ModelRequested: model, ModelResolved: upstream, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx)},
+		Request:       audit.RequestRef{Ingress: "anthropic", ModelRequested: model, ModelResolved: upstream, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), ParamsStripped: audit.ParamsStrippedFrom(ctx)},
 		Outcome:       &audit.OutcomeRef{Status: status},
 		Usage:         usage,
 		Cost:          cost,
@@ -721,7 +736,7 @@ func (h *MessagesHandler) auditCompletedPartial(ctx context.Context, p keystore.
 		ID:            ulid.New(),
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
-		Request:       audit.RequestRef{Ingress: "anthropic", ModelRequested: model, ModelResolved: upstream, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx)},
+		Request:       audit.RequestRef{Ingress: "anthropic", ModelRequested: model, ModelResolved: upstream, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), ParamsStripped: audit.ParamsStrippedFrom(ctx)},
 		Outcome:       &audit.OutcomeRef{Status: 200, Partial: true},
 		Usage:         usage,
 		Cost:          cost,

@@ -247,7 +247,7 @@ func (p *provider) completeConverse(ctx context.Context, req *providers.ProxyReq
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: converse req: %w", err)
 	}
-	stripUnsupportedInference(req.Upstream, cr.Inference)
+	req.ParamsStripped = append(req.ParamsStripped, stripUnsupportedInference(req.Upstream, cr.Inference)...)
 	cr.Guardrail = p.guardrailFor(req)
 	cresp, err := p.conv.Converse(ctx, req.Upstream, cr)
 	if err != nil {
@@ -284,7 +284,7 @@ func (p *provider) streamConverse(ctx context.Context, req *providers.ProxyReque
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: converse req: %w", err)
 	}
-	stripUnsupportedInference(req.Upstream, cr.Inference)
+	req.ParamsStripped = append(req.ParamsStripped, stripUnsupportedInference(req.Upstream, cr.Inference)...)
 	cr.Guardrail = p.guardrailFor(req)
 	evs, err := p.conv.ConverseStream(ctx, req.Upstream, cr)
 	if err != nil {
@@ -492,7 +492,7 @@ var converseUnsupportedInference = []struct {
 // temperature 1.0, its own default). Dropping a sampling param silently
 // changes sampling semantics, but the alternative is a hard 400 on every
 // request that carries it.
-func stripUnsupportedInference(upstream string, inf map[string]any) {
+func stripUnsupportedInference(upstream string, inf map[string]any) (stripped []string) {
 	for _, e := range converseUnsupportedInference {
 		if !strings.Contains(upstream, e.match) {
 			continue
@@ -500,10 +500,12 @@ func stripUnsupportedInference(upstream string, inf map[string]any) {
 		for _, p := range e.params {
 			if _, has := inf[p]; has {
 				delete(inf, p)
+				stripped = append(stripped, p)
 				logStrippedParam("converse", upstream, p)
 			}
 		}
 	}
+	return stripped
 }
 
 // strippedParamLogged dedupes logStrippedParam to once per (route, upstream,

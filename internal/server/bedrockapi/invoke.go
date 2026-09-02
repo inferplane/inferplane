@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
@@ -290,6 +291,7 @@ func isModelNotFound(statusCode int, body []byte) bool {
 }
 
 func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
+	pr.ParamsStripped = nil // per-attempt: a failed target's strips must not leak into this one's disclosure
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last {
@@ -340,6 +342,13 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusBadGateway, time.Since(start).Seconds(), 0)
 		return false
 	}
+	// Strip disclosure (strategy P1 "undisclosed request mutation"): the
+	// provider dropped request params the upstream rejects — say so, on the
+	// wire and in the audit record.
+	if len(pr.ParamsStripped) > 0 {
+		w.Header().Set("x-inferplane-params-stripped", strings.Join(pr.ParamsStripped, ","))
+		req = req.WithContext(audit.WithParamsStripped(req.Context(), pr.ParamsStripped))
+	}
 	if resp.Headers != nil {
 		copyUpstreamHeaders(w.Header(), resp.Headers)
 	}
@@ -385,6 +394,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 }
 
 func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
+	pr.ParamsStripped = nil // per-attempt: a failed target's strips must not leak into this one's disclosure
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last {
@@ -416,6 +426,12 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	}
 
 	h.r.RecordResult(providerName, identity, true)
+	// Strip disclosure (strategy P1) — the provider strips before opening
+	// the stream, so the fact is known pre-commit.
+	if len(pr.ParamsStripped) > 0 {
+		w.Header().Set("x-inferplane-params-stripped", strings.Join(pr.ParamsStripped, ","))
+		req = req.WithContext(audit.WithParamsStripped(req.Context(), pr.ParamsStripped))
+	}
 	w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Amzn-Bedrock-Content-Type", "application/json")
@@ -640,7 +656,7 @@ func (h *InvokeHandler) auditCompletedPartial(ctx context.Context, p keystore.Pr
 		ID:            ulid.New(),
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
-		Request:       audit.RequestRef{Ingress: "bedrock", ModelRequested: model, ModelResolved: upstream, Stream: h.streaming, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx)},
+		Request:       audit.RequestRef{Ingress: "bedrock", ModelRequested: model, ModelResolved: upstream, Stream: h.streaming, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), ParamsStripped: audit.ParamsStrippedFrom(ctx)},
 		Outcome:       &audit.OutcomeRef{Status: 200, Partial: true},
 		Usage:         usage,
 		Cost:          cost,

@@ -38,6 +38,14 @@ type RequestRef struct {
 	// Appended at the end (like PIIMasked) so mixed-version chains still
 	// verify byte-identically; empty means no substitution occurred.
 	ModelSubstitutedFrom string `json:"model_substituted_from,omitempty"`
+	// ParamsStripped names the request parameters the provider dropped
+	// before egress because the upstream model rejects them (the bedrock
+	// strip tables — strategy P1 "undisclosed request mutation": a dropped
+	// temperature changes sampling semantics, and the audit trail must say
+	// so). Appended at the end (same rule as ModelSubstitutedFrom) so
+	// mixed-version chains still verify byte-identically; omitted when
+	// nothing was stripped.
+	ParamsStripped []string `json:"params_stripped,omitempty"`
 }
 
 type OutcomeRef struct {

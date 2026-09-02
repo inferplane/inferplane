@@ -127,9 +127,14 @@ policy-selected action, no destination classification, and no egress ceiling.
   `providers/bedrock/testdata/strip_tables.json` records both tables with
   their probe date, and `strip_tables_guard_test.go` fails any table edit
   that doesn't update the artifact in the same commit — every drift is a
-  reviewable diff naming which models lose which params. Still open: a
-  dropped `temperature: 0` changes sampling semantics with no audit field,
-  metric, or response header — the per-request disclosure remains.
+  reviewable diff naming which models lose which params. The per-request
+  disclosure is also in place (2026-09-02): a provider that strips reports
+  it on `ProxyRequest.ParamsStripped`, and every ingress sets
+  `x-inferplane-params-stripped` on the response and `params_stripped` on
+  the audit record (`internal/audit` RequestRef, appended-at-end rule).
+  Still open: a Prometheus metric for strips (needs the cardinality
+  discussion — param names are table-bounded, but per-model×param series
+  should be a deliberate choice).
 - **Cache behavior differs by path.** Anthropic passthrough and Bedrock Claude
   InvokeModel preserve `cache_control`; Bedrock Converse does not map it to
   `cachePoint`. `internal/cache.VolatileStore` and cache-affinity are

@@ -35,6 +35,16 @@ type ProxyRequest struct {
 	// configured default. A deliberate, narrow exception to provider
 	// isolation (§8): a transport field any provider may ignore — only
 	// providers/bedrock reads it today.
+	// ParamsStripped flows the OTHER way from every field above: the
+	// PROVIDER appends the names of request parameters it dropped before
+	// egress because the upstream model rejects them (bedrock's strip
+	// tables), and the ingress reads it after Complete/Stream returns to
+	// disclose the mutation (x-inferplane-params-stripped response header +
+	// the audit record's params_stripped — strategy P1 "undisclosed
+	// request mutation"). Providers that never mutate a request leave it
+	// nil.
+	ParamsStripped []string
+
 	GuardrailID      string
 	GuardrailVersion string
 }

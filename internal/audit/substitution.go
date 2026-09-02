@@ -23,3 +23,23 @@ func SubstitutedFrom(ctx context.Context) string {
 	from, _ := ctx.Value(substitutedFromKey{}).(string)
 	return from
 }
+
+// paramsStrippedKey carries the parameter names the PROVIDER dropped before
+// egress (ProxyRequest.ParamsStripped, strategy P1 "undisclosed request
+// mutation") from the point the provider call returned down to the audit
+// call — the same one-way plumbing as substitutedFromKey above.
+type paramsStrippedKey struct{}
+
+// WithParamsStripped returns a context carrying the stripped parameter
+// names. Call it once, right after the provider call reports a strip,
+// before continuing the request with req.WithContext(ctx).
+func WithParamsStripped(ctx context.Context, params []string) context.Context {
+	return context.WithValue(ctx, paramsStrippedKey{}, params)
+}
+
+// ParamsStrippedFrom returns the value WithParamsStripped set, or nil if
+// nothing was stripped for this request.
+func ParamsStrippedFrom(ctx context.Context) []string {
+	params, _ := ctx.Value(paramsStrippedKey{}).([]string)
+	return params
+}

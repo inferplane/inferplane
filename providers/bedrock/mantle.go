@@ -201,6 +201,7 @@ func toMantleChatBody(req *providers.ProxyRequest, upstream string, stream bool)
 		for _, p := range e.params {
 			if _, has := top[p]; has {
 				delete(top, p)
+				req.ParamsStripped = append(req.ParamsStripped, p)
 				logStrippedParam("mantle", upstream, p)
 			}
 		}

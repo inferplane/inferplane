@@ -308,6 +308,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // pre-TTFT failure (transport error or upstream 5xx/429) when a next target
 // exists (!last); otherwise it writes the response/error and returns false.
 func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
+	pr.ParamsStripped = nil // per-attempt: a failed target's strips must not leak into this one's disclosure
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last {
@@ -350,6 +351,13 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 		recordSpanResponse(req, prov.Name(), upstream, nil, false)
 		h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 502, time.Since(start).Seconds(), 0)
 		return false
+	}
+	// Strip disclosure (strategy P1 "undisclosed request mutation"): the
+	// provider dropped request params the upstream rejects — say so, on the
+	// wire and in the audit record.
+	if len(pr.ParamsStripped) > 0 {
+		w.Header().Set("x-inferplane-params-stripped", strings.Join(pr.ParamsStripped, ","))
+		req = req.WithContext(audit.WithParamsStripped(req.Context(), pr.ParamsStripped))
 	}
 	if resp.StatusCode < 400 {
 		h.r.RecordResult(providerName, identity, true)
@@ -395,6 +403,7 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 // erroring before any event with a next target available (!last) returns
 // retriable=true. Once the first event is rendered the response is committed.
 func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
+	pr.ParamsStripped = nil // per-attempt: a failed target's strips must not leak into this one's disclosure
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last {
@@ -429,6 +438,12 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 	}
 	// Stream() succeeded → the target is healthy (breaker success, post-TTFT).
 	h.r.RecordResult(providerName, identity, true)
+	// Strip disclosure (strategy P1) — the provider strips before opening
+	// the stream, so the fact is known pre-commit.
+	if len(pr.ParamsStripped) > 0 {
+		w.Header().Set("x-inferplane-params-stripped", strings.Join(pr.ParamsStripped, ","))
+		req = req.WithContext(audit.WithParamsStripped(req.Context(), pr.ParamsStripped))
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(200)
@@ -667,7 +682,7 @@ func (h *ChatHandler) audit(ctx context.Context, p keystore.Principal, model, up
 		ID:            ulid.New(),
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
-		Request:       audit.RequestRef{Ingress: "openai", ModelRequested: model, ModelResolved: upstream, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx)},
+		Request:       audit.RequestRef{Ingress: "openai", ModelRequested: model, ModelResolved: upstream, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), ParamsStripped: audit.ParamsStrippedFrom(ctx)},
 		Outcome:       outcome,
 	}
 	if traceID != "" {
@@ -690,7 +705,7 @@ func (h *ChatHandler) auditCompleted(ctx context.Context, id string, p keystore.
 		ID:            id,
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
-		Request:       audit.RequestRef{Ingress: "openai", ModelRequested: model, ModelResolved: upstream, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx)},
+		Request:       audit.RequestRef{Ingress: "openai", ModelRequested: model, ModelResolved: upstream, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), ParamsStripped: audit.ParamsStrippedFrom(ctx)},
 		Outcome:       &audit.OutcomeRef{Status: status},
 		Usage:         usage,
 		Cost:          cost,
@@ -720,7 +735,7 @@ func (h *ChatHandler) auditCompletedPartial(ctx context.Context, p keystore.Prin
 		ID:            ulid.New(),
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
-		Request:       audit.RequestRef{Ingress: "openai", ModelRequested: model, ModelResolved: upstream, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx)},
+		Request:       audit.RequestRef{Ingress: "openai", ModelRequested: model, ModelResolved: upstream, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), ParamsStripped: audit.ParamsStrippedFrom(ctx)},
 		Outcome:       &audit.OutcomeRef{Status: 200, Partial: true},
 		Usage:         usage,
 		Cost:          cost,
