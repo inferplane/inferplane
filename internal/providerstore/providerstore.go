@@ -54,6 +54,26 @@ type Target struct {
 	Provider string
 	Model    string
 	API      string
+	// Pricing is the target's optional nominal per-MTok rate (ADR-041 item 6/D5):
+	// a self-hosted openai_compatible (vLLM/Ollama) model has no bundled rate, so
+	// the operator enters one in the same write that registers the route — one
+	// screen: endpoint, models, price. Nil = the target declares no rate and the
+	// bundled/file pricing applies unchanged. Not a secret (same category as a
+	// provider's Region).
+	Pricing *TargetPricing
+}
+
+// TargetPricing is a nominal rate in human USD-per-MTok floats — the same unit
+// config pricing overrides use; the overlay converts it to a pricing override
+// keyed (provider, upstream model id) per ADR-030, and the three cache rates
+// derive from the input rate at table build exactly as for a file override.
+// An all-zero value never persists: the write path rejects 0/0 without Free
+// ("0 means unpriced, not free" — the validatePricing rule), which is what lets
+// the SQLite layer reconstruct nil from all-zero columns without a presence flag.
+type TargetPricing struct {
+	InputPerMTok  float64
+	OutputPerMTok float64
+	Free          bool
 }
 
 // ModelRoute is a model's alias list plus its ordered target chain — the model

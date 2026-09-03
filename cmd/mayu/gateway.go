@@ -1040,7 +1040,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		}
 		return snap
 	}
-	g.adminSrv = &http.Server{Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore != nil), auditFileSinks, aud, m, writer, liveExport(holder), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), govDebug, cfg.Probe.AllowedHosts...)}
+	g.adminSrv = &http.Server{Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore), auditFileSinks, aud, m, writer, liveExport(holder, pstore), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), govDebug, cfg.Probe.AllowedHosts...)}
 	return g, nil
 }
 
@@ -1212,6 +1212,14 @@ func (g *gateway) writeMutation(ctx context.Context, persist func(context.Contex
 	provSlice := make([]providerstore.ProviderRow, 0, len(provs))
 	for _, p := range provs {
 		provSlice = append(provSlice, p)
+	}
+	// A pricing conflict — two routes declaring different rates for the same
+	// (provider, upstream) key — is rejected before anything persists: the rate
+	// key is upstream-scoped, so a half-honored declaration would bill silently
+	// wrong, the ADR-030 bug class (ADR-041 item 6).
+	if _, conflicts := providerstore.PricingOverrides(models); len(conflicts) > 0 {
+		fmt.Fprintln(os.Stderr, "inferplane: rejected UI write (pricing):", strings.Join(conflicts, "; "))
+		return configapi.ErrInvalidTopology
 	}
 	eff := providerstore.OverlayFrom(raw, provSlice, models)
 	if err := config.ValidateModelAliases(eff.Models); err != nil {
@@ -1743,12 +1751,22 @@ func ssoConnectSrc(cfg *config.Config) []string {
 
 // liveView derives the secret-free config view from the current generation,
 // so /admin/config reflects hot reloads (ADR-006). live never imports
-// configapi — the view is built here in the assembly layer.
-func liveView(holder *live.Holder, writable bool) func() configapi.View {
+// configapi — the view is built here in the assembly layer. With a provider
+// store, the store's target-carried nominal rates are echoed per target
+// (ADR-041 item 6) so the console's edit form round-trips them; a store read
+// error degrades to a rate-less view (logged) rather than failing the view.
+func liveView(holder *live.Holder, pstore providerstore.Store) func() configapi.View {
 	return func() configapi.View {
 		st := holder.Load()
 		v := configapi.ViewFrom(st.ProviderConfigs(), st.Models())
-		v.Writable = writable // capability hint for the console (ADR-008); not secret-bearing
+		v.Writable = pstore != nil // capability hint for the console (ADR-008); not secret-bearing
+		if pstore != nil {
+			if routes, err := pstore.ListModels(context.Background()); err != nil {
+				fmt.Fprintln(os.Stderr, "inferplane: config view: reading stored pricing:", err)
+			} else {
+				configapi.AttachStoredPricing(&v, routes)
+			}
+		}
 		return v
 	}
 }
@@ -1756,11 +1774,35 @@ func liveView(holder *live.Holder, writable bool) func() configapi.View {
 // liveExport derives the secret-free, config-shaped Git-export doc from the
 // current generation (ADR-008 §3). Like liveView it reads the holder per call so
 // the export reflects the latest UI writes / reloads; ProviderConfig.APIKey is
-// dropped at marshal time by its `json:"-"` tag.
-func liveExport(holder *live.Holder) func() configapi.ExportDoc {
+// dropped at marshal time by its `json:"-"` tag. DB-entered target rates export
+// as a pricing.overrides fragment (ADR-041 item 6) so migrating the topology
+// back to a file loses no rate.
+func liveExport(holder *live.Holder, pstore providerstore.Store) func() configapi.ExportDoc {
 	return func() configapi.ExportDoc {
 		st := holder.Load()
-		return configapi.ExportDocFrom(st.ProviderConfigs(), st.Models())
+		doc := configapi.ExportDocFrom(st.ProviderConfigs(), st.Models())
+		if pstore == nil {
+			return doc
+		}
+		routes, err := pstore.ListModels(context.Background())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "inferplane: config export: reading stored pricing:", err)
+			return doc
+		}
+		folded, _ := providerstore.PricingOverrides(routes)
+		if len(folded) == 0 {
+			return doc
+		}
+		overrides := make(map[string]map[string]config.RateConfig, len(folded))
+		for prov, rates := range folded {
+			inner := make(map[string]config.RateConfig, len(rates))
+			for m, tp := range rates {
+				inner[m] = config.RateConfig{InputPerMTok: tp.InputPerMTok, OutputPerMTok: tp.OutputPerMTok, Free: tp.Free}
+			}
+			overrides[prov] = inner
+		}
+		doc.Pricing = &configapi.PricingExport{Overrides: overrides}
+		return doc
 	}
 }
 

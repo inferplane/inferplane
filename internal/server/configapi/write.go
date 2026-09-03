@@ -60,9 +60,21 @@ type ModelWrite struct {
 }
 
 type targetWrite struct {
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-	API      string `json:"api,omitempty"`
+	Provider string        `json:"provider"`
+	Model    string        `json:"model"`
+	API      string        `json:"api,omitempty"`
+	Pricing  *pricingWrite `json:"pricing,omitempty"`
+}
+
+// pricingWrite is a target's optional nominal per-MTok rate (ADR-041 item 6):
+// USD floats, the unit file pricing overrides use. Cache rates derive from the
+// input rate at table build (ADR-030), so they are not enterable here — this is
+// the nominal-rate escape hatch for self-hosted GPU models, not a full rate
+// editor.
+type pricingWrite struct {
+	InputPerMTok  float64 `json:"input_per_mtok"`
+	OutputPerMTok float64 `json:"output_per_mtok"`
+	Free          bool    `json:"free,omitempty"`
 }
 
 // ParseProviderWrite validates a provider write body and returns the row to
@@ -171,7 +183,28 @@ func ParseModelWrite(body []byte) (providerstore.ModelRoute, error) {
 		if strings.TrimSpace(t.Provider) == "" || strings.TrimSpace(t.Model) == "" {
 			return zero, fmt.Errorf("target[%d] requires both provider and model", i)
 		}
-		targets = append(targets, providerstore.Target{Provider: t.Provider, Model: t.Model, API: t.API})
+		pt := providerstore.Target{Provider: t.Provider, Model: t.Model, API: t.API}
+		if t.Pricing != nil {
+			// Same rules the file loader applies to a pricing override
+			// (validatePricing), plus stricter free/rate exclusivity: FromConfig
+			// would honor the rates and ignore the flag, so accepting both would
+			// store an ambiguous row.
+			if t.Pricing.InputPerMTok < 0 || t.Pricing.OutputPerMTok < 0 {
+				return zero, fmt.Errorf("target[%d] pricing: rates must not be negative", i)
+			}
+			if t.Pricing.InputPerMTok == 0 && t.Pricing.OutputPerMTok == 0 && !t.Pricing.Free {
+				return zero, fmt.Errorf("target[%d] pricing: 0 means unpriced, not free; fill in real rates or set \"free\": true", i)
+			}
+			if t.Pricing.Free && (t.Pricing.InputPerMTok != 0 || t.Pricing.OutputPerMTok != 0) {
+				return zero, fmt.Errorf("target[%d] pricing: \"free\" declares a zero-cost model; do not also set rates", i)
+			}
+			pt.Pricing = &providerstore.TargetPricing{
+				InputPerMTok:  t.Pricing.InputPerMTok,
+				OutputPerMTok: t.Pricing.OutputPerMTok,
+				Free:          t.Pricing.Free,
+			}
+		}
+		targets = append(targets, pt)
 	}
 	seen := make(map[string]bool, len(w.Aliases))
 	for _, alias := range w.Aliases {

@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
 	"sync"
 	"testing"
 
+	"github.com/inferplane/inferplane/internal/pricing"
 	"github.com/inferplane/inferplane/internal/providerstore"
 	"github.com/inferplane/inferplane/internal/server/configapi"
 )
@@ -216,6 +219,119 @@ func TestWriteFileRefNonexistentRejected(t *testing.T) {
 	}
 	if _, err := g.pstore.GetProvider(ctx, "p"); !errors.Is(err, providerstore.ErrNotFound) {
 		t.Fatal("a provider whose ref does not resolve must NOT be persisted")
+	}
+}
+
+// TestWriteModelPricingAppliesToLiveTable (ADR-041 item 6): a rate entered on
+// the model write path lands in the published generation's pricing table keyed
+// (provider, upstream) — the same table Settle bills from — with cache rates
+// derived from input exactly like a file override, and it persists in the store.
+func TestWriteModelPricingAppliesToLiveTable(t *testing.T) {
+	g := newPstoreGateway(t)
+	ctx := context.Background()
+
+	if err := g.WriteModel(ctx, "glm", providerstore.ModelRoute{Targets: []providerstore.Target{
+		{Provider: "up", Model: "glm-up", Pricing: &providerstore.TargetPricing{InputPerMTok: 0.05, OutputPerMTok: 0.1}},
+	}}); err != nil {
+		t.Fatalf("WriteModel with pricing: %v", err)
+	}
+
+	tbl := g.holder.Load().Pricing()
+	if !tbl.HasRate("up", "glm-up") {
+		t.Fatal("written rate missing from the live pricing table")
+	}
+	cost, missing := tbl.CostUSDMicros("up", "glm-up", pricing.Usage{Input: 1_000_000, Output: 1_000_000})
+	if missing || cost != 150_000 { // 0.05 + 0.10 USD = 150000 µUSD
+		t.Fatalf("1MTok in + 1MTok out at 0.05/0.10: cost=%d missing=%v, want 150000 µUSD", cost, missing)
+	}
+
+	models, _ := g.pstore.ListModels(ctx)
+	p := models["glm"].Targets[0].Pricing
+	if p == nil || p.InputPerMTok != 0.05 || p.OutputPerMTok != 0.1 {
+		t.Fatalf("pricing not persisted: %+v", p)
+	}
+}
+
+// TestWritePricingConflictRejected (ADR-041 item 6): the rate key is
+// (provider, upstream), so two routes declaring DIFFERENT rates for the same
+// key is an authoring error — rejected before anything persists, same
+// build-once-swap-once discipline as every other invalid write.
+func TestWritePricingConflictRejected(t *testing.T) {
+	g := newPstoreGateway(t)
+	ctx := context.Background()
+
+	if err := g.WriteModel(ctx, "glm", providerstore.ModelRoute{Targets: []providerstore.Target{
+		{Provider: "up", Model: "glm-up", Pricing: &providerstore.TargetPricing{InputPerMTok: 1, OutputPerMTok: 2}},
+	}}); err != nil {
+		t.Fatalf("first declaration: %v", err)
+	}
+	err := g.WriteModel(ctx, "glm2", providerstore.ModelRoute{Targets: []providerstore.Target{
+		{Provider: "up", Model: "glm-up", Pricing: &providerstore.TargetPricing{InputPerMTok: 9, OutputPerMTok: 9}},
+	}})
+	if !errors.Is(err, configapi.ErrInvalidTopology) {
+		t.Fatalf("conflicting rate for the same (provider, upstream) = %v, want ErrInvalidTopology", err)
+	}
+	models, _ := g.pstore.ListModels(ctx)
+	if _, ok := models["glm2"]; ok {
+		t.Fatal("a conflicting write must NOT be persisted")
+	}
+	// An AGREEING second declaration is fine.
+	if err := g.WriteModel(ctx, "glm3", providerstore.ModelRoute{Targets: []providerstore.Target{
+		{Provider: "up", Model: "glm-up", Pricing: &providerstore.TargetPricing{InputPerMTok: 1, OutputPerMTok: 2}},
+	}}); err != nil {
+		t.Fatalf("agreeing declaration must be accepted: %v", err)
+	}
+}
+
+// TestPricingEchoAndExportOverHTTP (ADR-041 item 6): the assembly wiring —
+// GET /admin/config echoes the store-carried rate per target (the console form
+// round-trips it) and GET /admin/config/export carries a config-shaped
+// pricing.overrides fragment (the DB→file migration path loses no rate).
+func TestPricingEchoAndExportOverHTTP(t *testing.T) {
+	g, _ := newServedPstoreGateway(t)
+	ctx := context.Background()
+	if err := g.WriteModel(ctx, "glm", providerstore.ModelRoute{Targets: []providerstore.Target{
+		{Provider: "up", Model: "glm-up", Pricing: &providerstore.TargetPricing{InputPerMTok: 0.05, OutputPerMTok: 0.1}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	adminGET := func(path string, out any) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, "http://"+g.AdminAddr()+path, nil)
+		req.Header.Set("Authorization", "Bearer "+e2eAdminToken)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("GET %s: status %d", path, resp.StatusCode)
+		}
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			t.Fatalf("GET %s: decode: %v", path, err)
+		}
+	}
+
+	var view configapi.View
+	adminGET("/admin/config", &view)
+	var echoed *configapi.PricingView
+	for _, m := range view.Models {
+		if m.Name == "glm" {
+			echoed = m.Targets[0].Pricing
+		}
+	}
+	if echoed == nil || echoed.InputPerMTok != 0.05 || echoed.OutputPerMTok != 0.1 {
+		t.Fatalf("view must echo the stored rate: %+v", echoed)
+	}
+
+	var export configapi.ExportDoc
+	adminGET("/admin/config/export", &export)
+	if export.Pricing == nil {
+		t.Fatal("export must carry the DB-entered rates as a pricing fragment")
+	}
+	if got := export.Pricing.Overrides["up"]["glm-up"]; got.InputPerMTok != 0.05 || got.OutputPerMTok != 0.1 {
+		t.Fatalf("export pricing fragment wrong: %+v", export.Pricing.Overrides)
 	}
 }
 

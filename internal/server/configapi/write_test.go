@@ -228,6 +228,43 @@ func TestParseModelWriteAliases(t *testing.T) {
 	}
 }
 
+// TestParseModelWritePricing (ADR-041 item 6): a target's optional nominal
+// per-MTok rate parses; the validatePricing rules apply at the DTO — 0/0
+// without free is unpriced-not-free, negatives are rejected, and free is
+// exclusive with rates (stricter than the file loader, which would silently
+// prefer the rates).
+func TestParseModelWritePricing(t *testing.T) {
+	route, err := ParseModelWrite([]byte(`{"targets":[
+		{"provider":"gpu","model":"glm-4.7","pricing":{"input_per_mtok":0.05,"output_per_mtok":0.1}},
+		{"provider":"gpu","model":"scratch","pricing":{"free":true}},
+		{"provider":"a","model":"1"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p0 := route.Targets[0].Pricing
+	if p0 == nil || p0.InputPerMTok != 0.05 || p0.OutputPerMTok != 0.1 || p0.Free {
+		t.Fatalf("pricing not parsed: %+v", p0)
+	}
+	if p1 := route.Targets[1].Pricing; p1 == nil || !p1.Free {
+		t.Fatalf("free pricing not parsed: %+v", p1)
+	}
+	if route.Targets[2].Pricing != nil {
+		t.Fatal("absent pricing must stay nil")
+	}
+
+	rejects := map[string]string{
+		`{"targets":[{"provider":"p","model":"m","pricing":{"input_per_mtok":0,"output_per_mtok":0}}]}`:             "0 means unpriced",
+		`{"targets":[{"provider":"p","model":"m","pricing":{"input_per_mtok":-1,"output_per_mtok":1}}]}`:            "must not be negative",
+		`{"targets":[{"provider":"p","model":"m","pricing":{"input_per_mtok":1,"output_per_mtok":1,"free":true}}]}`: "do not also set rates",
+	}
+	for body, want := range rejects {
+		_, err := ParseModelWrite([]byte(body))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("body %s: want error containing %q, got %v", body, want, err)
+		}
+	}
+}
+
 func TestParseModelWriteRejectsEmpty(t *testing.T) {
 	if _, err := ParseModelWrite([]byte(`{"targets":[]}`)); err == nil {
 		t.Fatal("a model route with no targets must be rejected")

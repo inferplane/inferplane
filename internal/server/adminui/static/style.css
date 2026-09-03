@@ -212,6 +212,8 @@ select:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px 
 /* model-route ordered-target rows. */
 #mf-targets { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.6rem 0; }
 .target-row input { flex: 1 1 8rem; }
+/* nominal per-MTok rate inputs (ADR-041 item 6) stay narrow — prices, not text */
+.target-row input.t-price-in, .target-row input.t-price-out { flex: 0 1 6rem; }
 #issue-card { margin-bottom: 0.9rem; }
 #plaintext-box {
   margin-top: 1rem; padding: 0.9rem 1rem;

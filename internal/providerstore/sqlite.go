@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS model_targets (
     provider TEXT NOT NULL,
     model_id TEXT NOT NULL,
     api      TEXT NOT NULL DEFAULT '',
+    price_input_per_mtok  REAL NOT NULL DEFAULT 0,
+    price_output_per_mtok REAL NOT NULL DEFAULT 0,
+    price_free            INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (model, position)
 );
 CREATE TABLE IF NOT EXISTS model_aliases (
@@ -114,43 +117,55 @@ func ensureSchema(db *sql.DB) error {
 		return err
 	}
 
-	existing := map[string]bool{}
-	rows, err := conn.QueryContext(ctx, `PRAGMA table_info(providers)`)
-	if err != nil {
-		rollback()
-		return err
-	}
-	for rows.Next() {
-		var cid int
-		var name, colType string
-		var notNull, pk int
-		var dflt any
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			rows.Close()
-			rollback()
-			return err
+	tableColumns := func(table string) (map[string]bool, error) {
+		existing := map[string]bool{}
+		rows, err := conn.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+		if err != nil {
+			return nil, err
 		}
-		existing[name] = true
+		defer rows.Close()
+		for rows.Next() {
+			var cid int
+			var name, colType string
+			var notNull, pk int
+			var dflt any
+			if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+				return nil, err
+			}
+			existing[name] = true
+		}
+		return existing, rows.Err()
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		rollback()
-		return err
-	}
-	rows.Close()
 
-	columns := []struct{ name, ddl string }{
-		{"auth_header", `ALTER TABLE providers ADD COLUMN auth_header TEXT NOT NULL DEFAULT ''`},
-		{"guardrail_id", `ALTER TABLE providers ADD COLUMN guardrail_id TEXT NOT NULL DEFAULT ''`},
-		{"guardrail_version", `ALTER TABLE providers ADD COLUMN guardrail_version TEXT NOT NULL DEFAULT ''`},
+	migrations := []struct {
+		table   string
+		columns []struct{ name, ddl string }
+	}{
+		{"providers", []struct{ name, ddl string }{
+			{"auth_header", `ALTER TABLE providers ADD COLUMN auth_header TEXT NOT NULL DEFAULT ''`},
+			{"guardrail_id", `ALTER TABLE providers ADD COLUMN guardrail_id TEXT NOT NULL DEFAULT ''`},
+			{"guardrail_version", `ALTER TABLE providers ADD COLUMN guardrail_version TEXT NOT NULL DEFAULT ''`},
+		}},
+		{"model_targets", []struct{ name, ddl string }{
+			{"price_input_per_mtok", `ALTER TABLE model_targets ADD COLUMN price_input_per_mtok REAL NOT NULL DEFAULT 0`},
+			{"price_output_per_mtok", `ALTER TABLE model_targets ADD COLUMN price_output_per_mtok REAL NOT NULL DEFAULT 0`},
+			{"price_free", `ALTER TABLE model_targets ADD COLUMN price_free INTEGER NOT NULL DEFAULT 0`},
+		}},
 	}
-	for _, c := range columns {
-		if existing[c.name] {
-			continue
-		}
-		if _, err := conn.ExecContext(ctx, c.ddl); err != nil {
+	for _, m := range migrations {
+		existing, err := tableColumns(m.table)
+		if err != nil {
 			rollback()
 			return err
+		}
+		for _, c := range m.columns {
+			if existing[c.name] {
+				continue
+			}
+			if _, err := conn.ExecContext(ctx, c.ddl); err != nil {
+				rollback()
+				return err
+			}
 		}
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {

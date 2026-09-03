@@ -34,6 +34,15 @@ func Overlay(rawFileCfg *config.Config, store Store) (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Target-pricing conflicts can only reach this path via a direct DB edit
+	// (the UI write path rejects them before persisting). Log and proceed with
+	// the deterministic fold — refusing to boot over hand-edited rows would be
+	// a new way to take the data plane down.
+	if _, conflicts := PricingOverrides(models); len(conflicts) > 0 {
+		for _, c := range conflicts {
+			log.Printf("providerstore: %s (first declaration wins; fix via PUT /admin/models)", c)
+		}
+	}
 	return OverlayFrom(rawFileCfg, provs, models), nil
 }
 
@@ -52,7 +61,38 @@ func OverlayFrom(rawFileCfg *config.Config, provs []ProviderRow, models map[stri
 	for name, route := range models {
 		eff.Models[name] = modelConfigFromRoute(route)
 	}
+	mergeTargetPricing(&eff, models)
 	return &eff
+}
+
+// mergeTargetPricing folds target-carried nominal rates (ADR-041 item 6) into
+// the effective config's pricing overrides, keyed (provider, upstream) exactly
+// like a file override — so everything downstream (table build, cache-rate
+// derivation, the ADR-030 unpriced guards, `pricing check`) applies unchanged.
+// A DB rate wins over a file override for the same key: the store is
+// authoritative for what it declares, and a console edit must not be shadowed
+// by a stale file entry. The overrides map is copied copy-on-write (eff is a
+// shallow copy of the raw file config, whose maps must never be mutated).
+func mergeTargetPricing(eff *config.Config, models map[string]ModelRoute) {
+	folded, _ := PricingOverrides(models) // conflicts handled by the caller's path
+	if len(folded) == 0 {
+		return
+	}
+	merged := make(map[string]map[string]config.RateConfig, len(eff.Pricing.Overrides)+len(folded))
+	for prov, rates := range eff.Pricing.Overrides {
+		merged[prov] = rates // inner maps shared until a DB rate touches them
+	}
+	for prov, rates := range folded {
+		inner := make(map[string]config.RateConfig, len(merged[prov])+len(rates))
+		for m, rc := range merged[prov] {
+			inner[m] = rc
+		}
+		for m, tp := range rates {
+			inner[m] = config.RateConfig{InputPerMTok: tp.InputPerMTok, OutputPerMTok: tp.OutputPerMTok, Free: tp.Free}
+		}
+		merged[prov] = inner
+	}
+	eff.Pricing.Overrides = merged
 }
 
 // SeedIfEmpty performs the one-time file→DB import (ADR-008): if the store has
@@ -132,6 +172,9 @@ func routeFromModelConfig(mc config.ModelConfig) ModelRoute {
 	}
 }
 
+// targetsToConfig drops Pricing by construction — config.Target has no pricing
+// field (the file schema keeps rates in pricing.overrides, ADR-041 D5's "no
+// pricing-schema change"); mergeTargetPricing carries the rates over instead.
 func targetsToConfig(ts []Target) []config.Target {
 	out := make([]config.Target, len(ts))
 	for i, t := range ts {
@@ -140,6 +183,10 @@ func targetsToConfig(ts []Target) []config.Target {
 	return out
 }
 
+// targetsFromConfig (the seed path) leaves Pricing nil: file rates live in the
+// file's own pricing.overrides block, which stays file-sourced — the seed
+// imports topology, never pricing, so a rate in the DB is always one an
+// operator entered through the write path.
 func targetsFromConfig(ts []config.Target) []Target {
 	out := make([]Target, len(ts))
 	for i, t := range ts {

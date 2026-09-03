@@ -32,9 +32,19 @@ func replaceModel(ctx context.Context, tx *sql.Tx, name string, route ModelRoute
 		return fmt.Errorf("providerstore: set model: %w", err)
 	}
 	for i, t := range route.Targets {
+		// Pricing columns: nil ⇔ all-zero. The write path rejects a present-but-
+		// all-zero pricing object (0/0 without free), so the encoding is lossless.
+		var inRate, outRate float64
+		free := 0
+		if t.Pricing != nil {
+			inRate, outRate = t.Pricing.InputPerMTok, t.Pricing.OutputPerMTok
+			if t.Pricing.Free {
+				free = 1
+			}
+		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO model_targets (model, position, provider, model_id, api) VALUES (?,?,?,?,?)`,
-			name, i, t.Provider, t.Model, t.API); err != nil {
+			`INSERT INTO model_targets (model, position, provider, model_id, api, price_input_per_mtok, price_output_per_mtok, price_free) VALUES (?,?,?,?,?,?,?,?)`,
+			name, i, t.Provider, t.Model, t.API, inRate, outRate, free); err != nil {
 			return fmt.Errorf("providerstore: set model: %w", err)
 		}
 	}
@@ -54,16 +64,21 @@ func (s *SQLiteStore) ListModels(ctx context.Context) (map[string]ModelRoute, er
 	out := map[string]ModelRoute{}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT model, provider, model_id, api FROM model_targets ORDER BY model, position`)
+		`SELECT model, provider, model_id, api, price_input_per_mtok, price_output_per_mtok, price_free FROM model_targets ORDER BY model, position`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var model string
 		var t Target
-		if err := rows.Scan(&model, &t.Provider, &t.Model, &t.API); err != nil {
+		var inRate, outRate float64
+		var free int
+		if err := rows.Scan(&model, &t.Provider, &t.Model, &t.API, &inRate, &outRate, &free); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if inRate != 0 || outRate != 0 || free != 0 {
+			t.Pricing = &TargetPricing{InputPerMTok: inRate, OutputPerMTok: outRate, Free: free != 0}
 		}
 		r := out[model]
 		r.Targets = append(r.Targets, t)

@@ -459,7 +459,7 @@ function fillProviderForm(p) {
 function fillModelForm(m) {
   $("mf-name").value = m.name;
   $("mf-targets").textContent = "";
-  for (const t of m.targets || []) addTargetRow(t.provider, t.model, t.api);
+  for (const t of m.targets || []) addTargetRow(t.provider, t.model, t.api, t.pricing);
   if (!(m.targets || []).length) addTargetRow();
 }
 
@@ -468,7 +468,7 @@ function fillModelForm(m) {
 // a missing provider is rejected server-side, so this moves the failure to
 // authoring time). The upstream model is a free-text input with a <datalist>
 // typeahead sourced from the provider type's catalog (advisory — never blocks).
-function addTargetRow(provider, model, apiv) {
+function addTargetRow(provider, model, apiv, pricing) {
   const row = document.createElement("div");
   row.className = "row target-row";
 
@@ -504,10 +504,29 @@ function addTargetRow(provider, model, apiv) {
 
   const a = document.createElement("input");
   a.type = "text"; a.placeholder = "api (optional)"; a.className = "t-api"; a.value = apiv || "";
+
+  // Nominal per-MTok rate (ADR-041 item 6): the price entered where the
+  // endpoint + model are registered — for self-hosted GPU targets that have no
+  // bundled rate. Echoed from the view so an unrelated edit never drops a
+  // stored rate on save.
+  const pin = document.createElement("input");
+  pin.type = "number"; pin.min = "0"; pin.step = "any";
+  pin.placeholder = "$ in/MTok"; pin.className = "t-price-in";
+  const pout = document.createElement("input");
+  pout.type = "number"; pout.min = "0"; pout.step = "any";
+  pout.placeholder = "$ out/MTok"; pout.className = "t-price-out";
+  if (pricing && !pricing.free) {
+    pin.value = pricing.input_per_mtok || "";
+    pout.value = pricing.output_per_mtok || "";
+  }
+  // A stored free:true rate has no form control; keep it on the row so a save
+  // round-trips it instead of silently un-pricing the model.
+  row.dataset.priceFree = pricing && pricing.free ? "1" : "";
+
   const rm = document.createElement("button");
   rm.type = "button"; rm.className = "ghost"; rm.textContent = "✕";
   rm.addEventListener("click", () => row.remove());
-  row.append(p, m, dl, a, rm);
+  row.append(p, m, dl, a, pin, pout, rm);
   $("mf-targets").appendChild(row);
 }
 
@@ -599,6 +618,13 @@ $("model-form").addEventListener("submit", async (e) => {
     if (provider && model) {
       const t = { provider: provider, model: model };
       if (apiv) t.api = apiv;
+      const pin = parseFloat(row.querySelector(".t-price-in").value);
+      const pout = parseFloat(row.querySelector(".t-price-out").value);
+      if (!isNaN(pin) || !isNaN(pout)) {
+        t.pricing = { input_per_mtok: isNaN(pin) ? 0 : pin, output_per_mtok: isNaN(pout) ? 0 : pout };
+      } else if (row.dataset.priceFree === "1") {
+        t.pricing = { input_per_mtok: 0, output_per_mtok: 0, free: true };
+      }
       targets.push(t);
     }
   }

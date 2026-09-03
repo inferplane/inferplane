@@ -89,6 +89,31 @@ func TestExportIncludesGuardrailFields(t *testing.T) {
 	}
 }
 
+// TestExportPricingFragmentIsConfigShaped (ADR-041 item 6): the assembly-
+// attached pricing fragment marshals as a config-shaped pricing block, so its
+// overrides re-parse as config.PricingConfig overrides and paste directly into
+// a file's pricing block — the DB→file migration path loses no rate.
+func TestExportPricingFragmentIsConfigShaped(t *testing.T) {
+	snapshot := func() ExportDoc {
+		doc := ExportDocFrom(nil, nil)
+		doc.Pricing = &PricingExport{Overrides: map[string]map[string]config.RateConfig{
+			"gpu": {"glm-4.7": {InputPerMTok: 0.05, OutputPerMTok: 0.1}},
+		}}
+		return doc
+	}
+	h := ExportHandler(snapshot)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/admin/config/export", nil))
+
+	var cfg config.Config
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("export does not re-parse as config: %v", err)
+	}
+	if got := cfg.Pricing.Overrides["gpu"]["glm-4.7"]; got.InputPerMTok != 0.05 || got.OutputPerMTok != 0.1 {
+		t.Fatalf("pricing fragment did not round-trip through the config shape: %+v", got)
+	}
+}
+
 // TestExportIncludesModelAliases mirrors TestExportIncludesGuardrailFields:
 // ExportDocFrom serializes config.ModelConfig directly, which already carries
 // the json-tagged Aliases field, so a model's aliases must survive

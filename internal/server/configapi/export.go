@@ -16,6 +16,19 @@ import (
 type ExportDoc struct {
 	Providers map[string]config.ProviderConfig `json:"providers"`
 	Models    map[string]config.ModelConfig    `json:"models"`
+	// Pricing carries the STORE-carried nominal rates (ADR-041 item 6) as a
+	// config-shaped pricing fragment — its overrides paste directly into the
+	// file's pricing.overrides block, so migrating off the DB loses no rate.
+	// Only DB-entered rates appear (never bundled/file ones: they already live
+	// in the file); nil when the store carries none. Attached by the assembly
+	// (the topology snapshot alone cannot know which rates were DB-carried).
+	Pricing *PricingExport `json:"pricing,omitempty"`
+}
+
+// PricingExport is the config-shaped pricing fragment: provider → upstream
+// model id → rate, the exact shape of config pricing overrides.
+type PricingExport struct {
+	Overrides map[string]map[string]config.RateConfig `json:"overrides"`
 }
 
 // ExportDocFrom builds the export doc from a topology snapshot (the live

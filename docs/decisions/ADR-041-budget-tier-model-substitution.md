@@ -1,8 +1,8 @@
 # ADR-041: Budget-tier model substitution (routing.budgetTiers)
 
 **Date:** 2026-08-26
-**Status:** Accepted (implemented — work items 1–5 and item 7's full
-two-plane e2e; item 6, providerstore/UI pricing fields, remains a follow-up)
+**Status:** Accepted (implemented — all work items 1–7; item 6, the
+providerstore/UI pricing fields, shipped 2026-09-03)
 **Related:** ADR-008 (providerstore — the UI write path that registers a vLLM
 endpoint and its models), ADR-017 (budget alert webhooks — the utilization
 thresholds this ADR reuses as a routing trigger), ADR-029 (model-level
@@ -234,8 +234,24 @@ recording:
   gets its own `SubstituteTier` call site so it isn't a cost-leak path
   around the same policy the Anthropic/OpenAI ingresses enforce.
 
-Deferred to follow-up work: item 6 (providerstore/UI pricing fields
-alongside the `openai_compatible` endpoint write path, ADR-008 extension).
+Item 6 shipped 2026-09-03 (the D5 write-path half): a model-route target on
+the ADR-008 write path carries an optional `pricing` object
+(`input_per_mtok`/`output_per_mtok`/`free`, USD floats — the exact file
+override shape, cache rates derived per ADR-030), persisted on the
+`model_targets` row (`internal/providerstore`, ALTER-migrated) and folded by
+the overlay into the effective config's `pricing.overrides` keyed
+(provider, upstream) — so the table build, the unpriced guards, and
+`mayu pricing check` apply unchanged, and a DB rate wins over a stale file
+entry for the same key. Two routes declaring DIFFERENT rates for one
+(provider, upstream) key are rejected at write time (a half-honored rate is
+the ADR-030 bug class); the boot overlay logs such rows (only a direct DB
+edit can produce them) and proceeds first-declaration-wins. `GET
+/admin/config` echoes the STORE-carried rate per target (never the
+effective/bundled one — the console form round-trips what it echoes, and
+echoing a bundled rate would copy it into the store), the console's target
+rows grow the two price inputs, and `GET /admin/config/export` carries the
+DB-entered rates as a config-shaped `pricing.overrides` fragment so a
+DB→file migration loses no rate.
 Item 7 shipped 2026-09-02
 (`cmd/mayu/tier_twoplane_e2e_test.go`,
 `TestE2EBudgetTierActivatesFleetWideWithToolFidelity`): two mayu planes

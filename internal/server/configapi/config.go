@@ -11,6 +11,7 @@ import (
 	"sort"
 
 	"github.com/inferplane/inferplane/internal/config"
+	"github.com/inferplane/inferplane/internal/providerstore"
 )
 
 // ProviderView is the safe projection of a provider. It has NO field capable
@@ -30,6 +31,20 @@ type TargetView struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 	API      string `json:"api,omitempty"`
+	// Pricing echoes the STORE-carried nominal rate (ADR-041 item 6), attached
+	// by AttachStoredPricing — never the effective/bundled rate: the console
+	// form round-trips what it echoes on the next PUT, and echoing a bundled
+	// rate here would silently copy it into the store, shadowing future bundled
+	// updates. Non-secret (a price, same category as Region).
+	Pricing *PricingView `json:"pricing,omitempty"`
+}
+
+// PricingView mirrors the write DTO's pricing shape so a GET → edit → PUT
+// round-trip is field-for-field lossless.
+type PricingView struct {
+	InputPerMTok  float64 `json:"input_per_mtok"`
+	OutputPerMTok float64 `json:"output_per_mtok"`
+	Free          bool    `json:"free,omitempty"`
 }
 
 // ModelView lists a model's aliases and targets in priority order (target[0]
@@ -79,6 +94,35 @@ func ViewFrom(providers map[string]config.ProviderConfig, models map[string]conf
 	}
 	sort.Slice(v.Models, func(i, j int) bool { return v.Models[i].Name < v.Models[j].Name })
 	return v
+}
+
+// AttachStoredPricing echoes store-carried target rates into the view (ADR-041
+// item 6). With a provider store the effective models ARE the store routes
+// (Overlay replaces), so matching by model name + target index is exact; the
+// provider/upstream equality guard makes a mid-flight mismatch degrade to "no
+// echo" rather than mislabeling a rate. Assembly calls it with the live store
+// routes; without a provider store it is never called and the view is unchanged.
+func AttachStoredPricing(v *View, routes map[string]providerstore.ModelRoute) {
+	for i := range v.Models {
+		route, ok := routes[v.Models[i].Name]
+		if !ok {
+			continue
+		}
+		for j := range v.Models[i].Targets {
+			if j >= len(route.Targets) {
+				break
+			}
+			t, st := &v.Models[i].Targets[j], route.Targets[j]
+			if st.Pricing == nil || t.Provider != st.Provider || t.Model != st.Model {
+				continue
+			}
+			t.Pricing = &PricingView{
+				InputPerMTok:  st.Pricing.InputPerMTok,
+				OutputPerMTok: st.Pricing.OutputPerMTok,
+				Free:          st.Pricing.Free,
+			}
+		}
+	}
 }
 
 // authString describes how the gateway authenticates to the provider, using

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/inferplane/inferplane/internal/config"
+	"github.com/inferplane/inferplane/internal/providerstore"
 )
 
 // TestViewFromNeverLeaksSecrets is the centerpiece: even when the config's
@@ -107,6 +108,34 @@ func TestViewFromEchoesModelAliases(t *testing.T) {
 	v := ViewFrom(nil, models)
 	if len(v.Models) != 1 || len(v.Models[0].Aliases) != 1 || v.Models[0].Aliases[0] != "apac.claude" {
 		t.Fatalf("model aliases not echoed: %+v", v.Models)
+	}
+}
+
+// TestAttachStoredPricingEchoesStoreRates (ADR-041 item 6): the view echoes
+// STORE-carried rates per target so a console edit round-trips them; a target
+// without a stored rate stays rate-less, and a name mismatch (mid-flight skew)
+// degrades to no echo rather than mislabeling.
+func TestAttachStoredPricingEchoesStoreRates(t *testing.T) {
+	v := ViewFrom(nil, map[string]config.ModelConfig{
+		"glm":   {Targets: []config.Target{{Provider: "gpu", Model: "glm-4.7"}, {Provider: "gpu", Model: "backup"}}},
+		"other": {Targets: []config.Target{{Provider: "up", Model: "x"}}},
+	})
+	AttachStoredPricing(&v, map[string]providerstore.ModelRoute{
+		"glm": {Targets: []providerstore.Target{
+			{Provider: "gpu", Model: "glm-4.7", Pricing: &providerstore.TargetPricing{InputPerMTok: 0.05, OutputPerMTok: 0.1}},
+			{Provider: "MISMATCH", Model: "backup", Pricing: &providerstore.TargetPricing{Free: true}},
+		}},
+	})
+	// v.Models is sorted: glm, other.
+	p := v.Models[0].Targets[0].Pricing
+	if p == nil || p.InputPerMTok != 0.05 || p.OutputPerMTok != 0.1 {
+		t.Fatalf("stored rate not echoed: %+v", p)
+	}
+	if v.Models[0].Targets[1].Pricing != nil {
+		t.Fatal("a provider mismatch must degrade to no echo, never mislabel")
+	}
+	if v.Models[1].Targets[0].Pricing != nil {
+		t.Fatal("a model without stored rates must stay rate-less")
 	}
 }
 
