@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"sync"
 	"time"
@@ -177,11 +178,27 @@ func (s *Syncer) Run(ctx context.Context) {
 	}
 }
 
+// jitterFrac returns a uniform [0,1). A package var so a test can pin the
+// spread instead of seeding a RNG.
+var jitterFrac = rand.Float64
+
+// backoffJitter is the fraction of a backoff interval that is randomized away.
+// Applied downward only, so a jittered interval never exceeds the
+// DefaultPolicySyncInterval ceiling nor drops below the Min floor.
+const backoffJitter = 0.2
+
 // tick runs one heartbeat and returns the next cadence. Failures back off
 // exponentially (doubling up to DefaultPolicySyncInterval) so a fleet of
 // data planes doesn't hammer an already-degraded control plane in lockstep
 // (PR #50 review finding); the first success snaps back to the control
 // plane's requested cadence.
+//
+// Exponential backoff alone does NOT break lockstep: planes that failed on the
+// same control-plane outage double through identical values and retry at the
+// same instants, and once they all park at the ceiling they retry together
+// forever — the thundering herd lands precisely when the control plane comes
+// back up. The interval is therefore jittered downward by up to
+// backoffJitter before it is returned.
 func (s *Syncer) tick(ctx context.Context, prev time.Duration) time.Duration {
 	next, err := s.syncOnce(ctx)
 	if err == nil {
@@ -197,7 +214,20 @@ func (s *Syncer) tick(ctx context.Context, prev time.Duration) time.Duration {
 	if backoff > policy.DefaultPolicySyncInterval {
 		backoff = policy.DefaultPolicySyncInterval
 	}
-	return backoff
+	return jitter(backoff)
+}
+
+// jitter spreads d over [(1-backoffJitter)*d, d], floored at
+// MinPolicySyncInterval so the jittered value can never undercut the protocol
+// minimum. At the floor there is nothing to spread (d == Min), which is the
+// benign case: Min is the fastest cadence, and planes desynchronize on their
+// own response latency there.
+func jitter(d time.Duration) time.Duration {
+	out := d - time.Duration(jitterFrac()*backoffJitter*float64(d))
+	if out < policy.MinPolicySyncInterval {
+		return policy.MinPolicySyncInterval
+	}
+	return out
 }
 
 // syncOnce does one heartbeat and returns the next cadence.

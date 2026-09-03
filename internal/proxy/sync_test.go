@@ -499,3 +499,60 @@ func TestSyncerOutageKeepsLastTierState(t *testing.T) {
 		t.Fatal("tier state lost on outage")
 	}
 }
+
+// TestBackoffIsJittered pins the anti-thundering-herd property: two planes
+// that fail on the same outage must NOT return the same retry interval, and
+// the jittered value must stay inside the protocol's [Min, Default] band.
+func TestBackoffIsJittered(t *testing.T) {
+	orig := jitterFrac
+	defer func() { jitterFrac = orig }()
+
+	// Ceiling case — the one that matters: every plane parks at Default and,
+	// unjittered, would retry in lockstep when the control plane returns.
+	for _, frac := range []float64{0, 0.5, 0.999999} {
+		jitterFrac = func() float64 { return frac }
+		got := jitter(policy.DefaultPolicySyncInterval)
+		lo := policy.DefaultPolicySyncInterval - time.Duration(backoffJitter*float64(policy.DefaultPolicySyncInterval))
+		if got > policy.DefaultPolicySyncInterval {
+			t.Errorf("jitter(%v) = %v, must never exceed the ceiling", policy.DefaultPolicySyncInterval, got)
+		}
+		if got < lo {
+			t.Errorf("jitter(%v) = %v, want >= %v", policy.DefaultPolicySyncInterval, got, lo)
+		}
+	}
+
+	// Distinct fractions must produce distinct intervals — otherwise the fleet
+	// is still in lockstep.
+	jitterFrac = func() float64 { return 0 }
+	a := jitter(policy.DefaultPolicySyncInterval)
+	jitterFrac = func() float64 { return 0.9 }
+	b := jitter(policy.DefaultPolicySyncInterval)
+	if a == b {
+		t.Errorf("jitter is not spreading: both planes returned %v", a)
+	}
+
+	// Floor case: never undercut the protocol minimum.
+	jitterFrac = func() float64 { return 0.999999 }
+	if got := jitter(policy.MinPolicySyncInterval); got != policy.MinPolicySyncInterval {
+		t.Errorf("jitter at the floor = %v, want exactly %v", got, policy.MinPolicySyncInterval)
+	}
+}
+
+// TestTickBacksOffWithinBandOnFailure covers tick's whole failure path: the
+// doubling, the two clamps, and the jitter, against an unreachable endpoint.
+func TestTickBacksOffWithinBandOnFailure(t *testing.T) {
+	orig := jitterFrac
+	defer func() { jitterFrac = orig }()
+	jitterFrac = func() float64 { return 0.5 }
+
+	// A closed port: syncOnce fails without waiting on a network timeout.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := srv.URL
+	srv.Close()
+
+	s := &Syncer{URL: url, Token: "t", Dataplane: "dp", Store: policy.NewEmptyStore(), Leases: NewLeaseTable()}
+	got := s.tick(context.Background(), policy.MinPolicySyncInterval)
+	if got < policy.MinPolicySyncInterval || got > policy.DefaultPolicySyncInterval {
+		t.Errorf("backoff = %v, want within [%v, %v]", got, policy.MinPolicySyncInterval, policy.DefaultPolicySyncInterval)
+	}
+}
