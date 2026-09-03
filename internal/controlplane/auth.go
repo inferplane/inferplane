@@ -51,11 +51,38 @@ func newAuthOptions(opts []Option) authOptions {
 	return o
 }
 
+// actorCtxKey carries the authenticated actor string set by authn (see
+// ActorFromContext) — the only per-request identity the control plane keeps.
+// D4/D5 still holds: this is attribution for the mutation log, not a new
+// authorization axis, and every actor value still has whole-console access.
+type actorCtxKey struct{}
+
+// ActorFromContext returns the identity that authenticated the current
+// request, as set by authn: an OIDC subject (prefixed "oidc:"), the fixed
+// string "static-token" when authenticated via the shared bearer (which
+// carries no per-human identity — D4/D5), or "unauthenticated" when no auth
+// is configured at all (token == "" and no verifier). Used only for the
+// mutation log (policies.go) — never for authorization. "" only when the
+// value was never set (a request that didn't go through authn, e.g. a
+// direct programmatic call in a test).
+func ActorFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(actorCtxKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+func withActor(r *http.Request, actor string) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), actorCtxKey{}, actor))
+}
+
 // authn is the shared middleware. There is no request-context principal and
 // no per-team scoping on the control plane (D4/D5): a resolved OIDC identity
 // and the static token both grant the SAME whole-console access the one
 // shared token already grants today — SSO is a strict improvement in
 // per-human identity and short-lived tokens, not a new authorization axis.
+// It does, however, tag the request with WHO authenticated it (ActorFromContext)
+// so a policy mutation can at least be attributed to someone (policies.go).
 //
 // token == "" AND no verifier configured ⇒ unauthenticated, byte-identical
 // to today's loopback-only posture. Otherwise a request needs EITHER a
@@ -65,7 +92,7 @@ func newAuthOptions(opts []Option) authOptions {
 func authn(token string, opts authOptions, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if token == "" && opts.verifier == nil {
-			next(w, r)
+			next(w, withActor(r, "unauthenticated"))
 			return
 		}
 
@@ -85,7 +112,7 @@ func authn(token string, opts authOptions, next http.HandlerFunc) http.HandlerFu
 				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 				return
 			}
-			next(w, r)
+			next(w, withActor(r, "oidc:"+claims.Subject))
 			return
 		}
 
@@ -98,6 +125,6 @@ func authn(token string, opts authOptions, next http.HandlerFunc) http.HandlerFu
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
-		next(w, r)
+		next(w, withActor(r, "static-token"))
 	}
 }

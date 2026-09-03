@@ -9,10 +9,13 @@ package controlplane
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -21,6 +24,61 @@ import (
 	"github.com/inferplane/inferplane/internal/policystore"
 	"sigs.k8s.io/yaml"
 )
+
+// MutationEntry is one recorded policy-document mutation: who, what, and a
+// content fingerprint — never the document body itself (ApplyWrite's body IS
+// the operator's submission, but a log line is not the place to duplicate
+// it; the hash is enough to correlate against the store's own copy).
+type MutationEntry struct {
+	Actor       string // ActorFromContext's value; "unspecified" when the request carried none
+	Op          string // "put" | "delete"
+	Name        string // the policy document name
+	ContentHash string // sha256 of the submitted body, "put" only; "" on delete
+	TS          time.Time
+}
+
+// SetMutationLog installs the sink for policy mutation records. Call before
+// serving traffic. nil (the default) is never passed to onMutation — see
+// NewServer, which installs logMutation so mutation attribution exists out
+// of the box with no wiring required.
+func (s *Server) SetMutationLog(fn func(MutationEntry)) {
+	s.mu.Lock()
+	s.onMutation = fn
+	s.mu.Unlock()
+}
+
+// logMutation is the default MutationEntry sink: one structured line per
+// mutation via the standard logger, the same convention cmd/inferplaned
+// already uses for every other operational event. Before this, PUT/DELETE
+// /v1alpha1/policies left NO record at all of who changed what — the
+// highest-privilege mutation in the system was the one with zero audit
+// trail.
+func logMutation(e MutationEntry) {
+	if e.ContentHash != "" {
+		log.Printf("inferplaned: policy mutation actor=%s op=%s name=%q content_sha256=%s", e.Actor, e.Op, e.Name, e.ContentHash)
+		return
+	}
+	log.Printf("inferplaned: policy mutation actor=%s op=%s name=%q", e.Actor, e.Op, e.Name)
+}
+
+func (s *Server) recordMutation(ctx context.Context, op, name string, body []byte) {
+	s.mu.Lock()
+	fn := s.onMutation
+	s.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	actor := ActorFromContext(ctx)
+	if actor == "" {
+		actor = "unspecified"
+	}
+	e := MutationEntry{Actor: actor, Op: op, Name: name, TS: time.Now().UTC()}
+	if body != nil {
+		sum := sha256.Sum256(body)
+		e.ContentHash = hex.EncodeToString(sum[:])
+	}
+	fn(e)
+}
 
 // ErrNoPolicyStore is returned by the write paths when no policy store is
 // attached — the file channel is read-only by construction. Surfaces as 405,
@@ -148,6 +206,7 @@ func (s *Server) ApplyWrite(ctx context.Context, name string, body []byte) error
 	if err := store.Put(ctx, name, body); err != nil {
 		return fmt.Errorf("controlplane: put policy %q: %w", name, err)
 	}
+	s.recordMutation(ctx, "put", name, body)
 	return s.ReloadFromStore(ctx)
 }
 
@@ -164,6 +223,7 @@ func (s *Server) ApplyDelete(ctx context.Context, name string) error {
 		// via errors.Is.
 		return fmt.Errorf("controlplane: delete policy %q: %w", name, err)
 	}
+	s.recordMutation(ctx, "delete", name, nil)
 	return s.ReloadFromStore(ctx)
 }
 

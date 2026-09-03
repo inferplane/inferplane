@@ -60,6 +60,11 @@ type Server struct {
 
 	policyStore policystore.Store    // nil ⇒ file-authoritative; PUT/DELETE ⇒ 405
 	updated     map[string]time.Time // policy name → store updated_at (nil on the file path)
+
+	// onMutation records every policy PUT/DELETE (see SetMutationLog,
+	// policies.go). Defaulted to logMutation in NewServer — mutation
+	// attribution is on by default, no wiring required.
+	onMutation func(MutationEntry)
 }
 
 type ruleKey struct{ policy, rule string }
@@ -138,6 +143,7 @@ func NewServer(token, path string, opts ...Option) (*Server, error) {
 		tierLatch:  tier.NewLatch(),
 		dataplanes: map[string]*dpInfo{},
 		now:        time.Now,
+		onMutation: logMutation,
 	}
 	if err := s.Reload(); err != nil {
 		return nil, err

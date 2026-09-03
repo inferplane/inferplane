@@ -3,6 +3,8 @@ package controlplane
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -487,5 +489,110 @@ func TestChangedFalseWithStoreAttached(t *testing.T) {
 	}
 	if s.changed() {
 		t.Fatal("changed() must be false once a policy store is attached")
+	}
+}
+
+// TestApplyWriteRecordsMutationWithContentHash covers the core gap: before
+// this, a policy PUT left NO record of who changed what. A direct call (no
+// HTTP, no actor in context) must still record something greppable rather
+// than silently doing nothing.
+func TestApplyWriteRecordsMutationWithContentHash(t *testing.T) {
+	s, _ := newTestServer(t, "")
+	fs := newFakeStore()
+	if err := s.AttachPolicyStore(context.Background(), fs); err != nil {
+		t.Fatal(err)
+	}
+	var got []MutationEntry
+	s.SetMutationLog(func(e MutationEntry) { got = append(got, e) })
+
+	edited := strings.Replace(cpPolicyYAML, "limitMilliUSD: 100", "limitMilliUSD: 200", 1)
+	if err := s.ApplyWrite(context.Background(), "team-a", []byte(edited)); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("mutation log entries = %d, want 1", len(got))
+	}
+	e := got[0]
+	if e.Op != "put" || e.Name != "team-a" {
+		t.Errorf("entry = %+v, want op=put name=team-a", e)
+	}
+	if e.Actor != "unspecified" {
+		t.Errorf("actor = %q, want \"unspecified\" for a call with no ActorFromContext value", e.Actor)
+	}
+	sum := sha256.Sum256([]byte(edited))
+	want := hex.EncodeToString(sum[:])
+	if e.ContentHash != want {
+		t.Errorf("content hash = %q, want %q (sha256 of the submitted body)", e.ContentHash, want)
+	}
+}
+
+// TestApplyDeleteRecordsMutationWithNoContentHash covers the delete half:
+// there is no body to hash, and that must not be confused with a hashing bug.
+func TestApplyDeleteRecordsMutationWithNoContentHash(t *testing.T) {
+	s, _ := newTestServer(t, "")
+	fs := newFakeStore()
+	if err := s.AttachPolicyStore(context.Background(), fs); err != nil {
+		t.Fatal(err)
+	}
+	var got []MutationEntry
+	s.SetMutationLog(func(e MutationEntry) { got = append(got, e) })
+
+	if err := s.ApplyDelete(context.Background(), "team-a"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("mutation log entries = %d, want 1", len(got))
+	}
+	if got[0].Op != "delete" || got[0].Name != "team-a" {
+		t.Errorf("entry = %+v, want op=delete name=team-a", got[0])
+	}
+	if got[0].ContentHash != "" {
+		t.Errorf("content hash = %q, want empty on delete", got[0].ContentHash)
+	}
+}
+
+// TestApplyWriteRecordsMutationOverHTTPWithActor is the end-to-end path: a
+// PUT authenticated with the shared static token must attribute the
+// mutation to "static-token" via ActorFromContext, not "unspecified".
+func TestApplyWriteRecordsMutationOverHTTPWithActor(t *testing.T) {
+	s, ts := newTestServer(t, "secret-tok")
+	fs := newFakeStore()
+	if err := s.AttachPolicyStore(context.Background(), fs); err != nil {
+		t.Fatal(err)
+	}
+	var got []MutationEntry
+	s.SetMutationLog(func(e MutationEntry) { got = append(got, e) })
+
+	edited := strings.Replace(cpPolicyYAML, "limitMilliUSD: 100", "limitMilliUSD: 200", 1)
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/v1alpha1/policies/team-a", bytes.NewReader([]byte(edited)))
+	req.Header.Set("Authorization", "Bearer secret-tok")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("PUT status = %d, body = %s", resp.StatusCode, body)
+	}
+	if len(got) != 1 {
+		t.Fatalf("mutation log entries = %d, want 1", len(got))
+	}
+	if got[0].Actor != "static-token" {
+		t.Errorf("actor = %q, want %q for a request authenticated with the shared bearer", got[0].Actor, "static-token")
+	}
+}
+
+// TestApplyWriteDefaultsToLogMutation pins NewServer's out-of-the-box
+// behavior: mutation attribution must exist without any caller wiring
+// SetMutationLog — the fix this closes was "zero record at all", so the
+// default itself must not be the silent no-op.
+func TestApplyWriteDefaultsToLogMutation(t *testing.T) {
+	s, _ := newTestServer(t, "")
+	s.mu.Lock()
+	fn := s.onMutation
+	s.mu.Unlock()
+	if fn == nil {
+		t.Fatal("NewServer must install a default mutation sink (logMutation), not nil")
 	}
 }
