@@ -109,15 +109,16 @@ spec:
   rules:
   - name: user-month-cap
     failurePolicy: FailClosed
-    budget: { limitMilliUSD: 1, hardCap: true }
+    budget: { limitMilliUSD: 40000, hardCap: true }
 `
 	dataURL, adminURL := userBudgetGateway(t, up.srv.URL, pol, "pol-team")
 
 	_, cappedKey := createOwnedKey(t, adminURL, "pol-team", "sub-capped", []string{"*"})
 	_, freeKey := createOwnedKey(t, adminURL, "pol-team", "sub-free", []string{"*"})
 
-	// Pre-check runs on ACCUMULATED spend, so the capped user's first request
-	// always gets through; the second is the one that is denied.
+	// Reserve/settle economics (see govConfig in e2e_test.go): each request
+	// carries a $37 upper bound and settles $15, so the $40 cap admits the
+	// capped user's first request and denies the second.
 	mustPost(t, dataURL, cappedKey, http.StatusOK, "capped user's first request")
 	body := mustPost(t, dataURL, cappedKey, http.StatusPaymentRequired, "capped user past the cap")
 	if !strings.Contains(body, "user budget exceeded") {
@@ -152,7 +153,7 @@ spec:
   rules:
   - name: t1-user-cap
     failurePolicy: FailClosed
-    budget: { limitMilliUSD: 1, hardCap: true }
+    budget: { limitMilliUSD: 40000, hardCap: true }
 `
 	dataURL, adminURL := userBudgetGateway(t, up.srv.URL, pol, "t1", "t2")
 
@@ -219,7 +220,7 @@ spec:
     failurePolicy: FailOpen
     budget:
       period: CalendarDay
-      limitMilliUSD: 1
+      limitMilliUSD: 40000
   - name: hard-month
     failurePolicy: FailClosed
     budget: { limitMilliUSD: 100000, hardCap: true }
@@ -299,14 +300,14 @@ spec:
     failurePolicy: FailClosed
     budget:
       period: CalendarDay
-      limitMilliUSD: 1
+      limitMilliUSD: 40000
       hardCap: true
       adminContact: "ops@example.invalid"
 `
 	dataURL, adminURL := userBudgetGateway(t, up.srv.URL, pol, "pol-team")
 	_, key := createOwnedKey(t, adminURL, "pol-team", "sub-hardday", []string{"*"})
 
-	// Pre-check reads ACCUMULATED spend, so the first request always passes.
+	// $40 cap, $37 bound, $15 settled: the first request reserves and passes.
 	mustPost(t, dataURL, key, http.StatusOK, "first request under a hard day-only rule")
 	// Mutation 6: with no month rule, ul.BudgetHard == false and only
 	// ul.BudgetDayHard can flip the knob to "block" — the mutant warns and

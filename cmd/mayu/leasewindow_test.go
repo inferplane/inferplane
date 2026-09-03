@@ -284,7 +284,7 @@ spec:
     failurePolicy: FailOpen
     budget:
       period: CalendarDay
-      limitMilliUSD: 1
+      limitMilliUSD: 40000
       adminContact: "budget-team@example.com"
 `
 
@@ -317,8 +317,9 @@ func TestE2EDayOnlyPolicyAdminContact(t *testing.T) {
 
 	_, key := createKey(t, adminURL, "contact-team", []string{"*"})
 
-	// First request settles past the 1 milliUSD day cap (pre-check sees zero
-	// spend, §5.3).
+	// First request reserves within the $40 day cap ($37 bound) and settles
+	// $15 — the next request's bound no longer fits (reserve/settle economics,
+	// see govConfig in e2e_test.go).
 	r1 := postMessages(t, dataURL, key, "claude-test")
 	io.Copy(io.Discard, r1.Body)
 	r1.Body.Close()

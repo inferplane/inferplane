@@ -50,7 +50,7 @@ spec:
   rules:
   - name: user-month-cap
     failurePolicy: FailClosed
-    budget: { limitMilliUSD: 1, hardCap: true }
+    budget: { limitMilliUSD: 40000, hardCap: true }
 `
 	dataURL, adminURL := userBudgetGateway(t, up.srv.URL, pol, "id-team")
 
@@ -59,8 +59,9 @@ spec:
 	laptop := createIdentityKey(t, adminURL, "id-team", "https://idp.example#alice", "alice-laptop")
 	desktop := createIdentityKey(t, adminURL, "id-team", "https://idp.example#alice", "alice-desktop")
 
-	// The laptop key exhausts the user cap (~$15 spend vs a 1 milliUSD cap;
-	// pre-check runs on accumulated spend, so the first request lands).
+	// The laptop key's request reserves within the $40 cap ($37 bound) and
+	// settles $15 — the NEXT request's bound no longer fits (reserve/settle
+	// economics, see govConfig in e2e_test.go).
 	mustPost(t, dataURL, laptop, http.StatusOK, "first request on the laptop key")
 
 	// The DESKTOP key's very first request must already be over the cap:
@@ -88,7 +89,7 @@ spec:
   rules:
   - name: user-month-cap
     failurePolicy: FailClosed
-    budget: { limitMilliUSD: 1, hardCap: true }
+    budget: { limitMilliUSD: 40000, hardCap: true }
 `
 	dataURL, adminURL := userBudgetGateway(t, up.srv.URL, pol, "bs-team")
 	key := createIdentityKey(t, adminURL, "bs-team", "https://idp.example#bob", "bob")

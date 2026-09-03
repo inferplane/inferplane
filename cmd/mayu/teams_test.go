@@ -93,18 +93,18 @@ func TestE2ETeamRecordEnforcesDynamicallyNoRestart(t *testing.T) {
 		t.Fatalf("pre-record request: status %d, want 200 (ungoverned)", r1.StatusCode)
 	}
 
-	// A budget so tiny that a single ~15 µUSD request exhausts it.
-	putResp := putTeam(t, adminURL, "dyn-team", `{"budget_usd_micros":1,"budget_on_exceeded":"block"}`)
+	// Reserve/settle economics (see govConfig in e2e_test.go): each request
+	// carries a $37 upper bound and settles $15, so a $40 budget admits one
+	// request and blocks the next.
+	putResp := putTeam(t, adminURL, "dyn-team", `{"budget_usd_micros":40000000,"budget_on_exceeded":"block"}`)
 	body, _ := io.ReadAll(putResp.Body)
 	putResp.Body.Close()
 	if putResp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT /admin/teams/dyn-team: status %d: %s", putResp.StatusCode, body)
 	}
 
-	// First request under the new record: pre-check sees zero accumulated
-	// spend (budget pre-check only looks at ALREADY-spent, not the incoming
-	// request's own cost — governance.go's documented §5.3 behavior), so it
-	// is allowed and then settles, debiting past the 1 µUSD limit.
+	// First request under the new record: its $37 bound reserves within the
+	// $40 limit, and the $15 settle leaves too little room for a second bound.
 	r2 := postMessages(t, dataURL, key, "claude-test")
 	io.Copy(io.Discard, r2.Body)
 	r2.Body.Close()
@@ -378,15 +378,15 @@ func TestE2ETeamRecordDailyBudgetEnforcesDynamically(t *testing.T) {
 
 	_, key := createKey(t, adminURL, "dyn-team", []string{"claude-test"})
 
-	putResp := putTeam(t, adminURL, "dyn-team", `{"budget_usd_micros_per_day":1,"budget_on_exceeded":"block"}`)
+	putResp := putTeam(t, adminURL, "dyn-team", `{"budget_usd_micros_per_day":40000000,"budget_on_exceeded":"block"}`)
 	body, _ := io.ReadAll(putResp.Body)
 	putResp.Body.Close()
 	if putResp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT /admin/teams/dyn-team: status %d: %s", putResp.StatusCode, body)
 	}
 
-	// Same §5.3 shape as the monthly test: pre-check reads only ALREADY-spent,
-	// so request 1 is allowed and settles past the 1 µUSD daily cap.
+	// Same reserve/settle shape as the monthly test: request 1's $37 bound
+	// fits the $40 daily cap, and its $15 settle blocks request 2's bound.
 	r1 := postMessages(t, dataURL, key, "claude-test")
 	io.Copy(io.Discard, r1.Body)
 	r1.Body.Close()

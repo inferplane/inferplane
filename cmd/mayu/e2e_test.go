@@ -341,9 +341,14 @@ func govConfig(upstreamURL string) func(cfg map[string]any, dir string) {
 				"rate_limit": map[string]any{"requests_per_minute": 1},
 			},
 			"broke": map[string]any{
-				// First request costs ~ (10 in + 5 out tokens) at $1M/MTok ⇒ way
-				// over a $0.000001 monthly budget; block kicks in on request 2.
-				"budget": map[string]any{"usd_per_month": 0.000001, "on_exceeded": "block"},
+				// Reserve/settle economics: the standard postMessages body is
+				// 86 bytes ⇒ 21 estimated input tokens + max_tokens 16 = a $37
+				// upper bound at $1M/MTok, and each request settles $15
+				// (10 in + 5 out). A $40 budget admits the first reservation
+				// (37 ≤ 40) and blocks the second (15 spent + 37 bound > 40).
+				// The old "tiny budget, first request overshoots" pattern is
+				// exactly what atomic reservation now refuses up front.
+				"budget": map[string]any{"usd_per_month": 40.0, "on_exceeded": "block"},
 			},
 			"warned": map[string]any{
 				"budget": map[string]any{"usd_per_month": 0.000001, "on_exceeded": "warn"},
@@ -637,7 +642,11 @@ func TestE2EKeyBudgetAlertFires(t *testing.T) {
 	// inline with budget_usd_micros included.
 	body, _ := json.Marshal(map[string]any{
 		"team": "unbudgeted", "allowed_models": []string{"claude-test"},
-		"budget_usd_micros": 20_000_000, // $20 — one $15 request crosses 0.5, not 1.0
+		// Reserve/settle economics: each request carries a $37 upper bound and
+		// settles $15 (see govConfig). $56 admits both requests (req 2:
+		// 15 spent + 37 bound = 52 ≤ 56); the SECOND settle reaches $30 —
+		// ratio 0.536, crossing 0.5 exactly once and never 1.0.
+		"budget_usd_micros": 56_000_000,
 	})
 	req, _ := http.NewRequest(http.MethodPost, adminURL+"/admin/keys", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+e2eAdminToken)
@@ -658,11 +667,13 @@ func TestE2EKeyBudgetAlertFires(t *testing.T) {
 		t.Fatalf("create key: unexpected payload %+v", created)
 	}
 
-	mresp := postMessages(t, dataURL, created.Plaintext, "claude-test")
-	io.Copy(io.Discard, mresp.Body)
-	mresp.Body.Close()
-	if mresp.StatusCode != http.StatusOK {
-		t.Fatalf("request: status %d, want 200", mresp.StatusCode)
+	for i := 1; i <= 2; i++ {
+		mresp := postMessages(t, dataURL, created.Plaintext, "claude-test")
+		io.Copy(io.Discard, mresp.Body)
+		mresp.Body.Close()
+		if mresp.StatusCode != http.StatusOK {
+			t.Fatalf("request %d: status %d, want 200", i, mresp.StatusCode)
+		}
 	}
 
 	deadline := time.Now().Add(8 * time.Second)
@@ -888,11 +899,12 @@ func dailyBudgetConfig(upstreamURL string) func(cfg map[string]any, dir string) 
 		withAnthropicProvider(upstreamURL)(cfg, dir)
 		cfg["budget_timezone"] = "Asia/Seoul"
 		cfg["teams"] = map[string]any{
-			// First request costs ~(10 in + 5 out tokens) at $1M/MTok ⇒ way over
-			// a $0.000001 daily budget; block kicks in on request 2. No monthly
-			// cap at all, so a 402 here can only come from the DAY window.
+			// Reserve/settle economics (see govConfig): $37 upper bound per
+			// request, $15 settled — a $40 daily budget admits the first
+			// request and blocks the second. No monthly cap at all, so a 402
+			// here can only come from the DAY window.
 			"daily-only": map[string]any{
-				"budget": map[string]any{"usd_per_day": 0.000001, "on_exceeded": "block"},
+				"budget": map[string]any{"usd_per_day": 40.0, "on_exceeded": "block"},
 			},
 			// The control: monthly only. Its /v1/usage must carry no day field.
 			"monthly-only": map[string]any{
@@ -957,8 +969,8 @@ func TestE2EDailyBudgetBlocks(t *testing.T) {
 		if day["window"] != "calendar-day" {
 			t.Fatalf("team_budget_day window = %v, want calendar-day", day["window"])
 		}
-		if day["limit_usd_micros"].(float64) != 1 {
-			t.Fatalf("team_budget_day limit = %v, want 1 µUSD", day["limit_usd_micros"])
+		if day["limit_usd_micros"].(float64) != 40_000_000 {
+			t.Fatalf("team_budget_day limit = %v, want 40000000 µUSD", day["limit_usd_micros"])
 		}
 		// The reset INSTANT is what distinguishes the configured zone from UTC
 		// even on a day when the two calendar dates agree.

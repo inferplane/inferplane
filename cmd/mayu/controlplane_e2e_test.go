@@ -30,9 +30,9 @@ spec:
   - name: cap
     failurePolicy: FailClosed
     budget:
-      limitMilliUSD: 1000
+      limitMilliUSD: 100000
       hardCap: true
-      lease: { grantMilliUSD: 1000, renewInterval: "1s" }
+      lease: { grantMilliUSD: 50000, renewInterval: "1s" }
 `
 
 func TestE2EControlPlaneDistributesAndEnforces(t *testing.T) {

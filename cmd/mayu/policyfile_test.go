@@ -38,11 +38,13 @@ func TestE2EPolicyFileModelAccessOverlaysConfigBudget(t *testing.T) {
 			"targets": []any{map[string]any{"provider": "up", "model": "claude-other"}},
 		}
 		cfg["pricing"].(map[string]any)["overrides"].(map[string]any)["up"].(map[string]any)["claude-other"] = map[string]any{"input_per_mtok": 1000000.0, "output_per_mtok": 1000000.0}
-		// Config team with a budget so tiny one settled request exhausts it.
+		// Config team budget under reserve/settle economics (see govConfig in
+		// e2e_test.go): $37 upper bound per request, $15 settled — $40 admits
+		// the first request and blocks the second.
 		cfg["teams"] = map[string]any{
 			"pol-team": map[string]any{
 				"allowed_models": []any{"*"},
-				"budget":         map[string]any{"usd_per_month": 0.000001, "on_exceeded": "block"},
+				"budget":         map[string]any{"usd_per_month": 40.0, "on_exceeded": "block"},
 			},
 		}
 		polDir := filepath.Join(dir, "policies")
@@ -109,7 +111,7 @@ spec:
   rules:
   - name: hard-cap
     failurePolicy: FailClosed
-    budget: { limitMilliUSD: 1, hardCap: true }
+    budget: { limitMilliUSD: 40000, hardCap: true }
 `
 		if err := os.WriteFile(filepath.Join(polDir, "cap.yaml"), []byte(pol), 0o600); err != nil {
 			t.Fatal(err)
@@ -119,8 +121,9 @@ spec:
 
 	_, key := createKey(t, adminURL, "pol-team", []string{"*"})
 
-	// First request settles past the 1 milliUSD file cap (pre-check sees zero
-	// spend, §5.3), second blocks — the file budget bound, not the config's $1000.
+	// First request reserves within the $40 file cap and settles $15; the
+	// second's $37 bound no longer fits — the file budget bound, not the
+	// config's $1000 (reserve/settle economics, see govConfig in e2e_test.go).
 	r1 := postMessages(t, dataURL, key, "claude-test")
 	io.Copy(io.Discard, r1.Body)
 	r1.Body.Close()
@@ -164,7 +167,7 @@ spec:
   rules:
   - name: soft-cap
     failurePolicy: FailOpen
-    budget: { limitMilliUSD: 1 }
+    budget: { limitMilliUSD: 40000 }
 `
 		if err := os.WriteFile(filepath.Join(polDir, "cap.yaml"), []byte(pol), 0o600); err != nil {
 			t.Fatal(err)
@@ -180,8 +183,8 @@ spec:
 	if r1.StatusCode != http.StatusOK {
 		t.Fatalf("first request: status %d, want 200", r1.StatusCode)
 	}
-	// Past the 1 milliUSD file limit now. warn would admit (200); the base's
-	// block must win → 402.
+	// The second request's bound no longer fits the $40 file limit. warn
+	// would admit (200); the base's block must win → 402.
 	r2 := postMessages(t, dataURL, key, "claude-test")
 	io.Copy(io.Discard, r2.Body)
 	r2.Body.Close()
@@ -209,7 +212,7 @@ func TestE2EPolicyFileModelAccessPreservesConfigDailyBudget(t *testing.T) {
 		cfg["teams"] = map[string]any{
 			"pol-team": map[string]any{
 				"allowed_models": []any{"*"},
-				"budget":         map[string]any{"usd_per_day": 0.000001, "on_exceeded": "block"},
+				"budget":         map[string]any{"usd_per_day": 40.0, "on_exceeded": "block"},
 			},
 		}
 		polDir := filepath.Join(dir, "policies")
@@ -261,7 +264,7 @@ func TestE2EPolicyFileBudgetRuleKeepsConfigDailyBudget(t *testing.T) {
 		cfg["teams"] = map[string]any{
 			"pol-team": map[string]any{
 				"allowed_models": []any{"*"},
-				"budget":         map[string]any{"usd_per_day": 0.000001, "on_exceeded": "block"},
+				"budget":         map[string]any{"usd_per_day": 40.0, "on_exceeded": "block"},
 			},
 		}
 		polDir := filepath.Join(dir, "policies")
@@ -325,8 +328,9 @@ func TestE2EPolicyFileDayBudgetRuleBindsDailyWindow(t *testing.T) {
 		if err := os.MkdirAll(polDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		// 1 milliUSD/day is exhausted by one settled request; 100_000 milliUSD
-		// = $100/month is far above anything this test spends.
+		// 40_000 milliUSD/day admits one request ($37 bound) and blocks the
+		// second ($15 settled + $37 bound); 100_000 milliUSD = $100/month is
+		// far above anything this test spends.
 		pol := `apiVersion: inferplane.dev/v1alpha1
 kind: GovernancePolicy
 metadata: { name: pol-team-day }
@@ -337,7 +341,7 @@ spec:
     failurePolicy: FailClosed
     budget:
       period: CalendarDay
-      limitMilliUSD: 1
+      limitMilliUSD: 40000
       hardCap: true
   - name: roomy-monthly
     failurePolicy: FailClosed
@@ -400,7 +404,7 @@ spec:
     failurePolicy: FailOpen
     budget:
       period: CalendarDay
-      limitMilliUSD: 1
+      limitMilliUSD: 40000
 `
 		if err := os.WriteFile(filepath.Join(polDir, "day.yaml"), []byte(pol), 0o600); err != nil {
 			t.Fatal(err)
@@ -416,8 +420,8 @@ spec:
 	if r1.StatusCode != http.StatusOK {
 		t.Fatalf("first request: status %d, want 200", r1.StatusCode)
 	}
-	// Past the 1 milliUSD file limit now. warn would admit (200); the base's
-	// block must win → 402.
+	// The second request's bound no longer fits the $40 file limit. warn
+	// would admit (200); the base's block must win → 402.
 	r2 := postMessages(t, dataURL, key, "claude-test")
 	got, _ := io.ReadAll(r2.Body)
 	r2.Body.Close()
