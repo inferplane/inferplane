@@ -52,4 +52,4 @@ contract is in [docs/api-reference.md](../api-reference.md).
 ### 5. Cross-references
 - Related modules: `internal/router`, `internal/tier`, `internal/governance`, `internal/alert`, `internal/bodystore`, `providers/`
 - Related ADRs: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md, docs/decisions/ADR-040-credential-brokering.md, docs/decisions/ADR-041-budget-tier-model-substitution.md, docs/decisions/ADR-042-budget-windows.md
-- Related runbooks: docs/runbooks/, docs/runbooks/cli-login.md
+- Related runbooks: docs/runbooks/, docs/runbooks/cli-login.md **Writes (PUT/DELETE) take a DEDICATED bearer** — `INFERPLANED_POLICY_WRITE_TOKEN` (constant-time) or a console OIDC identity; the heartbeat `INFERPLANED_TOKEN` is 403'd on writes because it is deployed to every data plane (review/fable5 §08 B1). Unset write token ⇒ every static bearer is refused on writes. |
