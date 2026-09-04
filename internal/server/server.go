@@ -262,13 +262,19 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 		mux.Handle("GET /admin/providers/health", AdminAuth(adminTokens, verifier, mapping, denied,
 			requireAdmin(configapi.HealthHandler(healthSnapshot), emit)))
 	}
-	// UI-write provider/model registration (ADR-008), behind the same AdminAuth.
-	// writer is nil when no provider store is configured → every write returns
-	// 405 (ADR-005 stage-1 posture preserved). Mutations are secret-free (refs
-	// only) and run build-once-swap-once in the assembly.
-	providersW := AdminAuth(adminTokens, verifier, mapping, denied, configapi.WriteHandler("providers", writer, emit))
+	// UI-write provider/model registration (ADR-008), behind the same AdminAuth
+	// AND requireAdmin (S2): a provider write persists a base_url plus an
+	// api_key_ref that live traffic will resolve and send — strictly more
+	// dangerous than the probe below, which is already full-admin for exactly
+	// that reason. Before this gate a team-mapped identity could register an
+	// attacker-controlled base_url and exfiltrate a resolved secret ref via
+	// ordinary request traffic. writer is nil when no provider store is
+	// configured → every write returns 405 (ADR-005 stage-1 posture preserved).
+	// Mutations are secret-free (refs only) and run build-once-swap-once in the
+	// assembly.
+	providersW := AdminAuth(adminTokens, verifier, mapping, denied, requireAdmin(configapi.WriteHandler("providers", writer, emit), emit))
 	mux.Handle("/admin/providers/", providersW)
-	modelsW := AdminAuth(adminTokens, verifier, mapping, denied, configapi.WriteHandler("models", writer, emit))
+	modelsW := AdminAuth(adminTokens, verifier, mapping, denied, requireAdmin(configapi.WriteHandler("models", writer, emit), emit))
 	mux.Handle("/admin/models/", modelsW)
 	// Connection probe (ADR-014 D2): tests a DRAFT provider's upstream before a
 	// route is trusted. FULL-ADMIN ONLY — it resolves a secret ref to an
