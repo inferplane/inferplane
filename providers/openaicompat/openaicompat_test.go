@@ -365,10 +365,54 @@ func TestStreamInjectsAndStripsUsageForNativeOpenAIIngress(t *testing.T) {
 
 // Cross-protocol callers get include_usage injected unconditionally — the
 // resulting usage-only frame must carry NO Raw: the Bedrock ingress ignores
-// Raw, but the Anthropic ingress tees it verbatim, and an Anthropic-wire
-// client must never receive an OpenAI-shaped line (review finding, PR #65
-// round 5).
-func TestStreamStripsInjectedUsageRawForCrossProtocolIngress(t *testing.T) {
+// Raw, so stripping the injected usage-only frame's Raw is a harmless
+// belt-and-braces there (review finding, PR #65 round 5). The anthropic
+// ingress no longer takes this strip path at all — it gets a full re-render
+// instead (C1, TestStreamRendersAnthropicSSEForAnthropicIngress below).
+func TestStreamStripsInjectedUsageRawForBedrockIngress(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+				"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2}}\n\n" +
+				"data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	p := &provider{baseURL: srv.URL, client: srv.Client()}
+	raw := `{"model":"public-m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	var cr schema.ChatRequest
+	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := p.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), Parsed: &cr, IngressProtocol: "bedrock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawUsage bool
+	for ev, serr := range evs {
+		if serr != nil {
+			t.Fatal(serr)
+		}
+		if ev.Chunk != nil && ev.Chunk.Usage != nil {
+			sawUsage = true
+			if ev.Raw != nil {
+				t.Errorf("injected usage-only frame kept Raw on a cross-protocol stream: %s", ev.Raw)
+			}
+		}
+	}
+	if !sawUsage {
+		t.Error("usage frame must still be observed for settlement")
+	}
+}
+
+// TestStreamRendersAnthropicSSEForAnthropicIngress is C1's contract: the
+// anthropic ingress tees ev.Raw verbatim, so on this provider's OpenAI wire
+// every frame's Raw must be REAL Anthropic SSE — the full frame vocabulary,
+// no bare OpenAI JSON lines, no "data: [DONE]" terminator.
+func TestStreamRendersAnthropicSSEForAnthropicIngress(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte(
@@ -390,19 +434,34 @@ func TestStreamStripsInjectedUsageRawForCrossProtocolIngress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sawUsage bool
+	var tee strings.Builder
 	for ev, serr := range evs {
 		if serr != nil {
 			t.Fatal(serr)
 		}
-		if ev.Chunk != nil && ev.Chunk.Usage != nil {
-			sawUsage = true
-			if ev.Raw != nil {
-				t.Errorf("injected usage-only frame kept Raw on a cross-protocol stream: %s", ev.Raw)
-			}
+		if ev != nil && ev.Raw != nil {
+			tee.Write(ev.Raw)
 		}
 	}
-	if !sawUsage {
-		t.Error("usage frame must still be observed for settlement")
+	out := tee.String()
+	if !strings.HasPrefix(out, "event: message_start") {
+		t.Errorf("tee must start with event: message_start, got: %.80s", out)
+	}
+	for _, want := range []string{
+		"event: content_block_start",
+		"event: content_block_delta",
+		"event: content_block_stop",
+		"event: message_delta",
+		"event: message_stop",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("tee missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "data: [DONE]") {
+		t.Errorf("tee must not contain the OpenAI [DONE] terminator:\n%s", out)
+	}
+	if strings.Contains(out, `"choices"`) {
+		t.Errorf("tee must not contain OpenAI-wire JSON:\n%s", out)
 	}
 }

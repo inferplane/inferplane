@@ -342,6 +342,7 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 		// every frame fails to parse would otherwise end cleanly with zero
 		// canonical frames — and settle zero billable tokens for a served
 		// request (ADR-030's zero-cost class).
+		isAnthropicChatIngress := chatRoute && req.IngressProtocol == "anthropic"
 		var sawChunk, sawErr bool
 		for ev, serr := range inner {
 			if serr != nil {
@@ -351,10 +352,11 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 				sawChunk = true
 				// Chat routes always inject include_usage (toMantleChatBody)
 				// — strip the usage-only frame's Raw from the client tee,
-				// same as openaicompat: the Bedrock ingress ignores Raw, but
-				// the Anthropic ingress tees it verbatim and must never
-				// receive an OpenAI-shaped line. Chunk stays for settlement.
-				if chatRoute && openai.IsUsageOnlyFrame(ev.Chunk) {
+				// same as openaicompat. The anthropic ingress instead gets a
+				// full re-render below (its usage frame becomes a real
+				// message_delta), so the strip applies to the others only.
+				// Chunk stays for settlement either way.
+				if chatRoute && !isAnthropicChatIngress && openai.IsUsageOnlyFrame(ev.Chunk) {
 					ev.Raw = nil
 				}
 				// Echo the PUBLIC model name, matching Complete: streamed
@@ -364,7 +366,7 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 				// match, or only the re-rendering ingresses get the rewrite.
 				if ev.Chunk.Message != nil && ev.Chunk.Message.Model != req.Model {
 					ev.Chunk.Message.Model = req.Model
-					if len(ev.Raw) > 0 {
+					if !isAnthropicChatIngress && len(ev.Raw) > 0 {
 						var buf bytes.Buffer
 						if schema.WriteAnthropicSSE(&buf, ev.Chunk) == nil {
 							ev.Raw = buf.Bytes()
@@ -377,6 +379,28 @@ func (m *mantleClient) Stream(ctx context.Context, req *providers.ProxyRequest) 
 						}
 					}
 				}
+				if isAnthropicChatIngress {
+					// Anthropic-wire client on a Mantle CHAT route: the chat
+					// wire is OpenAI SSE, but the anthropic ingress tees Raw
+					// verbatim — re-render EVERY chunk as real Anthropic SSE,
+					// including the usage-only message_delta and the
+					// synthesized frames ReadChatSSE emits with Raw==nil. The
+					// model rewrite above already landed before this render
+					// reads the chunk (C1). The /anthropic/v1/messages route
+					// (chatRoute false) never takes this branch: its wire is
+					// already Anthropic-shaped.
+					var buf bytes.Buffer
+					if schema.WriteAnthropicSSE(&buf, ev.Chunk) == nil {
+						ev.Raw = buf.Bytes()
+					} else {
+						ev.Raw = nil
+					}
+				}
+			} else if ev != nil && isAnthropicChatIngress {
+				// [DONE] terminator / unparseable-frame passthrough on a chat
+				// route — an Anthropic client must never see an OpenAI-wire
+				// line; message_stop (re-rendered above) is the terminator (C1).
+				ev.Raw = nil
 			}
 			if !yield(ev, serr) {
 				return

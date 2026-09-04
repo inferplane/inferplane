@@ -572,3 +572,62 @@ func TestMantleAnthropicBodyFromOpenAIIngress(t *testing.T) {
 		t.Error("nil Parsed on openai ingress must fail, not forward OpenAI JSON")
 	}
 }
+
+// TestMantleStreamRendersAnthropicSSEForAnthropicIngress is C1's contract on
+// the Mantle chat routes: the anthropic ingress tees ev.Raw verbatim, so on
+// this OpenAI-wire route every frame's Raw must be REAL Anthropic SSE — the
+// full frame vocabulary, no bare OpenAI JSON lines, no "data: [DONE]".
+func TestMantleStreamRendersAnthropicSSEForAnthropicIngress(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"he\"}}]}\n\n" +
+			"data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\n" +
+			"data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	mc := staticMantle(t, srv)
+	raw := `{"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	evs, err := mc.Stream(context.Background(), &providers.ProxyRequest{
+		Model: "mantle.gpt-5.4", Upstream: "openai.gpt-5.4",
+		RawBody: []byte(raw), Parsed: parseChat(t, raw), IngressProtocol: "anthropic",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tee strings.Builder
+	for ev, serr := range evs {
+		if serr != nil {
+			t.Fatal(serr)
+		}
+		if ev != nil && ev.Raw != nil {
+			tee.Write(ev.Raw)
+		}
+	}
+	out := tee.String()
+	if !strings.HasPrefix(out, "event: message_start") {
+		t.Errorf("tee must start with event: message_start, got: %.80s", out)
+	}
+	for _, want := range []string{
+		"event: content_block_start",
+		"event: content_block_delta",
+		"event: content_block_stop",
+		"event: message_delta",
+		"event: message_stop",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("tee missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "data: [DONE]") {
+		t.Errorf("tee must not contain the OpenAI [DONE] terminator:\n%s", out)
+	}
+	if strings.Contains(out, `"choices"`) {
+		t.Errorf("tee must not contain OpenAI-wire JSON:\n%s", out)
+	}
+	// The public-model echo must survive the re-render: message_start carries
+	// the model the CLIENT asked for, never the internal upstream id.
+	if !strings.Contains(out, `"model":"mantle.gpt-5.4"`) || strings.Contains(out, `openai.gpt-5.4`) {
+		t.Errorf("message_start must carry the public model name, not the upstream id:\n%s", out)
+	}
+}
