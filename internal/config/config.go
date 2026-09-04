@@ -171,6 +171,32 @@ type ServerConfig struct {
 	DrainGrace  string    `json:"drain_grace"`
 	AdminAuth   AdminAuth `json:"admin_auth"`
 	TLS         TLSConfig `json:"tls"`
+	// MaxRequestBytes bounds every data-plane request body (C9 — before it,
+	// every ingress did an unbounded io.ReadAll and one oversized body could
+	// OOM the gateway). 0 (unset) defaults to 64 MiB at load; negative is a
+	// config error. Distinct from audit.log_bodies.max_body_bytes
+	// (BodyLogConfig.MaxBodyBytes), which caps a per-record CAPTURED body,
+	// not the ingress read.
+	MaxRequestBytes int64 `json:"max_request_bytes,omitempty"`
+}
+
+// defaultMaxRequestBytes is server.max_request_bytes' unset default. 64 MiB
+// comfortably covers the largest legitimate agent payloads (1M-token contexts,
+// base64 images/PDFs in messages) while still bounding a hostile body.
+const defaultMaxRequestBytes = 64 << 20
+
+// validateServer normalizes ServerConfig.MaxRequestBytes: negative is a
+// config error, zero (unset) defaults to defaultMaxRequestBytes, mutated in
+// place so every reader of cfg.Server.MaxRequestBytes sees the resolved
+// value (same posture as validateBodyLog's MaxBodyBytes).
+func validateServer(s *ServerConfig) error {
+	if s.MaxRequestBytes < 0 {
+		return fmt.Errorf("config: server.max_request_bytes must be >= 0")
+	}
+	if s.MaxRequestBytes == 0 {
+		s.MaxRequestBytes = defaultMaxRequestBytes
+	}
+	return nil
 }
 
 // KeyStoreConfig selects the virtual-key backend. Only "sqlite" exists — Type
@@ -653,6 +679,9 @@ func LoadRaw(path string) (*Config, error) {
 		cfg.Server.AdminAuth.Tokens = append(cfg.Server.AdminAuth.Tokens, tok)
 	}
 	if err := validateOIDC(&cfg.Server.AdminAuth); err != nil {
+		return nil, err
+	}
+	if err := validateServer(&cfg.Server); err != nil {
 		return nil, err
 	}
 	if err := validatePricing(cfg.Pricing); err != nil {

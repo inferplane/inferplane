@@ -45,13 +45,28 @@ type AuthConfigView struct {
 type DataMuxOption func(*dataMuxOptions)
 
 type dataMuxOptions struct {
-	usage *telemetry.Collector
+	usage           *telemetry.Collector
+	maxRequestBytes int64
 }
 
 // WithUsageCollector threads the control-plane usage collector into every
 // generation handler's settle path (nil-safe; absent = standalone default).
 func WithUsageCollector(c *telemetry.Collector) DataMuxOption {
 	return func(o *dataMuxOptions) { o.usage = c }
+}
+
+// defaultMaxRequestBytes mirrors internal/config's constant of the same name —
+// a small same-valued local copy per package, the repo's established pattern
+// (see isLoopbackHost's three copies), because this package deliberately does
+// not import internal/config.
+const defaultMaxRequestBytes = 64 << 20
+
+// WithMaxRequestBytes bounds every KeyAuth-guarded data-plane request body
+// via http.MaxBytesReader (C9). n<=0 selects the default (64 MiB) — the same
+// defaulting DataMux applies when this option is omitted entirely, so a
+// caller that does not go through config.Load still gets a bound.
+func WithMaxRequestBytes(n int64) DataMuxOption {
+	return func(o *dataMuxOptions) { o.maxRequestBytes = n }
 }
 
 // DataMux builds the data-plane (:8080) handler: Anthropic, Bedrock, and OpenAI
@@ -82,6 +97,10 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	var o dataMuxOptions
 	for _, opt := range opts {
 		opt(&o)
+	}
+	limit := o.maxRequestBytes
+	if limit <= 0 {
+		limit = defaultMaxRequestBytes
 	}
 	mux := http.NewServeMux()
 	msgs := anthropicapi.NewMessagesHandlerMetrics(r, aud, gov, m)
@@ -152,8 +171,31 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 		mintLimiter := limiter.NewMemory() // per-subject mint throttle (ADR-028 follow-up r1); instance-local, like every other in-memory governance store
 		dataMux.Handle("POST /v1/auth/key", AdminAuth(nil, cliVerifier, cliMapping, cliDenialEmitter(emit), authapi.MintHandler(store, cliKeyTTL, mintLimiter, emit)))
 	}
-	dataMux.Handle("/", KeyAuth(store, mux))
+	dataMux.Handle("/", maxBytesMiddleware(limit, KeyAuth(store, mux)))
 	return dataMux
+}
+
+// maxBytesMiddleware bounds every data-plane request body to limit bytes
+// BEFORE KeyAuth and before any ingress handler's io.ReadAll (C9 — one
+// oversized body must not OOM the gateway). A declared Content-Length over
+// the limit is rejected immediately with 413 — cheap, nothing is read. An
+// undeclared or understated length is still capped by http.MaxBytesReader,
+// whose read error surfaces through the SAME io.ReadAll each generation
+// ingress already treats as a malformed body — so this wrap changes no
+// handler's error path, only whether/when it fires. The two count_tokens
+// handlers ignore the read error entirely and fall back to the local
+// estimator, so they stay 200 either way (the never-non-200 invariant).
+func maxBytesMiddleware(limit int64, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > limit {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			_, _ = w.Write([]byte(`{"error":"request body too large"}`))
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // negotiateModels routes GET /v1/models to the Anthropic-shaped handler when the
