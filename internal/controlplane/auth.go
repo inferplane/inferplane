@@ -126,7 +126,7 @@ func authnWrite(token, writeToken string, opts authOptions, next http.HandlerFun
 		// to work as it used to. Comparing against it here leaks nothing the
 		// sync endpoint doesn't already: it accepts that exact value.
 		if token != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) == 1 {
-			http.Error(w, `{"error":"the heartbeat token carries no policy-write authority (it is deployed to every data plane): use INFERPLANED_POLICY_WRITE_TOKEN or a console OIDC identity"}`, http.StatusForbidden)
+			writeJSONError(w, http.StatusForbidden, "the heartbeat token carries no policy-write authority (it is deployed to every data plane): use INFERPLANED_POLICY_WRITE_TOKEN or a console OIDC identity")
 			return
 		}
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)

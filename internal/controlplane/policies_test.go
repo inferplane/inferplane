@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
+	"github.com/inferplane/inferplane/internal/adminauth"
 	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/policystore"
 )
@@ -612,5 +614,58 @@ func TestApplyWriteDefaultsToLogMutation(t *testing.T) {
 	s.mu.Unlock()
 	if fn == nil {
 		t.Fatal("NewServer must install a default mutation sink (logMutation), not nil")
+	}
+}
+
+// A verified console OIDC identity may write policies (the SSO console must
+// keep working) and is attributed as "oidc:<subject>" — the one non-token
+// write path authnWrite accepts.
+func TestPolicyWriteViaOIDCIdentity(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "p.yaml"), []byte(cpPolicyYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	v := &stubVerifier{claims: adminauth.Claims{Subject: "u-admin", Groups: []string{"platform"}}}
+	mapping := adminauth.MappingConfig{GroupMappings: []adminauth.GroupMapping{{Group: "platform", Teams: []string{"alpha"}}}}
+	s, err := NewServer("heartbeat-tok", dir, WithOIDC(v, mapping))
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	// No write token at all: only an OIDC identity may write.
+	mux := http.NewServeMux()
+	s.Mount(mux)
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	fs := newFakeStore()
+	if err := s.AttachPolicyStore(context.Background(), fs); err != nil {
+		t.Fatal(err)
+	}
+	var got []MutationEntry
+	s.SetMutationLog(func(e MutationEntry) { got = append(got, e) })
+
+	edited := strings.Replace(cpPolicyYAML, "limitMilliUSD: 100", "limitMilliUSD: 200", 1)
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/v1alpha1/policies/team-a", bytes.NewReader([]byte(edited)))
+	req.Header.Set("Authorization", "Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1LWFkbWluIn0.sig") // JWT-shaped → OIDC path
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("OIDC PUT status = %d, want 204", resp.StatusCode)
+	}
+	if len(got) != 1 || got[0].Actor != "oidc:u-admin" {
+		t.Fatalf("mutation actor = %+v, want one entry with actor oidc:u-admin", got)
+	}
+	// The heartbeat token is still refused on writes even with OIDC configured.
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/v1alpha1/policies/team-a", bytes.NewReader([]byte(edited)))
+	req.Header.Set("Authorization", "Bearer heartbeat-tok")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("heartbeat PUT status = %d, want 403", resp.StatusCode)
 	}
 }

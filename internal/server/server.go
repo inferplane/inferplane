@@ -192,22 +192,30 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	return dataMux
 }
 
+// governanceRetryAfterSeconds is the Retry-After the gate advertises: the
+// syncer's minimum heartbeat cadence (internal/policy.MinPolicySyncInterval,
+// 15s) — the soonest the gate can flip to ready. A same-valued local copy,
+// like defaultMaxRequestBytes above, because this package does not import
+// internal/policy.
+const governanceRetryAfterSeconds = "15"
+
 // governanceGateMiddleware refuses governed traffic while the control-plane
 // sync gate is not ready. Sits INSIDE KeyAuth (an unauthenticated caller
 // learns nothing about gateway state) and exempts count_tokens (never
-// non-200) and the /v1/models listings (read-only, RBAC-filtered, no spend).
+// non-200) and the /v1/models listing plus any /v1/models/ sub-path
+// (read-only, RBAC-filtered, no spend).
 // 503 with Retry-After: the condition is transient by construction — the
 // syncer keeps retrying with backoff.
 func governanceGateMiddleware(gate func() (bool, string), next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if strings.HasSuffix(p, "/count_tokens") || strings.HasSuffix(p, "/count-tokens") || p == "/v1/models" {
+		if strings.HasSuffix(p, "/count_tokens") || strings.HasSuffix(p, "/count-tokens") || p == "/v1/models" || strings.HasPrefix(p, "/v1/models/") {
 			next.ServeHTTP(w, r)
 			return
 		}
 		if ok, reason := gate(); !ok {
 			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Retry-After", "5")
+			w.Header().Set("Retry-After", governanceRetryAfterSeconds)
 			w.WriteHeader(http.StatusServiceUnavailable)
 			body, _ := json.Marshal(map[string]any{
 				"type":  "error",
