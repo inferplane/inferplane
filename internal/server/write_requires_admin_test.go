@@ -32,7 +32,7 @@ func TestAdminMux_ProviderModelWritesRequireFullAdmin(t *testing.T) {
 	v := &fakeVerifier{claims: adminauth.Claims{Subject: "u-alpha", Groups: []string{"team-alpha"}}}
 	mapping := adminauth.MappingConfig{GroupMappings: []adminauth.GroupMapping{{Group: "team-alpha", Teams: []string{"alpha"}}}}
 	mux := AdminMux(stubStore{}, []string{"admin-tok"}, v, mapping, func() configapi.View { return configapi.View{} },
-		nil, nil, nil, nil, nopWriter{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		nil, nil, nil, nil, nil, nopWriter{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	do := func(bearer, method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))

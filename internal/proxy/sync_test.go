@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -554,5 +555,46 @@ func TestTickBacksOffWithinBandOnFailure(t *testing.T) {
 	got := s.tick(context.Background(), policy.MinPolicySyncInterval)
 	if got < policy.MinPolicySyncInterval || got > policy.DefaultPolicySyncInterval {
 		t.Errorf("backoff = %v, want within [%v, %v]", got, policy.MinPolicySyncInterval, policy.DefaultPolicySyncInterval)
+	}
+}
+
+// TestGovernanceReady pins the require_sync gate (review/fable5 §08 B2/B3):
+// not ready before the first successful heartbeat; ready after; stale again
+// once the last success is older than maxAge; maxAge<=0 never expires.
+func TestGovernanceReady(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	s := &Syncer{now: func() time.Time { return now }}
+	if ok, reason := s.GovernanceReady(0); ok || !strings.Contains(reason, "no policy generation") {
+		t.Fatalf("never-synced must be not-ready: ok=%v reason=%q", ok, reason)
+	}
+	s.lastSuccess.Store(now.UnixNano())
+	if ok, _ := s.GovernanceReady(0); !ok {
+		t.Fatal("synced with maxAge 0 must be ready")
+	}
+	if ok, _ := s.GovernanceReady(10 * time.Minute); !ok {
+		t.Fatal("fresh sync within maxAge must be ready")
+	}
+	now = now.Add(11 * time.Minute)
+	if ok, reason := s.GovernanceReady(10 * time.Minute); ok || !strings.Contains(reason, "stale") {
+		t.Fatalf("sync older than maxAge must be not-ready: ok=%v reason=%q", ok, reason)
+	}
+	if ok, _ := s.GovernanceReady(0); !ok {
+		t.Fatal("maxAge 0 never expires")
+	}
+}
+
+// A successful heartbeat publishes lastSuccess AFTER applying the set.
+func TestSyncOnceMarksGovernanceReady(t *testing.T) {
+	ts := newControlPlane(t, "tok")
+	s := &Syncer{URL: ts.URL, Token: "tok", Dataplane: "dp1", Store: policy.NewEmptyStore(), Leases: NewLeaseTable(),
+		SpentOf: func(string, v1alpha1.BudgetPeriod) int64 { return 0 }}
+	if ok, _ := s.GovernanceReady(0); ok {
+		t.Fatal("must not be ready before any sync")
+	}
+	if _, err := s.syncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := s.GovernanceReady(0); !ok {
+		t.Fatal("must be ready after a successful sync")
 	}
 }
