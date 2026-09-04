@@ -869,7 +869,15 @@ func newGateway(cfgPath string) (*gateway, error) {
 		}
 		return recs
 	}
-	g.adminSrv = &http.Server{Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore != nil), auditFileSinks, aud, m, writer, liveExport(holder), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), cfg.Probe.AllowedHosts...)}
+	// The anchor cross-check on /admin/audit/verify (review/fable5 S3): wired
+	// only when the configured anchorer can also READ anchors back
+	// (audit.AnchorReader — s3anchor implements it). nil keeps the pre-existing
+	// internal-consistency-only verify.
+	var anchorReader audit.AnchorReader
+	if ar, ok := anchorer.(audit.AnchorReader); ok {
+		anchorReader = ar
+	}
+	g.adminSrv = &http.Server{Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore != nil), auditFileSinks, aud, anchorReader, m, writer, liveExport(holder), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), cfg.Probe.AllowedHosts...)}
 	return g, nil
 }
 

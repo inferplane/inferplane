@@ -177,7 +177,7 @@ func negotiateModels(anthropicH, openaiH http.Handler) http.Handler {
 // receives admin-action audit records (key create/revoke + denials, §5.5
 // "admin API calls are audit events"); nil skips. When m is nil the /metrics
 // endpoint is omitted.
-func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier, mapping adminauth.MappingConfig, configView func() configapi.View, auditFileSinks []string, aud *audit.Writer, m *metrics.Metrics, writer configapi.Writer, configExport func() configapi.ExportDoc, capabilities func() configapi.Capabilities, analyticsQ analyticsapi.Querier, teamStore keystore.TeamStore, configTeams func() []keystore.TeamRecord, alertFires func() []alert.Fire, healthSnapshot func() map[string]configapi.HealthRecord, bodiesRec *bodystore.Recorder, authConfig func() *AuthConfigView, connectSrc []string, probeAllowedHosts ...string) http.Handler {
+func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier, mapping adminauth.MappingConfig, configView func() configapi.View, auditFileSinks []string, aud *audit.Writer, anchorReader audit.AnchorReader, m *metrics.Metrics, writer configapi.Writer, configExport func() configapi.ExportDoc, capabilities func() configapi.Capabilities, analyticsQ analyticsapi.Querier, teamStore keystore.TeamStore, configTeams func() []keystore.TeamRecord, alertFires func() []alert.Fire, healthSnapshot func() map[string]configapi.HealthRecord, bodiesRec *bodystore.Recorder, authConfig func() *AuthConfigView, connectSrc []string, probeAllowedHosts ...string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
@@ -289,8 +289,15 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 		mux.Handle("/admin/config/export", AdminAuth(adminTokens, verifier, mapping, denied, configapi.ExportHandler(configExport)))
 	}
 	// Audit-chain verification (ADR-003 #2), behind the same AdminAuth: read-only
-	// per-sink hash-chain check, returns no record contents.
-	mux.Handle("/admin/audit/verify", AdminAuth(adminTokens, verifier, mapping, denied, auditapi.Handler(auditFileSinks)))
+	// per-sink hash-chain check, returns no record contents. anchorReader, when
+	// non-nil (an anchorer that also implements audit.AnchorReader — s3anchor
+	// does), adds the external-anchor cross-check: without it a truncated tail
+	// or a whole-file replacement verifies OK (review/fable5 S3).
+	auditInstance := ""
+	if aud != nil {
+		auditInstance = aud.Instance()
+	}
+	mux.Handle("/admin/audit/verify", AdminAuth(adminTokens, verifier, mapping, denied, auditapi.Handler(auditFileSinks, anchorReader, auditInstance)))
 	// Minimal embedded key console (ADR-001): data-free static assets, served
 	// unauthenticated like /metrics — every data call it makes goes through the
 	// token-gated /admin/keys handlers above.
