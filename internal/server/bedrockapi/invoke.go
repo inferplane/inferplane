@@ -707,7 +707,15 @@ func maskBody(raw []byte, f filter.RequestFilter) ([]byte, int, error) {
 	}
 	messagesRaw, ok := top["messages"]
 	if !ok {
-		return raw, 0, nil
+		// Titan (inputText) / Llama / Mistral (prompt) and every other
+		// non-"messages" Bedrock body shape has nothing this walker can mask.
+		// Returning it unmasked would silently forward a masking-enabled
+		// team's PII with pii_masked=false (C8) — error instead, which each
+		// caller already handles with its own correct posture: invoke 400s
+		// (openaiapi's masked-team stance), count_tokens falls back to the
+		// local estimate (never a non-200, and the upstream never sees the
+		// unmasked body).
+		return nil, 0, fmt.Errorf("maskBody: request shape has no messages array to mask")
 	}
 	var messages []json.RawMessage
 	if err := json.Unmarshal(messagesRaw, &messages); err != nil {
@@ -776,7 +784,13 @@ func maskContent(content json.RawMessage, f filter.RequestFilter) (json.RawMessa
 		}
 		var typ string
 		_ = json.Unmarshal(block["type"], &typ)
-		if typ != "text" {
+		// Anthropic text blocks carry type "text"; Nova/Converse-shaped
+		// bodies use {"text": "..."} with NO type field — previously skipped
+		// silently, forwarding a masking-enabled team's PII unmasked (C8).
+		// A typeless block that is not a text block either (e.g. {"toolUse":
+		// {...}}) still falls through harmlessly: the block["text"] unmarshal
+		// below errors on a missing key and continues, exactly as before.
+		if typ != "" && typ != "text" {
 			continue
 		}
 		var text string
