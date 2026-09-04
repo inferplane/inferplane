@@ -34,3 +34,16 @@ func TestValidateServerMaxRequestBytes(t *testing.T) {
 		})
 	}
 }
+
+// models.<name>.context_window: negative rejected by the shared per-model
+// validation walk (ValidateModelAliases), zero/positive pass through.
+func TestValidateModelContextWindow(t *testing.T) {
+	bad := map[string]ModelConfig{"m": {Targets: []Target{{Provider: "p", Model: "u"}}, ContextWindow: -1}}
+	if err := ValidateModelAliases(bad); err == nil {
+		t.Fatal("negative context_window must be rejected")
+	}
+	ok := map[string]ModelConfig{"m": {Targets: []Target{{Provider: "p", Model: "u"}}, ContextWindow: 872000}}
+	if err := ValidateModelAliases(ok); err != nil {
+		t.Fatalf("positive context_window rejected: %v", err)
+	}
+}

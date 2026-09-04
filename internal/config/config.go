@@ -96,6 +96,17 @@ type Target struct {
 type ModelConfig struct {
 	Aliases []string `json:"aliases,omitempty"`
 	Targets []Target `json:"targets"`
+	// ContextWindow is the model's total context limit in TOKENS
+	// (input + output), operator-declared. 0 (unset) = unknown: no gateway
+	// pre-flight and no exposure. When set, the gateway (a) advertises it in
+	// GET /v1/models (both wire shapes) so context-aware clients can size
+	// their windows instead of assuming a default, and (b) fast-fails an
+	// obviously oversized generation request with a CLEAR 400 naming the
+	// limit — the upstream's own rejection reaches the client as an opaque
+	// scrubbed ValidationException (providers/bedrock/errors.go never echoes
+	// upstream text). Declared per public model name; alias lookups resolve
+	// to it via router.ContextWindow.
+	ContextWindow int64 `json:"context_window,omitempty"`
 }
 
 // AdminAuth guards the admin plane (§5.5). Tokens are referenced via
@@ -771,10 +782,11 @@ func validateControlPlane(cfg *Config) error {
 }
 
 // ValidateModelAliases checks that no model's alias collides with another
-// model's name or with another model's alias (one hop only). It is the shared
-// guard for both the file-config path (LoadRaw) and the providerstore UI-write
-// path (configapi.ParseModelWrite), mirroring ValidateSecretRef's role for
-// provider refs.
+// model's name or with another model's alias (one hop only), and validates
+// the other per-model scalar fields (context_window >= 0) in the same walk.
+// It is the shared guard for both the file-config path (LoadRaw) and the
+// providerstore UI-write path (configapi.ParseModelWrite), mirroring
+// ValidateSecretRef's role for provider refs.
 func ValidateModelAliases(models map[string]ModelConfig) error {
 	return validateModelAliases(models)
 }
@@ -782,6 +794,9 @@ func ValidateModelAliases(models map[string]ModelConfig) error {
 func validateModelAliases(models map[string]ModelConfig) error {
 	seen := make(map[string]string)
 	for model, mc := range models {
+		if mc.ContextWindow < 0 {
+			return fmt.Errorf("config: model %q context_window must be >= 0 (tokens; 0 = unknown)", model)
+		}
 		for _, alias := range mc.Aliases {
 			if _, ok := models[alias]; ok {
 				return fmt.Errorf("config: model %q alias %q collides with existing model name", model, alias)
