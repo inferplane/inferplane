@@ -36,6 +36,10 @@ in the code and in `docs/decisions/`.
   right after `ResolveChain` in every ingress handler — the router has no `Principal`
   in scope, so a model-fallback or region-filtered target appended *after* the
   original allow-list check is not itself RBAC-checked until the handler does it.
+  This includes BOTH `count_tokens` handlers (previously they re-checked only
+  pre-routing, so a region-promoted cross-model fallback's upstream could receive
+  the caller's body — review/fable5 C3), and `FilterModelAllowed` must run BEFORE
+  the region/ingress filters: it derives "primary" from `chain[0].Model`.
 
 ## Key Packages
 - `server/` — HTTP data plane + admin plane. Ingress handlers: `anthropicapi/`, `openaiapi/`, `bedrockapi/` (ADR-024); `usageapi/` self-service `GET /v1/usage` (ADR-021); `authapi/` opt-in CLI login (ADR-028); `adminapi/`, `configapi/`, `auditapi/`, `analyticsapi/`; `adminui/` embedded console (ADR-001, SSO ADR-026, i18n ADR-027). A mid-stream upstream failure surfaces as a wire-appropriate error frame (SSE `error` event / eventstream exception), never a silent truncation, and the audit record is marked `partial: true`. **Every observability sink sees the same settled usage.** A partial stream's usage is settled, so it must also be `observeTokens`'d — metering only the clean path left `gen_ai_client_token_usage_total` below the budget spend, the audit ledger, and the usage windows on every interrupted stream. `recordSpanSettled` (not `recordSpanResponse`) is the span call at the three COMMITTED sites; `recordSpanResponse` stays for the terminal pre-commit rejects, where there is no usage or cost to report.
