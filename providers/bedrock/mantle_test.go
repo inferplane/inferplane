@@ -631,3 +631,54 @@ func TestMantleStreamRendersAnthropicSSEForAnthropicIngress(t *testing.T) {
 		t.Errorf("message_start must carry the public model name, not the upstream id:\n%s", out)
 	}
 }
+
+// A parseable 2xx that omits usage must fail, same posture as the unparseable
+// case above (C2): Settle no-ops on nil usage, so the request would bill zero.
+func TestMantleCompleteMissingUsageFails(t *testing.T) {
+	const anthropicOK = `{"type":"message","role":"assistant","model":"anthropic.claude-opus-5","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":3,"output_tokens":2}}`
+	const anthropicNoUsage = `{"type":"message","role":"assistant","model":"anthropic.claude-opus-5","content":[{"type":"text","text":"hi"}]}`
+	const chatOK = `{"id":"c1","object":"chat.completion","model":"openai.gpt-5.4","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hi"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}`
+	const chatNoUsage = `{"id":"c1","object":"chat.completion","model":"openai.gpt-5.4","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hi"}}]}`
+	for _, tc := range []struct {
+		name, upstream, body string
+		wantErr              bool
+	}{
+		{"anthropic route with usage", "anthropic.claude-opus-5", anthropicOK, false},
+		{"anthropic route no usage", "anthropic.claude-opus-5", anthropicNoUsage, true},
+		{"chat route with usage", "openai.gpt-5.4", chatOK, false},
+		{"chat route no usage", "openai.gpt-5.4", chatNoUsage, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			mc := staticMantle(t, srv)
+			raw := `{"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+			resp, err := mc.Complete(context.Background(), &providers.ProxyRequest{
+				Model: "mantle.m", Upstream: tc.upstream,
+				RawBody: []byte(raw), Parsed: parseChat(t, raw),
+			})
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if resp.Parsed == nil || resp.Parsed.Usage == nil {
+					t.Fatalf("usage must be populated: %+v", resp.Parsed)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("2xx with no usage returned success: %+v", resp)
+			}
+			var ue *providers.UpstreamError
+			if !errors.As(err, &ue) || ue.StatusCode != 502 {
+				t.Fatalf("want a 502 UpstreamError, got %v", err)
+			}
+			if resp != nil {
+				t.Fatalf("no response may be returned alongside the refusal: %+v", resp)
+			}
+		})
+	}
+}

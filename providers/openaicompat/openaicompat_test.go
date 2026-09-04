@@ -3,6 +3,7 @@ package openaicompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -463,5 +464,61 @@ func TestStreamRendersAnthropicSSEForAnthropicIngress(t *testing.T) {
 	}
 	if strings.Contains(out, `"choices"`) {
 		t.Errorf("tee must not contain OpenAI-wire JSON:\n%s", out)
+	}
+}
+
+// A parseable 2xx that omits usage must FAIL (C2): Settle no-ops on nil
+// usage, so serving it would bill zero and audit like a free model — on
+// every ingress, native openai included.
+func TestCompleteMissingUsageFails(t *testing.T) {
+	const withUsage = `{"id":"x","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}`
+	const noUsage = `{"id":"x","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`
+	cases := []struct {
+		name    string
+		body    string
+		ingress string
+		wantErr bool
+	}{
+		{"with usage, openai ingress", withUsage, "openai", false},
+		{"with usage, anthropic ingress", withUsage, "anthropic", false},
+		{"no usage, openai ingress", noUsage, "openai", true},
+		{"no usage, anthropic ingress", noUsage, "anthropic", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			p := &provider{baseURL: srv.URL, client: srv.Client()}
+			raw := `{"model":"public-m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+			var cr schema.ChatRequest
+			if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+				t.Fatal(err)
+			}
+			resp, err := p.Complete(context.Background(), &providers.ProxyRequest{
+				Model: "public-m", Upstream: "upstream-m", RawBody: []byte(raw), Parsed: &cr, IngressProtocol: tc.ingress,
+			})
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if resp.Parsed == nil || resp.Parsed.Usage == nil {
+					t.Fatalf("usage must be populated: %+v", resp.Parsed)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("want an error for a 2xx with no usage, got nil")
+			}
+			var ue *providers.UpstreamError
+			if !errors.As(err, &ue) || ue.StatusCode != 502 {
+				t.Fatalf("want *UpstreamError 502, got %v", err)
+			}
+			if resp != nil {
+				t.Fatalf("no response may be returned alongside the refusal: %+v", resp)
+			}
+		})
 	}
 }

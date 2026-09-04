@@ -297,6 +297,13 @@ func (m *mantleClient) Complete(ctx context.Context, req *providers.ProxyRequest
 	} else {
 		parsed = pv
 	}
+	// A parseable 2xx that omits usage would settle as a free request on
+	// every ingress (Settle no-ops when usage is nil) — refuse instead of
+	// serving an unsettleable response, same posture as the unparseable
+	// case just above (C2).
+	if parsed.Usage == nil {
+		return nil, synthError(502, "bedrock mantle: upstream 2xx carried no usage — refusing to serve an unsettleable response")
+	}
 	// Mantle answers under the UPSTREAM model id, but the client asked for the
 	// public name (same rewrite completeConverse does). Re-rendering is lossless:
 	// ChatResponse round-trips unknown fields through Extra. The Bedrock ingress

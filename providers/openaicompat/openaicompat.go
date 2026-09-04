@@ -248,6 +248,15 @@ func (p *provider) buildUpstream(ctx context.Context, req *providers.ProxyReques
 	return u, nil
 }
 
+// noUsageError is the fixed 502 for a parseable 2xx that omits usage (C2) —
+// the message never echoes upstream content.
+func noUsageError() *providers.UpstreamError {
+	body, _ := json.Marshal(map[string]any{
+		"error": map[string]string{"message": "openaicompat: upstream 2xx carried no usage — refusing to serve an unsettleable response"},
+	})
+	return &providers.UpstreamError{StatusCode: 502, Body: body}
+}
+
 func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {
 	u, err := p.buildUpstream(ctx, req, false)
 	if err != nil {
@@ -271,6 +280,13 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 	out := &providers.ProxyResponse{StatusCode: resp.StatusCode, Headers: resp.Header, RawBody: body}
 	if resp.StatusCode/100 == 2 {
 		if parsed, perr := openai.ResponseToCanonical(body); perr == nil {
+			if parsed.Usage == nil {
+				// A parseable 2xx that omits usage would settle as a free
+				// request on EVERY ingress (Settle no-ops when usage is nil)
+				// — refuse rather than serve an unsettleable response. The
+				// error body is fixed and never echoes upstream content (C2).
+				return nil, noUsageError()
+			}
 			out.Parsed = parsed
 			if req.IngressProtocol != "openai" {
 				parsed.Model = req.Model
