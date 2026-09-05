@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -283,7 +282,8 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 			if ok, reason := readyGate(); !ok {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusServiceUnavailable)
-				_, _ = w.Write([]byte(`{"ready":false,"reason":` + strconv.Quote(reason) + `}`))
+				body, _ := json.Marshal(map[string]any{"ready": false, "reason": reason})
+				_, _ = w.Write(body)
 				return
 			}
 		}

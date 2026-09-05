@@ -55,6 +55,9 @@ func TestDataMuxGovernanceGate(t *testing.T) {
 	if rec := do("POST", "/v1/messages/count_tokens", true); rec.Code != 200 {
 		t.Fatalf("count_tokens must be exempt from the gate: %d", rec.Code)
 	}
+	if rec := do("POST", "/model/claude-sonnet-4-6/count-tokens", true); rec.Code != 200 {
+		t.Fatalf("Bedrock count-tokens must be exempt from the gate: %d", rec.Code)
+	}
 	if rec := do("GET", "/v1/models", true); rec.Code != 200 {
 		t.Fatalf("/v1/models must be exempt from the gate: %d", rec.Code)
 	}
