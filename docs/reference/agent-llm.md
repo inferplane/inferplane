@@ -124,6 +124,18 @@ and their param contract belongs to the client.
 | `qwen.` | `stopSequences` |
 | `zai.` | `stopSequences` |
 
+`converseMinMaxTokens` (`providers/bedrock/converse.go`), a maxTokens FLOOR rather than a
+strip: these models 400 on `maxTokens` below 16 ("Invalid 'max_output_tokens': integer
+below minimum value. Expected a value >= 16") — and Claude Code sends a `max_tokens: 1`
+probe on every `/model` switch, so without the floor the switch itself fails. Raised to
+the floor (only ever MORE output, never less), logged once per model. Probed live
+2026-09-04: Mantle-served `openai.gpt-5.4`/`-5.5` and `zai.glm-5` accept 1 and are unlisted.
+
+| Upstream id substring | maxTokens floor |
+|---|---|
+| `openai.gpt-5.6` | 16 |
+| `xai.` | 16 |
+
 `mantleChatStripParams` (`providers/bedrock/mantle.go`), OpenAI-wire field names on
 Mantle's chat-completions route:
 
