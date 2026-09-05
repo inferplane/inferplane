@@ -76,6 +76,63 @@ func withActor(r *http.Request, actor string) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), actorCtxKey{}, actor))
 }
 
+// authnWrite guards the policy MUTATION routes (PUT/DELETE /v1alpha1/policies).
+// It deliberately does NOT accept the heartbeat token: that token is deployed
+// to every data plane (control_plane.token_ref), so if it also carried write
+// authority any node operator could rewrite fleet policy — the same reasoning
+// that gave the credential broker its own token (ADR-040 decision 1;
+// review/fable5 §08 B1). Accepted writers, in order:
+//
+//   - a verified console OIDC identity (verifier configured, JWT-shaped bearer,
+//     groups resolve) — the SSO console keeps working unchanged;
+//   - the DEDICATED write token (INFERPLANED_POLICY_WRITE_TOKEN), constant-time
+//     compared;
+//   - nothing else. With no write token configured, every static bearer —
+//     including the heartbeat token — gets 403 with a message naming the fix.
+//
+// The one carve-out mirrors authn: token == "" AND no verifier AND no write
+// token is the loopback-only dev posture, left fully open on purpose.
+func authnWrite(token, writeToken string, opts authOptions, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if token == "" && opts.verifier == nil && writeToken == "" {
+			next(w, withActor(r, "unauthenticated"))
+			return
+		}
+		bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if bearer == "" {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		if opts.verifier != nil && adminauth.IsOIDCBearerShape(bearer) {
+			claims, err := opts.verifier.Verify(r.Context(), bearer)
+			if err != nil {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+			if _, _, ok := adminauth.Resolve(claims.Groups, opts.mapping); !ok {
+				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+				return
+			}
+			next(w, withActor(r, "oidc:"+claims.Subject))
+			return
+		}
+		if writeToken != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(writeToken)) == 1 {
+			next(w, withActor(r, "policy-write-token"))
+			return
+		}
+		// A caller presenting the HEARTBEAT token is authenticated (it is a
+		// real credential) but not authorized to write — 403, and say why:
+		// the operator who hits this is holding that token and expecting it
+		// to work as it used to. Comparing against it here leaks nothing the
+		// sync endpoint doesn't already: it accepts that exact value.
+		if token != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) == 1 {
+			writeJSONError(w, http.StatusForbidden, "the heartbeat token carries no policy-write authority (it is deployed to every data plane): use INFERPLANED_POLICY_WRITE_TOKEN or a console OIDC identity")
+			return
+		}
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+	}
+}
+
 // authn is the shared middleware. There is no request-context principal and
 // no per-team scoping on the control plane (D4/D5): a resolved OIDC identity
 // and the static token both grant the SAME whole-console access the one

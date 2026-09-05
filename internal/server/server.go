@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/inferplane/inferplane/internal/adminauth"
@@ -47,6 +48,17 @@ type DataMuxOption func(*dataMuxOptions)
 type dataMuxOptions struct {
 	usage           *telemetry.Collector
 	maxRequestBytes int64
+	governanceGate  func() (bool, string)
+}
+
+// WithGovernanceGate installs the control_plane.require_sync gate (review/
+// fable5 §08 B2/B3): every KeyAuth-authenticated, GOVERNED data-plane request
+// is refused with 503 + Retry-After while gate() reports not-ready (no policy
+// generation received yet, or the last one is older than max_policy_age).
+// The two count_tokens routes are exempt — they must never return non-200 —
+// and so are /v1/models reads. nil = no gate (the default fail-open posture).
+func WithGovernanceGate(gate func() (bool, string)) DataMuxOption {
+	return func(o *dataMuxOptions) { o.governanceGate = gate }
 }
 
 // WithUsageCollector threads the control-plane usage collector into every
@@ -171,8 +183,48 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 		mintLimiter := limiter.NewMemory() // per-subject mint throttle (ADR-028 follow-up r1); instance-local, like every other in-memory governance store
 		dataMux.Handle("POST /v1/auth/key", AdminAuth(nil, cliVerifier, cliMapping, cliDenialEmitter(emit), authapi.MintHandler(store, cliKeyTTL, mintLimiter, emit)))
 	}
-	dataMux.Handle("/", maxBytesMiddleware(limit, KeyAuth(store, mux)))
+	var governed http.Handler = mux
+	if o.governanceGate != nil {
+		governed = governanceGateMiddleware(o.governanceGate, mux)
+	}
+	dataMux.Handle("/", maxBytesMiddleware(limit, KeyAuth(store, governed)))
 	return dataMux
+}
+
+// governanceRetryAfterSeconds is the Retry-After the gate advertises: the
+// syncer's minimum heartbeat cadence (internal/policy.MinPolicySyncInterval,
+// 15s) — the soonest the gate can flip to ready. A same-valued local copy,
+// like defaultMaxRequestBytes above, because this package does not import
+// internal/policy.
+const governanceRetryAfterSeconds = "15"
+
+// governanceGateMiddleware refuses governed traffic while the control-plane
+// sync gate is not ready. Sits INSIDE KeyAuth (an unauthenticated caller
+// learns nothing about gateway state) and exempts count_tokens (never
+// non-200) and the /v1/models listing plus any /v1/models/ sub-path
+// (read-only, RBAC-filtered, no spend).
+// 503 with Retry-After: the condition is transient by construction — the
+// syncer keeps retrying with backoff.
+func governanceGateMiddleware(gate func() (bool, string), next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if strings.HasSuffix(p, "/count_tokens") || strings.HasSuffix(p, "/count-tokens") || p == "/v1/models" || strings.HasPrefix(p, "/v1/models/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if ok, reason := gate(); !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", governanceRetryAfterSeconds)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			body, _ := json.Marshal(map[string]any{
+				"type":  "error",
+				"error": map[string]string{"type": "api_error", "message": "governance not ready: " + reason},
+			})
+			_, _ = w.Write(body)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // maxBytesMiddleware bounds every data-plane request body to limit bytes
@@ -219,10 +271,24 @@ func negotiateModels(anthropicH, openaiH http.Handler) http.Handler {
 // receives admin-action audit records (key create/revoke + denials, §5.5
 // "admin API calls are audit events"); nil skips. When m is nil the /metrics
 // endpoint is omitted.
-func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier, mapping adminauth.MappingConfig, configView func() configapi.View, auditFileSinks []string, aud *audit.Writer, anchorReader audit.AnchorReader, m *metrics.Metrics, writer configapi.Writer, configExport func() configapi.ExportDoc, capabilities func() configapi.Capabilities, analyticsQ analyticsapi.Querier, teamStore keystore.TeamStore, configTeams func() []keystore.TeamRecord, alertFires func() []alert.Fire, healthSnapshot func() map[string]configapi.HealthRecord, bodiesRec *bodystore.Recorder, authConfig func() *AuthConfigView, connectSrc []string, probeAllowedHosts ...string) http.Handler {
+func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier, mapping adminauth.MappingConfig, configView func() configapi.View, auditFileSinks []string, aud *audit.Writer, anchorReader audit.AnchorReader, readyGate func() (bool, string), m *metrics.Metrics, writer configapi.Writer, configExport func() configapi.ExportDoc, capabilities func() configapi.Capabilities, analyticsQ analyticsapi.Querier, teamStore keystore.TeamStore, configTeams func() []keystore.TeamRecord, alertFires func() []alert.Fire, healthSnapshot func() map[string]configapi.HealthRecord, bodiesRec *bodystore.Recorder, authConfig func() *AuthConfigView, connectSrc []string, probeAllowedHosts ...string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
+	// /readyz reflects the require_sync gate when one is wired (review/fable5
+	// §08 B2): a scale-out during a control-plane outage must NOT pass health
+	// checks while the new replica is ungoverned. nil gate = always ready.
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if readyGate != nil {
+			if ok, reason := readyGate(); !ok {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				body, _ := json.Marshal(map[string]any{"ready": false, "reason": reason})
+				_, _ = w.Write(body)
+				return
+			}
+		}
+		w.WriteHeader(200)
+	})
 	if m != nil {
 		mux.Handle("GET /metrics", metricsHandler(m)) // unauthenticated (§5.5)
 	}

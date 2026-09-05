@@ -65,6 +65,9 @@ type Server struct {
 	// policies.go). Defaulted to logMutation in NewServer — mutation
 	// attribution is on by default, no wiring required.
 	onMutation func(MutationEntry)
+	// writeToken is the dedicated policy-write bearer (SetPolicyWriteToken);
+	// "" means static bearers cannot write at all (authnWrite fails closed).
+	writeToken string
 }
 
 type ruleKey struct{ policy, rule string }

@@ -227,10 +227,24 @@ func (s *Server) ApplyDelete(ctx context.Context, name string) error {
 	return s.ReloadFromStore(ctx)
 }
 
+// SetPolicyWriteToken installs the DEDICATED bearer that authorizes policy
+// PUT/DELETE (INFERPLANED_POLICY_WRITE_TOKEN). Boot-time; call before Mount.
+// See authnWrite for why the heartbeat token is never accepted for writes.
+func (s *Server) SetPolicyWriteToken(tok string) {
+	s.mu.Lock()
+	s.writeToken = tok
+	s.mu.Unlock()
+}
+
 func (s *Server) mountPolicies(mux *http.ServeMux) {
+	s.mu.Lock()
+	writeToken := s.writeToken
+	s.mu.Unlock()
 	mux.HandleFunc("GET /v1alpha1/policies", authn(s.token, s.authOpts, s.handlePolicyList))
-	mux.HandleFunc("PUT /v1alpha1/policies/{name}", authn(s.token, s.authOpts, s.handlePolicyPut))
-	mux.HandleFunc("DELETE /v1alpha1/policies/{name}", authn(s.token, s.authOpts, s.handlePolicyDelete))
+	// Writes take the dedicated write authority, never the heartbeat token
+	// (review/fable5 §08 B1 — the heartbeat token sits on every node).
+	mux.HandleFunc("PUT /v1alpha1/policies/{name}", authnWrite(s.token, writeToken, s.authOpts, s.handlePolicyPut))
+	mux.HandleFunc("DELETE /v1alpha1/policies/{name}", authnWrite(s.token, writeToken, s.authOpts, s.handlePolicyDelete))
 }
 
 // policyView is one document as the console consumes it: the wire document

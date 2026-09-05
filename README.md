@@ -80,7 +80,16 @@ to zero, even though the spend stays in the audit chain (`mayu report` still
 shows it). With a control plane attached, a hard-cap lease fails *closed* only
 once a lease has been received — if the control plane is unreachable at
 `mayu` boot, each replica enforces its own local limit with no clamp until the
-first heartbeat succeeds.
+first heartbeat succeeds. Set `control_plane.require_sync: true` (optionally with
+`max_policy_age`) to fail closed instead: governed requests 503 and `/readyz`
+reports not-ready until a policy generation has arrived.
+
+**Policy enforcement assumes the node operator is not the adversary.** `mayu`
+proxies credentials that live on the node (`env:`/`file:` refs), so whoever
+controls the node can call providers directly — Bedrock via the ADR-040 broker
+is the one exception, and its sessions are not yet per-team scoped. Bedrock
+Guardrails and region locks are node-local team records, not distributed
+policy. See `review/fable5/08-control-plane-bypass.md` for the full analysis.
 
 ## Why not a central gateway?
 

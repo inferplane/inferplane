@@ -15,6 +15,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
@@ -156,6 +157,35 @@ type Syncer struct {
 	client     *http.Client
 	generation string
 	pending    []policy.Rejection
+	// lastSuccess is the wall-clock time of the last successful heartbeat
+	// (zero = never), published atomically for the request-path governance
+	// gate (GovernanceReady) — read on every request, written once per tick.
+	lastSuccess atomic.Int64 // UnixNano; 0 = never synced
+	now         func() time.Time
+}
+
+// GovernanceReady reports whether this data plane may serve GOVERNED requests
+// under a require_sync posture (review/fable5 §08 B2/B3): false before the
+// first successful heartbeat (no policy generation has ever arrived — the
+// store is empty and default-allow), and false again when maxAge > 0 and the
+// last successful sync is older than maxAge (the last-applied set is treated
+// as expired, the way hard-cap leases already expire). maxAge <= 0 means
+// policies never expire. The reason is operator-facing and secret-free.
+func (s *Syncer) GovernanceReady(maxAge time.Duration) (bool, string) {
+	last := s.lastSuccess.Load()
+	if last == 0 {
+		return false, "no policy generation received from the control plane yet (control_plane.require_sync)"
+	}
+	if maxAge > 0 {
+		clock := time.Now
+		if s.now != nil {
+			clock = s.now
+		}
+		if age := clock().Sub(time.Unix(0, last)); age > maxAge {
+			return false, "control-plane policy generation is stale: last successful sync " + age.Truncate(time.Second).String() + " ago exceeds control_plane.max_policy_age " + maxAge.String()
+		}
+	}
+	return true, ""
 }
 
 // Run heartbeats until ctx is done. The first sync fires immediately so a
@@ -313,6 +343,13 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 	if s.Tiers != nil {
 		s.Tiers.Set(resp.ActiveTiers)
 	}
+	// Published AFTER the set is applied, so a GovernanceReady()==true
+	// observer never sees a store the heartbeat has not yet populated.
+	clock := time.Now
+	if s.now != nil {
+		clock = s.now
+	}
+	s.lastSuccess.Store(clock().UnixNano())
 
 	next := time.Duration(resp.SyncIntervalSeconds) * time.Second
 	if next < time.Second {

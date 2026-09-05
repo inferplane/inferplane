@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
+	"github.com/inferplane/inferplane/internal/adminauth"
 	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/policystore"
 )
@@ -352,7 +354,7 @@ func TestApplyDelete(t *testing.T) {
 }
 
 func TestPolicyHTTPMapping(t *testing.T) {
-	s, ts := newTestServer(t, "t")
+	s, ts := newTestServerWrite(t, "t", "w")
 
 	do := func(method, path, token, body string) *http.Response {
 		t.Helper()
@@ -378,16 +380,34 @@ func TestPolicyHTTPMapping(t *testing.T) {
 		t.Fatalf("GET no bearer: status %d, want 401", resp.StatusCode)
 	}
 
-	// No store attached ⇒ writes 405, GET 200 with writable:false.
+	// The HEARTBEAT token never carries write authority (review/fable5 §08
+	// B1): PUT/DELETE with it are 403 before the store is even consulted.
 	resp = do(http.MethodPut, "/v1alpha1/policies/team-a", "t", cpPolicyYAML)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Fatalf("PUT no store: status %d, want 405", resp.StatusCode)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("PUT with heartbeat token: status %d, want 403", resp.StatusCode)
 	}
 	resp = do(http.MethodDelete, "/v1alpha1/policies/team-a", "t", "")
 	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("DELETE with heartbeat token: status %d, want 403", resp.StatusCode)
+	}
+	// With the dedicated write token, no store attached ⇒ writes 405.
+	resp = do(http.MethodPut, "/v1alpha1/policies/team-a", "w", cpPolicyYAML)
+	resp.Body.Close()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Fatalf("DELETE no store: status %d, want 405", resp.StatusCode)
+		t.Fatalf("PUT no store (write token): status %d, want 405", resp.StatusCode)
+	}
+	resp = do(http.MethodDelete, "/v1alpha1/policies/team-a", "w", "")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("DELETE no store (write token): status %d, want 405", resp.StatusCode)
+	}
+	// And the write token is NOT a heartbeat token: the read/sync side rejects it.
+	resp = do(http.MethodGet, "/v1alpha1/policies", "w", "")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("GET with write token: status %d, want 401 (write authority is not read/sync authority)", resp.StatusCode)
 	}
 	resp = do(http.MethodGet, "/v1alpha1/policies", "t", "")
 	if resp.StatusCode != http.StatusOK {
@@ -423,13 +443,13 @@ func TestPolicyHTTPMapping(t *testing.T) {
 		t.Fatal("GET with store: writable must be true")
 	}
 
-	resp = do(http.MethodPut, "/v1alpha1/policies/team-a", "t", cpPolicyYAML)
+	resp = do(http.MethodPut, "/v1alpha1/policies/team-a", "w", cpPolicyYAML)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("PUT happy: status %d, want 204", resp.StatusCode)
 	}
 
-	resp = do(http.MethodPut, "/v1alpha1/policies/wrong-name", "t", cpPolicyYAML)
+	resp = do(http.MethodPut, "/v1alpha1/policies/wrong-name", "w", cpPolicyYAML)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("PUT name mismatch: status %d, want 400", resp.StatusCode)
 	}
@@ -444,14 +464,14 @@ func TestPolicyHTTPMapping(t *testing.T) {
 		t.Fatal("PUT name mismatch: JSON error field is empty")
 	}
 
-	resp = do(http.MethodDelete, "/v1alpha1/policies/nope", "t", "")
+	resp = do(http.MethodDelete, "/v1alpha1/policies/nope", "w", "")
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("DELETE unknown: status %d, want 404", resp.StatusCode)
 	}
 
 	// Empty set encodes policies as [], never null.
-	resp = do(http.MethodDelete, "/v1alpha1/policies/team-a", "t", "")
+	resp = do(http.MethodDelete, "/v1alpha1/policies/team-a", "w", "")
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("DELETE team-a: status %d, want 204", resp.StatusCode)
@@ -555,7 +575,7 @@ func TestApplyDeleteRecordsMutationWithNoContentHash(t *testing.T) {
 // PUT authenticated with the shared static token must attribute the
 // mutation to "static-token" via ActorFromContext, not "unspecified".
 func TestApplyWriteRecordsMutationOverHTTPWithActor(t *testing.T) {
-	s, ts := newTestServer(t, "secret-tok")
+	s, ts := newTestServerWrite(t, "secret-tok", "write-tok")
 	fs := newFakeStore()
 	if err := s.AttachPolicyStore(context.Background(), fs); err != nil {
 		t.Fatal(err)
@@ -565,7 +585,7 @@ func TestApplyWriteRecordsMutationOverHTTPWithActor(t *testing.T) {
 
 	edited := strings.Replace(cpPolicyYAML, "limitMilliUSD: 100", "limitMilliUSD: 200", 1)
 	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/v1alpha1/policies/team-a", bytes.NewReader([]byte(edited)))
-	req.Header.Set("Authorization", "Bearer secret-tok")
+	req.Header.Set("Authorization", "Bearer write-tok")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -578,8 +598,8 @@ func TestApplyWriteRecordsMutationOverHTTPWithActor(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("mutation log entries = %d, want 1", len(got))
 	}
-	if got[0].Actor != "static-token" {
-		t.Errorf("actor = %q, want %q for a request authenticated with the shared bearer", got[0].Actor, "static-token")
+	if got[0].Actor != "policy-write-token" {
+		t.Errorf("actor = %q, want %q for a request authenticated with the dedicated write bearer", got[0].Actor, "policy-write-token")
 	}
 }
 
@@ -594,5 +614,58 @@ func TestApplyWriteDefaultsToLogMutation(t *testing.T) {
 	s.mu.Unlock()
 	if fn == nil {
 		t.Fatal("NewServer must install a default mutation sink (logMutation), not nil")
+	}
+}
+
+// A verified console OIDC identity may write policies (the SSO console must
+// keep working) and is attributed as "oidc:<subject>" — the one non-token
+// write path authnWrite accepts.
+func TestPolicyWriteViaOIDCIdentity(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "p.yaml"), []byte(cpPolicyYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	v := &stubVerifier{claims: adminauth.Claims{Subject: "u-admin", Groups: []string{"platform"}}}
+	mapping := adminauth.MappingConfig{GroupMappings: []adminauth.GroupMapping{{Group: "platform", Teams: []string{"alpha"}}}}
+	s, err := NewServer("heartbeat-tok", dir, WithOIDC(v, mapping))
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	// No write token at all: only an OIDC identity may write.
+	mux := http.NewServeMux()
+	s.Mount(mux)
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	fs := newFakeStore()
+	if err := s.AttachPolicyStore(context.Background(), fs); err != nil {
+		t.Fatal(err)
+	}
+	var got []MutationEntry
+	s.SetMutationLog(func(e MutationEntry) { got = append(got, e) })
+
+	edited := strings.Replace(cpPolicyYAML, "limitMilliUSD: 100", "limitMilliUSD: 200", 1)
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/v1alpha1/policies/team-a", bytes.NewReader([]byte(edited)))
+	req.Header.Set("Authorization", "Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1LWFkbWluIn0.sig") // JWT-shaped → OIDC path
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("OIDC PUT status = %d, want 204", resp.StatusCode)
+	}
+	if len(got) != 1 || got[0].Actor != "oidc:u-admin" {
+		t.Fatalf("mutation actor = %+v, want one entry with actor oidc:u-admin", got)
+	}
+	// The heartbeat token is still refused on writes even with OIDC configured.
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/v1alpha1/policies/team-a", bytes.NewReader([]byte(edited)))
+	req.Header.Set("Authorization", "Bearer heartbeat-tok")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("heartbeat PUT status = %d, want 403", resp.StatusCode)
 	}
 }

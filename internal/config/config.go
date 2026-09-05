@@ -530,6 +530,25 @@ type ControlPlaneConfig struct {
 	// Dataplane is this proxy's stable instance id; defaults to the
 	// hostname plus a boot-time suffix when empty.
 	Dataplane string `json:"dataplane,omitempty"`
+	// RequireSync flips this data plane from fail-open to fail-closed on
+	// control-plane reachability (review/fable5 §08 B2/B3). Default false
+	// keeps today's posture: boot serves ungoverned until the first
+	// heartbeat succeeds, and a lost control plane keeps the last-applied
+	// policy set forever. With true, governed data-plane requests are refused
+	// with 503 (and /readyz reports not-ready) until the first successful
+	// sync — and, when MaxPolicyAge is also set, again whenever the last
+	// successful sync is older than that. count_tokens is never gated (the
+	// never-non-200 invariant). A node operator can still firewall the
+	// control plane, but then gets NO service instead of ungoverned service.
+	RequireSync bool `json:"require_sync,omitempty"`
+	// MaxPolicyAge is a Go duration ("10m"); the last-applied policy set is
+	// treated as expired once the last successful sync is older than this.
+	// Only meaningful with RequireSync (rejected without it — a silently
+	// ignored knob is the failure mode this repo refuses). Empty = policies
+	// never expire (leases still do, as before).
+	MaxPolicyAge string `json:"max_policy_age,omitempty"`
+	// MaxPolicyAgeDuration is the parsed MaxPolicyAge; never serialized.
+	MaxPolicyAgeDuration time.Duration `json:"-"`
 }
 
 // FallbackFamilyEnabled reports whether the family fallback heuristic is on
@@ -754,6 +773,16 @@ func validateControlPlane(cfg *Config) error {
 	u, err := url.Parse(cp.URL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("config: control_plane.url must be an absolute http(s) URL")
+	}
+	if cp.MaxPolicyAge != "" {
+		if !cp.RequireSync {
+			return fmt.Errorf("config: control_plane.max_policy_age requires control_plane.require_sync: true — without the sync requirement a policy expiry has no fail-closed action to take")
+		}
+		d, err := time.ParseDuration(cp.MaxPolicyAge)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("config: control_plane.max_policy_age %q must be a positive Go duration (e.g. \"10m\")", cp.MaxPolicyAge)
+		}
+		cp.MaxPolicyAgeDuration = d
 	}
 	if cp.TokenRef != nil {
 		tok, err := ResolveSecretRef(cp.TokenRef)
