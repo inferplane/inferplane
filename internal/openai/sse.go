@@ -34,6 +34,10 @@ import (
 // callers' fail-closed no-frames check stays intact; message_stop at [DONE],
 // preceded by a synthesized stop-bearing message_delta when the upstream sent
 // no message-level frame of its own (no finish_reason, no usage-only chunk).
+// A clean EOF without [DONE] can also finish the canonical view, but only
+// after a valid explicit finish_reason and complete nonnegative usage in that
+// frame or later, in fully delimited SSE data. No sentinel or other native Raw
+// bytes are synthesized.
 func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, error] {
 	return func(yield func(*providers.StreamEvent, error) bool) {
 		br := bufio.NewReader(r)
@@ -52,6 +56,8 @@ func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, er
 		openBlocks := map[int]bool{}
 		started := false         // message_start emitted (implies ≥1 parsed chunk)
 		sawMessageDelta := false // any message_delta reached the consumer
+		sawDone, pendingData := false, false
+		var eof chatSSEEOF
 		startMessage := func() bool {
 			if started {
 				return true
@@ -75,9 +81,13 @@ func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, er
 		for {
 			line, err := br.ReadString('\n')
 			trimmed := strings.TrimRight(line, "\r\n")
+			if trimmed == "" && err == nil {
+				pendingData = false
+			}
 			if strings.HasPrefix(trimmed, "data:") {
 				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
 				if payload == "[DONE]" {
+					sawDone = true
 					// A stream that ended without a finish_reason still must
 					// not leave blocks open, and a started message must close.
 					if !closeOpenBlocks() {
@@ -104,8 +114,19 @@ func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, er
 						return
 					}
 				} else if payload != "" {
+					if pendingData {
+						// This parser's contract is one JSON data line per
+						// event. An unfinished/multiline event is not evidence
+						// of a complete no-sentinel response.
+						eof.invalid = true
+					}
+					pendingData = true
+					eof.observe(payload)
 					raw := []byte("data: " + payload + "\n\n")
 					chunks, cerr := ChunkToCanonical([]byte(payload))
+					if cerr != nil {
+						eof.invalid = true
+					}
 					if cerr != nil || len(chunks) == 0 {
 						if !yield(&providers.StreamEvent{Raw: raw}, nil) {
 							return
@@ -160,9 +181,19 @@ func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, er
 							}
 						}
 					}
+				} else {
+					eof.invalid = true
+					pendingData = true
 				}
 			}
 			if err == io.EOF {
+				if line == "" && !pendingData && !sawDone && started &&
+					eof.finished && eof.usageComplete && !eof.invalid {
+					if !closeOpenBlocks() {
+						return
+					}
+					yield(&providers.StreamEvent{Chunk: &schema.ChatChunk{Type: "message_stop"}}, nil)
+				}
 				return
 			}
 			if err != nil {
@@ -170,6 +201,87 @@ func ReadChatSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, er
 				return
 			}
 		}
+	}
+}
+
+// chatSSEEOF only gates the additional no-sentinel completion path. In
+// particular, ChunkToCanonical's fallback for unknown finish reasons and its
+// cache-count clamping must not turn malformed native data into EOF evidence.
+// Existing [DONE] forwarding and canonical behavior remain independent.
+type chatSSEEOF struct {
+	finished, usageComplete, invalid bool
+}
+
+func (s *chatSSEEOF) observe(payload string) {
+	if s.invalid {
+		return
+	}
+	var frame struct {
+		Choices []struct {
+			Index        int                        `json:"index"`
+			Delta        map[string]json.RawMessage `json:"delta"`
+			FinishReason *string                    `json:"finish_reason"`
+		} `json:"choices"`
+		Usage *oaiUsage       `json:"usage"`
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal([]byte(payload), &frame) != nil || len(frame.Choices) > 1 ||
+		len(frame.Choices) == 0 && frame.Usage == nil ||
+		len(frame.Error) != 0 && string(frame.Error) != "null" {
+		s.invalid = true
+		return
+	}
+	for _, choice := range frame.Choices {
+		if choice.Index != 0 {
+			s.invalid = true // canonical conversion observes a single choice
+			return
+		}
+		if s.finished {
+			for _, value := range choice.Delta {
+				// Empty terminal deltas do not add content. New content or a
+				// second finish after the explicit end is not a clean tail.
+				if string(value) != `""` && string(value) != "null" {
+					s.invalid = true
+					return
+				}
+			}
+			if choice.FinishReason != nil {
+				s.invalid = true
+				return
+			}
+		}
+		if choice.FinishReason != nil {
+			switch *choice.FinishReason {
+			case "stop", "length", "tool_calls":
+				s.finished = true
+			default:
+				s.invalid = true
+				return
+			}
+		}
+	}
+	if usage := frame.Usage; usage != nil {
+		if usage.PromptTokens == nil || usage.CompletionTokens == nil {
+			s.invalid = true
+			return
+		}
+		for _, count := range []*int64{usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens} {
+			if count != nil && *count < 0 {
+				s.invalid = true
+				return
+			}
+		}
+		if details := usage.PromptTokensDetails; details != nil && details.CachedTokens != nil {
+			cached := *details.CachedTokens
+			if cached < 0 || usage.PromptTokens != nil && cached > *usage.PromptTokens {
+				s.invalid = true
+				return
+			}
+		}
+		// Earlier counts are incremental observations, not proof that the
+		// final output was accounted for. The finish check above also allows
+		// complete usage carried in the same frame as the explicit finish.
+		s.usageComplete = s.finished
 	}
 }
 

@@ -271,7 +271,7 @@ func compatibleTarget(raw []byte, ct router.ChainTarget, st *live.State) bool {
 		// The native wire retains strictness directly. A foreign wire needs
 		// explicit structured-output capability; Anthropic strict-tool
 		// transport is not part of this adapter's proven contract.
-		if ct.Provider.Name() == "anthropic" || st == nil {
+		if ct.Provider.Name() == "anthropic" || ct.Provider.Name() == "bedrock" || st == nil {
 			return false
 		}
 		model, ok := st.Route(ct.Model)
@@ -282,8 +282,6 @@ func compatibleTarget(raw []byte, ct router.ChainTarget, st *live.State) bool {
 	switch ct.Provider.Name() {
 	case "openai_compatible", "anthropic":
 		return true
-	case "bedrock":
-		return false // requires a separately proven Responses-to-Bedrock contract
 	default:
 		supporter, ok := ct.Provider.(router.IngressSupporter)
 		return ok && supporter.SupportsIngress("responses")

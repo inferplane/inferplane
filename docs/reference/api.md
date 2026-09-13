@@ -87,6 +87,24 @@ Strict tiers allow threshold 100; their soft budget reference is an accounting
 threshold, not a second admission lease. Local session hints cannot authorize
 access, and every pin/attempt is revalidated. See [fields and Codex setup](../adaptive-routing.md).
 
+`POST /v1/responses` accepts the portable text/tool profile on declared Bedrock
+Converse, InvokeModel and Mantle bridges as well as the existing Anthropic and
+Chat Completions adapters. A neutral `reasoning.effort: "none"` does not demand
+backend effort control. Strict-tool guarantees and opaque/provider-owned state
+retain their native-target requirements.
+
+The OpenAI-shaped `GET /v1/models` adds these client metadata fields:
+
+| Field | Meaning |
+|---|---|
+| `capabilities` | Configured model capabilities, including `tools` when that deployed route is qualified for tool use. |
+| `responses_mode` | `native`, `bridge`, or `unsupported`, conservatively checked across the resolved target chain. |
+| `codex_model` | Native-only client catalog binding derived from the public model name, never from a private deployment ID. |
+| `context_window`, `max_model_len` | Existing declared context bounds; omitted when undeclared. |
+
+Discovery remains filtered by the authenticated key's model permissions.
+Inference rechecks capabilities, privacy, budgets and target compatibility.
+
 ### Durable budget heartbeat (ADR-045)
 
 `POST /v1alpha1/sync` negotiates `authority.protocol: escrow-v1` when

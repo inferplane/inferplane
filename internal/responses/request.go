@@ -284,11 +284,16 @@ func ValidateConversion(raw []byte) error {
 			return ErrInvalid
 		}
 		for k, v := range reasoning {
-			// Codex's summary-only preference does not submit reasoning
-			// state or require an effort level. We do not invent a summary.
-			if k != "summary" || optionalText(v) != "auto" {
-				return ErrUnsupported
+			// These neutral client preferences do not submit reasoning
+			// state or demand backend effort control. Codex can explicitly
+			// select "none" to clear an inherited native-model preference.
+			// The bridge neither invents a summary nor forwards these
+			// Responses-only options to another protocol.
+			if k == "summary" && optionalText(v) == "auto" ||
+				k == "effort" && optionalText(v) == "none" {
+				continue
 			}
+			return ErrUnsupported
 		}
 	}
 	if present(m["include"]) {
