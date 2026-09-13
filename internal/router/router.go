@@ -233,17 +233,37 @@ type ChainTarget struct {
 // Principal in scope; callers MUST run FilterModelAllowed on the result.
 func (r *Router) ResolveChain(model string) ([]ChainTarget, *live.State, error) {
 	st := r.live.Load() // one snapshot for this whole call — no mixed generations
+	all, err := configuredChain(st, model)
+	if err != nil {
+		return nil, st, err
+	}
+	var allowed []ChainTarget
+	for _, target := range all {
+		if r.brk.Allow(target.Identity) {
+			allowed = append(allowed, target)
+		}
+	}
+	if len(allowed) == 0 {
+		return all, st, nil // all breakers open → try anyway
+	}
+	return allowed, st, nil
+}
+
+// configuredChain resolves topology only, without health checks or authorization.
+// Callers use the supplied generation for every target and apply their own
+// filtering. Metadata discovery must never consult the runtime circuit breaker.
+func configuredChain(st *live.State, model string) ([]ChainTarget, error) {
 	mc, ok := st.Route(model)
 	if !ok || len(mc.Targets) == 0 {
-		return nil, st, fmt.Errorf("router: no route for model %q", model)
+		return nil, fmt.Errorf("router: no route for model %q", model)
 	}
 	models := []string{model}
-	if fb := st.FallbackFor(model); fb != "" {
+	if fb := st.Canonical(st.FallbackFor(model)); fb != "" && fb != model {
 		if fbmc, ok := st.Route(fb); ok && len(fbmc.Targets) > 0 {
 			models = append(models, fb)
 		}
 	}
-	var allowed, all []ChainTarget
+	var all []ChainTarget
 	for _, m := range models {
 		rmc, _ := st.Route(m)
 		for _, t := range rmc.Targets {
@@ -254,18 +274,12 @@ func (r *Router) ResolveChain(model string) ([]ChainTarget, *live.State, error) 
 			id, _ := st.Identity(t.Provider)
 			ct := ChainTarget{Provider: p, ProviderName: t.Provider, Identity: id, Upstream: t.Model, Model: m, Region: st.Region(t.Provider), DataBoundary: st.DataBoundary(t.Provider)}
 			all = append(all, ct)
-			if r.brk.Allow(id) {
-				allowed = append(allowed, ct)
-			}
 		}
 	}
 	if len(all) == 0 {
-		return nil, st, fmt.Errorf("router: model %q points at unknown provider(s)", model)
+		return nil, fmt.Errorf("router: model %q points at unknown provider(s)", model)
 	}
-	if len(allowed) == 0 {
-		return all, st, nil // all breakers open → try anyway
-	}
-	return allowed, st, nil
+	return all, nil
 }
 
 // FilterModelAllowed drops every target whose Model the caller is not

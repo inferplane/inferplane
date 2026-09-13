@@ -70,6 +70,15 @@ func (p *provider) guardrailFor(req *providers.ProxyRequest) Guardrail {
 func (p *provider) Name() string               { return "bedrock" }
 func (p *provider) Models() []schema.ModelInfo { return nil }
 
+func (p *provider) SupportsIngress(protocol string) bool {
+	switch protocol {
+	case "anthropic", "openai", "bedrock", "responses":
+		return true
+	default:
+		return false
+	}
+}
+
 // apiFor decides invoke vs converse vs mantle. Default: Claude models →
 // invoke_model, others → converse. Explicit per-model config overrides.
 // "mantle" routes to the Mantle endpoint (mantle.go) — the former
@@ -101,6 +110,21 @@ func (p *provider) mantleGuardrailCheck(req *providers.ProxyRequest) error {
 }
 
 func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+	if req.IngressProtocol == "responses" {
+		copy, names, err := prepareResponses(req)
+		if err != nil {
+			return nil, err
+		}
+		out, err := p.complete(ctx, copy)
+		if err != nil {
+			return out, err
+		}
+		return names.complete(out)
+	}
+	return p.complete(ctx, req)
+}
+
+func (p *provider) complete(ctx context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {
 	switch p.apiFor(req.Upstream) {
 	case "converse":
 		return p.completeConverse(ctx, req)
@@ -115,6 +139,21 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 }
 
 func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
+	if req.IngressProtocol == "responses" {
+		copy, names, err := prepareResponses(req)
+		if err != nil {
+			return nil, err
+		}
+		inner, err := p.stream(ctx, copy)
+		if err != nil {
+			return nil, err
+		}
+		return names.stream(inner), nil
+	}
+	return p.stream(ctx, req)
+}
+
+func (p *provider) stream(ctx context.Context, req *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
 	switch p.apiFor(req.Upstream) {
 	case "converse":
 		return p.streamConverse(ctx, req)

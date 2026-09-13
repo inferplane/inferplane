@@ -6,6 +6,7 @@ import (
 
 	"github.com/inferplane/inferplane/api/v1alpha1"
 	"github.com/inferplane/inferplane/internal/sensitivity"
+	"github.com/inferplane/inferplane/providers/testing/mockprovider"
 )
 
 func setCompatibility(t *testing.T, in *RequestRoutingInput, fn func(ChainTarget) bool) {
@@ -101,6 +102,32 @@ func TestResponsesCallbackCannotAuthorizeUnprovenBedrock(t *testing.T) {
 	setCompatibility(t, &in, func(ChainTarget) bool { return true })
 	got, err := r.RouteRequest(context.Background(), in)
 	requireDenied(t, got, err, "no_safe_route")
+}
+
+func TestResponsesDeclaredBedrockBridgeChecksInspectedFeatures(t *testing.T) {
+	provider := ingressCapableProvider{routingProvider{mockprovider.New("unused"), "bedrock"}, true}
+	target := routingConfig().Models["premium"].Targets[0]
+	for _, tt := range []struct {
+		name string
+		view sensitivity.Result
+		want bool
+	}{
+		{"text", sensitivity.Result{Complete: true}, true},
+		{"tools", sensitivity.Result{Complete: true, HasTools: true}, true},
+		{"opaque", sensitivity.Result{Complete: false}, false},
+		{"vision", sensitivity.Result{Complete: true, HasVision: true}, false},
+		{"reasoning state", sensitivity.Result{Complete: true, HasReasoning: true}, false},
+		{"strict output", sensitivity.Result{Complete: true, HasStructuredOutput: true}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := requestCompatible("responses", provider, target, &tt.view, false); got != tt.want {
+				t.Fatalf("bridge compatibility = %t, want %t", got, tt.want)
+			}
+		})
+	}
+	if requestCompatible("responses", provider, target, nil, false) {
+		t.Fatal("bridge accepted a request without inspection")
+	}
 }
 
 func TestResponsesDeclaredCanonicalContractsNeedCallback(t *testing.T) {

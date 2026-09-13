@@ -711,11 +711,12 @@ func requestCompatible(ingress string, provider providers.Provider, target confi
 		if provider.Name() == "openai_responses" {
 			return true
 		}
-		if provider.Name() == "bedrock" || s == nil || !s.Complete || s.HasVision || s.HasReasoning || s.HasStructuredOutput {
+		if s == nil || !s.Complete || s.HasVision || s.HasReasoning || s.HasStructuredOutput {
 			return false
 		}
-		// Known canonical text/tool paths and explicit provider contracts can
-		// bridge Responses only with the ingress callback's additional approval.
+		// Known canonical text/tool paths and explicit provider contracts
+		// (including Bedrock's canonical bridge) still require the ingress
+		// callback's additional approval. A name alone cannot opt Bedrock in.
 		return provider.Name() == "anthropic" || provider.Name() == "openai_compatible" || hasDeclaration
 	}
 	if provider.Name() == "openai_responses" {

@@ -90,7 +90,10 @@ approved local models. The separate `codex-native` model demonstrates a native
 Responses provider for compatible OpenAI-style upstreams.
 
 The bridge supports text, function/custom tools, tool results and compatible
-stateless history. Provider-owned conversation identifiers, encrypted reasoning
+stateless history over OpenAI Chat Completions, Anthropic Messages, Bedrock
+Converse, Bedrock InvokeModel and Mantle Chat/Messages routes. Bedrock tool names
+are mapped to deterministic backend-safe aliases and restored before the
+Responses client receives them. Provider-owned conversation identifiers, encrypted reasoning
 transfer, asynchronous response storage and unsupported built-in tools are not
 silently converted. Use a native compatible target or a fresh portable
 conversation when those features are involved. Models still need their own
@@ -98,8 +101,8 @@ coding/tool-use evaluation.
 
 Function-schema strictness is preserved on the Chat bridge; a strict function
 request requires a target explicitly declaring `structured_output`. The
-Anthropic adapter currently accepts non-strict tools only. It emits a real
-Messages envelope and supplies `max_tokens: 4096` when no output bound was sent.
+Anthropic and Bedrock bridges accept non-strict tools. They emit a real
+Messages envelope and supply `max_tokens: 4096` when no output bound was sent.
 Responses message-phase bookkeeping stays on the Responses side of that adapter.
 Failed and truncated attempts retain observed usage, and retry admission checks
 the remaining hard budget and current strict target again.
@@ -112,8 +115,12 @@ OpenAI reference material used:
 
 ## Codex with Amazon Bedrock IAM credentials
 
-The `bedrock` provider's Converse/InvokeModel routes do not accept Responses
-ingress. Use `bedrock_responses` for Bedrock Mantle's native Responses API:
+The `bedrock` provider bridges portable Responses requests to its configured
+Converse, InvokeModel or Mantle route. Model declarations need a context bound,
+the `tools` capability for coding clients, and a price for governed bridge
+selection. The actual backend must support the requested tools.
+
+Use `bedrock_responses` for Bedrock Mantle's native Responses API:
 
 ```json
 {
@@ -154,6 +161,19 @@ Use the custom Codex provider configuration above with
 search path has separately been configured. The `amazon-bedrock` Codex
 provider connects to AWS directly; select the custom `inferplane` provider
 to use gateway authentication, routing and accounting.
+
+`GET /v1/models` also supplies `capabilities` and `responses_mode`
+(`native`, `bridge` or `unsupported`). Native entries include `codex_model`,
+derived from the public name for matching installed Codex metadata; private
+upstream deployment names are not exposed. A mixed native/bridge target chain
+advertises the portable bridge contract. Metadata describes configured
+capabilities, while inference-time policy and provider checks remain authoritative.
+
+Portable clients may send `reasoning: {"effort": "none"}` to clear an inherited
+native-model effort preference. This requests no backend effort-control feature;
+the bridge carries text and tool results, and generation remains provider-defined.
+Explicit effort requirements and encrypted reasoning history still require a
+compatible native target.
 
 ## Privacy and cache limits
 

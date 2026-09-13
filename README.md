@@ -34,8 +34,10 @@ Goal 5 pulls against making goal 4 accurate under horizontal scale — see
 [Current limits](#current-limits) below and `docs/roadmap.md`.
 
 [^codex]: Responses ingress and native/stateless adapters have local protocol
-    tests and an opt-in installed Codex CLI tool-round-trip test. Model quality
-    and unsupported stateful features remain separate; see [Codex setup](docs/adaptive-routing.md).
+    tests and installed Codex CLI tool-round-trip tests, including Bedrock
+    Converse. The [model-aware launcher](docs/codex-launcher.md) supplies model
+    selection and context limits. Backend tool availability and native-only
+    features remain explicit; see [Codex setup](docs/adaptive-routing.md).
 
 ## Target users
 

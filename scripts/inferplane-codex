@@ -1,0 +1,371 @@
+#!/usr/bin/env python3
+"""Launch Codex using authenticated, per-model metadata from local inferplane."""
+
+import http.client
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+
+
+BASE_URL = "http://127.0.0.1:8081/v1"
+DEFAULT_MODEL = "global.openai.gpt-6-astra"
+FALLBACK_CONTEXT = 16384
+MAX_CATALOG_BYTES = 4 * 1024 * 1024
+MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}\Z")
+
+
+class LauncherError(Exception):
+    pass
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def gateway_models(key):
+    # Never route credentials through environment proxies, ~/.netrc, redirects,
+    # or any endpoint supplied by model metadata.
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), NoRedirect()
+    )
+    request = urllib.request.Request(
+        BASE_URL + "/models",
+        headers={"Authorization": "Bearer " + key, "Accept": "application/json"},
+    )
+    try:
+        with opener.open(request, timeout=5) as response:
+            if response.status != 200:
+                raise LauncherError("gateway model discovery did not return HTTP 200")
+            body = response.read(MAX_CATALOG_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        raise LauncherError("gateway model discovery returned HTTP {}".format(exc.code)) from None
+    except (OSError, ValueError, urllib.error.URLError, http.client.HTTPException):
+        raise LauncherError("cannot read model metadata from the local gateway") from None
+    if len(body) > MAX_CATALOG_BYTES:
+        raise LauncherError("gateway model catalog exceeds the size limit")
+    try:
+        payload = json.loads(body)
+    except (ValueError, UnicodeError, RecursionError):
+        raise LauncherError("gateway model metadata is not valid JSON") from None
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        raise LauncherError("gateway model metadata must contain a data array")
+    if not payload["data"]:
+        raise LauncherError("gateway returned no accessible models")
+    return payload["data"]
+
+
+def context_bound(entry):
+    bounds = []
+    for key in ("context_window", "max_model_len"):
+        value = entry.get(key)
+        if value is None:
+            continue
+        # Leave room for Codex's signed-i64 percentage arithmetic.
+        if type(value) is not int or not 0 < value <= (2 ** 63 - 1) // 100:
+            raise LauncherError("gateway declared an invalid model context bound")
+        bounds.append(value)
+    if bounds:
+        return min(bounds)
+    print(
+        "inferplane-codex: a gateway model has no context bound; using the conservative "
+        "{}-token fallback (declare context_window in gateway metadata)".format(FALLBACK_CONTEXT),
+        file=sys.stderr,
+    )
+    return FALLBACK_CONTEXT
+
+
+def codex_environment():
+    """Keep ambient proxies while bypassing loopback in the child only."""
+    child_env = os.environ.copy()
+    exclusions = []
+    for key in ("NO_PROXY", "no_proxy"):
+        exclusions.extend(
+            value.strip() for value in child_env.get(key, "").split(",") if value.strip()
+        )
+    exclusions.extend(("127.0.0.1", "localhost", "::1"))
+    bypass = ",".join(dict.fromkeys(exclusions))
+    child_env["NO_PROXY"] = bypass
+    child_env["no_proxy"] = bypass
+    return child_env
+
+
+def bundled_models():
+    """Read trusted, installed-client metadata without auth or network refresh."""
+    try:
+        result = subprocess.run(
+            ["codex", "debug", "models", "--bundled"],
+            stdin=subprocess.DEVNULL, capture_output=True, timeout=15,
+            env=codex_environment(),
+        )
+        if result.returncode != 0:
+            raise ValueError()
+        catalog = json.loads(result.stdout)
+        models = catalog["models"]
+        if not isinstance(models, list):
+            raise ValueError()
+        by_slug = {}
+        for model in models:
+            slug = model.get("slug") if isinstance(model, dict) else None
+            if not isinstance(slug, str) or not MODEL_ID.fullmatch(slug) or slug in by_slug:
+                raise ValueError()
+            by_slug[slug] = model
+        return by_slug
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
+        raise LauncherError("cannot read native model metadata from installed Codex") from None
+
+
+def build_catalog(entries):
+    models = []
+    seen = set()
+    native_models = None
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise LauncherError("gateway returned an invalid model entry")
+        name = entry.get("id")
+        if not isinstance(name, str) or not MODEL_ID.fullmatch(name):
+            raise LauncherError("gateway returned an invalid model identifier")
+        if name in seen:
+            raise LauncherError("gateway returned duplicate model identifiers")
+        seen.add(name)
+        mode = entry.get("responses_mode", "bridge")
+        if mode == "unsupported":
+            continue
+        if "capabilities" in entry:
+            capabilities = entry["capabilities"]
+            if not isinstance(capabilities, list) or any(
+                not isinstance(capability, str) for capability in capabilities
+            ):
+                raise LauncherError("gateway capabilities must be an array of strings")
+            if "tools" not in capabilities:
+                continue
+        bound = context_bound(entry)
+        template = entry.get("codex_model")
+        if mode not in ("native", "bridge"):
+            raise LauncherError("gateway declared an invalid responses_mode")
+        if mode == "native":
+            if not isinstance(template, str) or not MODEL_ID.fullmatch(template):
+                raise LauncherError("native route needs an exact codex_model metadata slug")
+            if native_models is None:
+                native_models = bundled_models()
+            if template not in native_models:
+                print(
+                    "inferplane-codex: skipping a native model: "
+                    "codex_model is absent from the installed Codex catalog",
+                    file=sys.stderr,
+                )
+                continue
+            native = dict(native_models[template])
+            native.update({
+                "slug": name,
+                "display_name": name,
+                "visibility": "list",
+                "supported_in_api": True,
+                "priority": 0 if name == DEFAULT_MODEL else len(models) + 1,
+                "context_window": bound,
+                "max_context_window": bound,
+                "auto_compact_token_limit": max(1, bound * 8 // 10),
+            })
+            models.append(native)
+            continue
+        if template is not None:
+            raise LauncherError("bridged route must not advertise a native codex_model")
+        # Portable text/tool defaults: neither model names nor owning providers
+        # attest support for native reasoning, images, hosted tools or state.
+        models.append({
+            "slug": name,
+            "display_name": name,
+            "description": "inferplane gateway model",
+            "base_instructions": (
+                "You are a coding assistant. Work with the user in their workspace. "
+                "Inspect relevant files, make focused changes, verify results, and "
+                "report limitations honestly. Follow the workspace instructions."
+            ),
+            "visibility": "list",
+            "supported_in_api": True,
+            "priority": 0 if name == DEFAULT_MODEL else len(models) + 1,
+            "context_window": bound,
+            "max_context_window": bound,
+            "effective_context_window_percent": 80,
+            "auto_compact_token_limit": max(1, bound * 8 // 10),
+            "default_reasoning_level": "none",
+            "supported_reasoning_levels": [
+                {"effort": "none", "description": "No reasoning effort (stateless bridge)"}
+            ],
+            "supports_reasoning_summary_parameter": False,
+            "default_reasoning_summary": "none",
+            "support_verbosity": False,
+            "default_verbosity": None,
+            "use_responses_lite": False,
+            "supports_experimental_context": False,
+            "supports_search_tool": False,
+            "input_modalities": ["text"],
+            "shell_type": "unified_exec",
+            "tool_mode": "direct",
+            "apply_patch_tool_type": None,
+            "truncation_policy": {"mode": "tokens", "limit": min(4096, bound)},
+            "experimental_supported_tools": [],
+            "availability_nux": None,
+            "upgrade": None,
+        })
+    return {"models": models}
+
+
+def config_string(value):
+    """Read a model override in Codex's TOML-string or raw-string forms."""
+    value = value.strip()
+    if value.startswith('"'):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            raise LauncherError("invalid quoted model override") from None
+    elif value.startswith("'") and value.endswith("'"):
+        value = value[1:-1]
+    if not isinstance(value, str) or not MODEL_ID.fullmatch(value):
+        raise LauncherError("invalid model override")
+    return value
+
+
+def selected_model(args):
+    """Inspect selection without rewriting or consuming the caller's arguments."""
+    model = None
+    config_model = None
+    # Skip values of normal CLI options so a path/prompt beginning with -m is
+    # never mistaken for model selection. Codex remains the argument validator.
+    values = {
+        "-i", "--image", "-p", "--profile", "-s", "--sandbox", "-a",
+        "--ask-for-approval", "-C", "--cd", "--add-dir", "--thread-source",
+        "--output-schema", "--color", "-o", "--output-last-message", "--enable",
+        "--disable", "--config", "-c", "--model", "-m", "--config-file",
+        "--title", "--base", "--commit",
+    }
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            break
+        flag = arg.split("=", 1)[0]
+        if flag in {"--oss", "--local-provider", "--remote", "--remote-auth-token-env"}:
+            raise LauncherError("direct or remote provider flags cannot be used with this launcher")
+        kind = None
+        value = None
+        if arg in values:
+            if index + 1 >= len(args) or args[index + 1] == "--":
+                raise LauncherError("missing CLI option value")
+            index += 1
+            value = args[index]
+            kind = arg
+        elif arg.startswith(("--model=", "--config=")):
+            kind, value = arg.split("=", 1)
+        elif arg.startswith(("-m", "-c")) and len(arg) > 2:
+            kind, value = arg[:2], arg[2:]
+            if value.startswith("="):
+                value = value[1:]
+        if kind in ("-m", "--model"):
+            if not MODEL_ID.fullmatch(value):
+                raise LauncherError("invalid model selection")
+            model = value
+        elif kind in ("-c", "--config"):
+            key, sep, raw = value.partition("=")
+            if sep and key.strip() == "model":
+                config_model = raw
+        index += 1
+    if model is not None:
+        return model
+    return config_string(config_model) if config_model is not None else DEFAULT_MODEL
+
+
+def codex_args(args, model, catalog_path, *, bridge):
+    provider = (
+        'model_providers.inferplane={name="inferplane (local)",base_url='
+        + json.dumps(BASE_URL)
+        + ',wire_api="responses",env_key="INFERPLANE_API_KEY",'
+        'requires_openai_auth=false,supports_websockets=false}'
+    )
+    overrides = []
+    for config in (
+        'model_provider="inferplane"',
+        "model=" + json.dumps(model),
+        "model_catalog_json=" + json.dumps(catalog_path),
+        'web_search="disabled"',
+        provider,
+    ):
+        overrides.extend(["-c", config])
+    if bridge:
+        # Catalog defaults do not clear an inherited or CLI-supplied effort in
+        # Codex 0.154.0. The stateless bridge accepts only the neutral sentinel.
+        overrides.extend(["-c", 'model_reasoning_effort="none"'])
+    split = args.index("--") if "--" in args else len(args)
+    # exec/resume have their own -c list; root overrides can otherwise be lost.
+    return args[:split] + overrides + args[split:]
+
+
+def run_codex(args):
+    child = None
+
+    def forward(signum, frame):
+        if child is None:
+            raise SystemExit(128 + signum)
+        # In a terminal both processes receive Ctrl-C from the foreground
+        # process group. Forwarding it again can turn "cancel" into "quit".
+        if signum == signal.SIGINT and sys.stdin.isatty():
+            return
+        try:
+            child.send_signal(signum)
+        except ProcessLookupError:
+            pass
+
+    previous = {}
+    try:
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            previous[sig] = signal.signal(sig, forward)
+        # Inherit all three streams; reading stdin here would consume prompts
+        # or break interactive terminal input.
+        child = subprocess.Popen(["codex", *args], env=codex_environment())
+        status = child.wait()
+        return status if status >= 0 else 128 - status
+    except OSError:
+        raise LauncherError("cannot start codex; check that Codex is installed on PATH") from None
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
+def main(args=None):
+    args = list(sys.argv[1:] if args is None else args)
+    try:
+        key = os.environ.get("INFERPLANE_API_KEY", "")
+        if not key or any(ord(c) <= 32 or ord(c) >= 127 for c in key):
+            raise LauncherError("set INFERPLANE_API_KEY to a gateway virtual key before launching")
+        model = selected_model(args)
+        entries = gateway_models(key)
+        catalog = build_catalog(entries)
+        if model not in {entry["slug"] for entry in catalog["models"]}:
+            raise LauncherError(
+                "selected model is unavailable to Codex "
+                "(absent, unsupported, lacking declared tools, or unmapped native model)"
+            )
+        selected = next(entry for entry in entries if entry["id"] == model)
+        bridge = selected.get("responses_mode", "bridge") == "bridge"
+        with tempfile.TemporaryDirectory(prefix="inferplane-codex-") as directory:
+            # mkstemp creates 0600; TemporaryDirectory creates a 0700 parent.
+            fd, path = tempfile.mkstemp(suffix=".json", dir=directory)
+            with os.fdopen(fd, "w", encoding="utf-8") as file:
+                json.dump(catalog, file, ensure_ascii=True)
+            return run_codex(codex_args(args, model, path, bridge=bridge))
+    except LauncherError as exc:
+        print("inferplane-codex: " + str(exc), file=sys.stderr)
+        return 1
+    except OSError:
+        print("inferplane-codex: cannot create the private model catalog", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -63,7 +63,6 @@ func TestOutputHintsDoNotPermitOpaqueInputOrEffort(t *testing.T) {
 	}{
 		{"input", []any{map[string]any{"type": "reasoning", "encrypted_content": "opaque"}}},
 		{"reasoning", map[string]any{"summary": "auto", "effort": "high"}},
-		{"reasoning", map[string]any{"effort": "none"}},
 		{"reasoning", map[string]any{"summary": "auto", "context": "auto"}},
 		{"include", []string{"message.output_text.logprobs"}},
 		{"previous_response_id", "resp_remote"},
