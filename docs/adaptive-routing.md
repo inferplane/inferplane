@@ -99,6 +99,14 @@ silently converted. Use a native compatible target or a fresh portable
 conversation when those features are involved. Models still need their own
 coding/tool-use evaluation.
 
+An explicitly requested Responses model uses the ingress context estimate and
+requested output budget for capacity admission. The conservative inspection
+ceiling remains in use when selecting another model automatically or enforcing
+an internal-only or strict budget destination. Keeping these estimates separate
+prevents ordinary long tool histories from being rejected as incompatible solely
+because decoded bytes were counted as input tokens. Neither estimate is a model
+tokenizer; upstream usage remains authoritative for settlement.
+
 Function-schema strictness is preserved on the Chat bridge; a strict function
 request requires a target explicitly declaring `structured_output`. The
 Anthropic and Bedrock bridges accept non-strict tools. They emit a real
