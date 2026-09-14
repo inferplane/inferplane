@@ -85,6 +85,15 @@ an inherited global `model_context_window` to the entry's `max_context_window`,
 including when it resolves another model. The helper adds no global
 context-window override.
 
+For an explicitly selected portable Responses model, gateway context admission
+uses the existing ingress estimate, `max(1, request_bytes / 4)`, plus the requested
+output budget. This is an estimate, not the backend's tokenizer. The sensitivity
+inspector's larger byte-based ceiling also accounts for recursively decoded JSON;
+it must not be mistaken for this model's actual input-token count. Automatic
+alternatives, strict budget targets and InternalOnly targets keep conservative
+capacity checks. Inspection coverage, capabilities, pricing and budget reservation
+are still enforced.
+
 This is verified against the installed Codex 0.154.0 app server using an
 isolated config with `model_context_window=1048576`. `config/read` still returns
 that raw global value, while the runtime `thread/tokenUsage/updated` event

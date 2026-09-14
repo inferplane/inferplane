@@ -615,6 +615,11 @@ func (b requestBoundary) filter(chain []ChainTarget, automatic bool) []ChainTarg
 		return nil
 	}
 	st := b.in.State
+	requested := b.in.RequestedModel
+	if requested == "" {
+		requested = b.in.Model
+	}
+	requested = st.Canonical(requested)
 	var out []ChainTarget
 	for _, ct := range chain {
 		ct.Model = st.Canonical(ct.Model)
@@ -663,7 +668,16 @@ func (b requestBoundary) filter(chain []ChainTarget, automatic bool) []ChainTarg
 		}
 		if b.inspection != nil && (automatic || ct.Model != b.in.Model || b.budgetModel != "" ||
 			(b.in.Protocol == "responses" && p.Name() != "openai_responses")) {
-			if !fitsRequest(mc, *b.inspection) || st.Pricing() == nil || !st.Pricing().HasRate(ct.ProviderName, ct.Upstream) {
+			capacity := *b.inspection
+			// Match ingress preflight only for the explicitly requested Responses
+			// model. Automatic, alternate, internal-only and budget choices retain
+			// the conservative ceiling. Keep classification signals, output budget,
+			// capability checks and invalid-estimate rejection unchanged.
+			if b.in.Protocol == "responses" && !automatic && ct.Model == requested && ct.Model == b.in.Model &&
+				b.models == nil && b.budgetModel == "" && capacity.InputTokens >= 0 {
+				capacity.InputTokens = max(int64(1), int64(len(b.in.RawBody)/4))
+			}
+			if !fitsRequest(mc, capacity) || st.Pricing() == nil || !st.Pricing().HasRate(ct.ProviderName, ct.Upstream) {
 				continue
 			}
 		}
