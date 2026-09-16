@@ -1,6 +1,6 @@
 # Enterprise product strategy
 
-Status: canonical product direction · Last reviewed: 2026-09-10 · Release posture: **alpha**
+Status: canonical product direction · Last reviewed: 2026-09-16 against main `6b5cf9c` · Release posture: **alpha**
 
 Owns: target market, enterprise contracts, release gates.
 Does not own: implementation status ([roadmap.md](roadmap.md)), current system
@@ -11,6 +11,11 @@ Where this document and an ADR disagree, the ADR governs until superseded.
 Inferplane remains alpha and must not be described as enterprise
 production-ready until every P0 below is closed and the acceptance suite passes.
 
+Execution priorities and migration gates are in the
+[current hardening program](superpowers/plans/2026-09-16-enterprise-hardening-program.md).
+It distinguishes shipped mechanisms from remaining product contracts; do not
+restart the old ledger/rate-share roadmap from a pre-ADR-045 checkout.
+
 ## 1. Scope
 
 The governance plane for enterprise coding-agent traffic (Claude Code, Codex,
@@ -18,12 +23,14 @@ OpenCode) — not a general-purpose LLM proxy. First production topology: a flee
 of developer-local `mayu` data planes controlled by `inferplaned`, with the
 control plane off the inference path.
 
-**First production claim covers developer-local `mayu` fleets only.** A shared,
-horizontally scaled Kubernetes data plane is a later profile.
+**The first production qualification target is a developer-local `mayu` fleet.**
+The shared Postgres gateway profile is implemented (ADR-046); its availability
+depends on an HA database endpoint and still requires deployment/load qualification.
+Keeping its production qualification separate does not mean the profile is absent.
 
 **Non-goals for the first release:** generic API gateway, provider/modality
-count, semantic response caching, multi-replica shared-gateway HA, custom
-authorization languages, MCP traffic routing.
+count, semantic response caching, custom authorization languages and MCP traffic
+routing. Do not infer deployed shared-gateway HA from implementation tests.
 
 ## 2. Enterprise contracts
 
@@ -32,9 +39,9 @@ authorization languages, MCP traffic routing.
 | Durable identity | `UserID = (OIDC issuer, subject)`. Key rotation, re-login, restart, and a second device must not split policy, budget, quota, or audit attribution. Email/owner strings/key IDs are not identities. | ❌ P0 |
 | Duty separation | Fixed roles (`platform-admin`, `policy-admin`, `provider-admin`, `budget-admin`, `auditor`, `team-admin`) with org/team scope. Every control-plane endpoint authorizes after authenticating. Every policy/provider/pricing/budget/role mutation records actor, capability, scope, before/after hash, generation. | ❌ P0 |
 | Two-pool user budget | Premium pool + total hard cap in one explicit window. Premium exhausted → first compatible model in an admin-approved fallback set; total exhausted → deny before egress. Token quotas must state fallback-or-block explicitly, never inherit monetary behavior. | ❌ P0 |
-| Pre-egress PII policy | Typed detector result; the policy engine (not the plugin) picks `external-unmodified` \| `external-masked` \| `internal-only` \| `blocked` and attaches it as an **egress ceiling**. Later stages may only narrow it. Detector/masker failure is fail-closed. `external-unmodified` requires a completed detector chain reporting nothing protected. | 🔶 partial (ADR-043 local inspection + InternalOnly/Block; broader contract remains open) |
-| Fleet enforcement accuracy | Enforcement key ≥ `(org, UserID, pool, windowID)` in a durable ledger. A lease is spend authority already reserved centrally — non-overlapping, immediately reducing central balance, expiry returning only provably-uncommitted authority. Rate/quota must not multiply by data-plane count. | ❌ P0 |
-| Guardrail / residency | A configured guardrail and region lock apply on **every** egress path, with no opt-out reachable from routing config. | ❌ P0 (regressed) |
+| Pre-egress PII policy | Typed detector result; the policy engine (not the plugin) picks `external-unmodified` \| `external-masked` \| `internal-only` \| `blocked` and attaches it as an **egress ceiling**. Later stages may only narrow it. Detector/masker failure is fail-closed. `external-unmodified` requires a completed detector chain reporting nothing protected. | 🔶 partial (ADR-043/044 inspection, InternalOnly/Block/Mask and reinspection implemented; detector and deployment qualification remain) |
+| Fleet enforcement accuracy | Enforcement key ≥ `(org, UserID, pool, windowID)` in a durable ledger. Grants reserve spend authority centrally before delivery; only proven unused authority can be returned. Expiry alone never refunds. Rate/quota must not multiply by data-plane count. | 🔶 mechanisms implemented in ADR-045/046; typed person identity, user-pool contract and operational qualification remain P0 |
+| Guardrail / residency | A configured guardrail and region lock apply on **every** egress path, with no opt-out reachable from routing config. | 🔶 refusal protection implemented; full application/qualification remains P0 |
 | Cost explainability | Every served request settles observed usage against an immutable pricing version; every request mutation the gateway performs is recorded. Cache reads, 5m/1h writes, hit ratio, write-without-reuse, and masking/model-switch cache loss are reported. | 🔶 partial |
 
 A hard cap governs admission against a versioned pricing table; it is not a
@@ -55,18 +62,25 @@ interrupted streams · OIDC login, short-lived virtual keys, STS credential
 brokering (ADR-028/040) · hash-chained audit, optional encrypted body capture,
 S3 anchoring (ADR-012/018) · optional Postgres usage analytics (ADR-036).
 
-### Policy-aware routing increment (ADR-043)
+### Policy-aware routing and coding-client support (ADR-043/044/047)
 
 Local finite inspection and an enforced destination restriction now constrain every
 attempt. Independent context preferences start in Shadow; Enforce is opt-in for
 completely inspectable single-user-turn requests without history/tools/media/
 reasoning/structured output. The input threshold chooses simple versus complex;
 a distinct compatible complex target can be selected above it. Privacy always enforces.
-The implemented actions are InternalOnly and Block; legacy masking remains separate.
-Boundary labels are operator assertions, detector coverage is finite, unsupported
-content can fail closed, and known translator losses still constrain alternatives.
-This does not complete the broader enterprise PII/masking or durable user fallback
-contract, add Responses ingress, or improve shared-state HA.
+ADR-044 extends this with an optional normal class, compatible tool/history
+sessions, bounded local successful-target affinity, strict budget targets,
+policy-selected Mask and independent reinspection. InternalOnly and Mask compose;
+unknown or unsafe content refuses rather than being labeled clean.
+Boundary labels remain operator assertions and detector coverage is finite.
+The legacy filter plugin is not the whole privacy implementation.
+
+Responses ingress and native/stateless provider adapters are implemented.
+ADR-047 adds Bedrock provider compatibility, model metadata and installed-client
+acceptance tests against local fake endpoints. These establish a portable
+protocol contract, not arbitrary model quality, opaque history transfer or every
+backend's tool/effort support. See [adaptive routing](adaptive-routing.md).
 
 Before promoting context to Enforce, compare task success, total settled cost
 including cold-cache writes/retries, p95 latency, and privacy negative cases against
@@ -75,6 +89,14 @@ from passing tests. Upgrade binaries/CRD before activation and use require_sync 
 CP protection before first policy delivery. [Operator guide](policy-routing.md).
 
 ### P0 — blocks the enterprise-ready claim
+
+**Selected destinations are not yet uniformly protected from HTTP redirects.**
+A local 307 reproduction at `6b5cf9c` showed the Anthropic and Chat Completions
+providers follow redirects with the request body and a synthetic gateway
+credential. Native Responses already refuses redirects. Close this concrete
+transport difference before claiming every egress remains on its approved
+destination; see the [bounded fix plan](superpowers/plans/2026-09-16-provider-redirect-boundary.md).
+This is a loopback reproduction, not evidence of a live compromise.
 
 **Guardrails on the Mantle egress path: refused, not applied.**
 Original bug: `guardrailFor` was called on the Converse and InvokeModel paths
@@ -105,55 +127,63 @@ served unbilled. Remaining gap: fail-closed conversion is a per-path
 discipline, not a structural guarantee — a future egress that builds `Parsed`
 from re-parsed JSON must repeat it (no test fences the invariant generically).
 
-**Per-user budget shipped; per-user rate and durable identity are still absent.**
-`internal/policy/store.go` `checkEnforceable` now rejects a user-subject
-*rate* rule only (needs the rate-share model — `docs/roadmap.md` item ①);
-user-subject *budget* is enforced (ADR-042 Phase 3 —
-`internal/governance/governance.go` third PreCheck/Settle scope). Per-user
-budget still has no control-plane lease (`docs/roadmap.md` §Accepted
-limitation), so N data planes admit up to N× a user's configured cap. Usage
-attribution remains the free-form key owner / bare OIDC `sub` — no
-`(issuer, subject)` pairing exists yet — so a stable per-person budget still
-does not survive a second IdP or a colliding `sub` across issuers.
+**Per-user accounting exists; durable person identity is still absent.**
+ADR-045 implements global GovernancePolicy money budgets, including user-only
+and team-user subjects. ADR-046 adds global user rate/token quotas and shared
+key/team storage. These scopes still use the configured opaque owner/subject:
+`internal/keystore/keystore.go` and `internal/server/authapi/authapi.go` do not
+persist a verified `(issuer, subject)` human identity. A shared counter for an
+owner is not protection against equal subjects from different issuers.
+Legacy/local modes retain their documented scope limits; do not generalize those
+limits to the explicitly enabled durable/shared profiles. Identity migration must
+preserve existing accounts, grants and pending permits rather than resetting them.
 
-**Substitution is team pressure, not a user fallback contract.** ADR-041
-activates a per-team substitution map from a referenced team budget;
-`router.SubstituteTier` leaves the premium model unchanged when the target is
-not allowed. Premium-pool exhaustion → user-specific fallback → total hard cap
-does not exist.
+**The complete user-pool contract remains open.** Legacy ADR-041 substitution
+keeps its optional behavior. ADR-044 strict `enforceTargets` rules instead
+constrain every attempt, including threshold 100, and can refuse when a target
+is unavailable. A soft switching meter can coexist with an independent hard cap.
+This is useful implemented machinery, but not yet the complete typed-person
+premium/total pool, approved fallback-set and management contract above.
 
-**Management authorization is coarse.** The control plane grants whole-console
-authority to any accepted OIDC identity or static token, and policy
-PUT/DELETE (`internal/controlplane/policies.go:170-174`) sits behind that same
-layer with no mutation audit. Provider/model writes on the `mayu` admin plane
-have no dedicated capability gate.
+**Management authorization is coarse.** `authnWrite` separates policy writes
+from the heartbeat token; `recordMutation` emits actor/operation/content-hash
+records. Provider/model writes have an admin check. What remains is the six-role
+org/team capability model and durable mutation evidence covering before/after
+state and generation. Current logging is not a transactionally coupled mutation
+audit guarantee.
 
-**Enforcement state is neither durable nor globally accurate.** Key store is
-SQLite; rate/quota/budget counters are process-local; the lease ledger is
-in-memory with approximate window rollover and prunes dead data-plane spend
-(`internal/controlplane/controlplane.go:39`). Standalone and per-key budgets
-get no lease. Helm pins `replicaCount: 1`.
+**Enforcement guarantees depend on the deployment profile.** Legacy ADR-034 and
+standalone memory stores retain their limitations. ADR-045 commits monetary
+authority in Postgres and journals each node's per-attempt reservations locally;
+expiry never refunds central credit. ADR-046 synchronously resolves shared keys
+and atomically reserves rate, token and monetary scopes against Postgres.
+Helm permits multiple replicas only in that explicit shared profile.
+Node-local valid-credit continuation and shared-mode refusal on DB failure are
+different contracts. Neither means that a production HA database is deployed or
+that a compromised developer machine cannot bypass upstream access.
 
-**The broader PII/masking contract remains partial.** ADR-043 adds typed local
-inspection and policy-selected InternalOnly/Block restrictions across the complete
-attempt chain. Detectors remain finite heuristics; opaque/unknown content is
-uninspectable and boundary labels are operator assertions. The existing `filter`
-and `piimask` transformation path is independent and does not cover every inspected
-surface. Policy-selected external-masked handling still needs a separate contract.
+**The broader PII/masking qualification remains partial.** ADR-043/044 implement
+typed local inspection, InternalOnly/Block/Mask composition and reinspection
+across the attempt chain. Detectors remain finite heuristics; opaque/unknown
+content can refuse, and boundary labels are operator assertions. Prove detector
+coverage and actual destination controls for a deployment before claiming
+compliance. Tests do not establish universal PII detection.
 
 ### P1 — operational competitiveness
 
-- **Undisclosed request mutation.** `providers/bedrock/converse.go:443-467`
-  and `providers/bedrock/mantle.go:112-117` are two separate model→param strip
-  tables in different wire vocabularies, both keyed by
-  `strings.Contains(upstream, …)`, both sourced from a one-off manual probe
-  (2026-08-28) with no stored artifact and no CI guard. A dropped
-  `temperature: 0` changes sampling semantics with no audit field, metric, or
-  response header. Pricing has `mayu pricing check`; this has no equivalent.
+- **Undisclosed request mutation.** `providers/bedrock/converse.go` and
+  `providers/bedrock/mantle.go` contain model-family parameter exceptions in
+  different wire vocabularies. Existing strip/Converse/Mantle regression tests
+  run in CI. The remaining gap is versioned live capability/probe provenance
+  and per-request mutation evidence. A dropped `temperature: 0` can change
+  sampling semantics; a once-per-model log does not explain an individual
+  request's transformation. Pricing has `mayu pricing check`; capability
+  qualification needs a similarly explicit process.
 - **Cache behavior differs by path.** Anthropic passthrough and Bedrock Claude
   InvokeModel preserve `cache_control`; Bedrock Converse does not map it to
-  `cachePoint`. `internal/cache.VolatileStore` and cache-affinity are
-  unimplemented.
+  `cachePoint`. The legacy `internal/cache.VolatileStore` interface remains
+  unused; ADR-044's separate bounded local affinity is implemented and is not
+  durable cross-node session pinning.
 - **Cache efficiency is measured as tokens, not outcomes** — no hit ratio,
   write-without-reuse, prefix fragmentation, or model-switch loss attribution.
 - **Request audit lacks durable identity** — records carry key ID and team;
@@ -162,17 +192,26 @@ surface. Policy-selected external-masked handling still needs a separate contrac
   (`internal/server/bedrockapi/invoke.go:277-282`) matches on
   `"ValidationException"`, which Mantle's OpenAI-shaped error bodies need not
   contain.
-- **Alpha deployment posture** — Helm defaults persistence off, no resource
-  requests, no security context, PDB, NetworkPolicy, or autoscaling; no CI
-  workflow running the full race/vet/vulnerability/release gates.
+- **Alpha qualification posture** — `.github/workflows/ci.yml` runs static
+  builds, race/vet/format, CRD, harness, Postgres integration and vulnerability
+  checks. Its DSN enables authority and other integration suites, but keystore
+  tests read the distinct `KEYSTORE_TEST_POSTGRES_DSN`, which CI currently omits;
+  18 keystore integration tests skip under that environment. Close this variable
+  mismatch and assert required DB tests execute. The shared Helm profile has separate persistent audit storage,
+  anti-affinity and a disruption budget. Production sizing, network controls,
+  DB failover/load evidence and signed release/deployment qualification remain
+  operational work; default resource requests still need operator configuration.
 
 ## 4. Delivery sequence
 
 Ordered by trust boundary. Each phase is a separate design spec and plan.
+The table describes contract closure, not a claim that every mechanism is
+unimplemented. ADR-044/045/046 shipped portions out of the original order.
+Use the current hardening program for the remaining execution sequence.
 
 | Phase | Work | Exit gate |
 |---|---|---|
-| **0a. Invariant guards** | Refuse to boot (or record honestly) when a configured guardrail or region lock is unreachable on a selected egress path; make a settled cost mandatory for every 2xx; CI guard for strip-table and guardrail-path coverage, in the `mayu pricing check` mold | No egress path can silently drop a mandated control or a billable settlement; a new path fails CI rather than review |
+| **0a. Invariant guards** | Refuse or record honestly when a configured control is unreachable; account for observed usage and retained uncertainty on every billable attempt; close redirect-boundary and capability-provenance gaps | No egress path silently drops a mandated control or accounting obligation; interrupted streams retain uncertainty and nonbillable count endpoints remain local/200 |
 | **0b. Identity & management trust** | First-class `(issuer, sub)` and typed service accounts; credentials reference identity; fixed roles with org/team scope; capability check on every management endpoint; mutation audit for policy/provider/pricing/budget/role | Key rotation and a second device retain the same policy and audit identity; cross-role negative authorization tests pass |
 | **1. User budget state machine** | Durable window IDs and enforcement ledger; premium + total pools; atomic reserve/settle/release; approved fallback sets with compatibility checks; explicit quota fallback-or-block; non-overlapping fleet leases | Concurrent requests, restart, key rotation, and two data planes cannot resurrect spend or bypass the total cap |
 | **2. Pre-egress PII policy** | Typed detector/transform contract; central action selection; destination classification; fail-closed detector and masker; PII-free OTel plus correlated audit | Detector timeout, transform failure, and every action prove unmasked protected data never reaches an external target |
@@ -208,7 +247,10 @@ request mutation the gateway performs appears in the audit record.
 
 **Cost** — a stable same-model prefix produces a cache write then a measured
 read · masking and model switching attribute the expected cache loss · every
-2xx carries a settled cost.
+billable attempt records known observed cost and retains unproven liability
+explicitly. An interrupted stream may already have HTTP 200; it must not invent
+final usage or refund uncertain cost. Legitimate rounded-zero/free usage is
+valid, and local nonbillable count responses are outside this billing assertion.
 
 **Administration** — a forbidden admin action is denied and evidenced · every
 policy/provider/budget mutation records actor, scope, diff hash, and generation.

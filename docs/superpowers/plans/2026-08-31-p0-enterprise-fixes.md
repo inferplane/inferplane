@@ -7,6 +7,13 @@
 
 **Reviewed:** 2026-09-11, against `main` at `08d7869` (including merged PR #71).
 
+**Historical baseline:** This document retains its reviewed snapshot. ADR-044
+through ADR-047 and PRs #77–82 have since shipped routing, Responses, durable
+monetary authority and shared key/rate/quota support. Use the
+[2026-09-16 hardening program](2026-09-16-enterprise-hardening-program.md) for
+current execution order. Do not treat the unmerged/absent descriptions below as
+current main or recreate their now-implemented subsystems.
+
 **Goal:** Preserve coding-task usefulness while controlling total cost inside
 approved data-processing boundaries. Enterprise readiness requires durable
 identity, scoped management authority, accurate shared enforcement, and
