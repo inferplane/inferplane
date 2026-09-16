@@ -1,6 +1,6 @@
 # Roadmap: closing the five operational gaps vs central-proxy gateways
 
-Status updated 2026-09-12: item ② ships as ADR-045 node-local monetary escrow;
+Status updated 2026-09-16 against `698edf3`: item ② ships as ADR-045 node-local monetary escrow;
 ADR-046 now implements shared keys and global rate/token quotas (item ①) in an
 explicit Postgres shared gateway profile. Remaining fleet features are listed below.
 
@@ -8,30 +8,32 @@ explicit Postgres shared gateway profile. Remaining fleet features are listed be
 target market, product contracts, priorities, and production-release gates. This
 roadmap tracks execution status and retains the original five-gap work breakdown.
 
-## Purpose alignment (2026-09-12)
+## Purpose alignment by profile (2026-09-16)
 
-`CLAUDE.md` → Core Purpose lists five goals. This table is the internal
-priority lens the LiteLLM-gap framing above doesn't give you — it's ordered
-by which goal each gap blocks, not by feature parity with a competitor. Its
-scope is broader than the five sprint items below: a row can be ✅ even
-though none of sprints S1-S3 have shipped, because some goals (e.g. #5) were
-already met by earlier work (ADR-031) outside this roadmap.
+The five goals in `CLAUDE.md` are evaluated against an explicit profile, not a
+single product-wide checkmark. Mechanism implementation, default activation,
+failure behavior and enterprise qualification are separate evidence.
 
-| Purpose | Status | Evidence |
+| Profile | Default / activation | Implemented authority | Availability boundary | Enterprise qualification |
+|---|---|---|---|---|
+| SQLite/local, including optional legacy CP | Standalone default; legacy CP is opt-in | Local keys/team records and rate/quota/money counters; legacy allowances do not provide durable global escrow. | No inference-time shared DB; attached CP policy/allowance readiness and expiry still apply. Local process/store failures remain possible. | Single-replica enforcement, not a fleet-global claim; alpha. |
+| ADR-045 node-local monetary authority | Opt-in durable CP authority + private journal | Global GovernancePolicy money, including opaque user scopes; keys/rate/token quotas and standalone/key-local money remain local. | No inference-time CP/DB call; CP-only or authority DB loss prevents replenishment. Existing credit is usable only within all readiness, policy-age and hard deadlines. | Monetary mechanism implemented; recovery/load and person-identity qualification open; alpha. |
+| ADR-046 shared gateway | Opt-in Postgres key/governance stores and common authority namespace | Shared key/team records; synchronous atomic RPM/TPM/token-quota/money admission. | CP-only loss is subject to valid binding and readiness/staleness gates. DB loss refuses new admission; gateway replicas do not remove this dependency. | Shared mechanism implemented; HA DB/deployment qualification open; alpha. |
+
+| Purpose | Implemented mechanism / default | Remaining contract in every profile |
 |---|---|---|
-| #1 A single entry point for Claude Code/OpenCode/Codex | 🔶 protocol support implemented; model evaluation remains | Messages, Chat Completions, Bedrock Invoke and Responses ingresses; native Responses plus stateless adapters, original-byte policy enforcement, and opt-in installed Codex CLI tool round trips (ADR-044). Opaque/stateful cross-model transfer and arbitrary model quality are not implied. |
-| #2 Per-user model choice | ✅ done | User-subject `modelAccess` rules are enforced: `Store.ModelAllowed` (`internal/policy/store.go`), wired into the router via `SetPolicyGate` in `cmd/mayu/gateway.go`. ADR-046 also supports global per-user rate/token quota in the shared profile. |
-| #3 Cost-driven model substitution via policy (routing) | ✅ implemented, rollout gates remain (ADR-041/043/044) | Legacy optional tiers retain their behavior. Opt-in `enforceTargets` constrains all choices/retries and allows threshold 100. Soft strict-tier references are switching meters, independent of total hard admission caps. Three-class context and bounded local successful-target affinity compose with privacy constraints. Evaluation uses integer utilization and referenced day/month windows; durable mode uses database-owned UTC window IDs (ADR-045). |
-| #4a Team budget + block | ✅ durable profile implemented | ADR-045 reserves finite global monetary authority in Postgres and per-attempt bounds in private node journals. Legacy ADR-034 and standalone/key-local budgets retain their limits. |
-| #4b Per-user budget/rate | ✅ shared profile implemented | ADR-045 global monetary budgets; ADR-046 global user-only/team-user RPM/TPM and tokenQuota. Non-shared profiles still reject unsupported user-rate/token-quota rules. |
-| #4c Rate/quota global accuracy under horizontal scale | ✅ shared profile implemented | ADR-046 Postgres transactions reserve all matching scopes atomically; shared keys and counters survive gateway restart. Requires an available HA DB endpoint. |
-| #4d Spend visibility | ✅ done | `internal/analytics` + console + `GET /admin/logs` (`analyticsapi.LogsHandler`, backed by the same analytics index — its `events` rows carry `cost_micros` per request, `internal/analytics/index.go:40`) |
-| #5 No central inference SPOF | ✅ explicit deployment profiles | Node-local ADR-045 continues on valid local credit. Shared ADR-046 uses multiple gateways plus HA Postgres, with no per-request control-plane HTTP call; DB partitions fail closed. |
+| #1 Coding-client entry point | Messages, Chat, Invoke and Responses; native/portable adapters and opt-in installed-client tests. | Versioned client/model tool qualification; no arbitrary opaque-state transfer or task-quality promise. |
+| #2 User model choice | Allowed-model and configured opaque user-subject policy gates. | Verified `(issuer, subject)` identity, key-rotation/multi-device attribution and six-role org/team authorization are not implemented. Shared key records do not close this gap. |
+| #3 Cost-driven routing | Optional legacy tiers; explicit strict targets and privacy rules; context defaults to Shadow, Enforce is opt-in. ADR-044 supports compatible tool/history workflows and local successful-target pins. | Premium/total person-pool contract, measured task/cost/latency results and fleet-wide session guarantees remain open. |
+| #4 Budget control and visibility | Scope/durability depend on the profile above. Analytics and console report observed usage/cost; durable/shared paths retain uncertain liability. | Person attribution, invoice reconciliation and complete operational recovery evidence; never infer known actual cost from an HTTP 200. |
+| #5 Bounded availability | CP HTTP does not carry inference. ADR-045 has finite local authority; ADR-046 deliberately uses synchronous DB admission. | No unconditional no-SPOF claim. Qualify process/node/DB/upstream failures for the chosen deployment. |
 
-**The known tension:** #4c and #5 pull against each other — see `CLAUDE.md` →
-Core Purpose. HA work here means closing that gap, not merely adding
-replicas; a naive multi-replica deployment currently breaks #4c further
-without an accurate shared rate/quota store.
+`require_sync` gates first CP delivery; `max_policy_age` can reject stale policy.
+Durable authority requires initial sync, shared mode requires initial binding,
+and hard grant/window expiry or exhaustion cannot be bypassed by a freshness
+setting. CP-only loss and DB loss are different events. Count APIs retain their
+local HTTP-200 contract during generation refusal. See the
+[profile tables](../README.md#deployment-profiles) and profile runbooks.
 
 Sprint plan (each phase = separate PR(s), reviewed before the next):
 
@@ -46,11 +48,13 @@ Sprint plan (each phase = separate PR(s), reviewed before the next):
 ## Policy-aware routing v1 (ADR-043, extended by ADR-044)
 
 Implemented: original-byte local inspection; FailClosed sensitiveData destination
-restrictions on every attempt; Shadow-default context recommendations; opt-in
-Enforce for completely inspectable single-user-turn requests without history/tools/
-media/reasoning/structured output; persisted topology metadata; ingress/count
-integration; bounded audit/headers/counter evidence; startup and policy-apply target
-validation. The input threshold chooses simple versus complex, not eligibility;
+restrictions on every attempt; Shadow-default context recommendations. Legacy
+ADR-043 Enforce eligibility is completely inspectable single-user-turn requests
+without history/tools/media/reasoning/structured output; ADR-044 extended rules
+support compatible tool/history sessions. Both have persisted topology metadata,
+ingress/count integration, bounded audit/headers/counter evidence, and startup and
+policy-apply target validation. In legacy rules, the input threshold chooses
+simple versus complex, not eligibility;
 a distinct compatible complex target can be selected above it. This extends
 cost-driven routing without replacing ADR-041 budgets.
 
@@ -58,8 +62,9 @@ Rollout evaluation remains open: task success, total cost including cold-cache
 writes/retries, p95 latency, and privacy-policy negative cases must pass declared
 baseline-relative gates before Enforce. Finite detectors and translator capabilities
 remain limits; this is not universal PII detection or measured savings. Durable
-cross-node session pinning, learned/remote classifiers and shared-state HA
-remain separate work. ADR-044 adds bounded local pins, Responses and complete Mask
+cross-node session pinning, learned/remote classifiers and deployed HA qualification
+remain separate work; ADR-046's shared admission is already implemented.
+ADR-044 adds bounded local pins, Responses and complete Mask
 policy handling; see [adaptive routing](adaptive-routing.md). Upgrade binaries/CRD before activating rules; require_sync is
 needed for CP privacy before first request. See [guide](policy-routing.md).
 

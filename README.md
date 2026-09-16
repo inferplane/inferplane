@@ -6,8 +6,9 @@
 
 **inferplane** — a control plane for LLM consumption governance.
 Policy and budget are distributed from the center; **`mayu`**, the
-node-local data plane, enforces them locally. The control plane stays off the
-inference path.
+data plane, enforces them under the selected deployment profile. The control-plane
+HTTP service is not called for per-request policy/budget admission; shared
+admission depends on Postgres. Broker credential renewal is a separate dependency.
 
 `mayu` is a component name, not a project name — it holds the same position in
 inferplane that ztunnel/waypoint hold in Istio. It runs on localhost or on each
@@ -26,12 +27,12 @@ routing.
    Sonnet → GLM) when cost, not just capability, decides.
 4. Set spend limits per team and per individual, block on breach, and always
    show how much has been spent.
-5. Keep the control plane off the inference path: installed policy and valid
-   authority remain locally usable during an outage. Expired hard authority
-   and configured readiness gates still fail closed.
+5. Keep control-plane HTTP off the inference path, with explicit outage limits:
+   node-local authority is finite, shared admission requires Postgres, and
+   readiness/staleness gates and hard-authority expiry still fail closed.
 
-Goal 5 pulls against making goal 4 accurate under horizontal scale — see
-[Current limits](#current-limits) below and `docs/roadmap.md`.
+These are goals, not blanket completion or no-SPOF guarantees. See
+[Deployment profiles](#deployment-profiles) and [Current limits](#current-limits).
 
 [^codex]: Responses ingress and native/stateless adapters have local protocol
     tests and installed Codex CLI tool-round-trip tests, including Bedrock
@@ -69,7 +70,11 @@ Privacy always enforces, including during Shadow (ADR-043/044).
 Strict budget tiers (`enforceTargets: true`) constrain every later selection and
 retry after a switching threshold. A separate total hard cap remains binding.
 The soft switching threshold does not become a smaller blocking admission cap.
-Legacy optional tiers and two-class context rules retain their behavior.
+Legacy optional tiers retain their behavior. Legacy ADR-043 two-class context
+selection remains limited to eligible, completely inspectable single-user-turn
+requests without history/tools/media/reasoning/structured output. ADR-044's
+extended context/stability rules support compatible tool/history sessions; pins
+are bounded and local to one gateway, not fleet-wide session state.
 
 Start with [the operator guide](docs/policy-routing.md) and the isolated
 [config](examples/config.policy-routing.json) /
@@ -89,22 +94,41 @@ For global monetary budgets across node-local gateways, enable the
 [durable budget profile](docs/durable-budgets.md) (ADR-045). Control-plane replicas
 share a Postgres authority ledger; each gateway durably reserves a conservative
 per-attempt bound locally before invoking a provider. Committed local grants
-remain usable during a control-plane/database outage until their deadlines.
+remain usable only while their deadlines and applicable readiness/staleness gates
+permit admission; an outage cannot create or renew credit.
+
+## Deployment profiles
+
+| Profile | Selection/default | Implemented mechanism | Enterprise qualification |
+|---|---|---|---|
+| SQLite/local, including optional legacy CP (ADR-034) | Default standalone profile; legacy CP is opt-in | SQLite key/team records; local rate/quota/money counters. Legacy CP adds in-memory budget allowances, not ADR-045 durability. | Local enforcement only; replicas do not create a globally accurate shared gateway. Alpha. |
+| Node-local monetary authority (ADR-045) | Opt-in durable CP authority and private node journal | Global **GovernancePolicy money** accounts in Postgres; per-attempt local reservations. Keys, rate/token quota and standalone/key-local money remain local. | Global policy-money mechanism implemented; fleet recovery/load and person-identity qualification remain open. Alpha. |
+| Shared Postgres admission (ADR-046) | Opt-in Postgres key and governance stores; same authority database/schema | Shared key/team records and atomic RPM/TPM, token-quota and money reservations. Key lookup and admission synchronously access Postgres. | Requires qualified HA Postgres and gateway deployment; no disconnected admission guarantee. Alpha. |
+
+All three profiles still lack verified `(OIDC issuer, subject)` person identity
+and the six-role org/team authorization model. Shared key/team records are not a
+durable human identity. Existing user-subject attribution and limits use configured
+opaque owner/subject values. User rate/token-quota policy rules require ADR-046.
+
+| Profile | Control-plane HTTP loss while its DB remains reachable | Authority/shared Postgres loss |
+|---|---|---|
+| SQLite/local + optional legacy CP | Standalone has no CP requirement. Legacy CP behavior depends on installed policy, allowances and configured initial/stale gates; it is not unlimited outage authority. | No synchronous shared-admission DB dependency. A CP store outage can stop policy delivery; local SQLite/storage failure remains a separate risk. |
+| ADR-045 | Already synchronized local credit may serve within readiness, policy-age and hard grant/window deadlines; no new grants while CP is unreachable. | Already issued local credit has the same finite limits; authority cannot replenish it without its DB. |
+| ADR-046 | DB-backed admission may continue only with a valid installed policy/authority binding and applicable readiness/staleness gates. It does not call CP HTTP per inference. | New key resolution/admission fails closed; gateway replicas cannot replace the unavailable DB. |
+
+`control_plane.require_sync` gates first policy delivery; `max_policy_age` can
+stop admission after stale synchronization. ADR-045 requires initial authority
+sync, and ADR-046 requires initial binding/readiness. Hard authority expiry and
+exhaustion remain binding independently of policy-age settings. Count APIs retain
+their local HTTP 200 contract while generation is refused. Individual gateway,
+upstream and credential availability also matter: no profile establishes
+unconditional no-SPOF operation.
+
+See [durable budgets](docs/durable-budgets.md), [shared governance](docs/shared-governance.md)
+and the [shared Helm example](examples/helm.shared-governance.yaml). Shared mode
+rejects mutable SQLite provider topology; model/provider rollout remains explicit.
 
 ## Current limits
-
-**Shared gateways now have an explicit Postgres profile (ADR-046).**
-It shares keys, team/key/user RPM and TPM, calendar token quotas and monetary
-reservations across replicas. Admission is transactional and database failures
-fail closed. See [shared governance](docs/shared-governance.md) and the
-[Helm example](examples/helm.shared-governance.yaml). Deploy an HA Postgres endpoint;
-shared mode uses synchronous database reads/writes and does not offer disconnected
-operation. Mutable SQLite provider topology is unsupported in this profile.
-
-**The default SQLite/in-memory profile remains single-replica.** Its rate/quota
-and standalone money counters remain local. ADR-045 globalizes policy money for
-node-local fleets; ADR-046 additionally supplies shared identity and complete
-resource admission. User rate/token-quota rules require the shared profile.
 
 **Standalone and legacy budget counters are not durable.** In standalone mode they live only in
 memory: restarting `mayu` mid-window resets every team, key, and user counter
@@ -120,25 +144,28 @@ and Postgres. It never falls back to these in-memory counters for global authori
 
 **Policy enforcement assumes the node operator is not the adversary.** `mayu`
 proxies credentials that live on the node (`env:`/`file:` refs), so whoever
-controls the node can call providers directly — Bedrock via the ADR-040 broker
-is the one exception, and its sessions are not yet per-team scoped. Bedrock
-Guardrails and region locks are node-local team records, not distributed
-policy. See `review/fable5/08-control-plane-bypass.md` for the full analysis.
+controls the node can call providers directly. ADR-040 brokering removes the need
+for standing node Bedrock IAM credentials, but a compromised host can obtain its
+broker token or vended sessions; it is not bypass-proof, and sessions are not yet
+per-team scoped. Guardrails and region restrictions require correct provider/team
+configuration; ADR-046 shares team records but does not make host credentials
+unreadable. See `review/fable5/08-control-plane-bypass.md` for the threat boundary.
 
 ## Why not a central gateway?
 
-Every "LLM gateway" puts a shared hop on the inference path. inferplane exists
-because that is the wrong place to stand:
+The node-local profile separates the control-plane HTTP service from the
+inference path. Its design goals differ from ADR-046's synchronous shared-DB
+admission:
 
 1. **Streaming latency.** Agent traffic is server-sent events; a central hop
    taxes *every chunk* of *every response* and lands directly on time-to-first-
    token. This is measurable — benchmark a proxied vs. direct stream and the
    cost of the extra hop is visible on day one, before any queueing under load.
-2. **Fault isolation.** When a central gateway degrades, every developer and
-   every agent stops at once. A node-local data plane keeps enforcement running
-   through a control-plane outage: rules and budget leases already on the node
-   keep working (fail-open within lease validity; only hard budget caps fail
-   closed when their lease expires — per-rule `failurePolicy`, never global).
+2. **Fault isolation.** A node-local gateway can isolate inference from a
+   control-plane-only outage while installed policy, readiness/staleness gates,
+   credentials and any required local authority remain valid. This is bounded
+   authorized operation, not a global fail-open policy. Shared ADR-046 admission
+   instead depends on a reachable database.
 
 The control plane never carries inference traffic. It distributes policy,
 issues budget leases, and aggregates usage telemetry — all off the request
@@ -179,18 +206,20 @@ flowchart LR
   quota/budget enforcement, tamper-evident audit logging, Prometheus/OTel
   GenAI metrics. *Works standalone today* (see Quick start).
 
-Budget control uses a **lease pattern**: N proxies each see only their own
-usage, so the control plane grants each `mayu` a slice of budget ("this much,
-for this interval") that it enforces locally with zero network round trips,
-reporting consumption and renewing asynchronously.
+The diagram shows the node-local topology. ADR-045 grants finite budget
+authority centrally and reserves it locally per attempt, reporting asynchronously.
+ADR-046 instead resolves shared keys and reserves resources through synchronous
+Postgres transactions. Legacy CP allowances are not a durable escrow ledger.
 
 ## What it governs
 
 - **Per-user token attribution** — who spent what, per user/team/model, at
-  integer micro-USD precision; identity fixed at credential issuance (OIDC).
+  integer micro-USD precision; CLI-issued keys use the verified opaque subject
+  as owner. Verified issuer/subject person identity is not yet implemented.
 - **Budget enforcement** — two-phase (pre-check before billing, settle after),
-  team and per-key budgets/quotas, `block` or `warn`, hard caps that stay hard
-  even when the control plane is down.
+  team and per-key budgets/quotas, `block` or `warn`, with the profile-specific
+  scope and outage limits above. Expired/exhausted hard authority never becomes
+  permission to send another request.
 - **Model-tier routing** — route by model to the right provider/region tier
   (e.g. Opus for design work, Haiku for hooks and summaries), with priority
   fallback and per-provider circuit breakers, plus model-level fallback for a
@@ -198,17 +227,19 @@ reporting consumption and renewing asynchronously.
 - **Credential lifetime** — in standalone mode, provider keys are referenced
   from local `env:`/`file:` secret refs, never inline in config. With a control
   plane, a bedrock provider can instead set `auth.mode: "broker"` and sign with
-  ≤1h STS sessions vended per request (ADR-040), so the node holds no Bedrock
-  credentials at all. Fail-closed: a broker that cannot be reached fails the
-  boot or reload rather than quietly falling back to the node's own AWS
-  identity.
+  broker-vended, cached ≤1h STS sessions (ADR-040), so it needs no standing
+  Bedrock IAM credentials. Those sessions and the broker token remain sensitive
+  node-accessible credentials; this does not protect against a compromised host.
+  Initial broker acquisition fails boot/reload rather than falling back to the
+  node's own AWS identity.
 - **Audit** — a tamper-evident hash-chain of every request, with chargeback
   reporting (`mayu report`).
 
 ## Quick start — `mayu` standalone
 
-`mayu` runs without a control plane: local config only, full gateway feature
-set. This is the supported first-touch path — you do not need to deploy
+`mayu` runs without a control plane in the SQLite/local profile; global authority
+and shared admission require their explicit profiles. This is the supported
+first-touch path — you do not need to deploy
 `inferplaned` to try inferplane.
 
 ```bash
