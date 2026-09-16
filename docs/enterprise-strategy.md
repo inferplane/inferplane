@@ -1,6 +1,6 @@
 # Enterprise product strategy
 
-Status: canonical product direction · Last reviewed: 2026-09-16 against main `698edf3` · Release posture: **alpha**
+Status: canonical product direction · Last reviewed: 2026-09-16, profile baseline `413f1a2` plus this branch's opt-in identity implementation · Release posture: **alpha**
 
 Owns: target market, enterprise contracts, release gates.
 Does not own: implementation status ([roadmap.md](roadmap.md)), current system
@@ -39,13 +39,14 @@ routing. Do not infer deployed shared-gateway HA from implementation tests.
 | Profile | Default / activation | Implemented mechanism | Availability limit | Enterprise status |
 |---|---|---|---|---|
 | SQLite/local, including legacy CP | Standalone default; legacy CP optional | SQLite key/team records, local rate/quota/money; legacy CP allowances are not durable global authority. | Standalone needs no CP. Attached CP readiness, stale-policy and allowance-expiry behavior still applies; local stores/processes can fail. | Alpha; no fleet-global enforcement claim. |
-| ADR-045 node-local money | Explicit durable authority and private journal | Global GovernancePolicy monetary accounts and local per-attempt reservations; keys, rates, token quotas and standalone/key-local money stay local. | CP-only loss or authority DB loss prevents new grants. Valid local credit works only until applicable readiness/staleness gates, hard expiry or exhaustion refuse it. | Money mechanism implemented; identity, roles and fleet qualification remain P0. |
-| ADR-046 shared admission | Explicit Postgres key/governance stores | Shared key/team records and synchronous DB transactions for rate, token quota and money. | CP-only loss may permit DB admission with a valid installed binding and readiness; DB loss refuses new requests. HA gateways alone do not remove the DB dependency. | Shared mechanism implemented; identity, roles and deployed HA/load qualification remain P0. |
+| ADR-045 node-local money | Explicit durable authority and private journal | Global GovernancePolicy monetary accounts and local per-attempt reservations; keys, rates, token quotas and standalone/key-local money stay local. | CP-only loss or authority DB loss prevents new grants. Valid local credit works only until applicable readiness/staleness gates, hard expiry or exhaustion refuse it. | Money mechanism implemented; identity rollout, roles and fleet qualification remain P0. |
+| ADR-046 shared admission | Explicit Postgres key/governance stores | Shared key/team records and synchronous DB transactions for rate, token quota and money. | CP-only loss may permit DB admission with a valid installed binding and readiness; DB loss refuses new requests. HA gateways alone do not remove the DB dependency. | Shared mechanism implemented; identity rollout, roles and deployed HA/load qualification remain P0. |
 
-Every profile lacks verified `(OIDC issuer, subject)` person identity and six-role
-org/team authorization. Shared records and configured opaque user-subject counters
-are not a completed human-identity contract. No profile has an unconditional
-no-SPOF or enterprise-ready checkmark.
+Every profile can opt into the implemented verified-identity registry; default
+legacy attribution and shared records alone do not enforce it. Trusted bindings,
+required-mode cutover and deployment qualification remain necessary. Six-role
+org/team authorization is still absent. No profile has an unconditional no-SPOF
+or enterprise-ready checkmark.
 
 `require_sync` governs first CP policy delivery; `max_policy_age` can close stale
 admission. Durable authority requires initial sync and shared mode requires initial
@@ -60,11 +61,11 @@ their component mechanisms are absent from all profiles.
 
 | Contract | Requirement | Status |
 |---|---|---|
-| Durable identity | `UserID = (OIDC issuer, subject)`. Key rotation, re-login, restart, and a second device must not split policy, budget, quota, or audit attribution. Email/owner strings/key IDs are not identities. | ❌ P0 |
+| Durable identity | Organization-scoped verified `(OIDC issuer, subject)` or derived service identity; key rotation/re-login/devices retain the registered accounting reference. Email/owner strings/key IDs alone are not identity proof. | 🔶 opt-in mechanism implemented; trusted legacy mapping and production rollout qualification remain P0 |
 | Duty separation | Fixed roles (`platform-admin`, `policy-admin`, `provider-admin`, `budget-admin`, `auditor`, `team-admin`) with org/team scope. Every management endpoint authorizes after authenticating; intentional public and machine endpoints retain their separate contracts. Every policy/provider/pricing/budget/role mutation records actor, capability, scope, before/after hash, generation. | ❌ P0 |
 | Two-pool user budget | Premium pool + total hard cap in one explicit window. Premium exhausted → first compatible model in an admin-approved fallback set; total exhausted → deny before egress. Token quotas must state fallback-or-block explicitly, never inherit monetary behavior. | ❌ P0 |
 | Pre-egress PII policy | Typed detector result; the policy engine (not the plugin) picks `external-unmodified` \| `external-masked` \| `internal-only` \| `blocked` and attaches it as an **egress ceiling**. Later stages may only narrow it. Detector/masker failure is fail-closed. `external-unmodified` requires a completed detector chain reporting nothing protected. | 🔶 partial (ADR-043/044 inspection, InternalOnly/Block/Mask and reinspection implemented; detector and deployment qualification remain) |
-| Fleet enforcement accuracy | Enforcement key ≥ `(org, UserID, pool, windowID)` in a durable ledger. Grants reserve spend authority centrally before delivery; only proven unused authority can be returned. Expiry alone never refunds. Rate/quota must not multiply by data-plane count. | 🔶 mechanisms implemented in ADR-045/046; typed person identity, user-pool contract and operational qualification remain P0 |
+| Fleet enforcement accuracy | Enforcement key ≥ `(org, UserID, pool, windowID)` in a durable ledger. Grants reserve spend authority centrally before delivery; only proven unused authority can be returned. Expiry alone never refunds. Rate/quota must not multiply by data-plane count. | 🔶 mechanisms implemented in ADR-045/046 with opt-in identity bindings; required rollout, user-pool contract and operational qualification remain P0 |
 | Guardrail / residency | A configured guardrail and region lock apply on **every** egress path, with no opt-out reachable from routing config. | 🔶 refusal protection implemented; full application/qualification remains P0 |
 | Cost explainability | Every served request settles observed usage against an immutable pricing version; every request mutation the gateway performs is recorded. Cache reads, 5m/1h writes, hit ratio, write-without-reuse, and masking/model-switch cache loss are reported. | 🔶 partial |
 
@@ -154,16 +155,17 @@ served unbilled. Remaining gap: fail-closed conversion is a per-path
 discipline, not a structural guarantee — a future egress that builds `Parsed`
 from re-parsed JSON must repeat it (no test fences the invariant generically).
 
-**Per-user accounting exists; durable person identity is still absent.**
-ADR-045 implements global GovernancePolicy money budgets, including user-only
-and team-user subjects. ADR-046 adds global user rate/token quotas and shared
-key/team storage. These scopes still use the configured opaque owner/subject:
-`internal/keystore/keystore.go` and `internal/server/authapi/authapi.go` do not
-persist a verified `(issuer, subject)` human identity. A shared counter for an
-owner is not protection against equal subjects from different issuers.
-Legacy/local modes retain their documented scope limits; do not generalize those
-limits to the explicitly enabled durable/shared profiles. Identity migration must
-preserve existing accounts, grants and pending permits rather than resetting them.
+**Verified identity is opt-in; production migration is still a gate.**
+The SQLite/Postgres registry, verified human issuance, privileged service issuance,
+digest-only audit and required synchronization fingerprints are implemented.
+Legacy accounting references remain unchanged through explicit trusted bindings;
+optional attribution does not enforce a new person-account boundary. Required
+activation covers every historical nonempty legacy owner, including revoked-only
+keys; active empty-owner keys must be revoked/reissued. Never guess an issuer,
+merge accounts, substitute a bound person's canonical audit reference into policy,
+or rewrite/refund financial history to pass activation. See
+[verified identity](verified-identity.md). ADR-045/046 retain their distinct scope
+and outage contracts; identity does not establish deployed HA or six-role authority.
 
 **The complete user-pool contract remains open.** Legacy ADR-041 substitution
 keeps its optional behavior. ADR-044 strict `enforceTargets` rules instead
@@ -213,8 +215,10 @@ compliance. Tests do not establish universal PII detection.
   durable cross-node session pinning.
 - **Cache efficiency is measured as tokens, not outcomes** — no hit ratio,
   write-without-reuse, prefix fragmentation, or model-switch loss attribution.
-- **Request audit lacks durable identity** — records carry key ID and team;
-  usage telemetry carries the key owner.
+- **Identity audit rollout remains opt-in** — managed records add canonical
+  identity and issuer/subject digests; financial lookup retains the registered
+  account reference. Legacy records keep their old encoding. Validate downstream
+  consumers and migration evidence before claiming complete enterprise attribution.
 - **Mantle errors miss model-level fallback.** `isModelNotFound`
   (`internal/server/bedrockapi/invoke.go:277-282`) matches on
   `"ValidationException"`, which Mantle's OpenAI-shaped error bodies need not

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
+	"github.com/inferplane/inferplane/internal/identity"
 	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/policystore"
 	"github.com/inferplane/inferplane/internal/tier"
@@ -44,10 +45,11 @@ const maxRejections = 100
 
 // Server is the control-plane distribution state and its HTTP handlers.
 type Server struct {
-	authority BudgetAuthorityBackend
-	paths     []string
-	token     string // shared bearer token; "" = no auth (loopback-only deployments)
-	authOpts  authOptions
+	identityConfig *identity.Config
+	authority      BudgetAuthorityBackend
+	paths          []string
+	token          string // shared bearer token; "" = no auth (loopback-only deployments)
+	authOpts       authOptions
 
 	mu         sync.Mutex
 	wire       []v1alpha1.GovernancePolicy
@@ -193,6 +195,9 @@ func (s *Server) Reload() error {
 func (s *Server) applyWire(wire []v1alpha1.GovernancePolicy, mtimes map[string]time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := policy.ValidateIdentitySubjects(wire, s.identityConfig); err != nil {
+		return err
+	}
 	ledger := map[ruleKey]*ruleLedger{}
 	tiers := map[ruleKey]*tierRule{}
 	minRenew := time.Duration(0)
@@ -371,6 +376,15 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"dataplane id required"}`, http.StatusBadRequest)
 		return
 	}
+	expectedIdentity := s.identityFingerprint()
+	if expectedIdentity != "" && !s.identityMachineAuthorized(r) {
+		writeJSONError(w, http.StatusUnauthorized, "machine authentication required")
+		return
+	}
+	if expectedIdentity != req.IdentityFingerprint {
+		writeJSONError(w, http.StatusConflict, "identity-aware synchronization requires the matching declaration")
+		return
+	}
 	if s.authority != nil {
 		s.authoritySync(w, r, req)
 		return
@@ -458,6 +472,9 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	// legally spend, so it is released back to the pool instead of
 	// permanently shrinking everyone's remaining budget.
 	resp := policy.SyncResponse{Generation: s.generation, SyncIntervalSeconds: s.interval}
+	if s.identityConfig != nil && s.identityConfig.Required {
+		resp.IdentityFingerprint = s.identityConfig.Fingerprint()
+	}
 	for k, l := range s.ledger {
 		if l.routingOnly {
 			// A switching threshold measures spend; it is not a second
@@ -522,6 +539,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 
 	if req.Generation != s.generation {
 		resp.Policies = s.wire
+		resp.IdentityPoliciesComplete = resp.IdentityFingerprint != ""
 	}
 	s.mu.Unlock()
 

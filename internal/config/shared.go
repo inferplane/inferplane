@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/inferplane/inferplane/internal/adminauth"
+	"github.com/inferplane/inferplane/internal/identity"
 )
 
 func (c *Config) SharedGovernance() bool {
@@ -20,10 +21,35 @@ func validateSharedStores(c *Config) error {
 	if err := validateKeyStore(k); err != nil {
 		return err
 	}
+	if k.Identity != nil && k.Identity.Required && c.ControlPlane != nil {
+		cp := c.ControlPlane
+		if !cp.RequireSync || cp.TokenRef == nil || strings.TrimSpace(cp.Token) == "" || adminauth.IsOIDCBearerShape(cp.Token) {
+			return fmt.Errorf("config: required identity needs require_sync and a non-JWT machine token")
+		}
+		u, err := url.Parse(cp.URL)
+		if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" ||
+			(u.Scheme != "https" && !(u.Scheme == "http" && isLoopbackHost(u.Hostname()))) {
+			return fmt.Errorf("config: required identity needs HTTPS or loopback control-plane transport")
+		}
+	}
+	for _, key := range c.VirtualKeys {
+		if key.Identity == nil {
+			continue
+		}
+		if k.Identity == nil || key.Identity.Organization != k.Identity.Organization ||
+			key.Identity.Kind != identity.Service || key.Identity.Validate() != nil {
+			return fmt.Errorf("config: declared keys require a valid service identity in the configured organization")
+		}
+	}
 	return validateSharedProfile(c)
 }
 
 func validateKeyStore(k *KeyStoreConfig) error {
+	if k.Identity != nil {
+		if err := k.Identity.Validate(); err != nil {
+			return fmt.Errorf("config: key_store.identity: %w", err)
+		}
+	}
 	switch k.Type {
 	case "", "sqlite":
 		if k.DSNRef != nil {

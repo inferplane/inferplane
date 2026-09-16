@@ -1,6 +1,7 @@
 # Roadmap: closing the five operational gaps vs central-proxy gateways
 
-Status updated 2026-09-16 against `698edf3`: item ② ships as ADR-045 node-local monetary escrow;
+Status updated 2026-09-16: profile baseline `413f1a2`; this branch also implements
+opt-in verified identity. Item ② ships as ADR-045 node-local monetary escrow;
 ADR-046 now implements shared keys and global rate/token quotas (item ①) in an
 explicit Postgres shared gateway profile. Remaining fleet features are listed below.
 
@@ -23,9 +24,9 @@ failure behavior and enterprise qualification are separate evidence.
 | Purpose | Implemented mechanism / default | Remaining contract in every profile |
 |---|---|---|
 | #1 Coding-client entry point | Messages, Chat, Invoke and Responses; native/portable adapters and opt-in installed-client tests. | Versioned client/model tool qualification; no arbitrary opaque-state transfer or task-quality promise. |
-| #2 User model choice | Allowed-model and configured opaque user-subject policy gates. | Verified `(issuer, subject)` identity, key-rotation/multi-device attribution and six-role org/team authorization are not implemented. Shared key records do not close this gap. |
+| #2 User model choice | Allowed-model/user policy gates; opt-in verified issuer/subject and service identity registry with stable accounting references. | Trusted historical mapping and required-mode rollout need qualification. Six-role org/team authorization is not implemented; default legacy attribution is unchanged. |
 | #3 Cost-driven routing | Optional legacy tiers; explicit strict targets and privacy rules; context defaults to Shadow, Enforce is opt-in. ADR-044 supports compatible tool/history workflows and local successful-target pins. | Premium/total person-pool contract, measured task/cost/latency results and fleet-wide session guarantees remain open. |
-| #4 Budget control and visibility | Scope/durability depend on the profile above. Analytics and console report observed usage/cost; durable/shared paths retain uncertain liability. | Person attribution, invoice reconciliation and complete operational recovery evidence; never infer known actual cost from an HTTP 200. |
+| #4 Budget control and visibility | Scope/durability depend on the profile above. Analytics and console report observed usage/cost; durable/shared paths retain uncertain liability. | Verified-identity rollout, invoice reconciliation and operational recovery evidence; never infer known actual cost from an HTTP 200. |
 | #5 Bounded availability | CP HTTP does not carry inference. ADR-045 has finite local authority; ADR-046 deliberately uses synchronous DB admission. | No unconditional no-SPOF claim. Qualify process/node/DB/upstream failures for the chosen deployment. |
 
 `require_sync` gates first CP delivery; `max_policy_age` can reject stale policy.
@@ -34,6 +35,13 @@ and hard grant/window expiry or exhaustion cannot be bypassed by a freshness
 setting. CP-only loss and DB loss are different events. Count APIs retain their
 local HTTP-200 contract during generation refusal. See the
 [profile tables](../README.md#deployment-profiles) and profile runbooks.
+
+The [verified-identity mechanism](verified-identity.md) is implemented as an
+opt-in overlay on these profiles, not a new ledger or default. Required mode
+checks matching declarations and preserves explicit legacy account references,
+including historical revoked-owner mappings. Its canonical audit reference is
+not a replacement policy reference for a legacy-bound person. Six-role access
+control, full premium/total pools and enterprise deployment qualification remain open.
 
 Sprint plan (each phase = separate PR(s), reviewed before the next):
 

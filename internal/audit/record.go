@@ -5,19 +5,25 @@
 // is computed for real in M3.
 package audit
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/inferplane/inferplane/internal/identity"
+)
 
 // PrincipalRef identifies the acting principal. For data-plane records KeyID
 // is the virtual key; for admin-plane records (ADR-004) User carries the
 // opaque OIDC `sub` (never email — PII stays out of the chain) and AuthMethod
-// records "oidc" vs "break_glass". AuthMethod is appended at the END of the
-// struct: the hash chain verifies exact line bytes, and an omitempty pointer
-// keeps pre-change records byte-identical (mixed-version chains still verify).
+// records "oidc" vs "break_glass". Managed Identity evidence contains only
+// digests and a canonical reference. Optional additions stay at the END: the
+// hash chain verifies exact line bytes, so legacy records must remain identical.
 type PrincipalRef struct {
 	KeyID      string  `json:"key_id"`
 	Team       string  `json:"team"`
 	User       *string `json:"user,omitempty"` // OIDC sub (admin plane) — opaque, never email
 	AuthMethod *string `json:"auth_method,omitempty"`
+	// Append-only, digest-only evidence. Nil preserves historical line bytes.
+	Identity *identity.AuditRef `json:"identity,omitempty"`
 }
 
 type RequestRef struct {

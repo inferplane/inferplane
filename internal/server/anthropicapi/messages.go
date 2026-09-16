@@ -650,7 +650,7 @@ func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upst
 	cost, missing := h.gov.Settle(subjectOf(p), keyPolicyOf(p), providerName, upstream, pu, table, estimatedTokens)
 	if h.usage != nil {
 		// Attribute to the UPSTREAM model — the name pricing billed.
-		h.usage.Record(p.Team, p.Owner, upstream, pu, cost)
+		h.usage.Record(p.Team, requestpolicy.TelemetrySubject(p), upstream, pu, cost)
 	}
 	return &audit.CostRef{
 		AmountUSDMicros: cost,
@@ -667,7 +667,7 @@ func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upst
 // deliberately-duplicated-per-package shape as keyPolicyOf below, and for the
 // same reason: governance stays a leaf and does not import keystore.
 func subjectOf(p keystore.Principal) governance.Subject {
-	return governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.Owner}
+	return governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.AccountSubject()}
 }
 
 // keyPolicyOf maps a Principal's optional per-key budget/TPM/RPM (§8 D2) to
@@ -722,7 +722,7 @@ func (h *MessagesHandler) audit(ctx context.Context, p keystore.Principal, model
 		Event:         "request_started",
 		ID:            ulid.New(),
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
-		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
+		Principal:     requestpolicy.AuditPrincipal(p),
 		Request:       audit.RequestRef{Ingress: "anthropic", ModelRequested: model, ModelResolved: upstream, PIIMasked: piiMasked, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), Routing: audit.RoutingFrom(ctx)},
 		Outcome:       outcome,
 	}
@@ -747,7 +747,7 @@ func (h *MessagesHandler) auditCompleted(ctx context.Context, id string, p keyst
 		Event:         "request_completed",
 		ID:            id,
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
-		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
+		Principal:     requestpolicy.AuditPrincipal(p),
 		Request:       audit.RequestRef{Ingress: "anthropic", ModelRequested: model, ModelResolved: upstream, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), Routing: audit.RoutingFrom(ctx)},
 		Outcome:       &audit.OutcomeRef{Status: status},
 		Usage:         usage,
@@ -779,7 +779,7 @@ func (h *MessagesHandler) auditCompletedPartial(ctx context.Context, p keystore.
 		Event:         "request_completed",
 		ID:            ulid.New(),
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
-		Principal:     audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
+		Principal:     requestpolicy.AuditPrincipal(p),
 		Request:       audit.RequestRef{Ingress: "anthropic", ModelRequested: model, ModelResolved: upstream, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), Routing: audit.RoutingFrom(ctx)},
 		Outcome:       &audit.OutcomeRef{Status: 200, Partial: true},
 		Usage:         usage,

@@ -59,7 +59,7 @@ func AdminAuth(tokens []string, verifier OIDCVerifier, mapping adminauth.Mapping
 				writeAnthropicError(w, http.StatusForbidden, "permission_error", "identity maps to no team")
 				return
 			}
-			id := principal.AdminIdentity{Subject: claims.Subject, Teams: teams, IsAdmin: isAdmin, AuthMethod: "oidc"}
+			id := principal.AdminIdentity{Issuer: claims.Issuer, Subject: claims.Subject, Teams: teams, IsAdmin: isAdmin, AuthMethod: "oidc"}
 			next.ServeHTTP(w, r.WithContext(principal.WithAdmin(r.Context(), id)))
 			return
 		}

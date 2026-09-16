@@ -35,7 +35,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.gov.HasSharedAuthority() {
-		limits, err := h.gov.SharedAuthority().SharedUsage(r.Context(), governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.Owner})
+		limits, err := h.gov.SharedAuthority().SharedUsage(r.Context(), governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.AccountSubject()})
 		if err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "shared usage unavailable"})
@@ -44,5 +44,5 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(governance.UsageStatus{Team: p.Team, EnforcementMode: "shared", SharedLimits: limits})
 		return
 	}
-	_ = json.NewEncoder(w).Encode(h.gov.UsageOf(governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.Owner}, kp))
+	_ = json.NewEncoder(w).Encode(h.gov.UsageOf(governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.AccountSubject()}, kp))
 }

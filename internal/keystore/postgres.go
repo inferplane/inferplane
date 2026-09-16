@@ -18,7 +18,10 @@ const postgresSchemaLock int64 = 0x6b657973 // "keys"
 
 // PostgresStore is the synchronous key authority for the explicit shared
 // gateway profile. It keeps no cached identities or team permissions.
-type PostgresStore struct{ db *pgxpool.Pool }
+type PostgresStore struct {
+	db *pgxpool.Pool
+	identityHandle
+}
 
 // OpenPostgres initializes the schema transactionally before returning. The
 // default SQLite constructor never calls this or opens a Postgres connection.
@@ -80,7 +83,14 @@ func (s *PostgresStore) Ready(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, postgresTimeout)
 	defer cancel()
 	_, err := s.db.Exec(ctx, `SELECT k.key_id, t.name FROM keys k LEFT JOIN teams t ON k.team=t.name LIMIT 0`)
-	return postgresError("check readiness", err)
+	if err != nil {
+		return postgresError("check readiness", err)
+	}
+	c, err := s.IdentityConfig(ctx)
+	if err != nil {
+		return err
+	}
+	return s.identityHandle.configured(identityMode{Required: boolInt(c.Required), Fingerprint: c.Fingerprint()})
 }
 
 func (s *PostgresStore) Close() error {
@@ -117,8 +127,17 @@ func (s *PostgresStore) EnsureKey(ctx context.Context, plaintext, team string, m
 
 const postgresInsertKey = `INSERT INTO keys
 (key_id, key_hash, team, allowed_models, created_at, revoked, budget_usd_micros,
- tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
+ tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day,
+ identity_organization,identity_kind,identity_issuer,identity_subject)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`
+
+const postgresUpdateKey = ` ON CONFLICT(key_hash) DO UPDATE SET
+team=excluded.team, allowed_models=excluded.allowed_models,
+budget_usd_micros=excluded.budget_usd_micros, tpm=excluded.tpm, rpm=excluded.rpm,
+expires_at=excluded.expires_at, owner=excluded.owner, metadata=excluded.metadata,
+budget_usd_micros_per_day=excluded.budget_usd_micros_per_day,
+identity_organization=excluded.identity_organization,identity_kind=excluded.identity_kind,
+identity_issuer=excluded.identity_issuer,identity_subject=excluded.identity_subject`
 
 func (s *PostgresStore) writeKey(ctx context.Context, hash, id, team string, models []string, opts KeyOptions, upsert bool) (Principal, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
@@ -126,6 +145,27 @@ func (s *PostgresStore) writeKey(ctx context.Context, hash, id, team string, mod
 		return Principal{}, postgresError("begin key write", err)
 	}
 	defer rollbackPostgres(tx)
+	if err := lockPostgresIdentity(ctx, tx); err != nil {
+		return Principal{}, err
+	}
+	itx := identityTx{ctx: ctx, pg: tx}
+	mode, err := itx.mode()
+	if err != nil {
+		return Principal{}, err
+	}
+	if err := s.identityHandle.configured(mode); err != nil {
+		return Principal{}, err
+	}
+	if upsert {
+		opts, err = itx.preserveKeyIdentity(hash, opts, mode)
+		if err != nil {
+			return Principal{}, err
+		}
+	}
+	opts, err = itx.prepareOptions(opts, mode)
+	if err != nil {
+		return Principal{}, err
+	}
 	now, err := postgresNow(ctx, tx)
 	if err != nil {
 		return Principal{}, err
@@ -136,11 +176,12 @@ func (s *PostgresStore) writeKey(ctx context.Context, hash, id, team string, mod
 	}
 	query := postgresInsertKey
 	if upsert {
-		query += ` ON CONFLICT(key_hash) DO UPDATE SET
-team=excluded.team, allowed_models=excluded.allowed_models,
-budget_usd_micros=excluded.budget_usd_micros, tpm=excluded.tpm, rpm=excluded.rpm,
-expires_at=excluded.expires_at, owner=excluded.owner, metadata=excluded.metadata,
-budget_usd_micros_per_day=excluded.budget_usd_micros_per_day`
+		if mode.Required != 0 {
+			if err := itx.preserveKeyTombstone(&k); err != nil {
+				return Principal{}, err
+			}
+		}
+		query += postgresUpdateKey
 	}
 	if _, err := tx.Exec(ctx, query, k.values()...); err != nil {
 		return Principal{}, postgresError("write key", err)
@@ -173,6 +214,9 @@ func (s *PostgresStore) Resolve(ctx context.Context, plaintext string) (Principa
 	if err := checkPostgresExpiry(p, now); err != nil {
 		return Principal{}, err
 	}
+	if err := s.identityHandle.configured(identityMode{Required: boolInt(p.IdentityRequired), Fingerprint: p.IdentityFingerprint}); err != nil {
+		return Principal{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Principal{}, postgresError("commit resolve", err)
 	}
@@ -187,6 +231,13 @@ func (s *PostgresStore) List(ctx context.Context) ([]Principal, error) {
 		return nil, postgresError("begin list", err)
 	}
 	defer rollbackPostgres(tx)
+	mode, err := (identityTx{ctx: ctx, pg: tx}).mode()
+	if err != nil {
+		return nil, err
+	}
+	if err := s.identityHandle.configured(mode); err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(ctx, postgresSnapshotQuery+`WHERE k.revoked=0 ORDER BY k.created_at, k.key_id`)
 	if err != nil {
 		return nil, postgresError("list keys", err)
@@ -196,6 +247,9 @@ func (s *PostgresStore) List(ctx context.Context) ([]Principal, error) {
 	for rows.Next() {
 		p, _, err := scanPostgresSnapshot(rows)
 		if err != nil {
+			return nil, err
+		}
+		if err := s.identityHandle.configured(identityMode{Required: boolInt(p.IdentityRequired), Fingerprint: p.IdentityFingerprint}); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

@@ -14,7 +14,10 @@ import (
 
 // SQLiteStore is the M3 default Store. Schema uses only portable SQL types so
 // the same DDL maps cleanly onto Postgres in v0.2 (co-agent guidance).
-type SQLiteStore struct{ db *sql.DB }
+type SQLiteStore struct {
+	db *sql.DB
+	identityHandle
+}
 
 // schema — TEXT/INTEGER only, no SQLite-specific types, for Postgres portability.
 // Includes every column (keys' §8 D2 governance fields, teams' D6/ADR-019
@@ -39,7 +42,11 @@ CREATE TABLE IF NOT EXISTS keys (
     expires_at         TEXT NOT NULL DEFAULT '',
     owner              TEXT NOT NULL DEFAULT '',
     metadata           TEXT NOT NULL DEFAULT '',
-    budget_usd_micros_per_day INTEGER NOT NULL DEFAULT 0
+    budget_usd_micros_per_day INTEGER NOT NULL DEFAULT 0,
+    identity_organization TEXT NOT NULL DEFAULT '',
+    identity_kind TEXT NOT NULL DEFAULT '',
+    identity_issuer TEXT NOT NULL DEFAULT '',
+    identity_subject TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_keys_hash ON keys(key_hash) WHERE revoked = 0;
 
@@ -142,6 +149,10 @@ func ensureSchema(db *sql.DB) error {
 		{"owner", `ALTER TABLE keys ADD COLUMN owner TEXT NOT NULL DEFAULT ''`},
 		{"metadata", `ALTER TABLE keys ADD COLUMN metadata TEXT NOT NULL DEFAULT ''`},
 		{"budget_usd_micros_per_day", `ALTER TABLE keys ADD COLUMN budget_usd_micros_per_day INTEGER NOT NULL DEFAULT 0`},
+		{"identity_organization", `ALTER TABLE keys ADD COLUMN identity_organization TEXT NOT NULL DEFAULT ''`},
+		{"identity_kind", `ALTER TABLE keys ADD COLUMN identity_kind TEXT NOT NULL DEFAULT ''`},
+		{"identity_issuer", `ALTER TABLE keys ADD COLUMN identity_issuer TEXT NOT NULL DEFAULT ''`},
+		{"identity_subject", `ALTER TABLE keys ADD COLUMN identity_subject TEXT NOT NULL DEFAULT ''`},
 	}
 	if err := applyMigrations(ctx, conn, keyColumns, keyMigrations); err != nil {
 		rollback()
@@ -166,6 +177,10 @@ func ensureSchema(db *sql.DB) error {
 	if err := applyMigrations(ctx, conn, existingTeamCols, teamMigrations); err != nil {
 		rollback()
 		return err
+	}
+	if _, err := conn.ExecContext(ctx, identitySchema+sqliteIdentityGuards); err != nil {
+		rollback()
+		return identityStorageError(err)
 	}
 
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
@@ -224,43 +239,65 @@ func (s *SQLiteStore) CreateWithOptions(ctx context.Context, team string, allowe
 	if err != nil {
 		return "", Principal{}, err
 	}
-	metaJSON, err := encodeMetadata(opts.Metadata)
+	p, err := s.writeIdentityKey(ctx, hashHex, keyID, team, allowedModels, opts, false)
 	if err != nil {
-		return "", Principal{}, fmt.Errorf("keystore: metadata: %w", err)
+		return "", Principal{}, err
 	}
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO keys (key_id, key_hash, team, allowed_models, created_at,
-		 budget_usd_micros, tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-		keyID, hashHex, team, joinModels(allowedModels), nowRFC3339(),
-		opts.BudgetUSDMicros, opts.TPM, opts.RPM, encodeExpiry(opts.ExpiresAt), opts.Owner, metaJSON, opts.BudgetUSDMicrosPerDay)
-	if err != nil {
-		return "", Principal{}, fmt.Errorf("keystore: insert: %w", err)
-	}
-	p := Principal{KeyID: keyID, Team: team, AllowedModels: allowedModels, KeyOptions: opts}
 	return plaintext, p, nil
 }
 
 func (s *SQLiteStore) EnsureKey(ctx context.Context, plaintext, team string, allowedModels []string, opts KeyOptions) (Principal, error) {
 	hashHex := hashKey(plaintext)
 	keyID := "ik_" + hashHex[:12]
-	metaJSON, err := encodeMetadata(opts.Metadata)
+	return s.writeIdentityKey(ctx, hashHex, keyID, team, allowedModels, opts, true)
+}
+
+func (s *SQLiteStore) writeIdentityKey(ctx context.Context, hash, id, team string, models []string, opts KeyOptions, upsert bool) (Principal, error) {
+	var p Principal
+	err := s.identityTransaction(ctx, true, func(tx identityTx) error {
+		m, err := tx.mode()
+		if err != nil {
+			return err
+		}
+		if err := s.identityHandle.configured(m); err != nil {
+			return err
+		}
+		if upsert {
+			opts, err = tx.preserveKeyIdentity(hash, opts, m)
+			if err != nil {
+				return err
+			}
+		}
+		opts, err = tx.prepareOptions(opts, m)
+		if err != nil {
+			return err
+		}
+		k, err := newPostgresKey(hash, id, team, models, opts, time.Now().Truncate(time.Second))
+		if err != nil {
+			return err
+		}
+		query := postgresInsertKey
+		if upsert {
+			if m.Required != 0 {
+				if err := tx.preserveKeyTombstone(&k); err != nil {
+					return err
+				}
+			}
+			query += postgresUpdateKey
+		}
+		if err := tx.exec(query, k.values()...); err != nil {
+			return err
+		}
+		p, err = scanPrincipal(tx.row(`SELECT `+keyColumns+` FROM keys WHERE key_hash=$1`, hash))
+		if err != nil {
+			return identityStorageError(err)
+		}
+		return tx.validatePrincipal(&p, m)
+	})
 	if err != nil {
-		return Principal{}, fmt.Errorf("keystore: metadata: %w", err)
+		return Principal{}, err
 	}
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO keys (key_id, key_hash, team, allowed_models, created_at,
-		 budget_usd_micros, tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-		 ON CONFLICT(key_hash) DO UPDATE SET
-		   team=excluded.team, allowed_models=excluded.allowed_models,
-		   budget_usd_micros=excluded.budget_usd_micros, budget_usd_micros_per_day=excluded.budget_usd_micros_per_day, tpm=excluded.tpm, rpm=excluded.rpm,
-		   expires_at=excluded.expires_at, owner=excluded.owner, metadata=excluded.metadata`,
-		keyID, hashHex, team, joinModels(allowedModels), nowRFC3339(),
-		opts.BudgetUSDMicros, opts.TPM, opts.RPM, encodeExpiry(opts.ExpiresAt), opts.Owner, metaJSON, opts.BudgetUSDMicrosPerDay)
-	if err != nil {
-		return Principal{}, fmt.Errorf("keystore: ensure key: %w", err)
-	}
-	p := Principal{KeyID: keyID, Team: team, AllowedModels: allowedModels, KeyOptions: opts}
-	return p, nil
+	return p, err
 }
 
 var ErrKeyNotFound = errors.New("keystore: key not found")
@@ -272,7 +309,8 @@ var ErrKeyNotFound = errors.New("keystore: key not found")
 // login` rather than suspect a typo (ADR-028).
 var ErrKeyExpired = errors.New("keystore: key expired")
 
-const keyColumns = `key_id, team, allowed_models, budget_usd_micros, tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day`
+const keyColumns = `key_id, team, allowed_models, budget_usd_micros, tpm, rpm, expires_at, owner, metadata, budget_usd_micros_per_day,
+ identity_organization,identity_kind,identity_issuer,identity_subject`
 
 // scanPrincipal reads one keyColumns-shaped row. Expiry is checked by the
 // caller (Resolve treats an expired key as not-found; List shows it as-is so
@@ -282,7 +320,9 @@ const keyColumns = `key_id, team, allowed_models, budget_usd_micros, tpm, rpm, e
 func scanPrincipal(row interface{ Scan(...any) error }) (Principal, error) {
 	var p Principal
 	var models, expiresAt, metaJSON string
-	if err := row.Scan(&p.KeyID, &p.Team, &models, &p.BudgetUSDMicros, &p.TPM, &p.RPM, &expiresAt, &p.Owner, &metaJSON, &p.BudgetUSDMicrosPerDay); err != nil {
+	var org, kind, issuer, subject string
+	if err := row.Scan(&p.KeyID, &p.Team, &models, &p.BudgetUSDMicros, &p.TPM, &p.RPM, &expiresAt, &p.Owner, &metaJSON, &p.BudgetUSDMicrosPerDay,
+		&org, &kind, &issuer, &subject); err != nil {
 		return Principal{}, err
 	}
 	p.AllowedModels = splitModels(models)
@@ -292,24 +332,40 @@ func scanPrincipal(row interface{ Scan(...any) error }) (Principal, error) {
 	}
 	p.ExpiresAt = exp
 	p.Metadata = decodeMetadata(metaJSON)
+	p.Identity, err = identityFromFields(org, kind, issuer, subject)
+	if err != nil {
+		return Principal{}, err
+	}
 	return p, nil
 }
 
 func (s *SQLiteStore) Resolve(ctx context.Context, plaintext string) (Principal, error) {
 	h := hashKey(plaintext)
-	row := s.db.QueryRowContext(ctx,
-		`SELECT `+keyColumns+` FROM keys WHERE key_hash = ? AND revoked = 0`, h)
-	p, err := scanPrincipal(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Principal{}, ErrKeyNotFound
-	}
+	var p Principal
+	err := s.identityTransaction(ctx, false, func(tx identityTx) error {
+		m, err := tx.mode()
+		if err != nil {
+			return err
+		}
+		if err := s.identityHandle.configured(m); err != nil {
+			return err
+		}
+		p, err = scanPrincipal(tx.row(`SELECT `+keyColumns+` FROM keys WHERE key_hash=$1 AND revoked=0`, h))
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrKeyNotFound
+		}
+		if err != nil {
+			return identityStorageError(err)
+		}
+		if p.ExpiresAt != nil && !time.Now().UTC().Before(*p.ExpiresAt) {
+			return ErrKeyExpired
+		}
+		return tx.validatePrincipal(&p, m)
+	})
 	if err != nil {
 		return Principal{}, err
 	}
-	if p.ExpiresAt != nil && p.ExpiresAt.Before(time.Now().UTC()) {
-		return Principal{}, ErrKeyExpired
-	}
-	return p, nil
+	return p, err
 }
 
 func encodeExpiry(t *time.Time) string {
@@ -360,21 +416,42 @@ func (s *SQLiteStore) Revoke(ctx context.Context, keyID string) error {
 }
 
 func (s *SQLiteStore) List(ctx context.Context) ([]Principal, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+keyColumns+` FROM keys WHERE revoked = 0 ORDER BY created_at`)
+	var out []Principal
+	err := s.identityTransaction(ctx, false, func(tx identityTx) error {
+		mode, err := tx.mode()
+		if err != nil {
+			return err
+		}
+		if err := s.identityHandle.configured(mode); err != nil {
+			return err
+		}
+		rows, closeRows, err := tx.rows(`SELECT ` + keyColumns + ` FROM keys WHERE revoked=0 ORDER BY created_at`)
+		if err != nil {
+			return err
+		}
+		defer closeRows()
+		for rows.Next() {
+			p, err := scanPrincipal(rows)
+			if err != nil {
+				return identityStorageError(err)
+			}
+			out = append(out, p)
+		}
+		if err := rows.Err(); err != nil {
+			return identityStorageError(err)
+		}
+		closeRows()
+		for i := range out {
+			if err := tx.validatePrincipal(&out[i], mode); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []Principal
-	for rows.Next() {
-		p, err := scanPrincipal(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *SQLiteStore) Close() error { return s.db.Close() }

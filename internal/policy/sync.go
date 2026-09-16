@@ -22,6 +22,7 @@ import (
 
 // SyncRequest is what a data plane POSTs to the control plane each heartbeat.
 type SyncRequest struct {
+	IdentityFingerprint string `json:"identityFingerprint,omitempty"`
 	// Dataplane is this proxy's stable instance id.
 	Dataplane string `json:"dataplane"`
 	// APIVersions is what this data-plane build understands — the control
@@ -71,7 +72,11 @@ type ConsumptionReport struct {
 
 // SyncResponse is the control plane's answer.
 type SyncResponse struct {
-	Generation string `json:"generation"`
+	IdentityFingerprint string `json:"identityFingerprint,omitempty"`
+	// IdentityPoliciesComplete distinguishes an intentional empty snapshot
+	// from an omitted unchanged snapshot when required identity is active.
+	IdentityPoliciesComplete bool   `json:"identityPoliciesComplete,omitempty"`
+	Generation               string `json:"generation"`
 	// Policies is the full current document set; omitted (nil) when the
 	// caller's generation already matches.
 	Policies []v1alpha1.GovernancePolicy `json:"policies,omitempty"`

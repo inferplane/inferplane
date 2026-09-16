@@ -184,6 +184,7 @@ func (s *Server) ReloadFromStore(ctx context.Context) error {
 func (s *Server) ApplyWrite(ctx context.Context, name string, body []byte) error {
 	s.mu.Lock()
 	store := s.policyStore
+	identityConfig := s.identityConfig
 	s.mu.Unlock()
 	if store == nil {
 		return ErrNoPolicyStore
@@ -200,6 +201,9 @@ func (s *Server) ApplyWrite(ctx context.Context, name string, body []byte) error
 	}
 	if docs[0].Metadata.Name != name {
 		return fmt.Errorf("%w: metadata.name %q does not match the URL policy name %q", ErrPolicyValidation, docs[0].Metadata.Name, name)
+	}
+	if err := policy.ValidateIdentitySubjects(docs, identityConfig); err != nil {
+		return fmt.Errorf("%w: %v", ErrPolicyValidation, err)
 	}
 	// The body VERBATIM, so what an operator submitted is exactly what is
 	// stored.

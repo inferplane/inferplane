@@ -71,11 +71,12 @@ type AuthorityMeter struct {
 }
 
 type AuthorityRequest struct {
-	Protocol string                  `json:"protocol"`
-	Instance string                  `json:"instance"`
-	Requests []AuthorityGrantRequest `json:"requests,omitempty"`
-	Reports  []AuthorityReport       `json:"reports,omitempty"`
-	Meters   []AuthorityMeter        `json:"meters,omitempty"`
+	Protocol            string                  `json:"protocol"`
+	Instance            string                  `json:"instance"`
+	Requests            []AuthorityGrantRequest `json:"requests,omitempty"`
+	Reports             []AuthorityReport       `json:"reports,omitempty"`
+	Meters              []AuthorityMeter        `json:"meters,omitempty"`
+	IdentityFingerprint string                  `json:"identityFingerprint,omitempty"`
 }
 
 type AuthorityAck struct {
@@ -91,14 +92,15 @@ type AuthorityDenial struct {
 }
 
 type AuthorityResponse struct {
-	AuthorityID string                      `json:"authorityID,omitempty"`
-	Protocol    string                      `json:"protocol"`
-	ServerTime  time.Time                   `json:"serverTime"`
-	Generation  string                      `json:"generation"`
-	Policies    []v1alpha1.GovernancePolicy `json:"policies"`
-	Budgets     []AuthorityBudget           `json:"budgets"`
-	Grants      []AuthorityGrant            `json:"grants,omitempty"`
-	ReportAcks  []AuthorityAck              `json:"reportAcks,omitempty"`
-	MeterAcks   []AuthorityAck              `json:"meterAcks,omitempty"`
-	Denied      []AuthorityDenial           `json:"denied,omitempty"`
+	AuthorityID         string                      `json:"authorityID,omitempty"`
+	Protocol            string                      `json:"protocol"`
+	ServerTime          time.Time                   `json:"serverTime"`
+	Generation          string                      `json:"generation"`
+	Policies            []v1alpha1.GovernancePolicy `json:"policies"`
+	Budgets             []AuthorityBudget           `json:"budgets"`
+	Grants              []AuthorityGrant            `json:"grants,omitempty"`
+	ReportAcks          []AuthorityAck              `json:"reportAcks,omitempty"`
+	MeterAcks           []AuthorityAck              `json:"meterAcks,omitempty"`
+	Denied              []AuthorityDenial           `json:"denied,omitempty"`
+	IdentityFingerprint string                      `json:"identityFingerprint,omitempty"`
 }

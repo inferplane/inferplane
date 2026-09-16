@@ -50,6 +50,7 @@ func (s *Server) authoritySync(w http.ResponseWriter, r *http.Request, request p
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+	request.Authority.IdentityFingerprint = request.IdentityFingerprint
 	response, err := s.authority.Sync(ctx, request.Dataplane, *request.Authority)
 	if err != nil {
 		http.Error(w, `{"error":"durable budget authority unavailable"}`, http.StatusServiceUnavailable)
@@ -59,6 +60,12 @@ func (s *Server) authoritySync(w http.ResponseWriter, r *http.Request, request p
 		http.Error(w, `{"error":"invalid durable authority response"}`, http.StatusServiceUnavailable)
 		return
 	}
+	expectedIdentity := s.identityFingerprint()
+	if response.Authority.IdentityFingerprint != expectedIdentity {
+		writeJSONError(w, http.StatusServiceUnavailable, "authority identity declaration does not match")
+		return
+	}
+	response.IdentityFingerprint = expectedIdentity
 	s.mu.Lock()
 	s.dataplanes[request.Dataplane] = &dpInfo{
 		APIVersions: request.APIVersions, Generation: response.Generation,

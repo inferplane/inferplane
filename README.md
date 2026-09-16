@@ -105,10 +105,18 @@ permit admission; an outage cannot create or renew credit.
 | Node-local monetary authority (ADR-045) | Opt-in durable CP authority and private node journal | Global **GovernancePolicy money** accounts in Postgres; per-attempt local reservations. Keys, rate/token quota and standalone/key-local money remain local. | Global policy-money mechanism implemented; fleet recovery/load and person-identity qualification remain open. Alpha. |
 | Shared Postgres admission (ADR-046) | Opt-in Postgres key and governance stores; same authority database/schema | Shared key/team records and atomic RPM/TPM, token-quota and money reservations. Key lookup and admission synchronously access Postgres. | Requires qualified HA Postgres and gateway deployment; no disconnected admission guarantee. Alpha. |
 
-All three profiles still lack verified `(OIDC issuer, subject)` person identity
-and the six-role org/team authorization model. Shared key/team records are not a
-durable human identity. Existing user-subject attribution and limits use configured
-opaque owner/subject values. User rate/token-quota policy rules require ADR-046.
+All three profiles can opt into the implemented verified-identity registry through
+`key_store.identity`; it is **not enabled by default**. Required mode binds
+credentials to verified issuer/subject or server-derived service identity while
+preserving registered account references. Optional attribution retains legacy
+accounting. Shared records alone do not enable this protection. Six-role org/team
+authorization, user-pool contracts and deployment qualification remain open;
+user rate/token-quota policy rules still require ADR-046.
+
+See [verified identity](docs/verified-identity.md) before activation: matching CP
+declarations/required sync, trusted bindings for historical nonempty owners
+(including revoked keys), and safe handling of empty-owner credentials are
+mandatory. This is an opt-in mechanism, not an enterprise-ready checkmark.
 
 | Profile | Control-plane HTTP loss while its DB remains reachable | Authority/shared Postgres loss |
 |---|---|---|
@@ -214,8 +222,9 @@ Postgres transactions. Legacy CP allowances are not a durable escrow ledger.
 ## What it governs
 
 - **Per-user token attribution** — who spent what, per user/team/model, at
-  integer micro-USD precision; CLI-issued keys use the verified opaque subject
-  as owner. Verified issuer/subject person identity is not yet implemented.
+  integer micro-USD precision. Legacy mode retains owner attribution; opt-in
+  required identity uses immutable registered account references and digest-only
+  verified identity evidence. Historical bindings do not rewrite financial rows.
 - **Budget enforcement** — two-phase (pre-check before billing, settle after),
   team and per-key budgets/quotas, `block` or `warn`, with the profile-specific
   scope and outage limits above. Expired/exhausted hard authority never becomes
@@ -304,6 +313,7 @@ The project targets CNCF Sandbox.
   [ADR-031](docs/decisions/ADR-031-monorepo-control-plane-data-plane-split.md),
   the control-plane/data-plane split
 - [docs/shared-governance.md](docs/shared-governance.md) — shared keys, global rate/token quotas and migration
+- [docs/verified-identity.md](docs/verified-identity.md) — opt-in verified identity, trusted legacy bindings and issuance
 - [docs/durable-budgets.md](docs/durable-budgets.md) — global monetary budgets and control-plane failover
 - [docs/roadmap.md](docs/roadmap.md) — remaining gaps (mutable shared topology, fleet tooling, self-update, embeddings)
 - [CHANGELOG.md](CHANGELOG.md) · [GOVERNANCE.md](GOVERNANCE.md) · [MAINTAINERS.md](MAINTAINERS.md)

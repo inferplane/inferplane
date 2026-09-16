@@ -10,6 +10,7 @@ import (
 	"time"
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
+	"github.com/inferplane/inferplane/internal/identity"
 )
 
 // LocalWatchInterval is the mtime-poll cadence for locally loaded policy
@@ -90,6 +91,7 @@ type Store struct {
 	// already takes toward checkEnforceable.
 	routedAndPriced   func(model string) error
 	sharedEnforcement bool
+	identityConfig    *identity.Config
 }
 
 // SetSharedEnforcement is a startup-only capability declaration. It must only
@@ -144,6 +146,28 @@ func NewEmptyStore() *Store {
 // report — refused loudly upstream, never silently dropped (the version-skew
 // stance). Atomic swap: readers see either the old set or the new one.
 func (s *Store) ApplyWire(docs []v1alpha1.GovernancePolicy) []Rejection {
+	if err := ValidateIdentitySubjects(docs, s.identityConfig); err != nil {
+		return []Rejection{{Reason: err.Error()}}
+	}
+	if s.identityConfig != nil && s.identityConfig.Required {
+		// Required identity treats a distributed set as one contract. Keep
+		// the last valid snapshot (including its budgets) on any rejection.
+		seen := map[string]bool{}
+		for i := range docs {
+			name := docs[i].Metadata.Name
+			if name == "" || seen[name] {
+				return []Rejection{{Policy: name, Reason: "metadata.name missing or duplicate"}}
+			}
+			seen[name] = true
+			p, err := FromV1Alpha1(&docs[i])
+			if err == nil {
+				err = checkEnforceable(p, s.routedAndPriced, s.sharedEnforcement)
+			}
+			if err != nil {
+				return []Rejection{{Policy: name, Reason: err.Error()}}
+			}
+		}
+	}
 	var accepted []*Policy
 	var rejected []Rejection
 	seen := make(map[string]bool, len(docs))
@@ -226,6 +250,9 @@ func (s *Store) ApplyWire(docs []v1alpha1.GovernancePolicy) []Rejection {
 	if len(rejected) == 0 && len(docs) > 0 {
 		delete(pending, "")
 	}
+	if s.identityConfig != nil && s.identityConfig.Required && len(rejected) > 0 {
+		return rejected
+	}
 	s.snap.Store(&snapshot{
 		generation:      GenerationOf(docs),
 		rejectedRouting: pending,
@@ -251,6 +278,9 @@ func (s *Store) Reload() error {
 		return err
 	}
 	for _, p := range policies {
+		if err := validateIdentitySubject(p.Subject.User, s.identityConfig); err != nil {
+			return err
+		}
 		if err := checkEnforceable(p, s.routedAndPriced, s.sharedEnforcement); err != nil {
 			return err
 		}

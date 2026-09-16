@@ -57,7 +57,7 @@ func ReserveBudget(req *http.Request, g *governance.Governor, p keystore.Princip
 	if g.HasSharedAuthority() {
 		return reserveShared(req, g, p, target, state, model.ContextWindow, bound)
 	}
-	permit, err := g.ReserveBudget(req.Context(), governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.Owner}, bound)
+	permit, err := g.ReserveBudget(req.Context(), governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.AccountSubject()}, bound)
 	if err != nil {
 		return req, nil, err
 	}

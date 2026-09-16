@@ -13,6 +13,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/inferplane/inferplane/internal/identity"
 )
 
 // KeyOptions are the optional per-key governance fields (spec §8 D2). Zero
@@ -27,6 +29,7 @@ type KeyOptions struct {
 	ExpiresAt             *time.Time        // nil = never; enforced in Resolve
 	Owner                 string            // opaque identifier, optional — never use as a metric label (unbounded cardinality; CLAUDE.md forbids raw-input metric labels)
 	Metadata              map[string]string // optional key/value tags — same caution: never use as a metric label
+	Identity              *identity.ID      `json:"identity,omitempty"`
 }
 
 // Principal is the resolved identity behind a virtual key (M3: service-account
@@ -42,6 +45,23 @@ type Principal struct {
 	SharedRevision     string      `json:"-"`
 	TeamSnapshot       *TeamRecord `json:"-"`
 	TeamSnapshotLoaded bool        `json:"-"`
+	// Identity state is captured with the authenticated key. Shared admission
+	// includes it in the revision; neither field is part of a public key view.
+	IdentityFingerprint string `json:"-"`
+	IdentityRequired    bool   `json:"-"`
+}
+
+// AccountSubject retains the exact accounting reference. Required-mode stores
+// validate Owner against the immutable registry before returning a Principal.
+// Dormant typed attribution never changes a legacy accounting subject.
+func (p Principal) AccountSubject() string { return p.Owner }
+
+// IdentityStore is optional so existing legacy Store implementations remain valid.
+type IdentityStore interface {
+	ConfigureIdentity(context.Context, identity.Config) error
+	IdentityConfig(context.Context) (identity.Config, error)
+	ResolveIdentity(context.Context, identity.ID) (identity.Binding, bool, error)
+	IdentityByRef(context.Context, string) (identity.Binding, bool, error)
 }
 
 // ErrStoreUnavailable deliberately contains no driver error, DSN, or row data.
@@ -52,6 +72,10 @@ var ErrStoreUnavailable = errors.New("keystore: store unavailable")
 // or imported row conflicts with stored state. Authorization must be renewed;
 // seed/import conflicts require explicit reconciliation.
 var ErrSnapshotChanged = errors.New("keystore: snapshot changed")
+
+// ErrIdentityNeedsMapping means existing accounting attribution has no explicit
+// trusted binding. No owner, issuer or subject is included in the error.
+var ErrIdentityNeedsMapping = errors.New("keystore: identity mapping required for existing credentials")
 
 // SeedKey declares a bootstrap identity. Only its hash is persisted.
 type SeedKey struct {

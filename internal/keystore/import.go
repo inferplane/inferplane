@@ -44,12 +44,26 @@ func (s *PostgresStore) ImportSQLite(ctx context.Context, path string) (ImportRe
 		return empty, postgresError("begin import source", err)
 	}
 	defer source.Rollback()
+	identities, err := readSQLiteIdentity(ctx, source)
+	if err != nil {
+		return empty, err
+	}
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return empty, postgresError("begin import", err)
 	}
 	defer rollbackPostgres(tx)
+	if err := lockIdentityMode(ctx, tx); err != nil {
+		return empty, err
+	}
 	if err := lockPostgresIdentity(ctx, tx); err != nil {
+		return empty, err
+	}
+	if err := lockIdentityFinancialTables(ctx, tx); err != nil {
+		return empty, err
+	}
+	itx := identityTx{ctx: ctx, pg: tx}
+	if err := itx.stageIdentityImport(identities); err != nil {
 		return empty, err
 	}
 	teams, err := importSQLiteTeams(ctx, source, tx)
@@ -58,6 +72,9 @@ func (s *PostgresStore) ImportSQLite(ctx context.Context, path string) (ImportRe
 	}
 	keys, err := importSQLiteKeys(ctx, source, tx)
 	if err != nil {
+		return empty, err
+	}
+	if err := itx.finishIdentityImport(identities); err != nil {
 		return empty, err
 	}
 	if err := source.Commit(); err != nil {
@@ -124,6 +141,16 @@ func importSQLiteKeys(ctx context.Context, source *sql.Tx, tx pgx.Tx) (int, erro
 		var k postgresKey
 		if err := rows.Scan(k.destinations()...); err != nil {
 			return 0, postgresError("scan import key", err)
+		}
+		id, err := identityFromFields(k.IdentityOrganization, k.IdentityKind, k.IdentityIssuer, k.IdentitySubject)
+		if err != nil {
+			return 0, err
+		}
+		if id != nil {
+			mode, err := (identityTx{ctx: ctx, pg: tx}).mode()
+			if err != nil || id.Organization != mode.Organization {
+				return 0, ErrSnapshotChanged
+			}
 		}
 		inserted, err := insertPostgresKey(ctx, tx, k, false)
 		if err != nil {

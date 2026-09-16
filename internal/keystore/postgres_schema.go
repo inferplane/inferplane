@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS keys (
  budget_usd_micros BIGINT NOT NULL DEFAULT 0,
  tpm BIGINT NOT NULL DEFAULT 0, rpm BIGINT NOT NULL DEFAULT 0,
  expires_at TEXT NOT NULL DEFAULT '', owner TEXT NOT NULL DEFAULT '',
- metadata TEXT NOT NULL DEFAULT '', budget_usd_micros_per_day BIGINT NOT NULL DEFAULT 0
+ metadata TEXT NOT NULL DEFAULT '', budget_usd_micros_per_day BIGINT NOT NULL DEFAULT 0,
+ identity_organization TEXT NOT NULL DEFAULT '', identity_kind TEXT NOT NULL DEFAULT '',
+ identity_issuer TEXT NOT NULL DEFAULT '', identity_subject TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_keys_hash ON keys(key_hash) WHERE revoked=0;
 CREATE TABLE IF NOT EXISTS teams (
@@ -42,6 +44,7 @@ var postgresKeyColumns = []postgresColumn{
 	{name: "created_at", required: true}, {name: "revoked", numeric: true, required: true},
 	{name: "budget_usd_micros", numeric: true}, {name: "tpm", numeric: true}, {name: "rpm", numeric: true},
 	{name: "expires_at"}, {name: "owner"}, {name: "metadata"}, {name: "budget_usd_micros_per_day", numeric: true},
+	{name: "identity_organization"}, {name: "identity_kind"}, {name: "identity_issuer"}, {name: "identity_subject"},
 }
 
 var postgresTeamColumns = []postgresColumn{
@@ -60,6 +63,9 @@ func (s *PostgresStore) initialize(ctx context.Context) error {
 		return postgresError("begin schema", err)
 	}
 	defer rollbackPostgres(tx)
+	if err := lockIdentityMode(ctx, tx); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, postgresSchemaLock); err != nil {
 		return postgresError("lock schema", err)
 	}
@@ -98,6 +104,9 @@ WHERE table_schema=current_schema() AND table_name=$1 AND column_name=$2`, table
 				}
 			}
 		}
+	}
+	if _, err := tx.Exec(ctx, identitySchema+postgresIdentityGuards); err != nil {
+		return identityStorageError(err)
 	}
 	return postgresError("commit schema", tx.Commit(ctx))
 }

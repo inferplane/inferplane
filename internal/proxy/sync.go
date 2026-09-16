@@ -19,6 +19,7 @@ import (
 	"time"
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
+	"github.com/inferplane/inferplane/internal/identity"
 	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/tier"
 )
@@ -135,6 +136,8 @@ func (t *LeaseTable) set(grants []policy.LeaseGrant) {
 
 // Syncer runs the heartbeat loop against inferplaned.
 type Syncer struct {
+	IdentityConfig   *identity.Config
+	identityInvalid  atomic.Bool
 	Authority        AuthorityClient
 	authorityInvalid atomic.Bool
 	URL              string // control plane base URL
@@ -174,6 +177,9 @@ type Syncer struct {
 // as expired, the way hard-cap leases already expire). maxAge <= 0 means
 // policies never expire. The reason is operator-facing and secret-free.
 func (s *Syncer) GovernanceReady(maxAge time.Duration) (bool, string) {
+	if s.identityInvalid.Load() {
+		return false, "identity synchronization is missing or incompatible"
+	}
 	if s.authorityInvalid.Load() {
 		return false, "durable budget authority response is invalid"
 	}
@@ -289,12 +295,19 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 		Generation:  s.generation,
 		Rejections:  s.pending,
 	}
+	if s.IdentityConfig != nil && s.IdentityConfig.Required {
+		req.IdentityFingerprint = s.IdentityConfig.Fingerprint()
+		if s.identityInvalid.Load() {
+			req.Generation = "" // A rejection needs a complete verified snapshot.
+		}
+	}
 	if s.Authority != nil {
 		request, err := s.Authority.Request(ctx)
 		if err != nil {
 			return 0, fmt.Errorf("control plane sync: authority request: %w", err)
 		}
 		req.Authority = &request
+		req.Authority.IdentityFingerprint = req.IdentityFingerprint
 	}
 	// Cumulative spend per lease-managed budget rule of the APPLIED set.
 	//
@@ -350,6 +363,10 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 	}
 	defer hresp.Body.Close()
 	if hresp.StatusCode != http.StatusOK {
+		if s.IdentityConfig != nil && s.IdentityConfig.Required &&
+			(hresp.StatusCode == 401 || hresp.StatusCode == 403 || hresp.StatusCode == 409 || hresp.StatusCode == 426) {
+			s.identityInvalid.Store(true)
+		}
 		if s.Authority != nil && (hresp.StatusCode == 401 || hresp.StatusCode == 403 || hresp.StatusCode == 409 || hresp.StatusCode == 426) {
 			s.authorityInvalid.Store(true)
 		}
@@ -358,7 +375,45 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 	}
 	var resp policy.SyncResponse
 	if err := json.NewDecoder(io.LimitReader(hresp.Body, 8<<20)).Decode(&resp); err != nil {
+		if s.IdentityConfig != nil && s.IdentityConfig.Required {
+			s.identityInvalid.Store(true)
+		}
 		return 0, fmt.Errorf("control plane sync: decode: %w", err)
+	}
+	if resp.IdentityFingerprint != req.IdentityFingerprint {
+		s.identityInvalid.Store(true)
+		return 0, fmt.Errorf("control plane sync: identity declaration does not match")
+	}
+	if s.Authority == nil && resp.Authority != nil {
+		s.identityInvalid.Store(true)
+		return 0, fmt.Errorf("control plane sync: unsolicited budget authority envelope")
+	}
+	fullIdentityPolicy := resp.Policies != nil || resp.IdentityPoliciesComplete
+	if resp.IdentityPoliciesComplete && resp.Policies == nil {
+		resp.Policies = []v1alpha1.GovernancePolicy{}
+	}
+	identityPolicies := resp.Policies
+	if resp.Authority != nil {
+		identityPolicies = resp.Authority.Policies
+		fullIdentityPolicy = identityPolicies != nil
+		if resp.Authority.IdentityFingerprint != req.IdentityFingerprint {
+			s.identityInvalid.Store(true)
+			return 0, fmt.Errorf("control plane sync: authority identity does not match")
+		}
+	}
+	if s.IdentityConfig != nil && s.IdentityConfig.Required {
+		if !fullIdentityPolicy && (s.identityInvalid.Load() || s.generation == "" || resp.Generation != s.generation) {
+			s.identityInvalid.Store(true)
+			return 0, fmt.Errorf("control plane sync: complete identity policy snapshot required")
+		}
+		if fullIdentityPolicy && policy.GenerationOf(identityPolicies) != resp.Generation {
+			s.identityInvalid.Store(true)
+			return 0, fmt.Errorf("control plane sync: identity policy generation does not match content")
+		}
+	}
+	if err := policy.ValidateIdentitySubjects(identityPolicies, s.IdentityConfig); err != nil {
+		s.identityInvalid.Store(true)
+		return 0, fmt.Errorf("control plane sync: identity policy rejected: %w", err)
 	}
 	if s.Authority != nil {
 		if err := policy.ValidateAuthorityBundle(resp.Authority); err != nil || resp.Authority.Generation != resp.Generation || len(resp.Leases) != 0 {
@@ -379,13 +434,20 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 	// them below when a fresh document set arrives.
 	s.pending = nil
 	if resp.Policies != nil {
+		if s.IdentityConfig != nil && s.IdentityConfig.Required {
+			s.identityInvalid.Store(true)
+		}
 		rejected := s.Store.ApplyWire(resp.Policies)
 		s.pending = rejected
-		s.generation = resp.Generation
 		if s.Authority != nil && len(rejected) > 0 {
 			s.authorityInvalid.Store(true)
 			return 0, fmt.Errorf("control plane sync: durable policy rejected")
 		}
+		if s.IdentityConfig != nil && s.IdentityConfig.Required && len(rejected) > 0 {
+			s.identityInvalid.Store(true)
+			return 0, fmt.Errorf("control plane sync: required identity policy rejected")
+		}
+		s.generation = resp.Generation
 	}
 	if s.Authority != nil {
 		s.authorityInvalid.Store(false)
@@ -403,6 +465,7 @@ func (s *Syncer) syncOnce(ctx context.Context) (time.Duration, error) {
 		clock = s.now
 	}
 	s.lastSuccess.Store(clock().UnixNano())
+	s.identityInvalid.Store(false)
 
 	next := time.Duration(resp.SyncIntervalSeconds) * time.Second
 	if next < time.Second {
