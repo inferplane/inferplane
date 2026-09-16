@@ -4,6 +4,14 @@
 
 **Goal:** Give every credential a durable typed identity, enforce fixed role/capability grants with organization and team scope on every management endpoint, and emit reproducible mutation audit evidence.
 
+**Execution update (2026-09-16):** This identity model remains input to the
+[current hardening program](2026-09-16-enterprise-hardening-program.md), but this
+plan predates ADR-045/046/047. Rebase its file inventory and migration steps for
+Postgres keys, Responses, existing authority accounts, grants and pending permits
+before executing. A SQLite-only migration or changing `Owner` to a new identity
+without carrying historical liabilities can reset a user's effective budget.
+The program's B/C gates govern that cutover; do not recreate the shipped ledger.
+
 **Architecture:** Add two leaf packages: `internal/identity` owns comparable human/service identities, while `internal/authz` owns fixed roles, capabilities, scopes, bindings, and authorization decisions. OIDC and virtual-key code resolve into those types; management HTTP layers authenticate first and then authorize through one route matrix. `mayu` uses a local SQLite binding store and its existing audit writer; `inferplaned` separates machine and management credentials, uses a Postgres binding store when mutable authorization is enabled, and gains a management audit writer.
 
 **Tech Stack:** Go 1.25, `coreos/go-oidc`, `modernc.org/sqlite`, `pgx/v5`, `net/http` Go 1.22 patterns, existing `internal/audit` hash chain, CRD-style `api/v1alpha1` policy schema.

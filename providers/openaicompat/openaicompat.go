@@ -31,14 +31,17 @@ type provider struct {
 }
 
 func factory(cfg providers.Config) (providers.Provider, error) {
-	client := cfg.HTTPClient
-	if client == nil {
-		client = &http.Client{}
+	client := http.Client{}
+	if cfg.HTTPClient != nil {
+		client = *cfg.HTTPClient
 	}
+	// Preserve the caller's transport/settings without letting a redirect
+	// move a credential-bearing request beyond the selected destination.
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	// Accept the same root or /v1 base form operators use for Responses and
 	// OpenAI SDK clients; both generation and health append their own /v1 path.
 	baseURL := strings.TrimSuffix(strings.TrimRight(cfg.BaseURL, "/"), "/v1")
-	return &provider{baseURL: baseURL, apiKey: cfg.APIKey, client: client}, nil
+	return &provider{baseURL: baseURL, apiKey: cfg.APIKey, client: &client}, nil
 }
 
 func (p *provider) Name() string { return "openai_compatible" }
@@ -261,6 +264,16 @@ func noUsageError() *providers.UpstreamError {
 	return &providers.UpstreamError{StatusCode: 502, Body: body}
 }
 
+// Refusing to follow is not enough: ingress can relay upstream headers and
+// bodies, so replace redirects before the client can replay its own request.
+func redirectError() *providers.UpstreamError {
+	return &providers.UpstreamError{
+		StatusCode: http.StatusBadGateway,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       []byte(`{"error":{"type":"upstream_error","message":"upstream redirect refused"}}`),
+	}
+}
+
 func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {
 	u, err := p.buildUpstream(ctx, req, false)
 	if err != nil {
@@ -271,6 +284,9 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 		return nil, fmt.Errorf("openaicompat: upstream call: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode/100 == 3 {
+		return nil, redirectError()
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("openaicompat: read upstream: %w", err)
@@ -319,6 +335,10 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 	resp, err := p.client.Do(u)
 	if err != nil {
 		return nil, fmt.Errorf("openaicompat: upstream stream: %w", err)
+	}
+	if resp.StatusCode/100 == 3 {
+		resp.Body.Close()
+		return nil, redirectError()
 	}
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(resp.Body)
