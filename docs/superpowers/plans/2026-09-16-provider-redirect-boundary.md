@@ -26,7 +26,8 @@ grant authority to a new endpoint.
 - Tests use only loopback fake servers and synthetic credentials.
 - No prompt or upstream credential may reach a redirect target.
 - Preserve normal passthrough, streaming, count, health and usage contracts.
-- Provider changes remain under `providers/`; no `internal/*` implementation edit.
+- Runtime changes remain under `providers/`; assembled HTTP acceptance lives
+  under `cmd/mayu/`. No `internal/*` implementation edit.
 - Ingress count APIs still return 200 under their existing local-fallback contract.
 - Run required checks and retain DCO/latest-HEAD review requirements.
 
@@ -47,6 +48,7 @@ a live endpoint. Other redirect codes and operations still need the tests below.
 | `providers/testing/redirecttest/relay_test.go` (new) | Reject client-relayable responses, sensitive headers/bodies and read failures |
 | `providers/anthropic/anthropic_test.go` | Caller-owned client preservation |
 | `providers/openaicompat/openaicompat_test.go` | Caller-owned client preservation |
+| `cmd/mayu/provider_redirect_test.go` (new) | Real HTTP count endpoint returns 200 after upstream redirects |
 
 ## Task 1: Add the failing destination matrix
 
@@ -244,3 +246,8 @@ The relay matrix adds 160 cases over all selected 3xx classes and failing-body
 reads. Client preservation uses a nonnil cookie jar. Full integration and remote
 PR checks determine release status; the earlier `6b5cf9c` reproduction remains
 historical evidence.
+
+The assembled count regression adds ten real HTTP cases (five redirect codes,
+API-key/bearer authentication). The client retains normal redirect following;
+the test requires zero destination calls and a local positive `input_tokens`
+estimate with HTTP 200 and no leaked redirect headers/body.

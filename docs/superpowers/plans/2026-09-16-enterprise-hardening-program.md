@@ -359,7 +359,7 @@ disposable instance; individual tests isolate themselves with random schemas.
 export KEYSTORE_TEST_POSTGRES_DSN="$INFERPLANE_TEST_PG_DSN"
 CGO_ENABLED=0 go build -trimpath -o bin/mayu ./cmd/mayu
 CGO_ENABLED=0 go build -trimpath -o bin/inferplaned ./cmd/inferplaned
-go test ./... -race -json > /tmp/inferplane-test-results.json
+go test ./... -race -count=1 -json > /tmp/inferplane-test-results.json
 go vet ./...
 gofmt -l .
 bash tests/run-all.sh
@@ -385,29 +385,11 @@ contract.
 After the `go test -json` command, enforce the database gate with:
 
 ```bash
-python3 - <<'PY'
-import json
-from pathlib import Path
-
-required = {
-    "TestConcurrentReplicasReserveAtMostLimit",
-    "TestExpiryNeverRefundsOrExtendsReplay",
-    "TestTwoJournalsTwoReplicasAndJournalRestart",
-    "TestSharedPolicyMoneyCompetesWithLocalGrants",
-    "TestSharedPolicyRateUserScopesAndStableIdentity",
-    "TestSharedOriginalCalendarWindowsFinishAndCancel",
-    "TestPostgresResolveNeverTearsKeyAndTeamSnapshot",
-}
-outcomes = {}
-for line in Path("/tmp/inferplane-test-results.json").read_text().splitlines():
-    event = json.loads(line)
-    if event.get("Test") in required and event["Action"] in {"pass", "fail", "skip"}:
-        outcomes[event["Test"]] = event["Action"]
-bad = sorted(name for name in required if outcomes.get(name) != "pass")
-if bad:
-    raise SystemExit("Required DB tests missing, failed or skipped: " + ", ".join(bad))
-PY
+python3 -B tests/ci/require_db_tests.py < /tmp/inferplane-test-results.json
 ```
+
+Use this same verifier locally and in CI. It matches exact package/test identities,
+requires execution and package completion, and rejects skipped descendants.
 
 For each PR: keep DCO sign-off, run relevant tests and required checks, obtain AI
 review of the latest HEAD, fix verified Critical/Major issues, then merge only
