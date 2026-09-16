@@ -39,7 +39,12 @@ func openGatewayKeys(ctx context.Context, cfg config.KeyStoreConfig) (gatewayKey
 	if cfg.Identity != nil {
 		declaration = *cfg.Identity
 	}
-	if err := store.(keystore.IdentityStore).ConfigureIdentity(ctx, declaration); err != nil {
+	identities, ok := store.(keystore.IdentityStore)
+	if !ok {
+		_ = store.Close()
+		return nil, fmt.Errorf("key backend does not support identity configuration")
+	}
+	if err := identities.ConfigureIdentity(ctx, declaration); err != nil {
 		_ = store.Close()
 		return nil, fmt.Errorf("key identity configuration: %w", err)
 	}

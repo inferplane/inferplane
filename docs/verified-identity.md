@@ -49,6 +49,14 @@ generation; count APIs remain local/200. Fingerprint equality is an
 interoperability check, not machine authentication or protection from a compromised
 node.
 
+Required mode deliberately gates new generation while publishing a complete
+policy/authority snapshot. Requests arriving during that short update can receive
+503; counts stay local/200 and already admitted attempts retain their accounting.
+This also applies when a durable-authority heartbeat carries a complete snapshot
+at the same generation. It is a fail-closed publication boundary, not an
+uninterrupted-admission guarantee; clients should retry retryable failures.
+Latency and load effects still require deployment qualification.
+
 ## Preserve existing accounts before requiring identity
 
 There is no automatic migration/merge command. Configuration installs registry

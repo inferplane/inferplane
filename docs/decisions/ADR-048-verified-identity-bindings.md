@@ -62,6 +62,11 @@ where the legacy `policies,omitempty` field would otherwise be ambiguous.
 
 Count endpoints remain local/200 during generation refusal. Identity declarations
 and backend changes require restart; there is no mode downgrade through hot reload.
+Publishing a full required-policy snapshot briefly gates new generation with 503,
+including same-generation full durable-authority heartbeats. Existing admitted
+attempts keep their original accounting. This conservative publication boundary
+must remain explicit in retry/latency qualification; it is not zero-downtime
+admission during every update.
 
 ## Evidence and scope
 

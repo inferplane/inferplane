@@ -82,6 +82,10 @@ type identityTx struct {
 	pg  pgx.Tx
 }
 
+// Internal statements use PostgreSQL $N numbering. The modernc SQLite adapter
+// maps that to SQLite's indexed ?NNN parameters, preserving repeated/out-of-order
+// references; replacing them with bare ? would bind different arguments.
+// Only fixed internal SQL reaches this adapter; values remain bound parameters.
 var identityPlaceholder = regexp.MustCompile(`\$(\d+)`)
 
 func (t identityTx) exec(query string, args ...any) error {
