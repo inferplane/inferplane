@@ -90,13 +90,16 @@ CP protection before first policy delivery. [Operator guide](policy-routing.md).
 
 ### P0 — blocks the enterprise-ready claim
 
-**Selected destinations are not yet uniformly protected from HTTP redirects.**
-A local 307 reproduction at `6b5cf9c` showed the Anthropic and Chat Completions
-providers follow redirects with the request body and a synthetic gateway
-credential. Native Responses already refuses redirects. Close this concrete
-transport difference before claiming every egress remains on its approved
-destination; see the [bounded fix plan](superpowers/plans/2026-09-16-provider-redirect-boundary.md).
-This is a loopback reproduction, not evidence of a live compromise.
+**The reproduced provider redirect escape is closed.** The Anthropic and Chat
+Completions factories now disable redirects on copies of their HTTP clients.
+Their generation paths and Anthropic CountTokens replace 3xx responses with static JSON 502 errors,
+so a client cannot receive the upstream Location/body and replay its original
+request. Native Responses already refuses redirects and strips Location.
+The [bounded fix plan](superpowers/plans/2026-09-16-provider-redirect-boundary.md)
+records the loopback reproduction and regression matrix; no live compromise is
+asserted. This closes the identified transport path, not every deployment's
+network/residency qualification. Configure the final upstream endpoint directly;
+redirecting endpoints now fail instead of moving the request.
 
 **Guardrails on the Mantle egress path: refused, not applied.**
 Original bug: `guardrailFor` was called on the Converse and InvokeModel paths
@@ -194,10 +197,11 @@ compliance. Tests do not establish universal PII detection.
   contain.
 - **Alpha qualification posture** — `.github/workflows/ci.yml` runs static
   builds, race/vet/format, CRD, harness, Postgres integration and vulnerability
-  checks. Its DSN enables authority and other integration suites, but keystore
-  tests read the distinct `KEYSTORE_TEST_POSTGRES_DSN`, which CI currently omits;
-  18 keystore integration tests skip under that environment. Close this variable
-  mismatch and assert required DB tests execute. The shared Helm profile has separate persistent audit storage,
+  checks. CI now supplies `KEYSTORE_TEST_POSTGRES_DSN` as well as the authority
+  DSN and checks the Go JSON results for seven required database tests and
+  successful package completion. Missing, skipped or failed required coverage
+  fails the job; the former 18-test keystore skip is no longer accepted as green.
+  The shared Helm profile has separate persistent audit storage,
   anti-affinity and a disruption budget. Production sizing, network controls,
   DB failover/load evidence and signed release/deployment qualification remain
   operational work; default resource requests still need operator configuration.

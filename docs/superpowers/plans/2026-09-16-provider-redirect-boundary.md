@@ -2,7 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > `superpowers:subagent-driven-development` or `superpowers:executing-plans`.
-> Steps use checkbox syntax. This document plans a fix; it does not implement it.
+> Steps use checkbox syntax. Implementation is recorded below; repository-wide
+> and latest-HEAD PR gates remain mandatory.
 
 **Goal:** Prevent an upstream HTTP redirect from bypassing the destination chosen
 by routing in the Anthropic and Chat Completions providers.
@@ -10,7 +11,9 @@ by routing in the Anthropic and Chat Completions providers.
 **Architecture:** Copy the configured HTTP client by value and override
 `CheckRedirect`, following the existing native Responses provider. Keep caller
 transport, timeout and cookie jar intact; never mutate the caller-owned client.
-No shared core change or new runtime abstraction is needed.
+Also replace generation/count 3xx responses with static JSON 502 errors so ingress
+cannot relay Location or the redirect body to a client. No shared core change or
+new runtime abstraction is needed.
 
 **Tech Stack:** Go 1.25, `net/http`, `httptest`, existing provider registry.
 
@@ -41,6 +44,7 @@ a live endpoint. Other redirect codes and operations still need the tests below.
 | `providers/anthropic/anthropic.go` | Apply the non-following client policy in `factory` |
 | `providers/openaicompat/openaicompat.go` | Apply the same policy in `factory` |
 | `providers/testing/redirecttest/redirect_test.go` (new) | Public-registry cross-provider regression matrix |
+| `providers/testing/redirecttest/relay_test.go` (new) | Reject client-relayable responses, sensitive headers/bodies and read failures |
 | `providers/anthropic/anthropic_test.go` | Caller-owned client preservation |
 | `providers/openaicompat/openaicompat_test.go` | Caller-owned client preservation |
 
@@ -170,6 +174,13 @@ client.CheckRedirect = func(*http.Request, []*http.Request) error {
 
 - [ ] Set the returned provider's `client` field to `&client`. Keep existing
   base URL normalization, API key and Anthropic bearer selection unchanged.
+- [ ] Refuse every received 3xx before reading or forwarding its body in
+  Complete/Stream and Anthropic CountTokens. Close that body exactly once;
+  return the package-local `redirectError()` with status 502, static JSON and
+  only a JSON Content-Type header. Strip Location, Refresh, cookies and raw
+  redirect/read-error text. Health probes already return sanitized status-only
+  failures. `ErrUseLastResponse` alone is insufficient because ingress header
+  passthrough could otherwise redirect the original client request.
 - [ ] In each provider's existing test package add a factory test that passes an
   `http.Client` with a transport, timeout and permissive redirect callback.
   Assert `p.(*provider).client != original`, equal Transport/Timeout/Jar,
@@ -222,5 +233,14 @@ git commit -s -m "fix(providers): refuse redirects beyond selected destinations"
 ```
 
 - [ ] Follow latest-HEAD AI review and required CI through merge under the
-  standing PR workflow. Do not describe this documentation-only plan as a
-  deployed fix.
+  standing PR workflow. A merged fix still requires a separate deployment to
+  change an already-running gateway.
+
+## Implementation record
+
+The provider changes and both regression matrices are now in this branch. The
+destination matrix covers 130 combinations, including Anthropic bearer mode.
+The relay matrix adds 160 cases over all selected 3xx classes and failing-body
+reads. Client preservation uses a nonnil cookie jar. Full integration and remote
+PR checks determine release status; the earlier `6b5cf9c` reproduction remains
+historical evidence.

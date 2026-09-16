@@ -69,12 +69,21 @@ jobs:
           go build -trimpath -o /tmp/mayu ./cmd/mayu
           go build -trimpath -o /tmp/inferplaned ./cmd/inferplaned
 
+      - name: DB sentinel gate tests
+        run: python3 -B -m unittest discover -s tests/ci -p 'test_*.py' -v
+
       # -race needs cgo; the static-binary guarantee is proven by the build step
       # above, which runs with CGO_ENABLED=0.
       - name: go test -race
-        run: CGO_ENABLED=1 go test ./... -race -timeout 15m 2>&1 | tee /tmp/test.log
-      # Redirect-then-grep rather than piping to tail: a truncated pipe can hide
-      # an OOM abort behind a passing-looking summary.
+        shell: bash
+        run: |
+          set -euo pipefail
+          export KEYSTORE_TEST_POSTGRES_DSN="${INFERPLANE_TEST_PG_DSN:?disposable Postgres DSN is required}"
+          ci_test_results="$RUNNER_TEMP/go-test-results.jsonl"
+          CGO_ENABLED=1 go test ./... -race -count=1 -json -timeout 15m | tee "$ci_test_results"
+          python3 -B tests/ci/require_db_tests.py < "$ci_test_results"
+      # Keep stderr in the job log and stdout as JSON. Pipefail preserves Go/tee
+      # failures; the sentinel gate also rejects missing or skipped DB coverage.
 
       - name: Pricing coverage (ADR-030 guard)
         env:

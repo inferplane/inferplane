@@ -6,13 +6,41 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inferplane/inferplane/pkg/schema"
 	"github.com/inferplane/inferplane/providers"
 )
+
+func TestFactoryCopiesClientAndDisablesRedirects(t *testing.T) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := &http.Client{
+		Transport:     http.DefaultTransport,
+		Timeout:       time.Second,
+		Jar:           jar,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return nil },
+	}
+	p, err := factory(providers.Config{BaseURL: "http://127.0.0.1", HTTPClient: original})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual := p.(*provider).client
+	if actual == original || actual.Transport != original.Transport ||
+		actual.Timeout != original.Timeout || actual.Jar != original.Jar {
+		t.Fatal("caller-owned client or settings changed")
+	}
+	if original.CheckRedirect(nil, nil) != nil || actual.CheckRedirect == nil ||
+		actual.CheckRedirect(nil, nil) != http.ErrUseLastResponse {
+		t.Fatal("redirect policy was not isolated")
+	}
+}
 
 func TestCompleteForwardsOpenAIVerbatimWhenIngressOpenAI(t *testing.T) {
 	var gotBody []byte

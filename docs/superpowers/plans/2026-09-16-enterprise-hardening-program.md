@@ -7,6 +7,12 @@
 **Reviewed:** 2026-09-16 against `main` at
 `6b5cf9c0518b896d2355fa805e9826eea3eeccc5`.
 
+**Implementation update:** Work package A's two reproduced defects have fixes in
+this branch: provider redirect refusal (including client relay protection) and
+CI database-test activation/required-result validation. Sections 1 and 7 retain
+the original baseline evidence. The identity, management and operating-contract
+milestones remain open; a source change does not attest a deployed fleet.
+
 **Goal:** Close the remaining identity, management-trust and operational evidence
 gaps without rebuilding the monetary authority, shared admission or coding-client
 support already merged.

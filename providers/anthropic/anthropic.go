@@ -32,16 +32,29 @@ func factory(cfg providers.Config) (providers.Provider, error) {
 	if base == "" {
 		base = "https://api.anthropic.com"
 	}
-	client := cfg.HTTPClient
-	if client == nil {
-		client = &http.Client{}
+	client := http.Client{}
+	if cfg.HTTPClient != nil {
+		client = *cfg.HTTPClient
 	}
-	return &provider{baseURL: base, apiKey: cfg.APIKey, bearer: cfg.Settings["auth_header"] == "bearer", client: client}, nil
+	// Preserve the caller's transport/settings without letting a redirect
+	// move a credential-bearing request beyond the selected destination.
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &provider{baseURL: base, apiKey: cfg.APIKey, bearer: cfg.Settings["auth_header"] == "bearer", client: &client}, nil
 }
 
 func (p *provider) Name() string { return "anthropic" }
 
 func (p *provider) Models() []schema.ModelInfo { return nil } // M2: models come from config
+
+// A redirect must not escape through ingress header/body passthrough and make
+// the client replay its original request outside the selected destination.
+func redirectError() *providers.UpstreamError {
+	return &providers.UpstreamError{
+		StatusCode: http.StatusBadGateway,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       []byte(`{"type":"error","error":{"type":"api_error","message":"upstream redirect refused"}}`),
+	}
+}
 
 func (p *provider) buildUpstream(ctx context.Context, path string, req *providers.ProxyRequest) (*http.Request, error) {
 	body, err := rewriteTopLevelModel(req.RawBody, req.Upstream)
@@ -115,6 +128,9 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 		return nil, fmt.Errorf("anthropic: upstream call: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode/100 == 3 {
+		return nil, redirectError()
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: read upstream: %w", err)
@@ -138,6 +154,10 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 	resp, err := p.client.Do(u)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: upstream stream: %w", err)
+	}
+	if resp.StatusCode/100 == 3 {
+		resp.Body.Close()
+		return nil, redirectError()
 	}
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(resp.Body)
@@ -165,6 +185,9 @@ func (p *provider) CountTokens(ctx context.Context, req *providers.ProxyRequest)
 		return 0, fmt.Errorf("anthropic: count_tokens call: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode/100 == 3 {
+		return 0, redirectError()
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return 0, err
