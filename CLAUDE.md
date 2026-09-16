@@ -42,19 +42,35 @@ stated explicitly (see the HA vs. rate-limit-accuracy tension below).
 4. **Budget control with visibility** — set spend limits per team and per
    individual, block on breach, and always be able to answer "how much have
    we spent."
-5. **No central inference SPOF** — control plane and data plane are separate
-   processes; installed policy, local classification/pins and valid authority
-   remain usable without an inference-time control-plane call. Expired hard
-   leases and configured stale/initial readiness gates fail closed. A mayu
-   instance's own availability and shared-state enforcement remain separate.
+5. **Profile-qualified availability** — control-plane HTTP and inference are
+   separate, but removing that hop is not an unconditional no-SPOF guarantee.
+   Node-local authority is finite; shared admission synchronously depends on
+   Postgres. Gateway, storage, upstream and credential failures remain relevant.
 
-**Known tension:** #5 (no SPOF) pulls against making enforcement accurate.
-Running N node-local data planes removes the SPOF, but in-memory
-per-instance counters mean rate limits and quotas become up to N× the
-configured value unless enforcement is made globally accurate — as ADR-034
-originally bounded for team budget. ADR-045 now provides opt-in Postgres
-authority for global GovernancePolicy money budgets (team and user scopes),
-with private durable node journals and per-attempt conservative reservation.
+### Deployment profiles: mechanism, default and qualification
+
+| Profile | Default / activation | Implemented enforcement | Availability boundary | Qualification |
+|---|---|---|---|---|
+| SQLite/local + optional legacy CP | Standalone default; legacy CP opt-in | Local key/team records and rate/quota/money counters; legacy CP allowance is not durable global escrow. | No synchronous shared-admission DB; attached CP readiness/staleness and hard allowance expiry still apply. | Single-replica enforcement; alpha. |
+| ADR-045 node-local monetary authority | Explicit durable CP authority + private node journal | Global GovernancePolicy money only; keys, rate/token quota and standalone/key-local money remain local. | CP-only or authority DB loss prevents replenishment; already installed credit is usable only within readiness/policy-age and hard deadlines. | Monetary mechanism implemented; fleet qualification open; alpha. |
+| ADR-046 shared Postgres | Explicit key + governance Postgres stores | Shared key/team snapshots and atomic rate/token-quota/money admission, synchronous to the DB. | CP-only loss may allow admission with valid binding/readiness; DB loss fails closed, even with multiple gateways. | Shared mechanism implemented; HA DB/deployment qualification open; alpha. |
+
+All profiles lack verified `(OIDC issuer, subject)` person identity and six-role
+org/team authorization. Shared key/team records and opaque owner/subject counters
+are not human-identity support. Use profile-specific evidence rather than marking
+the five purposes universally complete. ADR-044 compatible tool/history workflows
+do not expand legacy ADR-043 single-turn eligibility; successful-target pins remain
+bounded gateway-local state, never fleet-wide session authority.
+
+`require_sync` gates first CP policy delivery, `max_policy_age` can refuse stale
+policy, and hard authority expiry/exhaustion applies independently. ADR-045
+requires initial authority sync; ADR-046 requires initial binding/readiness.
+Distinguish CP-only outage (DB reachable) from DB loss. Counts remain local/200
+while generation is refused. Brokering removes standing node IAM requirements,
+not the compromised-host threat: broker tokens and vended credentials can still
+be obtained by an adversarial node operator.
+
+ADR-045 uses private durable journals and per-attempt conservative reservation.
 Control-plane replicas share the ledger; inference needs no database call.
 Restart burns old open node grants; expiry never refunds central authority;
 only complete known usage releases unused local reservations. UTC windows

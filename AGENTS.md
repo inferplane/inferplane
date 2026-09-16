@@ -1,4 +1,4 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: b4dc0c1468d6 · generated-at: 2026-09-12 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: c5df40f64bb0 · generated-at: 2026-09-16 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
 > from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
 > per-AI copy).
@@ -17,9 +17,24 @@ coding-assistant traffic, (2) per-user model choice, (3) cost-driven model
 substitution — enforceable via `routing.budgetTiers` (ADR-041): a budget
 rule crossing a threshold substitutes a cheaper target for a requested
 model name. Legacy substitutions never widen access or deny; opt-in ADR-044
-strict targets constrain every attempt and may refuse. (4) team/per-user budget control with visibility, (5) no SPOF.
-Known tension: (5)'s no-SPOF pulls against making (4)'s enforcement accurate
-under multi-replica — see the HA note below.
+strict targets constrain every attempt and may refuse. (4) team/per-user budget
+control with visibility, (5) profile-qualified availability with control-plane
+HTTP off the inference path. These are goals, not blanket completion or no-SPOF
+claims.
+
+| Profile | Default / activation | Implemented mechanism | Availability / qualification |
+|---|---|---|---|
+| SQLite/local + legacy CP | Standalone default; legacy CP optional | Local keys/team records, rate/quota/money; legacy allowances are not durable global escrow. | Attached CP gates/expiry apply; single-replica enforcement, alpha. |
+| ADR-045 node-local money | Opt-in authority + private journal | Global GovernancePolicy money; keys/rates/token quotas and standalone/key-local money remain local. | Existing credit only within readiness, policy-age and hard deadlines; CP or authority DB loss prevents replenishment. Fleet qualification open. |
+| ADR-046 shared Postgres | Opt-in key + governance stores | Shared key/team records and synchronous DB rate/token-quota/money admission. | CP-only loss requires valid binding/readiness; DB loss refuses new admission. HA DB/deployment qualification open. |
+
+Every profile lacks verified issuer/subject person identity and six-role org/team
+authorization. Shared key records do not supply human identity. `require_sync`
+gates first CP policy delivery; `max_policy_age` can refuse stale policy. Initial
+authority sync/shared binding and hard authority expiry/exhaustion remain binding.
+Counts stay local/200. CP-only loss assumes a reachable DB; it is not DB loss.
+Gateway/upstream/credential failures still matter. Local pins never imply
+fleet-wide session authority or unconditional availability.
 
 Two binaries: **`cmd/mayu`** is the node-local data plane (the full gateway —
 routing, auth, governance, audit; runs standalone, no control plane required).
@@ -30,7 +45,8 @@ with INFERPLANED_BROKER_ROLE_ARN set, inferplaned vends <=1h STS Bedrock
 sessions over POST /v1alpha1/credentials behind a DEDICATED broker token
 (never the heartbeat token, no OIDC branch); mayu opts in per provider with
 auth.mode "broker" — which must never fall back to the default credential
-chain.
+chain. Brokering does not make a compromised host bypass-proof: an adversarial
+node operator can obtain broker tokens or vended credentials.
 
 ## Build · test · lint
 
@@ -173,5 +189,6 @@ credentials, or a real IdP (httptest fakes only).
 Known false-positives to suppress: `/metrics` being unauthenticated is by
 design (ADR-005); the admin console's static assets being unauthenticated is
 by design (ADR-001/002 — they are data-free); key-existence signal on revoke
-403 is an accepted, documented trade-off; single-replica-only enforcement
-(see ADR-013 note above) is known, not a new finding.
+403 is an accepted, documented trade-off; the default/local profile's
+single-replica enforcement limit is known. Do flag claims that this default
+profile provides fleet-global enforcement or that shared mode tolerates DB loss.

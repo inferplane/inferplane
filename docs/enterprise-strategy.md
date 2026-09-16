@@ -1,6 +1,6 @@
 # Enterprise product strategy
 
-Status: canonical product direction · Last reviewed: 2026-09-16 against main `6b5cf9c` · Release posture: **alpha**
+Status: canonical product direction · Last reviewed: 2026-09-16 against main `698edf3` · Release posture: **alpha**
 
 Owns: target market, enterprise contracts, release gates.
 Does not own: implementation status ([roadmap.md](roadmap.md)), current system
@@ -34,10 +34,34 @@ routing. Do not infer deployed shared-gateway HA from implementation tests.
 
 ## 2. Enterprise contracts
 
+### Profile-specific support and qualification
+
+| Profile | Default / activation | Implemented mechanism | Availability limit | Enterprise status |
+|---|---|---|---|---|
+| SQLite/local, including legacy CP | Standalone default; legacy CP optional | SQLite key/team records, local rate/quota/money; legacy CP allowances are not durable global authority. | Standalone needs no CP. Attached CP readiness, stale-policy and allowance-expiry behavior still applies; local stores/processes can fail. | Alpha; no fleet-global enforcement claim. |
+| ADR-045 node-local money | Explicit durable authority and private journal | Global GovernancePolicy monetary accounts and local per-attempt reservations; keys, rates, token quotas and standalone/key-local money stay local. | CP-only loss or authority DB loss prevents new grants. Valid local credit works only until applicable readiness/staleness gates, hard expiry or exhaustion refuse it. | Money mechanism implemented; identity, roles and fleet qualification remain P0. |
+| ADR-046 shared admission | Explicit Postgres key/governance stores | Shared key/team records and synchronous DB transactions for rate, token quota and money. | CP-only loss may permit DB admission with a valid installed binding and readiness; DB loss refuses new requests. HA gateways alone do not remove the DB dependency. | Shared mechanism implemented; identity, roles and deployed HA/load qualification remain P0. |
+
+Every profile lacks verified `(OIDC issuer, subject)` person identity and six-role
+org/team authorization. Shared records and configured opaque user-subject counters
+are not a completed human-identity contract. No profile has an unconditional
+no-SPOF or enterprise-ready checkmark.
+
+`require_sync` governs first CP policy delivery; `max_policy_age` can close stale
+admission. Durable authority requires initial sync and shared mode requires initial
+binding; hard authority/window expiry and exhaustion remain independent gates.
+CP-only outage assumes the DB is still reachable and must not be conflated with
+DB outage. Count endpoints remain local/200 while generation is refused.
+Provider/credential availability remains another dependency: ADR-040 brokering
+does not make a compromised developer laptop unable to bypass the gateway.
+
+The table below describes the remaining product contracts, not a declaration that
+their component mechanisms are absent from all profiles.
+
 | Contract | Requirement | Status |
 |---|---|---|
 | Durable identity | `UserID = (OIDC issuer, subject)`. Key rotation, re-login, restart, and a second device must not split policy, budget, quota, or audit attribution. Email/owner strings/key IDs are not identities. | ❌ P0 |
-| Duty separation | Fixed roles (`platform-admin`, `policy-admin`, `provider-admin`, `budget-admin`, `auditor`, `team-admin`) with org/team scope. Every control-plane endpoint authorizes after authenticating. Every policy/provider/pricing/budget/role mutation records actor, capability, scope, before/after hash, generation. | ❌ P0 |
+| Duty separation | Fixed roles (`platform-admin`, `policy-admin`, `provider-admin`, `budget-admin`, `auditor`, `team-admin`) with org/team scope. Every management endpoint authorizes after authenticating; intentional public and machine endpoints retain their separate contracts. Every policy/provider/pricing/budget/role mutation records actor, capability, scope, before/after hash, generation. | ❌ P0 |
 | Two-pool user budget | Premium pool + total hard cap in one explicit window. Premium exhausted → first compatible model in an admin-approved fallback set; total exhausted → deny before egress. Token quotas must state fallback-or-block explicitly, never inherit monetary behavior. | ❌ P0 |
 | Pre-egress PII policy | Typed detector result; the policy engine (not the plugin) picks `external-unmodified` \| `external-masked` \| `internal-only` \| `blocked` and attaches it as an **egress ceiling**. Later stages may only narrow it. Detector/masker failure is fail-closed. `external-unmodified` requires a completed detector chain reporting nothing protected. | 🔶 partial (ADR-043/044 inspection, InternalOnly/Block/Mask and reinspection implemented; detector and deployment qualification remain) |
 | Fleet enforcement accuracy | Enforcement key ≥ `(org, UserID, pool, windowID)` in a durable ledger. Grants reserve spend authority centrally before delivery; only proven unused authority can be returned. Expiry alone never refunds. Rate/quota must not multiply by data-plane count. | 🔶 mechanisms implemented in ADR-045/046; typed person identity, user-pool contract and operational qualification remain P0 |
@@ -65,12 +89,12 @@ S3 anchoring (ADR-012/018) · optional Postgres usage analytics (ADR-036).
 ### Policy-aware routing and coding-client support (ADR-043/044/047)
 
 Local finite inspection and an enforced destination restriction now constrain every
-attempt. Independent context preferences start in Shadow; Enforce is opt-in for
-completely inspectable single-user-turn requests without history/tools/media/
-reasoning/structured output. The input threshold chooses simple versus complex;
+attempt. Independent context preferences start in Shadow. Legacy ADR-043 Enforce
+is limited to completely inspectable single-user-turn requests without
+history/tools/media/reasoning/structured output. Its input threshold chooses simple versus complex;
 a distinct compatible complex target can be selected above it. Privacy always enforces.
 ADR-044 extends this with an optional normal class, compatible tool/history
-sessions, bounded local successful-target affinity, strict budget targets,
+sessions, bounded local successful-target affinity (not fleet-wide pins), strict budget targets,
 policy-selected Mask and independent reinspection. InternalOnly and Mask compose;
 unknown or unsafe content refuses rather than being labeled clean.
 Boundary labels remain operator assertions and detector coverage is finite.
