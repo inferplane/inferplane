@@ -16,7 +16,7 @@ import (
 )
 
 func subject(p keystore.Principal) governance.Subject {
-	return governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.Owner}
+	return governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.AccountSubject()}
 }
 func keyPolicy(p keystore.Principal) governance.KeyPolicy {
 	return governance.KeyPolicy{
@@ -37,7 +37,7 @@ func (h *Handler) denied(req *http.Request, p keystore.Principal, model string, 
 	if h.aud != nil {
 		h.aud.Append(audit.Record{
 			SchemaVersion: 1, Event: "request_started", ID: ulid.New(), TS: time.Now().UTC().Format(time.RFC3339Nano),
-			Principal: audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
+			Principal: requestpolicy.AuditPrincipal(p),
 			Request:   audit.RequestRef{Ingress: "responses", ModelRequested: model, Routing: audit.RoutingFrom(req.Context())},
 			Outcome:   &audit.OutcomeRef{Status: status, Error: &reason},
 		})
@@ -50,7 +50,7 @@ func (h *Handler) started(a attempt) {
 	}
 	h.aud.Append(audit.Record{
 		SchemaVersion: 1, Event: "request_started", ID: ulid.New(), TS: time.Now().UTC().Format(time.RFC3339Nano),
-		Principal: audit.PrincipalRef{KeyID: a.principal.KeyID, Team: a.principal.Team},
+		Principal: requestpolicy.AuditPrincipal(a.principal),
 		Request:   a.requestRef(),
 	})
 }
@@ -83,7 +83,7 @@ func (a attempt) finish(status int, u *schema.Usage, body []byte, partial bool, 
 			amount, missing := a.h.gov.Settle(subject(a.principal), keyPolicy(a.principal), a.target.ProviderName, a.target.Upstream, pu, a.table, a.estimate)
 			cost = &audit.CostRef{AmountUSDMicros: amount, PricingMissing: missing, PricingVersion: governance.PricingVersionOf(a.table)}
 			if a.h.usage != nil {
-				a.h.usage.Record(a.principal.Team, a.principal.Owner, a.target.Upstream, pu, amount)
+				a.h.usage.Record(a.principal.Team, requestpolicy.TelemetrySubject(a.principal), a.target.Upstream, pu, amount)
 			}
 			tracing.SetCost(span, amount, missing)
 		}
@@ -113,7 +113,7 @@ func (a attempt) finish(status int, u *schema.Usage, body []byte, partial bool, 
 	}
 	rec := audit.Record{
 		SchemaVersion: 1, Event: "request_completed", ID: id, TS: time.Now().UTC().Format(time.RFC3339Nano),
-		Principal: audit.PrincipalRef{KeyID: a.principal.KeyID, Team: a.principal.Team},
+		Principal: requestpolicy.AuditPrincipal(a.principal),
 		Request:   a.requestRef(), Outcome: &audit.OutcomeRef{Status: status, Partial: partial},
 		Usage: usage, Cost: cost,
 		Latency: &audit.LatencyRef{TotalMs: time.Since(a.started).Milliseconds(), TTFTMs: int64(ttft * 1000)},

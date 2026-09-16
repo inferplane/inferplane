@@ -152,9 +152,9 @@ func (r *Router) RouteRequest(ctx context.Context, in RequestRoutingInput) (Requ
 	if r.routingPolicies != nil || r.routingSnapshot != nil {
 		var err error
 		if r.routingSnapshot != nil {
-			docs, out.PolicyGeneration, err = r.routingSnapshot(in.Principal.Team, in.Principal.Owner)
+			docs, out.PolicyGeneration, err = r.routingSnapshot(in.Principal.Team, in.Principal.AccountSubject())
 		} else {
-			docs, err = r.routingPolicies(in.Principal.Team, in.Principal.Owner)
+			docs, err = r.routingPolicies(in.Principal.Team, in.Principal.AccountSubject())
 		}
 		if err != nil {
 			var cause error

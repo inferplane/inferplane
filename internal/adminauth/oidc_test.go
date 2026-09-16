@@ -185,6 +185,10 @@ func TestVerifyValidTokens(t *testing.T) {
 			if claims.Subject != "user-1" || len(claims.Groups) != 1 || claims.Groups[0] != "team-alpha" {
 				t.Fatalf("claims = %+v", claims)
 			}
+			// Use the verified issuer, not any client-supplied attribution.
+			if claims.Issuer != idp.srv.URL {
+				t.Fatal("verified claims lost the issuer")
+			}
 		})
 	}
 }

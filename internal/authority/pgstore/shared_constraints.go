@@ -70,7 +70,7 @@ func sharedScope(team, user string) string {
 }
 
 func sharedMatch(team, user string, p keystore.Principal) bool {
-	return (team == "" || team == p.Team) && (user == "" || user == p.Owner)
+	return (team == "" || team == p.Team) && (user == "" || user == p.AccountSubject())
 }
 
 func sharedDefinitions(ctx context.Context, tx pgx.Tx, p keystore.Principal, now time.Time, req *governance.SharedRequest) ([]sharedDefinition, []policy.AuthorityBudget, error) {

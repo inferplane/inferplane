@@ -40,7 +40,7 @@ func TestWhoamiOIDCIdentity(t *testing.T) {
 // TestWhoamiExactShape pins the PII-free invariant: the response has EXACTLY the
 // four fields, so a future AdminIdentity field (email/claims/groups) cannot leak.
 func TestWhoamiExactShape(t *testing.T) {
-	rec := whoamiReq(&principal.AdminIdentity{Subject: "sub-x", Teams: []string{"t"}, AuthMethod: "oidc"})
+	rec := whoamiReq(&principal.AdminIdentity{Issuer: "https://private-issuer.example", Subject: "sub-x", Teams: []string{"t"}, AuthMethod: "oidc"})
 	var got map[string]json.RawMessage
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestWhoamiExactShape(t *testing.T) {
 			t.Fatalf("whoami leaked unexpected field %q", k)
 		}
 	}
-	for _, banned := range []string{"email", "claims", "groups", "token"} {
+	for _, banned := range []string{"issuer", "email", "claims", "groups", "token"} {
 		if _, bad := got[banned]; bad {
 			t.Fatalf("whoami leaked %q", banned)
 		}

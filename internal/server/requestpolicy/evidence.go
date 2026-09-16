@@ -87,7 +87,7 @@ func CountRecord(w *audit.Writer, req *http.Request, protocol string, completed 
 	}
 	rec := audit.Record{
 		SchemaVersion: 1, Event: "request_started", ID: ulid.New(), TS: time.Now().UTC().Format(time.RFC3339Nano),
-		Principal: audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team},
+		Principal: AuditPrincipal(p),
 		Request:   audit.RequestRef{Ingress: protocol, ModelRequested: ref.RequestedModel, Routing: ref},
 	}
 	if completed {

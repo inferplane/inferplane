@@ -18,13 +18,14 @@ type SharedAuthority interface {
 }
 
 type SharedRequest struct {
-	Subject           Subject
-	AuthRevision      string
-	PolicyGeneration  string
-	RequestedModel    string
-	Model             string
-	TokenBound        int64
-	CostBoundMicroUSD int64
+	IdentityFingerprint string
+	Subject             Subject
+	AuthRevision        string
+	PolicyGeneration    string
+	RequestedModel      string
+	Model               string
+	TokenBound          int64
+	CostBoundMicroUSD   int64
 }
 
 type SharedPermit struct {

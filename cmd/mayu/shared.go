@@ -6,8 +6,10 @@ import (
 	"math"
 	"slices"
 
+	sharedpg "github.com/inferplane/inferplane/internal/authority/pgstore"
 	"github.com/inferplane/inferplane/internal/config"
 	"github.com/inferplane/inferplane/internal/governance"
+	"github.com/inferplane/inferplane/internal/identity"
 	"github.com/inferplane/inferplane/internal/keystore"
 )
 
@@ -18,10 +20,35 @@ type gatewayKeyStore interface {
 }
 
 func openGatewayKeys(ctx context.Context, cfg config.KeyStoreConfig) (gatewayKeyStore, error) {
+	var store gatewayKeyStore
+	var err error
 	if cfg.Type == "postgres" {
-		return keystore.OpenPostgres(ctx, cfg.DSN)
+		if cfg.Identity != nil && cfg.Identity.Required {
+			if err := sharedpg.InstallIdentityWriteGuards(ctx, cfg.DSN); err != nil {
+				return nil, fmt.Errorf("identity admission guard installation: %w", err)
+			}
+		}
+		store, err = keystore.OpenPostgres(ctx, cfg.DSN)
+	} else {
+		store, err = keystore.OpenSQLite(cfg.Path)
 	}
-	return keystore.OpenSQLite(cfg.Path)
+	if err != nil {
+		return nil, err
+	}
+	declaration := identity.Config{}
+	if cfg.Identity != nil {
+		declaration = *cfg.Identity
+	}
+	identities, ok := store.(keystore.IdentityStore)
+	if !ok {
+		_ = store.Close()
+		return nil, fmt.Errorf("key backend does not support identity configuration")
+	}
+	if err := identities.ConfigureIdentity(ctx, declaration); err != nil {
+		_ = store.Close()
+		return nil, fmt.Errorf("key identity configuration: %w", err)
+	}
+	return store, nil
 }
 
 func seedSharedKeys(ctx context.Context, store *keystore.PostgresStore, cfg *config.Config) error {
@@ -58,6 +85,7 @@ func seedSharedKeys(ctx context.Context, store *keystore.PostgresStore, cfg *con
 		meta["managed_by"] = "config"
 		keys = append(keys, keystore.SeedKey{Plaintext: key.Key, Team: key.Team, AllowedModels: key.AllowedModels,
 			Options: keystore.KeyOptions{RPM: key.RPM, TPM: key.TPM, Owner: key.Owner, Metadata: meta,
+				Identity:              key.Identity,
 				BudgetUSDMicros:       int64(math.Round(key.BudgetUSDPerMonth * 1_000_000)),
 				BudgetUSDMicrosPerDay: int64(math.Round(key.BudgetUSDPerDay * 1_000_000))}})
 	}
@@ -66,6 +94,9 @@ func seedSharedKeys(ctx context.Context, store *keystore.PostgresStore, cfg *con
 
 func (g *gateway) validateSharedReload(next *config.Config) error {
 	before := g.cfg
+	if identityFingerprint(before.KeyStore.Identity) != identityFingerprint(next.KeyStore.Identity) {
+		return fmt.Errorf("identity configuration requires restart")
+	}
 	if before.KeyStore.Type != next.KeyStore.Type || before.KeyStore.Path != next.KeyStore.Path ||
 		before.KeyStore.DSN != next.KeyStore.DSN || before.SharedGovernance() != next.SharedGovernance() {
 		return fmt.Errorf("key/governance backend configuration requires restart")
@@ -79,4 +110,11 @@ func (g *gateway) validateSharedReload(next *config.Config) error {
 		return fmt.Errorf("shared authority identity and readiness configuration requires restart")
 	}
 	return nil
+}
+
+func identityFingerprint(cfg *identity.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.Fingerprint()
 }

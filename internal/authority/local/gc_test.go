@@ -27,6 +27,9 @@ func readJournal(t *testing.T, s *Store) (*journal, int) {
 
 func TestCompletedReceiptRetentionIsBoundedWithoutLosingAccounting(t *testing.T) {
 	s, _ := openTest(t)
+	// Receipt retention must not depend on how long the durable writes take.
+	now := time.Now()
+	s.now = func() time.Time { return now }
 	hard, soft := definition("hard", true), definition("soft", false)
 	hard.GrantMicroUSD, hard.LimitMicroUSD = 1_000_000, 2_000_000
 	funded(t, s, 2, 1_000_000, hard, soft)

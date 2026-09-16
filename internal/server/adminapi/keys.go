@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/inferplane/inferplane/internal/audit"
+	"github.com/inferplane/inferplane/internal/identity"
 	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/pkg/ulid"
@@ -39,32 +40,38 @@ func (h *KeysHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"no admin identity"}`, http.StatusForbidden)
 		return
 	}
+	cfg, err := principal.IdentityConfig(r.Context(), h.store)
+	if err != nil {
+		http.Error(w, `{"error":"identity configuration unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	switch {
 	case r.Method == http.MethodPost:
-		h.create(w, r, id)
+		h.create(w, r, id, cfg)
 	case r.Method == http.MethodGet:
 		h.list(w, r)
 	case r.Method == http.MethodDelete:
-		h.revoke(w, r, id)
+		h.revoke(w, r, id, cfg.Organization)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-// adminEvent emits one admin-plane audit record. The User field carries the
-// opaque subject (never email — PII stays out of the chain, ADR-003/004);
-// keyID is empty for denials.
-func (h *KeysHandler) adminEvent(event string, id principal.AdminIdentity, team, keyID string) {
+// adminEvent emits one admin-plane actor record. Unconfigured identity keeps
+// legacy User attribution; managed OIDC actors use digest-only Identity.
+// keyID is empty for creation denials.
+func (h *KeysHandler) adminEvent(event string, id principal.AdminIdentity, team, keyID, organization string) {
 	if h.emit == nil {
 		return
 	}
-	sub, method := id.Subject, id.AuthMethod
+	ref := principal.AdminAuditRef(id, organization)
+	ref.KeyID, ref.Team = keyID, team
 	h.emit(audit.Record{
 		SchemaVersion: 1,
 		Event:         event,
 		ID:            ulid.New(),
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
-		Principal:     audit.PrincipalRef{KeyID: keyID, Team: team, User: &sub, AuthMethod: &method},
+		Principal:     ref,
 		Request:       audit.RequestRef{Ingress: "admin"},
 	})
 }
@@ -81,6 +88,8 @@ type keyOptionsBody struct {
 	ExpiresAt             string            `json:"expires_at,omitempty"`
 	Owner                 string            `json:"owner,omitempty"`
 	Metadata              map[string]string `json:"metadata,omitempty"`
+	AccountRef            string            `json:"account_ref,omitempty"`
+	ServiceAccount        string            `json:"service_account,omitempty"`
 }
 
 // maxMetadataBytes bounds the serialized size of KeyOptions.Metadata, and
@@ -151,10 +160,14 @@ func keyView(p keystore.Principal) map[string]any {
 	if len(p.Metadata) > 0 {
 		v["metadata"] = p.Metadata
 	}
+	if p.Identity != nil && p.Identity.Validate() == nil {
+		v["identity"] = p.Identity.Audit()
+		v["account_ref"] = p.AccountSubject()
+	}
 	return v
 }
 
-func (h *KeysHandler) create(w http.ResponseWriter, r *http.Request, id principal.AdminIdentity) {
+func (h *KeysHandler) create(w http.ResponseWriter, r *http.Request, id principal.AdminIdentity, cfg identity.Config) {
 	var body struct {
 		Team          string   `json:"team"`
 		AllowedModels []string `json:"allowed_models"`
@@ -171,7 +184,7 @@ func (h *KeysHandler) create(w http.ResponseWriter, r *http.Request, id principa
 		return
 	}
 	if !id.Entitled(body.Team) {
-		h.adminEvent("admin_denied", id, body.Team, "")
+		h.adminEvent("admin_denied", id, body.Team, "", cfg.Organization)
 		http.Error(w, `{"error":"not entitled to team"}`, http.StatusForbidden)
 		return
 	}
@@ -182,20 +195,19 @@ func (h *KeysHandler) create(w http.ResponseWriter, r *http.Request, id principa
 		json.NewEncoder(w).Encode(map[string]string{"error": "invalid key options: " + err.Error()})
 		return
 	}
-	// A non-admin OIDC identity cannot set owner to anyone but itself — the
-	// team-mapped caller and the "victim" it names in owner may be distinct
-	// people on the same team. Full admins and break-glass keep the field
-	// caller-supplied (e.g. bootstrap/service-account provisioning on behalf
-	// of someone else). ADR-028.
-	if id.AuthMethod == "oidc" && !id.IsAdmin {
-		opts.Owner = id.Subject
+	if status := h.applyMintIdentity(r.Context(), cfg, id, body.keyOptionsBody, &opts); status != 0 {
+		if status == http.StatusForbidden {
+			h.adminEvent("admin_denied", id, body.Team, "", cfg.Organization)
+		}
+		http.Error(w, `{"error":"invalid or unavailable managed identity"}`, status)
+		return
 	}
 	plaintext, p, err := h.store.CreateWithOptions(r.Context(), body.Team, body.AllowedModels, opts)
 	if err != nil {
 		http.Error(w, `{"error":"create failed"}`, http.StatusInternalServerError)
 		return
 	}
-	h.adminEvent("admin_key_created", id, p.Team, p.KeyID)
+	h.adminEvent("admin_key_created", id, p.Team, p.KeyID, cfg.Organization)
 	out := keyView(p)
 	out["plaintext"] = plaintext
 	w.Header().Set("Content-Type", "application/json")
@@ -216,7 +228,7 @@ func (h *KeysHandler) list(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{"data": out})
 }
 
-func (h *KeysHandler) revoke(w http.ResponseWriter, r *http.Request, id principal.AdminIdentity) {
+func (h *KeysHandler) revoke(w http.ResponseWriter, r *http.Request, id principal.AdminIdentity, organization string) {
 	keyID := strings.TrimPrefix(r.URL.Path, "/admin/keys/")
 	if keyID == "" || keyID == r.URL.Path {
 		http.Error(w, `{"error":"key_id required in path"}`, http.StatusBadRequest)
@@ -239,7 +251,7 @@ func (h *KeysHandler) revoke(w http.ResponseWriter, r *http.Request, id principa
 	}
 	team := key.Team
 	if found && !id.Entitled(team) {
-		h.adminEvent("admin_denied", id, team, keyID)
+		h.adminEvent("admin_denied", id, team, keyID, organization)
 		http.Error(w, `{"error":"not entitled to team"}`, http.StatusForbidden)
 		return
 	}
@@ -258,7 +270,7 @@ func (h *KeysHandler) revoke(w http.ResponseWriter, r *http.Request, id principa
 		http.Error(w, `{"error":"revoke failed"}`, http.StatusNotFound)
 		return
 	}
-	h.adminEvent("admin_key_revoked", id, team, keyID)
+	h.adminEvent("admin_key_revoked", id, team, keyID, organization)
 	w.WriteHeader(http.StatusNoContent)
 }
 

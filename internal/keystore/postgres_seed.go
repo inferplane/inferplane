@@ -28,6 +28,14 @@ func (s *PostgresStore) Seed(ctx context.Context, teams []TeamRecord, keys []See
 	if err := lockPostgresIdentity(ctx, tx); err != nil {
 		return err
 	}
+	itx := identityTx{ctx: ctx, pg: tx}
+	mode, err := itx.mode()
+	if err != nil {
+		return err
+	}
+	if err := s.identityHandle.configured(mode); err != nil {
+		return err
+	}
 	now, err := postgresNow(ctx, tx)
 	if err != nil {
 		return err
@@ -54,7 +62,14 @@ func (s *PostgresStore) Seed(ctx context.Context, teams []TeamRecord, keys []See
 	}
 	for _, key := range keys {
 		hash := hashKey(key.Plaintext)
-		k, err := newPostgresKey(hash, "ik_"+hash[:12], key.Team, key.AllowedModels, key.Options, now)
+		opts := key.Options
+		if opts.Identity != nil {
+			opts, err = itx.prepareOptions(opts, mode)
+			if err != nil {
+				return err
+			}
+		}
+		k, err := newPostgresKey(hash, "ik_"+hash[:12], key.Team, key.AllowedModels, opts, now)
 		if err != nil {
 			return err
 		}
@@ -66,8 +81,24 @@ func (s *PostgresStore) Seed(ctx context.Context, teams []TeamRecord, keys []See
 		if err != nil {
 			return err
 		}
+		if err := checkIdentitySeed(ctx, tx, k); err != nil {
+			return err
+		}
 		if known {
 			continue
+		}
+		if mode.Required != 0 && opts.Identity == nil {
+			// Attaching a matching original declaration to an already-bound
+			// imported row is not owner-only credential issuance.
+			if err := attachBoundLegacySeed(ctx, tx, k, fingerprint); err != nil {
+				return err
+			}
+			continue
+		}
+		if mode.Required != 0 {
+			if err := itx.preserveKeyTombstone(&k); err != nil {
+				return err
+			}
 		}
 		if _, err := insertPostgresKey(ctx, tx, k, true); err != nil {
 			return err
@@ -77,6 +108,66 @@ func (s *PostgresStore) Seed(ctx context.Context, teams []TeamRecord, keys []See
 		}
 	}
 	return postgresError("commit seed", tx.Commit(ctx))
+}
+
+func attachBoundLegacySeed(ctx context.Context, tx pgx.Tx, k postgresKey, fingerprint string) error {
+	var encoded []byte
+	if err := tx.QueryRow(ctx, `SELECT to_jsonb(k) FROM keys k WHERE key_hash=$1`, k.Hash).Scan(&encoded); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrSnapshotChanged
+		}
+		return identityStorageError(err)
+	}
+	var existing postgresKey
+	if json.Unmarshal(encoded, &existing) != nil {
+		return ErrStoreUnavailable
+	}
+	id, err := identityFromFields(existing.IdentityOrganization, existing.IdentityKind, existing.IdentityIssuer, existing.IdentitySubject)
+	if err != nil || id == nil {
+		return ErrSnapshotChanged
+	}
+	b, found, err := (identityTx{ctx: ctx, pg: tx}).lookup(*id)
+	if err != nil || !found || b.AccountRef != existing.Owner {
+		return ErrSnapshotChanged
+	}
+	stored, err := keySeedFingerprint(existing)
+	if err != nil {
+		return err
+	}
+	if stored != fingerprint {
+		return ErrSnapshotChanged
+	}
+	return saveSeedFingerprint(ctx, tx, "key", k.Hash, fingerprint)
+}
+
+func checkIdentitySeed(ctx context.Context, tx pgx.Tx, k postgresKey) error {
+	id, err := identityFromFields(k.IdentityOrganization, k.IdentityKind, k.IdentityIssuer, k.IdentitySubject)
+	if err != nil || id == nil {
+		return err
+	}
+	known, err := knownSeedFingerprint(ctx, tx, "key-identity-v1", k.Hash, id.CanonicalRef())
+	if err != nil {
+		return err
+	}
+	var encoded []byte
+	err = tx.QueryRow(ctx, `SELECT to_jsonb(k) FROM keys k WHERE key_hash=$1`, k.Hash).Scan(&encoded)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return identityStorageError(err)
+	}
+	if err == nil {
+		var stored postgresKey
+		if json.Unmarshal(encoded, &stored) != nil {
+			return ErrStoreUnavailable
+		}
+		existing, err := identityFromFields(stored.IdentityOrganization, stored.IdentityKind, stored.IdentityIssuer, stored.IdentitySubject)
+		if err != nil || existing == nil || *existing != *id {
+			return ErrSnapshotChanged
+		}
+	}
+	if !known {
+		return saveSeedFingerprint(ctx, tx, "key-identity-v1", k.Hash, id.CanonicalRef())
+	}
+	return nil
 }
 
 func knownSeedFingerprint(ctx context.Context, tx pgx.Tx, kind, identity, fingerprint string) (bool, error) {
@@ -118,6 +209,9 @@ func canonicalSeedList(encoded string) string {
 
 func keySeedFingerprint(k postgresKey) (string, error) {
 	k.KeyID, k.CreatedAt, k.Revoked = "", "", 0
+	// Preserve the v1 declaration bytes. Typed declaration consistency is
+	// checked independently; adding columns must not change old fingerprints.
+	k.IdentityOrganization, k.IdentityKind, k.IdentityIssuer, k.IdentitySubject = "", "", "", ""
 	k.Models = canonicalSeedList(k.Models)
 	expiry, err := decodeExpiry(k.ExpiresAt)
 	if err != nil {

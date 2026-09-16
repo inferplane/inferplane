@@ -26,10 +26,11 @@ type VerifierConfig struct {
 	GroupsClaim string // default "groups"; top-level claim only, no traversal
 }
 
-// Claims is the PII-minimal verified output: the opaque subject and the raw
+// Claims is the verified output: issuer, opaque subject and the raw
 // group names (consumed by Resolve and dropped — they never enter the
 // request context).
 type Claims struct {
+	Issuer  string
 	Subject string
 	Groups  []string
 }
@@ -150,7 +151,7 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (Claims, error) {
 	if err != nil {
 		return Claims{}, err
 	}
-	return Claims{Subject: idt.Subject, Groups: groups}, nil
+	return Claims{Issuer: idt.Issuer, Subject: idt.Subject, Groups: groups}, nil
 }
 
 // extractGroups reads the configured TOP-LEVEL claim: a string array, or a

@@ -127,6 +127,9 @@ func (s *Store) Initialize(ctx context.Context) error {
 	if err := initializeIdentity(ctx, tx); err != nil {
 		return err
 	}
+	if err := installIdentityWriteGuards(ctx, tx); err != nil {
+		return err
+	}
 	return databaseError("commit initialization", tx.Commit(ctx))
 }
 
@@ -154,6 +157,10 @@ func (s *Store) Sync(ctx context.Context, dataplane string, req policy.Authority
 		return empty, databaseError("begin sync", err)
 	}
 	defer rollback(tx)
+	identityConfig, identityFingerprint, err := requireIdentityAdmission(ctx, tx, req.IdentityFingerprint)
+	if err != nil {
+		return empty, err
+	}
 	// SHARE conflicts with policy writers' ROW EXCLUSIVE locks. READ COMMITTED
 	// takes a fresh snapshot AFTER acquiring this lock, so a waiting old CP
 	// cannot issue against policy that was replaced while it waited.
@@ -162,6 +169,9 @@ func (s *Store) Sync(ctx context.Context, dataplane string, req policy.Authority
 	}
 	docs, err := readPolicies(ctx, tx)
 	if err != nil {
+		return empty, err
+	}
+	if err := policy.ValidateIdentitySubjects(docs, identityConfig); err != nil {
 		return empty, err
 	}
 	// One mutex per authenticated dataplane also serializes conflicting
@@ -202,11 +212,13 @@ func (s *Store) Sync(ctx context.Context, dataplane string, req policy.Authority
 		return empty, err
 	}
 	resp := policy.SyncResponse{
-		Policies: docs, Generation: generation,
+		IdentityFingerprint: identityFingerprint,
+		Policies:            docs, Generation: generation,
 		SyncIntervalSeconds: 10,
 		Authority: &policy.AuthorityResponse{
-			AuthorityID: authorityID,
-			Protocol:    policy.AuthorityProtocol, ServerTime: now, Budgets: budgets,
+			IdentityFingerprint: identityFingerprint,
+			AuthorityID:         authorityID,
+			Protocol:            policy.AuthorityProtocol, ServerTime: now, Budgets: budgets,
 			Generation: generation, Policies: docs,
 		},
 	}

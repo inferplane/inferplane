@@ -26,15 +26,16 @@ func From(ctx context.Context) (keystore.Principal, bool) {
 }
 
 // AdminIdentity is the admin-plane caller (§5.1 Identity→Principal, ADR-004).
-// PII-minimal by design (P2 gate): only the opaque OIDC `sub` — never email,
-// never raw IdP groups — enters the request context; groups are consumed by
-// the middleware's mapping step and dropped. Break-glass static tokens inject
+// Verified issuer and opaque OIDC `sub` are internal trust inputs, never email
+// or raw IdP groups. Groups are consumed by the middleware's mapping step and
+// dropped; wire/audit adapters must not expose the raw issuer. Break-glass tokens inject
 // the sentinel {Subject: "break-glass", IsAdmin: true}.
 type AdminIdentity struct {
 	Subject    string
 	Teams      []string // teams this identity may issue/revoke keys for (nil for admins)
 	IsAdmin    bool     // admin_groups member or break-glass: entitled to every team
 	AuthMethod string   // "oidc" | "break_glass" — recorded in audit
+	Issuer     string   // verified OIDC issuer; never populate from request JSON
 }
 
 // Entitled reports whether the identity may act on the given team.

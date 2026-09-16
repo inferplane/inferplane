@@ -9,7 +9,9 @@ import (
 	"text/tabwriter"
 
 	"github.com/inferplane/inferplane/internal/config"
+	"github.com/inferplane/inferplane/internal/identity"
 	"github.com/inferplane/inferplane/internal/keystore"
+	"github.com/inferplane/inferplane/internal/principal"
 )
 
 // keysCmd implements the local virtual-key bootstrap CLI (server-not-running):
@@ -38,6 +40,7 @@ func keysCreate(args []string) error {
 	models := fs.String("models", "*", "comma-separated allowed models, or * for all")
 	store := fs.String("store", "", "path to the SQLite key store (required)")
 	cfg := fs.String("config", "", "config file selecting a key backend (alternative to --store)")
+	serviceAccount := fs.String("service-account", "", "stable service ID within the configured identity organization")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -49,13 +52,33 @@ func keysCreate(args []string) error {
 		return err
 	}
 	defer s.Close()
-	plaintext, p, err := s.Create(context.Background(), *team, splitCSV(*models))
+	identityCfg, err := principal.IdentityConfig(context.Background(), s)
+	if err != nil {
+		return err
+	}
+	opts := keystore.KeyOptions{}
+	if *serviceAccount != "" {
+		if identityCfg.Organization == "" {
+			return fmt.Errorf("keys create: --service-account requires a configured identity organization")
+		}
+		service, err := identity.NewService(identityCfg.Organization, *serviceAccount)
+		if err != nil {
+			return fmt.Errorf("keys create: invalid service identity")
+		}
+		opts.Identity = &service
+	} else if identityCfg.Required {
+		return fmt.Errorf("keys create: --service-account is required; use OIDC login for human credentials")
+	}
+	plaintext, p, err := s.CreateWithOptions(context.Background(), *team, splitCSV(*models), opts)
 	if err != nil {
 		return err
 	}
 	// Plaintext is shown ONCE — never stored, never recoverable.
 	fmt.Println(plaintext)
 	fmt.Printf("key_id: %s\n", p.KeyID)
+	if p.Identity != nil {
+		fmt.Printf("identity_ref: %s\n", p.Identity.CanonicalRef())
+	}
 	// Local bootstrap audit note (§5.5): the full audit writer is the runtime path.
 	fmt.Fprintf(os.Stderr, "audit: key %s created for team %s\n", p.KeyID, *team)
 	return nil

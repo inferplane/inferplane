@@ -133,6 +133,11 @@ func newGateway(cfgPath string) (*gateway, error) {
 		}
 		tiers = tier.NewTable()
 	}
+	if polStore != nil {
+		if err := polStore.SetIdentityConfig(raw.KeyStore.Identity); err != nil {
+			return nil, fmt.Errorf("identity policy: %w", err)
+		}
+	}
 
 	// Prometheus metrics sink: owned by main, threaded into the audit writer,
 	// router, governor, and ingress handlers, and exposed on the admin /metrics.
@@ -192,8 +197,9 @@ func newGateway(cfgPath string) (*gateway, error) {
 		}
 		metadata["managed_by"] = "config"
 		opts := keystore.KeyOptions{
-			RPM: vk.RPM,
-			TPM: vk.TPM,
+			Identity: vk.Identity,
+			RPM:      vk.RPM,
+			TPM:      vk.TPM,
 			// math.Round here, plain truncation in governance.PoliciesFromConfig:
 			// the two USD→µUSD sites have always disagreed and this phase mirrors
 			// each one's existing behavior rather than unifying them (that is its
@@ -646,8 +652,10 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// budget spend — the same per-instance-approximation caveat standalone
 	// budget/rate already carries (internal/CLAUDE.md Design Debt).
 	if raw.ControlPlane != nil {
-		r.SetTierGate(func(p keystore.Principal) map[string]string { return tiers.GetForSubject(p.Team, p.Owner) })
-		r.SetBudgetConstraintGate(func(p keystore.Principal) map[string]string { return tiers.ConstraintsForSubject(p.Team, p.Owner) })
+		r.SetTierGate(func(p keystore.Principal) map[string]string { return tiers.GetForSubject(p.Team, p.AccountSubject()) })
+		r.SetBudgetConstraintGate(func(p keystore.Principal) map[string]string {
+			return tiers.ConstraintsForSubject(p.Team, p.AccountSubject())
+		})
 	} else if polStore != nil {
 		standaloneTierLatch := tier.NewLatch()
 		r.SetTierGate(func(p keystore.Principal) map[string]string {
@@ -693,12 +701,13 @@ func newGateway(cfgPath string) (*gateway, error) {
 			OnDrop:    m.IncUsageWindowDropped,
 		}
 		syncer = &proxy.Syncer{
-			URL:       raw.ControlPlane.URL,
-			Token:     raw.ControlPlane.Token,
-			Dataplane: dataplaneID,
-			Store:     polStore,
-			Leases:    leases,
-			Tiers:     tiers,
+			IdentityConfig: raw.KeyStore.Identity,
+			URL:            raw.ControlPlane.URL,
+			Token:          raw.ControlPlane.Token,
+			Dataplane:      dataplaneID,
+			Store:          polStore,
+			Leases:         leases,
+			Tiers:          tiers,
 			SpentOf: func(team string, period v1alpha1.BudgetPeriod) int64 {
 				// Team-scoped read: no KeyID and deliberately no User, so this
 				// reports the TEAM counter only. A user-subject rule is never
@@ -1930,7 +1939,7 @@ func wireRoutingPolicyGates(r *router.Router, store *policy.Store) {
 		return
 	}
 	r.SetPolicyGate(func(p keystore.Principal, model string, canonical func(string) string) bool {
-		return store.ModelAllowed(p.Team, p.Owner, model, canonical)
+		return store.ModelAllowed(p.Team, p.AccountSubject(), model, canonical)
 	})
 	r.SetRoutingPolicySnapshot(store.RoutingSnapshot)
 }

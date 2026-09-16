@@ -55,10 +55,12 @@ stated explicitly (see the HA vs. rate-limit-accuracy tension below).
 | ADR-045 node-local monetary authority | Explicit durable CP authority + private node journal | Global GovernancePolicy money only; keys, rate/token quota and standalone/key-local money remain local. | CP-only or authority DB loss prevents replenishment; already installed credit is usable only within readiness/policy-age and hard deadlines. | Monetary mechanism implemented; fleet qualification open; alpha. |
 | ADR-046 shared Postgres | Explicit key + governance Postgres stores | Shared key/team snapshots and atomic rate/token-quota/money admission, synchronous to the DB. | CP-only loss may allow admission with valid binding/readiness; DB loss fails closed, even with multiple gateways. | Shared mechanism implemented; HA DB/deployment qualification open; alpha. |
 
-All profiles lack verified `(OIDC issuer, subject)` person identity and six-role
-org/team authorization. Shared key/team records and opaque owner/subject counters
-are not human-identity support. Use profile-specific evidence rather than marking
-the five purposes universally complete. ADR-044 compatible tool/history workflows
+All profiles can opt into verified issuer/subject and derived service identity
+through `key_store.identity`; it is not enabled by default. Optional attribution
+preserves legacy accounting; required mode enforces registry bindings. Six-role
+org/team authorization, full user-pool contracts and deployment qualification
+remain open. Use profile-specific evidence rather than marking the five purposes
+universally complete. ADR-044 compatible tool/history workflows
 do not expand legacy ADR-043 single-turn eligibility; successful-target pins remain
 bounded gateway-local state, never fleet-wide session authority.
 
@@ -84,6 +86,28 @@ generation must match before dispatch. Shared bootstrap fingerprints preserve
 admin changes; conditional revocation checks the authenticated revision. Shared
 mode rejects local journal/provider topology stores, and counts stay local/200.
 Default and node-local profiles retain their separate limits (`docs/roadmap.md`).
+
+### Verified identity invariants (opt-in)
+
+- `internal/identity` is a leaf; registry bindings preserve exact accounting
+  references. Human tuples come only from verified OIDC plus the store's
+  organization; service issuers are derived. Full-admin authority is required
+  for admin `account_ref`/`service_account`; direct service CLI access is privileged.
+- Required activation needs trusted bindings for all historical nonempty legacy
+  owners, including revoked-only history. Revoke/reissue active empty-owner keys.
+  Never infer an issuer from owner/email or merge/split/refund/rewrite accounts.
+- A legacy-bound person's canonical identity reference is for audit correlation;
+  policy `subject.user` must retain the declared `account_ref`, not that alias.
+- Required CP deployments use `require_sync` and matching
+  `INFERPLANED_IDENTITY_CONFIG` / `key_store.identity` fingerprints before
+  policy/authority installation. A mismatch gates generation; counts stay local/200.
+  Fingerprints are not authentication. Existing profile outage/expiry gates apply.
+- New identity audit DTOs contain digests, not raw issuer/subject; metrics gain no
+  identity/account labels. Audit fields stay append-only/omitempty. Required
+  declarations cannot be silently removed or downgraded; changes and restore need
+  coordinated restart/fencing with liabilities preserved.
+- See [verified identity](docs/verified-identity.md). Implementation is not live
+  activation or enterprise qualification; six-role authorization remains separate.
 
 ## Tech Stack
 

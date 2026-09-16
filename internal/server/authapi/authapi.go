@@ -48,17 +48,26 @@ func NewConfigHandler(view func() ConfigView) http.Handler {
 // mintEvent emits one CLI-auth audit record — same shape as adminapi's
 // admin_key_created/revoked, distinct event names so an operator can tell a
 // CLI-minted key apart from a console/API one at a glance.
-func mintEvent(emit func(audit.Record), event, sub, team, keyID string) {
+func mintEvent(emit func(audit.Record), event string, p keystore.Principal) {
 	if emit == nil {
 		return
 	}
 	method := "oidc"
+	if event == "cli_key_revoked" && p.Identity != nil {
+		method = "virtual_key"
+	}
+	ref := principal.AuditRef(p)
+	ref.AuthMethod = &method
+	if p.Identity == nil {
+		sub := p.Owner
+		ref.User = &sub // preserve the legacy event bytes when unconfigured
+	}
 	emit(audit.Record{
 		SchemaVersion: 1,
 		Event:         event,
 		ID:            ulid.New(),
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
-		Principal:     audit.PrincipalRef{KeyID: keyID, Team: team, User: &sub, AuthMethod: &method},
+		Principal:     ref,
 		Request:       audit.RequestRef{Ingress: "cli"},
 	})
 }
@@ -113,6 +122,25 @@ func MintHandler(store keystore.Store, ttl time.Duration, mint limiter.LimiterSt
 			http.Error(w, `{"error":"no identity"}`, http.StatusForbidden)
 			return
 		}
+		cfg, err := principal.IdentityConfig(r.Context(), store)
+		if err != nil {
+			http.Error(w, `{"error":"identity configuration unavailable"}`, http.StatusServiceUnavailable)
+			return
+		}
+		opts := keystore.KeyOptions{Owner: id.Subject, Metadata: map[string]string{"source": "cli"}}
+		throttleSubject := id.Subject
+		if cfg.Organization != "" {
+			human, err := id.HumanIdentity(cfg.Organization)
+			if err != nil {
+				http.Error(w, `{"error":"verified OIDC identity required"}`, http.StatusForbidden)
+				return
+			}
+			opts.Identity = &human
+			throttleSubject = human.CanonicalRef()
+			if cfg.Required {
+				opts.Owner = "" // registry resolves the immutable accounting reference
+			}
+		}
 		var body mintRequest
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, `{"error":"invalid request body: `+jsonEscape(err.Error())+`"}`, http.StatusBadRequest)
@@ -127,29 +155,24 @@ func MintHandler(store keystore.Store, ttl time.Duration, mint limiter.LimiterSt
 			http.Error(w, `{"error":"`+jsonEscape(err.Error())+`"}`, status)
 			return
 		}
-		// Per-subject mint throttle (ADR-028 follow-up r1): a valid ID token
+		// Issuer-qualified in managed mode, legacy subject otherwise: a valid ID token
 		// alone must not be able to grow the keys table without bound. 10/min
 		// with a burst of 10 comfortably covers a normal login+every-renewal
 		// cadence while capping an accidental or malicious mint loop.
-		if !mint.AllowRate("cli_mint:"+id.Subject, 1, 10, 10) {
+		if !mint.AllowRate("cli_mint:"+throttleSubject, 1, 10, 10) {
 			http.Error(w, `{"error":"too many key requests, slow down"}`, http.StatusTooManyRequests)
 			return
 		}
 		expiresAt := time.Now().UTC().Add(ttl)
-		plaintext, p, err := store.CreateWithOptions(r.Context(), team, []string{"*"}, keystore.KeyOptions{
-			ExpiresAt: &expiresAt,
-			Owner:     id.Subject,
-			Metadata:  map[string]string{"source": "cli"},
-			// Deliberately no BudgetUSDMicros/TPM/RPM: those key on the
-			// rotating key_id with a fixed-length window (governance.go), so a
-			// per-key limit would reset every time the CLI re-mints. CLI-key
-			// spend is governed at the TEAM level only.
-		})
+		opts.ExpiresAt = &expiresAt
+		// No per-key budget/rate override: rotating keys must retain the
+		// configured team/user accounting scope rather than reset it.
+		plaintext, p, err := store.CreateWithOptions(r.Context(), team, []string{"*"}, opts)
 		if err != nil {
 			http.Error(w, `{"error":"create failed"}`, http.StatusInternalServerError)
 			return
 		}
-		mintEvent(emit, "cli_key_created", id.Subject, p.Team, p.KeyID)
+		mintEvent(emit, "cli_key_created", p)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
 			"key":        plaintext,
@@ -192,7 +215,7 @@ func RevokeHandler(store keystore.Store, emit func(audit.Record)) http.Handler {
 			http.Error(w, `{"error":"revoke failed"}`, http.StatusInternalServerError)
 			return
 		}
-		mintEvent(emit, "cli_key_revoked", p.Owner, p.Team, p.KeyID)
+		mintEvent(emit, "cli_key_revoked", p)
 		w.WriteHeader(http.StatusNoContent)
 	})
 }

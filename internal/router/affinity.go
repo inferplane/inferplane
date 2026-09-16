@@ -157,7 +157,7 @@ func (s *affinityStore) sessionKey(in RequestRoutingInput) ([32]byte, bool) {
 	if requested == "" {
 		requested = in.Model
 	}
-	_ = enc.Encode([]string{in.Principal.Team, in.Principal.KeyID, in.Principal.Owner, in.Protocol, in.State.Canonical(requested)})
+	_ = enc.Encode([]string{in.Principal.Team, in.Principal.KeyID, in.Principal.AccountSubject(), in.Protocol, in.State.Canonical(requested)})
 	if in.SessionHint != "" {
 		if len(in.SessionHint) > 4096 {
 			return [32]byte{}, false

@@ -91,6 +91,9 @@ func (s *Store) InitializeShared(ctx context.Context) error {
 	if _, err = tx.Exec(ctx, sharedSchema); err != nil {
 		return sharedError(err)
 	}
+	if err := installIdentityWriteGuards(ctx, tx); err != nil {
+		return sharedError(err)
+	}
 	return sharedError(tx.Commit(ctx))
 }
 
@@ -115,7 +118,7 @@ func sharedChanged() error {
 }
 
 func sharedSubjectMatches(p keystore.Principal, subject governance.Subject) bool {
-	return p.Team == subject.Team && p.KeyID == subject.KeyID && p.Owner == subject.User
+	return p.Team == subject.Team && p.KeyID == subject.KeyID && p.AccountSubject() == subject.User
 }
 
 // sharedSnapshot acquires definition locks BEFORE reading fresh READ COMMITTED
@@ -156,12 +159,28 @@ func (s *Store) ReserveShared(ctx context.Context, req governance.SharedRequest)
 		return nil, sharedError(err)
 	}
 	defer rollback(tx)
+	identityConfig, _, err := requireIdentityAdmission(ctx, tx, req.IdentityFingerprint)
+	if err != nil {
+		return nil, sharedError(err)
+	}
 	p, now, err := sharedSnapshot(ctx, tx, req.Subject)
 	if err != nil {
 		return nil, err
 	}
 	if subtle.ConstantTimeCompare([]byte(p.SharedRevision), []byte(req.AuthRevision)) != 1 {
 		return nil, sharedChanged()
+	}
+	if p.IdentityRequired && (p.Identity == nil || p.IdentityFingerprint != req.IdentityFingerprint) {
+		return nil, sharedChanged()
+	}
+	if identityConfig != nil {
+		docs, err := readPolicies(ctx, tx)
+		if err != nil {
+			return nil, sharedError(err)
+		}
+		if err := policy.ValidateIdentitySubjects(docs, identityConfig); err != nil {
+			return nil, sharedError(err)
+		}
 	}
 	defs, budgets, err := sharedDefinitions(ctx, tx, p, now, &req)
 	if err != nil {

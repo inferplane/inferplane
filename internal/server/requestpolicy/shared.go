@@ -21,9 +21,14 @@ func reserveShared(req *http.Request, g *governance.Governor, p keystore.Princip
 		return req, nil, governance.ErrSharedUnavailable
 	}
 	bundle, _ := req.Context().Value(bundleKey{}).(bundleRef)
-	subject := governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.Owner}
+	subject := governance.Subject{Team: p.Team, KeyID: p.KeyID, User: p.AccountSubject()}
+	fingerprint := ""
+	if p.IdentityRequired {
+		fingerprint = p.IdentityFingerprint
+	}
 	permit, err := g.SharedAuthority().ReserveShared(req.Context(), governance.SharedRequest{
-		Subject: subject, AuthRevision: p.SharedRevision, PolicyGeneration: bundle.generation,
+		IdentityFingerprint: fingerprint,
+		Subject:             subject, AuthRevision: p.SharedRevision, PolicyGeneration: bundle.generation,
 		RequestedModel: bundle.requested, Model: target.Model, TokenBound: 5 * window, CostBoundMicroUSD: costBound,
 	})
 	if err != nil {

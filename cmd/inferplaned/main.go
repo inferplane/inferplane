@@ -160,6 +160,13 @@ func validatePolicyWriteEnv(token, brokerToken, writeToken string) error {
 // Postgres pool when INFERPLANED_USAGE_DSN was set; it is a no-op otherwise
 // and safe to defer unconditionally.
 func buildMux(policies, token string, oidc *oidcEnv) (mux *http.ServeMux, cp *controlplane.Server, closePG func(), err error) {
+	identityConfig, err := loadIdentityDeclaration(os.Getenv("INFERPLANED_IDENTITY_CONFIG"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if identityConfig != nil && (policies == "" || (identityConfig.Required && (token == "" || adminauth.IsOIDCBearerShape(token)))) {
+		return nil, nil, nil, errors.New("identity configuration requires policies and authenticated machine synchronization")
+	}
 	durableBudgets, err := durableBudgetMode(os.Getenv("INFERPLANED_DURABLE_BUDGETS"), os.Getenv("INFERPLANED_POLICY_DSN"), token)
 	if err != nil {
 		return nil, nil, nil, err
@@ -312,6 +319,9 @@ func buildMux(policies, token string, oidc *oidcEnv) (mux *http.ServeMux, cp *co
 			closePG = func() { ledger.Close(); closePrevious() }
 			cp.SetBudgetAuthority(ledger)
 			log.Print("inferplaned: durable PostgreSQL budget authority enabled")
+		}
+		if err := configureControlPlaneIdentity(cp, policyDSN, identityConfig); err != nil {
+			return nil, nil, closePG, fmt.Errorf("identity configuration: %w", err)
 		}
 		cp.Mount(mux)
 	}

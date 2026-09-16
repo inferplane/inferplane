@@ -19,6 +19,7 @@ import (
 	"unicode"
 
 	"github.com/inferplane/inferplane/internal/adminauth"
+	"github.com/inferplane/inferplane/internal/identity"
 )
 
 // envRefShape is the allowed shape of an env-var secret ref: a POSIX-ish env var
@@ -216,10 +217,11 @@ func validateServer(s *ServerConfig) error {
 
 // KeyStoreConfig selects the default SQLite or explicit shared Postgres backend.
 type KeyStoreConfig struct {
-	Type   string     `json:"type"`
-	Path   string     `json:"path,omitempty"`
-	DSNRef *SecretRef `json:"dsn_ref,omitempty"`
-	DSN    string     `json:"-"`
+	Type     string           `json:"type"`
+	Path     string           `json:"path,omitempty"`
+	DSNRef   *SecretRef       `json:"dsn_ref,omitempty"`
+	DSN      string           `json:"-"`
+	Identity *identity.Config `json:"identity,omitempty"`
 }
 
 type GovernanceStoreConfig struct {
@@ -324,6 +326,7 @@ type TeamConfig struct {
 }
 
 type VirtualKeyConfig struct {
+	Identity          *identity.ID      `json:"identity,omitempty"`
 	Team              string            `json:"team"`
 	KeyRef            *SecretRef        `json:"key_ref"`
 	AllowedModels     []string          `json:"allowed_models"`

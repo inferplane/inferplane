@@ -8,6 +8,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/inferplane/inferplane/internal/identity"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -28,16 +29,22 @@ type postgresKey struct {
 	Owner                 string `json:"owner"`
 	Metadata              string `json:"metadata"`
 	BudgetUSDMicrosPerDay int64  `json:"budget_usd_micros_per_day"`
+	IdentityOrganization  string `json:"identity_organization,omitempty"`
+	IdentityKind          string `json:"identity_kind,omitempty"`
+	IdentityIssuer        string `json:"identity_issuer,omitempty"`
+	IdentitySubject       string `json:"identity_subject,omitempty"`
 }
 
 func (k postgresKey) values() []any {
 	return []any{k.KeyID, k.Hash, k.Team, k.Models, k.CreatedAt, k.Revoked,
-		k.BudgetUSDMicros, k.TPM, k.RPM, k.ExpiresAt, k.Owner, k.Metadata, k.BudgetUSDMicrosPerDay}
+		k.BudgetUSDMicros, k.TPM, k.RPM, k.ExpiresAt, k.Owner, k.Metadata, k.BudgetUSDMicrosPerDay,
+		k.IdentityOrganization, k.IdentityKind, k.IdentityIssuer, k.IdentitySubject}
 }
 
 func (k *postgresKey) destinations() []any {
 	return []any{&k.KeyID, &k.Hash, &k.Team, &k.Models, &k.CreatedAt, &k.Revoked,
-		&k.BudgetUSDMicros, &k.TPM, &k.RPM, &k.ExpiresAt, &k.Owner, &k.Metadata, &k.BudgetUSDMicrosPerDay}
+		&k.BudgetUSDMicros, &k.TPM, &k.RPM, &k.ExpiresAt, &k.Owner, &k.Metadata, &k.BudgetUSDMicrosPerDay,
+		&k.IdentityOrganization, &k.IdentityKind, &k.IdentityIssuer, &k.IdentitySubject}
 }
 
 func newPostgresKey(hash, id, team string, models []string, opts KeyOptions, now time.Time) (postgresKey, error) {
@@ -45,11 +52,13 @@ func newPostgresKey(hash, id, team string, models []string, opts KeyOptions, now
 	if err != nil {
 		return postgresKey{}, postgresError("encode metadata", err)
 	}
+	org, kind, issuer, subject := identityFields(opts.Identity)
 	return postgresKey{
 		KeyID: id, Hash: hash, Team: team, Models: joinModels(models),
 		CreatedAt: now.UTC().Format(time.RFC3339Nano), BudgetUSDMicros: opts.BudgetUSDMicros,
 		TPM: opts.TPM, RPM: opts.RPM, ExpiresAt: encodeExpiry(opts.ExpiresAt),
 		Owner: opts.Owner, Metadata: metadata, BudgetUSDMicrosPerDay: opts.BudgetUSDMicrosPerDay,
+		IdentityOrganization: org, IdentityKind: kind, IdentityIssuer: issuer, IdentitySubject: subject,
 	}, nil
 }
 
@@ -107,13 +116,17 @@ func (t postgresTeam) record() TeamRecord {
 
 // A single joined statement captures both rows, including absence of a team.
 // Database time is returned separately and is never part of the digest.
-const postgresSnapshotQuery = `SELECT to_jsonb(k), to_jsonb(t), clock_timestamp()
+const postgresSnapshotQuery = `SELECT to_jsonb(k), to_jsonb(t), clock_timestamp(),
+(SELECT to_jsonb(m) FROM identity_mode m WHERE singleton=1),
+(SELECT i.account_ref FROM identity_registry i WHERE i.organization=k.identity_organization AND
+ i.kind=k.identity_kind AND i.issuer=k.identity_issuer AND i.subject=k.identity_subject)
 FROM keys k LEFT JOIN teams t ON t.name=k.team `
 
 func scanPostgresSnapshot(row interface{ Scan(...any) error }) (Principal, time.Time, error) {
-	var keyJSON, teamJSON []byte
+	var keyJSON, teamJSON, modeJSON []byte
+	var accountRef *string
 	var now time.Time
-	if err := row.Scan(&keyJSON, &teamJSON, &now); err != nil {
+	if err := row.Scan(&keyJSON, &teamJSON, &now, &modeJSON, &accountRef); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Principal{}, time.Time{}, ErrKeyNotFound
 		}
@@ -141,14 +154,37 @@ func scanPostgresSnapshot(row interface{ Scan(...any) error }) (Principal, time.
 		},
 		TeamSnapshotLoaded: true,
 	}
+	p.Identity, err = identityFromFields(k.IdentityOrganization, k.IdentityKind, k.IdentityIssuer, k.IdentitySubject)
+	if err != nil {
+		return Principal{}, time.Time{}, err
+	}
+	var mode identityMode
+	if len(modeJSON) == 0 || json.Unmarshal(modeJSON, &mode) != nil {
+		return Principal{}, time.Time{}, ErrStoreUnavailable
+	}
+	if _, err := mode.config(); err != nil {
+		return Principal{}, time.Time{}, err
+	}
+	p.IdentityFingerprint, p.IdentityRequired = mode.Fingerprint, mode.Required == 1
+	if p.Identity != nil && p.Identity.Organization != mode.Organization {
+		return Principal{}, time.Time{}, ErrStoreUnavailable
+	}
+	if p.IdentityRequired {
+		if p.Identity == nil || accountRef == nil || *accountRef != p.Owner ||
+			(identity.Binding{Identity: *p.Identity, AccountRef: *accountRef}).Validate() != nil {
+			return Principal{}, time.Time{}, ErrStoreUnavailable
+		}
+	}
 	if team != nil {
 		record := team.record()
 		p.TeamSnapshot = &record
 	}
 	encoded, err := json.Marshal(struct {
-		Key  postgresKey
-		Team *postgresTeam
-	}{k, team})
+		Key                 postgresKey
+		Team                *postgresTeam
+		IdentityFingerprint string `json:",omitempty"`
+		IdentityRequired    bool   `json:",omitempty"`
+	}{k, team, p.IdentityFingerprint, p.IdentityRequired})
 	if err != nil {
 		return Principal{}, time.Time{}, postgresError("encode snapshot", err)
 	}

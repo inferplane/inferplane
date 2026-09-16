@@ -1,4 +1,4 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: c5df40f64bb0 · generated-at: 2026-09-16 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 02fa37398d88 · generated-at: 2026-09-16 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
 > from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
 > per-AI copy).
@@ -28,8 +28,10 @@ claims.
 | ADR-045 node-local money | Opt-in authority + private journal | Global GovernancePolicy money; keys/rates/token quotas and standalone/key-local money remain local. | Existing credit only within readiness, policy-age and hard deadlines; CP or authority DB loss prevents replenishment. Fleet qualification open. |
 | ADR-046 shared Postgres | Opt-in key + governance stores | Shared key/team records and synchronous DB rate/token-quota/money admission. | CP-only loss requires valid binding/readiness; DB loss refuses new admission. HA DB/deployment qualification open. |
 
-Every profile lacks verified issuer/subject person identity and six-role org/team
-authorization. Shared key records do not supply human identity. `require_sync`
+Every profile can opt into verified human/service identity via `key_store.identity`;
+default legacy attribution is unchanged. Optional typed attribution preserves
+legacy accounting; required mode enforces registry bindings. Six-role org/team
+authorization, full user pools and enterprise qualification remain open. `require_sync`
 gates first CP policy delivery; `max_policy_age` can refuse stale policy. Initial
 authority sync/shared binding and hard authority expiry/exhaustion remain binding.
 Counts stay local/200. CP-only loss assumes a reachable DB; it is not DB loss.
@@ -174,6 +176,27 @@ credentials, or a real IdP (httptest fakes only).
   provider topology is rejected; common file/ConfigMap topology is supported.
 - Default/local rate and key stores remain local. Do not mistake the shared
   profile's explicit DB dependency for a change to ADR-045 node-local admission.
+
+## Verified identity (opt-in)
+
+- Human issuer/subject come from verified OIDC plus the store organization, never
+  JSON/userinfo/owner guesses. Service issuers are derived; admin `account_ref`
+  and `service_account` require full admin. Direct service CLI is privileged.
+- Required activation covers every historical nonempty legacy owner, including
+  revoked-only history. Revoke/reissue active empty-owner keys. Preserve one-to-one
+  registry mappings and all account/window/grant/permit liabilities: no merges,
+  splits, refunds or financial-row rewrite to force activation.
+- A legacy-bound person's canonical audit reference must not replace its declared
+  account_ref in policy. Use Principal.AccountSubject() for financial lookup and
+  principal.AuditRef(p) for digest-only evidence; no identity/account metric labels.
+- Required CP deployments match INFERPLANED_IDENTITY_CONFIG and key_store.identity
+  fingerprints before installing policy/authority, with require_sync enabled.
+  Incompatibility gates generation; counts remain local/200. Fingerprints do not
+  authenticate machines or override existing profile/expiry/DB-loss contracts.
+- Required declarations cannot be removed/downgraded silently. Restart/migration
+  and consistent restore need writer fencing and accounting for issued authority;
+  a restored DB cannot retroactively revoke offline grants. Runtime implementation
+  is not live activation or enterprise qualification. See docs/verified-identity.md.
 
 ## Review checklist
 
