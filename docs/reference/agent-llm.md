@@ -41,7 +41,8 @@ client and upstream protocols without losing thinking blocks or `cache_control`.
   `inferplane.usage.cache_write_{5m,1h}_input_tokens` (zero tiers omitted),
   `inferplane.cost.amount_usd_micros` (integer µUSD — a span must not be the one place a
   float rounding artifact appears) with `inferplane.cost.pricing_missing` always alongside
-  it, since a 0 with the flag means "no rate configured" and a 0 without it means "free".
+  it, since a 0 with the flag means "no rate configured"; without it, zero may be an
+  explicit free rate or a legitimate round-half-even result.
   `inferplane.response.partial` + span status `Error` mark a stream committed to the client
   and then truncated upstream — the wire status was already 200, so without the attribute a
   truncated stream is indistinguishable from a clean one. Span attributes never carry a
@@ -66,7 +67,7 @@ is top-level-only (`system`/`messages`/`tools` values byte-identical).
 | Anthropic → `bedrock` Mantle chat-completions route | `cache_control` | Dropped | body re-rendered from `Parsed` via `internal/openai.CanonicalToRequest`; the OpenAI wire has no cache marker |
 | Anthropic → `openai_compatible` | `cache_control` | Dropped (documented) | best-effort cross-protocol conversion; spec §3.3 states cache_control is ignored with a warning |
 | OpenAI → `openai_compatible` | (upstream-side caching) | Preserved | `RawBody` forwarded byte-for-byte except the top-level `model` value span, plus — streaming only, when the client did not opt in — an order-preserving `stream_options.include_usage` splice (`ensureIncludeUsageRaw`, the zero-billing guard); the resulting usage-only frame is stripped from the client tee |
-| Any path, PII-masked team | `cache_control` | Kept on blocks, **cache lost** | masking re-serializes the whole body (opt-in, ~10× cost warned at boot — ADR-009) |
+| Any path, PII-masked team | `cache_control` | Cache namespace changes | Legacy masking re-serializes the body; complete policy Mask produces deterministic transformed bytes, so repeated masked prefixes can still cache. Measure the actual path; no fixed cost multiplier is guaranteed. |
 
 Even on paths whose cache MARKER is dropped, the conversation prefix itself must
 stay byte-stable across turns for upstream AUTOMATIC caching to hit:

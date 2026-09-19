@@ -163,7 +163,8 @@ inspecting that node's state, and today that means grepping logs.
 - control plane: reachability, auth OK, latency, applied generation vs
   server generation, pending rejections;
 - governance: applied policies per team, lease table (allowance/spent/expiry,
-  from `Governor.UsageOf` + `LeaseTable`), rate shares once ① lands;
+  from `Governor.UsageOf` + `LeaseTable`), plus shared reservations and quotas
+  when ADR-046 is enabled;
 - providers: connection probes (reuse `configapi/probe.go`'s SSRF-guarded
   prober), pricing coverage (reuse `live.UnpricedTargets`);
 - environment: version, supported apiVersions, clock skew vs control plane
@@ -180,7 +181,7 @@ discipline; `key_id`/owner stay out of the JSON by default.
 
 ## ⑤ Provider coverage: embeddings first (ADR candidate — unassigned; next available slot is ADR-040 as of 2026-08-14)
 
-**Gap.** Three provider types, chat-only. The canonical schema is a
+**Gap.** The product remains focused on chat/coding traffic. The canonical schema is a
 Messages-superset — embeddings structurally don't fit it, and forcing them
 through it would violate the lossless-round-trip invariant.
 
@@ -208,12 +209,12 @@ details are swappable.
 
 ## Explicitly deferred (so the list stays five)
 
-- **Credential brokering (ADR-040, Accepted — design gate passed)** — inferplaned vends
-  short-lived STS Bedrock credentials so `bedrock:Invoke*` leaves
-  developer/node IAM entirely (bypassing mayu then yields no credentials).
-  Accepted 2026-08-18 after a 3-round 3-AI design gate (10 findings fixed).
-  Requires a dedicated `INFERPLANED_BROKER_TOKEN` (never the heartbeat
-  token) and auth-mode validation in mayu's config loader.
+- **Credential brokering (ADR-040) is implemented separately, not deferred.**
+  inferplaned vends short-lived STS Bedrock credentials behind a dedicated token.
+  Removing standing node permissions reduces credential exposure, but a developer
+  who can read mayu's environment can obtain the token or sessions. It is not
+  bypass-proof on a compromised/developer-owned host. See the credential-brokering
+  runbook for the deployment trust boundary.
 - **Mutable shared provider topology** remains deferred. ADR-046 shared gateways
   use a common file/ConfigMap rollout and reject the SQLite provider-store option.
   Shared key/rate/quota and key-local money enforcement are implemented.

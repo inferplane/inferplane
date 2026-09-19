@@ -42,6 +42,9 @@
 .md-typeset .grid.cards > ul > li:hover { box-shadow: none; border-color: var(--md-accent-fg-color); }
 .md-typeset table:not([class]) { font-size: .7rem; }
 .md-typeset code { border-radius: .2rem; }
+html[lang="ko"] .md-typeset { word-break: keep-all; overflow-wrap: anywhere; }
+html[lang="ko"] .md-typeset pre { word-break: normal; overflow-wrap: normal; }
+.ip-actions > p { display: flex; flex-wrap: wrap; gap: .6rem; margin: 0; }
 .md-footer { margin-top: 2rem; }
 @media (max-width: 600px) {
   .ip-hero { padding-top: 1rem; }

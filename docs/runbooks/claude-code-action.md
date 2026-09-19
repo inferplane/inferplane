@@ -72,7 +72,7 @@ you'll use (and the regions the cross-region profile spans).
 - **Secret** `AWS_ROLE_TO_ASSUME` = the role ARN from step 2.
 - **Variables** (optional overrides; the workflows have safe defaults):
   - `AWS_REGION` (default `us-west-2`)
-  - `CLAUDE_BEDROCK_MODEL` (default `us.anthropic.claude-sonnet-4-6`) — set to
+  - `CLAUDE_BEDROCK_MODEL` (default: see the current workflow) — set to
     a model id whose access you enabled in step 3 / matches your region.
 
 ### 5. Merge these workflows to `main`
@@ -143,4 +143,4 @@ LOW findings resolved in a follow-up cleanup: `actions: read` removed from `clau
 (no allowed tool exercised it); the fork-guard comment in `claude-code-review.yml`
 restores the OIDC-token security rationale alongside the red-check rationale.
 
-Still open (tracked, not yet actioned): SHA re-pin automation via Dependabot.
+SHA re-pin automation is configured through the weekly Dependabot workflow described above.

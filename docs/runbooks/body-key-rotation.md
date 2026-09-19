@@ -42,9 +42,9 @@ applies when you're running the Postgres `bodystore` backend across multiple
 coordination (same posture as `Purge`) — a body captured by another live
 replica while rotation is running simply isn't in this run's row list; a
 second `bodies rewrap-key` run with the same old/new keys catches it. This
-does not imply the gateway as a whole supports multi-replica deployment
-today — `keystore`/`limiter`/`budget` are still single-replica only
-(ADR-013, deferred; see `docs/roadmap.md`).
+does not qualify the gateway deployment for HA. The default/local profile stays
+single-replica; multiple gateways require the explicit ADR-046 shared profile
+and an available Postgres service. See [deployment profiles](../getting-started/deployment-profiles.md).
 
 ## Reading the output
 

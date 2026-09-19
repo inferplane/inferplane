@@ -14,6 +14,7 @@ Open the loopback URL printed by MkDocs. To run the same documentation checks as
 
 ```bash
 .venv-docs/bin/python -m unittest discover -s tests/docs -v
+.venv-docs/bin/python scripts/check_docs_translations.py
 .venv-docs/bin/python -m mkdocs build --strict
 .venv-docs/bin/python scripts/check_docs_site.py site
 ```
@@ -26,7 +27,24 @@ Write for the operator's task: prerequisites, supported configuration, expected 
 
 New behavior must link to its reference and decision. New operational procedures must preserve credentials, identity history, audit evidence and outstanding authority. Never turn examples into claims about current model availability or pricing.
 
-`mkdocs.yml` owns navigation. Historical specifications/plans and customer analysis remain in GitHub; they are excluded from site navigation and search. ADRs remain searchable with their original status. The hook rewrites links to repository-only files/directories into GitHub source links and generates an ADR index without duplicating source documents.
+`mkdocs.yml` owns navigation. Historical specifications/plans and customer analysis remain in GitHub; they are excluded from site navigation and search. ADRs remain searchable with their original status. The hook rewrites links to repository-only files/directories into GitHub source links. After adding or renaming an ADR, run `python scripts/docs_hooks.py` to regenerate the committed English/Korean ADR indexes; validation rejects a stale index.
+
+## Korean and English
+
+English stays at the existing root URL; Korean is under `/ko/`. The language
+selector follows the current page. Add a sibling `page.ko.md` for every published
+product, operations, API, implementation-reference and project document. ADRs
+remain English originals with a Korean index and an explicit original-language
+notice. Historical plans/specifications stay outside the published site.
+
+Preserve commands, field names, code examples and safety conditions. Give translated
+headings the original English anchor with `{#original-anchor}` so existing deep links
+work in either language. Update the original and translation together; retain the
+`translation_source` path and set `translation_source_sha256` to the SHA-256 of the
+reviewed English file after translating its changes. The check detects missing and
+outdated translations; a matching hash alone does not prove translation quality.
+Review the meaning as well as updating the marker. Keep both languages' search,
+metadata, navigation, and mobile language switch under browser verification.
 
 ## Publication
 

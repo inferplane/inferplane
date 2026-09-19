@@ -52,6 +52,71 @@ theme:
     - content.action.edit
 plugins:
   - search
+  - i18n:
+      docs_structure: suffix
+      languages:
+        - locale: en
+          default: true
+          name: English
+        - locale: ko
+          name: 한국어
+          copyright: Copyright © inferplane 기여자 · Apache-2.0
+          site_description: 코딩 에이전트의 모델 접근, 예산, 개인정보 보호와 감사 기록을 관리하는 자체 호스팅 거버넌스 플랫폼.
+          theme:
+            palette:
+              - scheme: default
+                primary: custom
+                accent: custom
+                toggle:
+                  icon: material/weather-night
+                  name: 어두운 테마로 전환
+              - scheme: slate
+                primary: custom
+                accent: custom
+                toggle:
+                  icon: material/weather-sunny
+                  name: 밝은 테마로 전환
+          nav_translations:
+            Overview: 소개
+            Get started: 시작하기
+            First request: 첫 요청 보내기
+            Choose a deployment profile: 배포 프로파일 선택
+            Connect clients: 클라이언트 연결
+            Feature support: 기능 지원 범위
+            Guides: 사용 가이드
+            Model routing & privacy: 모델 라우팅과 개인정보 보호
+            Adaptive coding workflows: 적응형 코딩 워크플로
+            Verified identity: 검증된 사용자 식별
+            Durable budgets: 영속 전역 예산
+            Shared governance: 공유 거버넌스
+            Codex launcher: Codex 실행 도구
+            CLI login: CLI 로그인
+            Credential brokering: 자격 증명 중개
+            Console SSO: 콘솔 SSO
+            Operations: 운영
+            Deploy with containers: 컨테이너 배포
+            Monitor & troubleshoot: 모니터링과 문제 해결
+            Upgrade & recover: 업그레이드와 복구
+            Production readiness: 상용화 준비도
+            Security boundaries: 보안 경계
+            Audit anchoring: 감사 앵커링
+            Body key rotation: 본문 암호화 키 교체
+            Reference: 레퍼런스
+            HTTP & CLI: HTTP와 CLI
+            Architecture: 아키텍처
+            Implementation: 구현 레퍼런스
+            Index: 색인
+            Infrastructure: 인프라
+            API: API
+            Data: 데이터
+            Security: 보안
+            Providers & agents: 공급자와 에이전트
+            Architecture decisions: 설계 결정 기록
+            Project: 프로젝트
+            Contributing: 기여하기
+            Maintain the documentation: 문서 관리
+            Product direction: 제품 방향
+            Roadmap: 로드맵
 markdown_extensions:
   - admonition
   - attr_list

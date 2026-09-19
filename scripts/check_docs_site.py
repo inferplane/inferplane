@@ -27,7 +27,7 @@ class Document(HTMLParser):
 def check_site(root, base="/inferplane/"):
     root = root.resolve()
     documents = {
-        path: Document(path.read_text())
+        path: Document(path.read_text(encoding="utf-8"))
         for path in root.rglob("*.html")
     }
     errors = []

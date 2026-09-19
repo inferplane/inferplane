@@ -15,8 +15,8 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
 | GovernancePolicy CRD | `deploy/crd/` | kubectl-native schema validation for `inferplane.dev/v1alpha1` documents (structural schema + CEL, K8s 1.25+); controller-watch is a named follow-up (ADR-035) |
 | Chart values | `charts/inferplane/values.yaml` | Image, replicaCount (local=1; shared Postgres supports multiple replicas), existingSecret, IRSA annotation, ingress (data/admin hosts), persistence (opt-in PVC for the key store), commented `config.otel` OTLP-trace example |
 | Grafana dashboard | `deploy/grafana/inferplane.json` | 9-panel Prometheus dashboard |
-| Product documentation | `mkdocs.yml`, `docs/assets/`, `scripts/docs_hooks.py` | MkDocs Material site; profile-qualified product guides, search, repository-link handling |
-| Documentation delivery | `.github/workflows/docs.yml` | Strict build/rendered-link checks on PRs; Pages deployment from main with isolated deployment permissions |
+| Product documentation | `mkdocs.yml`, `docs/assets/`, `scripts/docs_hooks.py` | MkDocs Material + static-i18n; Korean/English product guides, localized navigation/search, repository-link handling |
+| Documentation delivery | `.github/workflows/docs.yml` | Strict build, translation coverage/freshness, and rendered-link checks on PRs; Pages deployment from main with isolated deployment permissions |
 
 ### 3. Key Decisions
 - `CGO_ENABLED=0` static binary so the image can be distroless/nonroot with no libc.
@@ -67,7 +67,7 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
 
 ### 5. Cross-references
 - Related modules: [docs/architecture.md](../architecture.md) (Infrastructure section)
-- Related ADRs: docs/decisions/ (none yet)
+- Related ADRs: [ADR-031](../decisions/ADR-031-monorepo-control-plane-data-plane-split.md), [ADR-046](../decisions/ADR-046-shared-governance.md)
 - Related guides: [container/Helm deployment](../operations/deployment.md),
   [recovery](../operations/recovery.md), [documentation maintenance](../documentation.md)
 
@@ -92,5 +92,6 @@ ADR-045 adds opt-in Postgres global monetary authority with interchangeable
 control-plane replicas and private durable node journals. Its readiness endpoint
 checks the database; data planes retain only finite previously committed credit
 during outages. Deploy a replicated database and a stable control-plane endpoint.
-This does not remove the shared-gateway key/rate/quota limits above.
+ADR-045 does not globalize local keys/rates/token quotas; ADR-046 supplies
+the separate synchronous shared-admission profile described above.
 See [deployment and failure behavior](../durable-budgets.md).
