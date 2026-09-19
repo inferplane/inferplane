@@ -3,7 +3,7 @@
 ## Quick Start
 
 ### 1. Prerequisites
-- [ ] Go 1.25+ installed (`go version`)
+- [ ] Go toolchain matching `go.mod` installed (`go version`)
 - [ ] Repository access granted
 - [ ] (Optional) Docker for container builds; Helm + kubectl for cluster deploys
 - [ ] Upstream credentials for local testing (e.g. `ANTHROPIC_API_KEY`)
@@ -25,10 +25,13 @@ go test ./... -race      # full suite, race detector
 go vet ./...             # static checks
 gofmt -l .               # must print nothing
 
-# Run against the example config
-ANTHROPIC_API_KEY=sk-ant-... INFERPLANE_ADMIN_TOKEN=dev \
-  go run ./cmd/mayu serve --config examples/config.json
 ```
+
+For a running gateway, use the [first-request guide](getting-started/quickstart.md).
+It prepares writable state, reads credentials without shell-history values, and
+uses one config for key issuance and serving. Database integration tests require
+both `INFERPLANE_TEST_PG_DSN` and `KEYSTORE_TEST_POSTGRES_DSN` pointing to the same
+disposable test service; a skipped database suite is not a passing qualification.
 
 ## Project Overview
 - Read `CLAUDE.md` for project context and conventions.

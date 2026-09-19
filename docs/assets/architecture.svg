@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 490" role="img" aria-labelledby="title desc">
+  <title id="title">inferplane component architecture</title>
+  <desc id="desc">Coding agents send inference to mayu and then providers. inferplaned delivers policy and finite authority, and uses Postgres when enabled. Shared ADR-046 gateways synchronously access Postgres for key lookup and admission. Each gateway writes its own audit and telemetry.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0 8 4 0 8" fill="none" stroke="#047857" stroke-width="1.5"/>
+    </marker>
+  </defs>
+  <rect width="960" height="490" rx="16" fill="#f0f5f2"/>
+  <g fill="#fff" stroke="#c1d4c9" stroke-width="1.5">
+    <rect x="340" y="30" width="250" height="82" rx="10"/>
+    <rect x="705" y="30" width="225" height="82" rx="10"/>
+    <rect x="30" y="230" width="215" height="85" rx="10"/>
+    <rect x="340" y="230" width="250" height="85" rx="10" stroke="#047857" stroke-width="2"/>
+    <rect x="705" y="230" width="225" height="85" rx="10"/>
+    <rect x="340" y="400" width="250" height="65" rx="10"/>
+  </g>
+  <g fill="none" stroke="#047857" stroke-width="2" marker-end="url(#arrow)">
+    <path d="M245 272H335"/>
+    <path d="M590 272H700"/>
+    <path d="M465 315V395"/>
+    <path d="M590 71H700" stroke-dasharray="6 5"/>
+    <path d="M465 112V224" stroke-dasharray="6 5"/>
+    <path d="M590 230 745 117" stroke-dasharray="6 5"/>
+  </g>
+  <g fill="#163c2c" font-family="system-ui,sans-serif" text-anchor="middle">
+    <g font-size="21" font-weight="650">
+      <text x="465" y="65">inferplaned</text>
+      <text x="817" y="65">Postgres</text>
+      <text x="137" y="267">Coding agents</text>
+      <text x="465" y="265">mayu</text>
+      <text x="817" y="267">Providers</text>
+      <text x="465" y="427" font-size="18">Audit + telemetry</text>
+    </g>
+    <g font-size="14">
+      <text x="465" y="91">Policy and budget authority</text>
+      <text x="817" y="91">When the profile enables it</text>
+      <text x="137" y="291">Virtual-key authentication</text>
+      <text x="465" y="291">Routing and admission</text>
+      <text x="817" y="291">Approved model targets</text>
+      <text x="465" y="449">Per-instance evidence</text>
+      <text x="361" y="162">Policy + finite</text>
+      <text x="361" y="181">authority</text>
+      <text x="796" y="165">ADR-046 only:</text>
+      <text x="796" y="184">synchronous admission</text>
+      <text x="630" y="256">Inference</text>
+      <text x="465" y="372">Observed usage and uncertainty</text>
+    </g>
+  </g>
+</svg>

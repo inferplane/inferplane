@@ -1,19 +1,22 @@
 # Infrastructure
 
 ### 1. Overview
-Packaging and deployment for the single static binary: a multi-stage Docker build
-producing a distroless image, and a Helm chart that renders config into a ConfigMap and
-wires an optional IRSA ServiceAccount for Bedrock.
+Packaging and deployment for two static binaries: separate multi-stage Docker
+builds produce the mayu and inferplaned distroless images. The gateway Helm chart
+renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Bedrock.
 
 ### 2. Components
 | Component | Path | Purpose |
 |---|---|---|
 | Dockerfile | `Dockerfile` | Multi-stage `CGO_ENABLED=0` build → `distroless/static:nonroot` |
+| Control-plane Dockerfile | `Dockerfile.inferplaned` | Separate static inferplaned image |
 | Docker ignore | `.dockerignore` | Excludes tests/docs/charts from the build context |
 | Helm chart | `charts/inferplane/` | Deployment, Service (data+admin), ServiceAccount, ConfigMap, optional policies ConfigMap (`/etc/inferplane/policies`, live-reloaded — ADR-035), optional Ingress, optional PVC (ADR-023), NOTES.txt |
 | GovernancePolicy CRD | `deploy/crd/` | kubectl-native schema validation for `inferplane.dev/v1alpha1` documents (structural schema + CEL, K8s 1.25+); controller-watch is a named follow-up (ADR-035) |
 | Chart values | `charts/inferplane/values.yaml` | Image, replicaCount (local=1; shared Postgres supports multiple replicas), existingSecret, IRSA annotation, ingress (data/admin hosts), persistence (opt-in PVC for the key store), commented `config.otel` OTLP-trace example |
 | Grafana dashboard | `deploy/grafana/inferplane.json` | 9-panel Prometheus dashboard |
+| Product documentation | `mkdocs.yml`, `docs/assets/`, `scripts/docs_hooks.py` | MkDocs Material site; profile-qualified product guides, search, repository-link handling |
+| Documentation delivery | `.github/workflows/docs.yml` | Strict build/rendered-link checks on PRs; Pages deployment from main with isolated deployment permissions |
 
 ### 3. Key Decisions
 - `CGO_ENABLED=0` static binary so the image can be distroless/nonroot with no libc.
@@ -65,7 +68,8 @@ wires an optional IRSA ServiceAccount for Bedrock.
 ### 5. Cross-references
 - Related modules: [docs/architecture.md](../architecture.md) (Infrastructure section)
 - Related ADRs: docs/decisions/ (none yet)
-- Related runbooks: docs/runbooks/ (create `deploy-production.md`)
+- Related guides: [container/Helm deployment](../operations/deployment.md),
+  [recovery](../operations/recovery.md), [documentation maintenance](../documentation.md)
 
 ### Routing rollout (ADR-043)
 

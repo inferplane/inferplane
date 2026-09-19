@@ -1,4 +1,8 @@
 /bin/
+/site/
+/.venv-docs/
+/.local/
+__pycache__/
 /inferplane
 *.db
 *.db-wal

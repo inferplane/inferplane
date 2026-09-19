@@ -77,7 +77,7 @@ way to end up billing 0.
 | Key | `(provider, upstream)`; exact match wins |
 | Bedrock cross-region | ONE leading `global.` / `us.` / `eu.` / `apac.` / `us-gov.` is stripped on a miss — same model, no published price differential. Declare a prefixed key only for a genuinely different rate. |
 | Model versions | **Never** collapsed. Each version needs its own rate even when prices coincide today. |
-| Provider | Never collapsed — Bedrock Opus 4.8 is $6.00/$30.00 vs first-party $5.00/$25.00. |
+| Provider | Never collapsed. Configure and verify rates per provider/account; do not assume either price parity or a markup. |
 | Cache rates | Derived from input: read **0.1x**, 5m write **1.25x**, 1h write **2.0x**. Declare `input_per_mtok` + `output_per_mtok` and the three follow. An explicit value wins; `0` means derive. |
 | `on_missing` | `block` → refuse to boot on an unpriced route AND deny at runtime (402 `pricing_missing`). `allow` (default) → log loudly, bill 0. An unrecognized value is a load error. |
 | `version` | Free-form label landing in every audit record's `cost.pricing_version`. Set it so a disputed invoice can be pinned to its rates. |
