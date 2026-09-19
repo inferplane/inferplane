@@ -4,8 +4,6 @@ from pathlib import Path
 import re
 from urllib.parse import quote, unquote, urlsplit
 
-from mkdocs.structure.files import File
-
 
 def repository_link(target, source, root, published):
     """Rewrite existing repository-only destinations; leave typos for MkDocs."""
@@ -31,8 +29,9 @@ def repository_link(target, source, root, published):
     return f"https://github.com/inferplane/inferplane/{kind}/main/{path}{suffix}"
 
 
-def on_files(files, config):
-    root = Path(config["docs_dir"])
+def adr_indexes(root):
+    """Materialized indexes also work with plugins that require real source files."""
+    root = Path(root)
     decisions = sorted((root / "decisions").glob("ADR-*.md"))
     lines = [
         "# Architecture decisions",
@@ -45,17 +44,30 @@ def on_files(files, config):
         "",
     ]
     for decision in decisions:
-        title = decision.read_text().splitlines()[0].lstrip("# ")
+        title = decision.read_text(encoding="utf-8").splitlines()[0].lstrip("# ")
         lines.append(f"- [{title}]({decision.name})")
-    files.append(File.generated(config, "decisions/index.md", content="\n".join(lines)))
-    return files
+    korean = [
+        "# 설계 결정 기록",
+        "",
+        "설계 이력과 구현 계약입니다. 각 기록의 상태를 확인하세요. 설계가 승인되었다고 "
+        "운영 환경 검증까지 완료된 것은 아닙니다.",
+        "",
+        "현재 동작은 [배포 프로파일](../getting-started/deployment-profiles.md)에서 확인하세요. "
+        "아래 ADR은 역사적 맥락을 보존하는 **영어 원문**입니다.",
+        "",
+    ]
+    korean.extend(lines[6:])
+    return {
+        "decisions/index.md": "\n".join(lines) + "\n",
+        "decisions/index.ko.md": "\n".join(korean) + "\n",
+    }
 
 
 def on_page_markdown(markdown, page, config, files):
     root = Path(config["docs_dir"]).parent.resolve()
     source = Path(config["docs_dir"]) / page.file.src_uri
     published = {
-        (Path(config["docs_dir"]) / file.src_uri).resolve()
+        (Path(config["docs_dir"]) / getattr(file, "norm_src_uri", file.src_uri)).resolve()
         for file in files
         if file.inclusion.is_included()
     }
@@ -70,3 +82,9 @@ def on_page_markdown(markdown, page, config, files):
             chunks[index],
         )
     return "".join(chunks)
+
+
+if __name__ == "__main__":
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    for path, content in adr_indexes(docs).items():
+        (docs / path).write_text(content, encoding="utf-8")

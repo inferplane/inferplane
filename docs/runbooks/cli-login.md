@@ -65,9 +65,10 @@ redirect match, no wildcard port. Either:
 
 - Register the CLI's fixed port and always pass `mayu login --port
   <that port>`, or
-- Skip the browser flow entirely: `mayu login --id-token-command
-  "aws sso login ... && aws sts get-caller-identity ..."`-style wrapper that
-  prints a valid ID token to stdout (see below).
+- Skip the browser flow entirely: use `mayu login --id-token-command` with a
+  trusted helper that prints a valid IdP **ID token** to stdout (see below).
+  AWS STS `get-caller-identity` returns account/ARN metadata, not an ID token,
+  and cannot be used as that helper by itself.
 
 ## Use it (developer)
 

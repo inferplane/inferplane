@@ -1,0 +1,50 @@
+<svg lang="ko" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 490" role="img" aria-labelledby="title desc">
+  <title id="title">inferplane 구성 요소 아키텍처</title>
+  <desc id="desc">코딩 에이전트의 요청은 mayu를 거쳐 공급자로 전달됩니다. inferplaned가 정책과 한정된 사용 권한을 배포합니다. 공유 모드의 키 조회와 승인은 Postgres에 동기 접근하며, 각 게이트웨이가 감사와 관측 기록을 만듭니다.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0 8 4 0 8" fill="none" stroke="#047857" stroke-width="1.5"/>
+    </marker>
+  </defs>
+  <rect width="960" height="490" rx="16" fill="#f0f5f2"/>
+  <g fill="#fff" stroke="#c1d4c9" stroke-width="1.5">
+    <rect x="340" y="30" width="250" height="82" rx="10"/>
+    <rect x="705" y="30" width="225" height="82" rx="10"/>
+    <rect x="30" y="230" width="215" height="85" rx="10"/>
+    <rect x="340" y="230" width="250" height="85" rx="10" stroke="#047857" stroke-width="2"/>
+    <rect x="705" y="230" width="225" height="85" rx="10"/>
+    <rect x="340" y="400" width="250" height="65" rx="10"/>
+  </g>
+  <g fill="none" stroke="#047857" stroke-width="2" marker-end="url(#arrow)">
+    <path d="M245 272H335"/>
+    <path d="M590 272H700"/>
+    <path d="M465 315V395"/>
+    <path d="M590 71H700" stroke-dasharray="6 5"/>
+    <path d="M465 112V224" stroke-dasharray="6 5"/>
+    <path d="M590 230 745 117" stroke-dasharray="6 5"/>
+  </g>
+  <g fill="#163c2c" font-family="system-ui,sans-serif" text-anchor="middle">
+    <g font-size="21" font-weight="650">
+      <text x="465" y="65">inferplaned</text>
+      <text x="817" y="65">Postgres</text>
+      <text x="137" y="267">코딩 에이전트</text>
+      <text x="465" y="265">mayu</text>
+      <text x="817" y="267">공급자</text>
+      <text x="465" y="427" font-size="18">감사 + 관측</text>
+    </g>
+    <g font-size="14">
+      <text x="465" y="91">정책과 예산 사용 권한</text>
+      <text x="817" y="91">프로파일에서 활성화한 경우</text>
+      <text x="137" y="291">가상 키 인증</text>
+      <text x="465" y="291">라우팅과 요청 승인</text>
+      <text x="817" y="291">승인된 모델 목적지</text>
+      <text x="465" y="449">인스턴스별 증거</text>
+      <text x="361" y="162">정책과 한정된</text>
+      <text x="361" y="181">사용 권한</text>
+      <text x="796" y="165">ADR-046만 해당:</text>
+      <text x="796" y="184">동기식 요청 승인</text>
+      <text x="630" y="256">추론</text>
+      <text x="465" y="372">관측 사용량과 불확실성</text>
+    </g>
+  </g>
+</svg>

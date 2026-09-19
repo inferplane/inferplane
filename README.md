@@ -4,7 +4,8 @@
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8.svg)](go.mod)
 [![Status](https://img.shields.io/badge/Status-alpha-orange.svg)](#status)
 
-[**Documentation**](https://inferplane.github.io/inferplane/) ·
+[**Documentation (English)**](https://inferplane.github.io/inferplane/) ·
+[**한국어 문서**](https://inferplane.github.io/inferplane/ko/) ·
 [Quickstart](docs/getting-started/quickstart.md) ·
 [Deployment profiles](docs/getting-started/deployment-profiles.md) ·
 [Production readiness](docs/operations/production-readiness.md)

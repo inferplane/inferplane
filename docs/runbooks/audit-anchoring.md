@@ -11,7 +11,7 @@ The gateway only PUTs anchor objects. The resistance guarantee holds **only if**
 the bucket and IAM are configured correctly — otherwise the gateway is just
 writing mutable JSON:
 
-1. **Object Lock ENABLED at bucket creation** (it cannot be turned on later) with
+1. **Object Lock ENABLED on the bucket** with
    a **default retention in COMPLIANCE mode** (GOVERNANCE mode can be bypassed by
    privileged users — use COMPLIANCE for true WORM). Versioning is required (and
    implied by Object Lock).
