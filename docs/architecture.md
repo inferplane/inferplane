@@ -2,180 +2,182 @@
 
 ## System Overview
 
-inferplane is split into two binaries: **`mayu`**, a node-local data plane that
-sits between coding agents (Claude Code, OpenCode, Codex) and upstream model providers
-(Anthropic, Amazon Bedrock, self-hosted vLLM/Ollama), and **`inferplaned`**, a
-control plane that distributes policy and budget leases but never carries
-inference traffic (ADR-031). `mayu` authenticates virtual keys, enforces
-per-team RBAC, rate limits, quotas, and budgets, forwards each request to a
-real provider, and writes a tamper-evident audit record — all with no external
-SaaS dependency. Both binaries are static, cgo-free, and Kubernetes-native.
-See the [README](../README.md#architecture) for the control-plane/data-plane
-topology diagram; this document covers `mayu`'s internal component
-architecture.
+inferplane separates inference traffic from policy administration. **`mayu`**
+authenticates and routes requests, enforces configured controls, and records
+usage. **`inferplaned`** distributes policy and budget authority, aggregates usage,
+and optionally brokers short-lived Bedrock credentials. Both are static Go
+binaries; a standalone `mayu` needs no control plane.
 
-`mayu` is built around two design invariants: a **canonical schema** (an
-Anthropic-superset that preserves thinking blocks and `cache_control`) for
-cross-protocol conversion, and **verbatim body forwarding** when the ingress
-protocol matches the upstream protocol, so prompt-cache hits are never
-corrupted.
+The control-plane HTTP service is not called for each inference admission.
+Dependencies still vary by [deployment profile](getting-started/deployment-profiles.md):
+local enforcement uses process-local counters; ADR-045 uses centrally committed
+monetary grants and a private local journal; ADR-046 synchronously resolves keys
+and reserves resources through Postgres. This separation is not an unconditional
+availability guarantee.
 
 ## Components
 
 ### Ingress Layer (`internal/server`)
-- **Data plane (`:8080`)** -- three ingresses: Anthropic Messages (`/v1/messages`, `/v1/messages/count_tokens`, `/v1/models`), OpenAI Chat Completions (`/v1/chat/completions`, `/v1/models`), and Bedrock InvokeModel passthrough (`/model/{modelId}/invoke`, `/invoke-with-response-stream`, `/count-tokens`, ADR-024). `KeyAuth` resolves the virtual key before routing.
-- **Admin plane (`:9090`)** -- `/healthz`, `/readyz`, unauthenticated `/metrics`, the token-authenticated `/admin/keys` API, and the minimal embedded key console at `/admin/ui/` (data-free static assets, ADR-001; OIDC SSO login button, ADR-026).
-- **TLS (`tls.go`)** -- optional self-terminated TLS on the data plane for non-Kubernetes deployments; the admin plane stays plaintext (cluster-internal).
 
-### Governance Layer (`internal/governance`, `limiter`, `budget`, `pricing`)
-- **Governor** -- two-phase: `PreCheck` runs BEFORE billing (rate/quota/budget), `Settle` runs AFTER (debits quota tokens and budget microUSD, records cost).
-- **Limiter / Budget stores** -- in-memory, two-phase (optimistic check + post-debit), injectable clocks; a shared-store backend (Postgres/Redis) is planned to slot behind the same interfaces for multi-replica HA (ADR-013, not yet implemented).
-- **Pricing** -- integer microUSD, round-half-even via `math/big`, TTL-tiered cache-write rates, `on_missing: allow` (self-hosted chargeback) | `block`.
+Messages, Chat Completions, Responses, and Bedrock-shaped generation routes share
+identity, body-size, readiness, access and governance controls. Model discovery
+and usage views are authenticated. Count endpoints preserve their HTTP-200
+contract, including local estimates when generation would be refused.
+See the [HTTP reference](api-reference.md) for routes and protocol limits.
+
+The separate admin listener serves health, readiness, metrics, authenticated
+management APIs and a data-free console shell. OIDC and static-token paths have
+different identity/authorization contracts; the complete six-role org/team model
+remains open.
+
+### Governance Layer (`internal/governance`, `internal/authority`)
+
+| Profile | Admission state | Failure boundary |
+| --- | --- | --- |
+| Local SQLite / optional legacy CP | Process-local rate, quota and money; legacy CP allowances | Local counters reset on restart; attached readiness/lease gates still apply |
+| Durable node-local money · ADR-045 | Postgres policy-money authority, finite grants, private node journal | Existing credit only within readiness/staleness and hard deadlines; no replenishment during CP/DB loss |
+| Shared Postgres · ADR-046 | Shared key/team snapshots and atomic rate/token/money reservations | New key resolution/admission requires reachable Postgres and valid policy binding |
+
+Governance checks precede billable egress. Authority profiles reserve a
+conservative bound for **each provider attempt**. Settlement records known usage
+and retains uncertainty where a refund cannot be proved. Expiry, a lost node, or
+an interrupted stream does not create fresh credit. Monetary arithmetic uses
+integer microUSD and round-half-even; pricing is an operator-reviewed accounting
+input, not a guarantee about an external invoice.
 
 ### Provider Layer (`providers/*`)
-- **anthropic** -- Messages API passthrough; verbatim body, gateway-injected `x-api-key`.
-- **bedrock** -- Claude via InvokeModel (native Anthropic body, cache-safe top-level model rewrite, event-stream → Anthropic SSE); non-Claude via Converse. SDK isolated behind invoker/converser interfaces.
-- **openaicompat** -- vLLM/Ollama/any OpenAI endpoint; order-preserving model rewrite.
-- The `Provider` interface (`Name`, `Models`, `Complete`, `Stream`, optional `TokenCounter`) is the single extension point — a new provider is one package.
 
-### Routing Layer (`internal/router`)
-- Resolves model → provider target, walks the priority fallback chain, and guards each provider with a circuit breaker (consecutive-failure → open → backoff → half-open). Failover is **pre-TTFT only**; a mid-stream failure is never retried.
-- **Model-level fallback (ADR-029)** — an unrouted requested model (e.g. a hardcoded client on a model the operator hasn't added yet) substitutes for a configured `model_fallbacks` entry, or by default the highest configured version below it in the same name family, BEFORE the allow-list check (`Router.ResolveModel`). A *configured* model whose upstream rejects it as unknown (404, or Bedrock 400 `ValidationException`) also crosses to its fallback model within the existing chain (`ResolveChain` appends the fallback model's own targets); because that append happens after the ingress allow-list check already ran, every ingress handler re-checks those targets via `FilterModelAllowed` before ever dispatching to them. Either path is fail-closed on RBAC and sets `x-inferplane-model-fallback`.
+| Package | Responsibility |
+| --- | --- |
+| `anthropic` | Messages protocol and server-side credential injection |
+| `bedrock` | Configured InvokeModel, Converse or Mantle paths; AWS signing and API-specific limits |
+| `bedrockresponses` | Native Bedrock Responses transport with AWS credential/signing integration |
+| `openaicompat` | Chat Completions-compatible upstreams |
+| `openairesponses` | Native Responses upstreams |
 
-### Persistence Layer (`internal/keystore`, `internal/audit`)
-- **Key store** -- SQLite (`modernc.org/sqlite`, cgo-free), Postgres-portable schema; keys SHA-256 hashed at rest behind a `Store` interface.
-- **Audit** -- single-writer goroutine, per-instance SHA-256 hash chain, disk-backed WAL (`buffer_then_block`), `audit verify` CLI, ULID record IDs.
+The provider interface is the extension boundary. Protocol-compatible paths
+preserve raw request bodies under the existing forwarding contract; deliberate
+model rewrites, enabled masking and cross-protocol translation have separate
+semantics. Declared capabilities do not prove universal tool/reasoning support.
+Unsupported guardrail/API combinations refuse rather than silently bypassing the
+control. See [provider reference](reference/agent-llm.md).
+
+### Routing Layer (`internal/router`, `internal/sensitivity`, `internal/tier`)
+
+Routing composes public model resolution, allowed targets, budget tiers,
+sensitive-data decisions, context selection, and provider fallback. Every attempt
+must satisfy access, privacy, region, capacity and active strict-target constraints.
+Legacy optional tier substitution retains the original model when an alternative
+cannot be used; opt-in strict targets can refuse. Context Shadow still enforces
+privacy. Session stability is bounded and local, not a shared session authority.
+
+Fallback is limited by the ingress/provider's pre-commit streaming boundary.
+Once output has been committed, a failed stream cannot be replayed transparently.
+See [policy routing](policy-routing.md) and [adaptive routing](adaptive-routing.md).
+
+### Persistence Layer (`internal/keystore`, `internal/authority`, `internal/audit`)
+
+SQLite is the default hashed-key/team store. The shared profile implements a
+Postgres key/team backend and shared resource admission. Optional verified
+human/service identity uses a persistent registry while retaining registered
+financial account references; activation is explicit, not a side effect of
+choosing Postgres.
+
+Postgres can also store policy documents and usage/analytics. The mutable provider
+topology store remains SQLite-only and is rejected in shared governance mode.
+Private ADR-045 journals and per-instance audit WALs must never be shared between
+running gateways. See [data reference](reference/data.md) and
+[verified identity](verified-identity.md).
 
 ### Observability Layer (`internal/metrics`)
-- Prometheus registry with OpenTelemetry GenAI semantic-convention naming (`gen_ai_*`) plus `inferplane_*` operational series. Cardinality is config-bounded; a sentinel `_rejected` model label protects pre-resolution 403/404 paths.
+
+Prometheus serves bounded `gen_ai_*` and `inferplane_*` metrics on the admin port.
+Opt-in traces use OTLP. Audit records use an exact-byte hash chain with per-instance
+segments and optional external anchors. Body capture is a separate opt-in
+encrypted store; it is not part of the audit chain.
 
 ### Control-Plane Telemetry (`internal/telemetry`, `internal/controlplane`, ADR-036)
-- The "usage up" channel of the split (ADR-031): each mayu folds settled usage — team/user/model, integer µUSD, cache 5m/1h tiers — into 60s windows (`telemetry.Collector`) pushed to inferplaned's `POST /v1alpha1/usage`, deliberately separate from the enforcement-critical policy/lease sync heartbeat. The data plane's bounded FIFO is the single retry store (the control plane acks only what is stored — 503 otherwise); storage is always-on bounded memory plus opt-in Postgres write-through (`INFERPLANED_USAGE_DSN`), queried via `GET /v1alpha1/usage`, streamed exports, and the read-only `/ui/` console (SSO login button, ADR-037).
+
+Usage windows travel to `POST /v1alpha1/usage` separately from policy/authority
+synchronization. They support analytics and the usage console; they are not OTLP
+and are not a substitute for the authority ledger. Analytics delivery loss and
+retained monetary uncertainty are different operating conditions.
 
 ### Security Layer (cross-cutting)
-- Virtual-key auth + team RBAC (`Principal.Allows`), inline-secret rejection, client/upstream key isolation, no secret leakage on `/metrics`.
+
+Virtual-key hashes, upstream credential isolation, referenced secrets, bounded
+metrics and fail-closed control paths protect the configured gateway boundary.
+Policy administration and credential brokering have dedicated credentials.
+A compromised host can still obtain locally accessible credentials or sessions;
+provider boundary labels and identity fingerprints are not host attestation.
+See [security boundaries](operations/security.md).
 
 ## mayu Component Diagram
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                         Clients                                │
-│   Claude Code (Anthropic API)      OpenCode (OpenAI API)       │
-└───────────────┬─────────────────────────────┬─────────────────┘
-                │ ik_... virtual key           │ ik_... virtual key
-                ▼                             ▼
-┌──────────────────────────────────────────────────────────────┐
-│                   Data Plane  :8080  (internal/server)         │
-│   ┌────────────┐   KeyAuth (RBAC)   ┌────────────────────┐     │
-│   │ /v1/messages│──────┐     ┌──────│ /v1/chat/completions│    │
-│   └────────────┘       ▼     ▼      └────────────────────┘     │
-│                  ┌──────────────────┐                          │
-│                  │    Governor       │  PreCheck (rate/quota/  │
-│                  │ (governance)      │   budget) BEFORE bill   │
-│                  └────────┬─────────┘                          │
-│                           ▼                                    │
-│                  ┌──────────────────┐                          │
-│                  │     Router        │ fallback chain +        │
-│                  │ + circuit breaker │ breaker (pre-TTFT)      │
-│                  └────────┬─────────┘                          │
-└───────────────────────────┼────────────────────────────────────┘
-                            ▼
-┌──────────────────────────────────────────────────────────────┐
-│                   Provider Layer  (providers/*)                │
-│   ┌──────────┐    ┌──────────┐    ┌────────────────────┐       │
-│   │ anthropic│    │ bedrock   │    │ openai_compatible  │       │
-│   └────┬─────┘    └────┬─────┘    └─────────┬──────────┘       │
-└────────┼──────────────┼────────────────────┼──────────────────┘
-         ▼              ▼                    ▼
-   Anthropic API   Amazon Bedrock      vLLM / Ollama
-         │              │                    │
-         └──────────────┴────────────────────┘
-                        │ Settle (debit quota/budget, record cost)
-                        ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Persistence + Observability                                   │
-│  ┌───────────┐  ┌──────────────────┐  ┌───────────────────┐   │
-│  │ key store │  │ audit hash chain  │  │ Prometheus /metrics│  │
-│  │ (SQLite)  │  │ (WAL, verify)     │  │ :9090 (admin plane)│  │
-│  └───────────┘  └──────────────────┘  └───────────────────┘   │
-└──────────────────────────────────────────────────────────────┘
-```
+![Coding agents reach providers through mayu. inferplaned distributes policy and authority; shared mode additionally uses synchronous Postgres admission.](assets/architecture.svg)
+
+The shared-DB edge applies to ADR-046. ADR-045 instead reserves from its private
+journal during inference and obtains new authority asynchronously. Local default
+mode has neither shared admission nor a mandatory control-plane dependency.
 
 ## Data Flow Summary
 
-```
-Client -> KeyAuth(RBAC) -> Governor.PreCheck -> Router(fallback+breaker) -> Provider -> Upstream
-                                                                                  |
-                              ┌───────────────────────────────────────────────────┘
-                              ▼
-                       Governor.Settle -> quota/budget debit + Pricing(microUSD) -> Audit(hash chain) -> /metrics
-```
+1. Authenticate the virtual key and establish its current principal/identity.
+2. Parse and bound the request; retain the protocol representation needed for
+   supported forwarding or conversion.
+3. Resolve routing and enforce access, privacy, region and capability constraints.
+4. Apply readiness/governance checks and reserve any required authority before
+   each billable provider attempt.
+5. Dispatch and stream under the selected protocol; preserve terminal failures.
+6. Settle observed usage, retain unresolved liability, and emit audit/telemetry.
+
+This is a conceptual sequence; ingress-specific protocol adaptation remains in
+the corresponding handlers. A later fallback cannot widen an earlier restriction.
 
 ## Infrastructure
 
 ### Deployment
-- Container: multi-stage build, `CGO_ENABLED=0` static binary → `distroless/static:nonroot`.
-- Kubernetes: Helm chart at `charts/inferplane` (ConfigMap-rendered config, optional IRSA ServiceAccount for Bedrock, `existingSecret` reference — the chart never creates secrets). Optional `Ingress` (off by default); the admin plane stays off Ingress even when enabled unless `ingress.admin.enabled` is set explicitly, since it carries key-issuance/governance actions. Optional PVC for the key store (`persistence.enabled`, default off, ADR-023) — without it `/var/lib/inferplane` is an `emptyDir` and the key store/audit WAL are wiped on every restart; declaring `virtual_keys` in config gives clients a restart-durable key without needing the PVC. `NOTES.txt` prints post-install next steps (port-forward/Ingress host, first key, pointing a client at it).
+
+Each Dockerfile builds a static binary into a non-root distroless image. The Helm
+chart renders config and references an existing Secret. Local mode allows one
+gateway replica. Explicit shared mode supports multiple gateways; persistent
+shared mode supplies separate audit PVCs, anti-affinity and a disruption budget.
+Postgres HA, TLS, network controls, resource sizing and recovery qualification are
+operator responsibilities. See [container and Helm deployment](operations/deployment.md).
 
 ### Modules / Resources
-| Component | Path | Description |
-|-----------|------|-------------|
-| Data-plane binary | `cmd/mayu` | serve / keys / audit / report / bodies / pricing / login / token / logout subcommands |
-| Control-plane binary | `cmd/inferplaned` | distributes GovernancePolicy documents and budget leases (ADR-034); no subcommands, flags + env only |
-| Helm chart | `charts/inferplane` | Deployment, Service (data+admin), ServiceAccount, ConfigMap, optional Ingress, optional PVC (ADR-023), NOTES.txt |
-| Dashboard | `deploy/grafana/inferplane.json` | 9-panel Prometheus dashboard |
+
+| Component | Path | Role |
+| --- | --- | --- |
+| Data plane | `cmd/mayu` | Thin assembly and operator CLI |
+| Control plane | `cmd/inferplaned` | Policy, authority, telemetry and optional broker assembly |
+| Policy schema | `internal/policy`, `api/v1alpha1`, `deploy/crd` | Shared rules and versioned contracts |
+| Helm chart | `charts/inferplane` | Profile-aware gateway manifests |
+| Monitoring | `deploy/grafana/inferplane.json` | Starter dashboard |
 
 ### Deployed Endpoints
-- Data plane: `:8080` (`/v1/messages`, `/v1/chat/completions`)
-- Admin plane: `:9090` (`/healthz`, `/readyz`, `/metrics`, `/admin/keys`, `/admin/ui/`)
 
-- **Config hot-reload (`internal/live`, ADR-006)** -- the provider/model/pricing topology is one immutable `live.State` behind an atomic pointer; `SIGHUP` validates + atomically swaps a new generation. Governance counters, keystore, audit chain, and circuit-breaker state persist across reloads.
+The gateway defaults to data port 8080 and admin port 9090; production exposure is
+explicit. `inferplaned` defaults to port 7601. See [API reference](api-reference.md)
+and the [infrastructure reference](reference/infrastructure.md).
 
-- **UI-write provider registration (`internal/providerstore`, ADR-008)** -- an opt-in `provider_store` makes the DB authoritative for the reloadable topology (providers + model routes); `PUT`/`DELETE /admin/providers|models` register changes build-once-swap-once through the same `reload()` mechanism (validate the candidate generation, persist, swap the validated state, all under one `reloadMu`). **Secrets never enter the gateway** -- only the ref (env var name / file path) is stored; `GET /admin/config/export` emits a secret-free config fragment for Git. Absent `provider_store` → file-authoritative, writes 405 (ADR-005).
-
-- **Opt-in PII masking filter (`plugins/piimask`, ADR-009)** -- a request-filter
-  chain (`internal/filter`) with an opt-in, per-team PII masker. Masking
-  re-serializes the body, abandoning verbatim forwarding → it **destroys the
-  prompt cache** for masked traffic (up to 10× cost) — so it is opt-in and the
-  cost is made explicit (boot warning + `inferplane_pii_mask_redactions_total` +
-  audit `pii_masked`). One-way (no vault, no PII at rest); fails CLOSED (a masker
-  error rejects, never forwards unmasked; the OpenAI ingress refuses masked teams
-  in v1). A new filter = one package under `plugins/` + one blank import.
-
-- **Opt-in OpenTelemetry tracing (`internal/tracing`, ADR-011)** -- a configured
-  `otel` block installs an OTLP exporter (http/grpc) + GenAI-semconv spans on the
-  generative endpoints + W3C trace-context propagation (joins the client trace,
-  correlates the upstream call) + `trace_id` in the audit chain. **No-op by
-  default** (no `otel` → no spans, deps inert, request path byte-identical). One
-  span per request owned across the fallback loop (`defer End`, error-only-on-
-  terminal); best-effort — never on the critical path. Pure-Go, exports to the
-  operator's own collector (no SaaS). Beyond the semconv token counts a span
-  carries the settled facts semconv has no name for — cache read / 5m / 1h write
-  tokens, integer-µUSD cost with its pricing-missing flag, and
-  `inferplane.response.partial` (+ status `Error`) for a stream truncated after
-  the 200 was already committed.
-
-- **OTel signal topography — traces are the only OTLP channel.** OTel standardizes
-  traces, metrics, and logs; inferplane emits exactly one of them over OTLP.
-  Metrics are Prometheus exposition on the admin plane (`:9090/metrics`) with
-  `internal/metrics` as the single registry — adding an OTLP metric exporter would
-  double-instrument the same counters and let the two drift. Logs are the
-  hash-chained audit JSONL (`internal/audit`) plus stdout, not OTLP: the audit
-  chain's value is that it is verifiable offline byte-for-byte, which a lossy
-  best-effort export cannot be. Control-plane usage windows are a third channel
-  (`POST /v1alpha1/usage`, ADR-036) on inferplane's own protocol. Collector
-  wiring: [docs/reference/infrastructure.md](reference/infrastructure.md).
+SIGHUP reloads supported provider/model/pricing topology atomically. Listen,
+backend, identity declaration, node/journal and authority-mode changes require
+restart. A failed reload retains the previous valid topology.
 
 ## Key Design Decisions
 
-- **Canonical schema = Anthropic-superset, not OpenAI** -- preserves thinking blocks and `cache_control` that the OpenAI shape cannot represent; same-protocol round-trips stay lossless.
-- **Verbatim body forwarding on protocol match** -- corrupting `cache_control` turns a 96%-hit prompt cache into a 10× cost regression, so a matching protocol tees `RawBody` byte-for-byte instead of re-serializing.
-- **Instance-local governance + SQLite default** -- a single binary boots in 5 minutes with no external DB; the `Store` interface keeps a shared-store HA backend as a future swap, not a rewrite (ADR-013, design-only today).
-- **Per-instance segmented audit chain** -- a hash chain per process run survives legitimate restarts without reading as tampering, while remaining verifiable offline.
-- **Pre-TTFT-only failover** -- once the first token streams, the response is committed; retrying mid-stream would duplicate or corrupt output.
-- **Cost as integer microUSD** -- float accumulation drifts; round-half-even on `math/big` keeps billing exact and overflow-free.
+- Profile-specific authority defines accounting and outage behavior.
+- Canonical conversion supports compatible cross-protocol requests; raw forwarding
+  preserves supported same-protocol semantics.
+- Admission precedes billable egress; each retry carries its own obligation.
+- Uncertain usage remains unavailable until supported recovery can establish it.
+- Audit fields evolve additively so old exact-byte records still verify.
+- Working mechanisms remain alpha pending [production qualification](operations/production-readiness.md).
 
 ## Operations
-- Deployment: see [docs/runbooks/.template.md](runbooks/.template.md) (create `deploy-production.md` from it).
-- Decisions: see [docs/decisions/](decisions/).
-- Reference: see [docs/reference/INDEX.md](reference/INDEX.md).
+
+Start with [monitoring](operations/observability.md), [upgrade and recovery](operations/recovery.md),
+and [security](operations/security.md). Architectural history lives in
+[the decision records](decisions/); package details live in the
+[implementation reference](reference/INDEX.md).

@@ -1,14 +1,15 @@
 # Infrastructure
 
 ### 1. Overview
-Packaging and deployment for the single static binary: a multi-stage Docker build
-producing a distroless image, and a Helm chart that renders config into a ConfigMap and
-wires an optional IRSA ServiceAccount for Bedrock.
+Packaging and deployment for two static binaries: separate multi-stage Docker
+builds produce the mayu and inferplaned distroless images. The gateway Helm chart
+renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Bedrock.
 
 ### 2. Components
 | Component | Path | Purpose |
 |---|---|---|
 | Dockerfile | `Dockerfile` | Multi-stage `CGO_ENABLED=0` build → `distroless/static:nonroot` |
+| Control-plane Dockerfile | `Dockerfile.inferplaned` | Separate static inferplaned image |
 | Docker ignore | `.dockerignore` | Excludes tests/docs/charts from the build context |
 | Helm chart | `charts/inferplane/` | Deployment, Service (data+admin), ServiceAccount, ConfigMap, optional policies ConfigMap (`/etc/inferplane/policies`, live-reloaded — ADR-035), optional Ingress, optional PVC (ADR-023), NOTES.txt |
 | GovernancePolicy CRD | `deploy/crd/` | kubectl-native schema validation for `inferplane.dev/v1alpha1` documents (structural schema + CEL, K8s 1.25+); controller-watch is a named follow-up (ADR-035) |

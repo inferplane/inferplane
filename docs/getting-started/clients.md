@@ -17,6 +17,7 @@ A client integration must be tested with the installed client version and select
 | --- | --- | --- |
 | `anthropic` | `api_key_ref` and Anthropic base URL | Same-protocol forwarding preserves raw request bytes unless an enabled transform applies |
 | `bedrock` | Region and configured AWS auth mode | Model API, guardrail support and region eligibility differ by route |
+| `bedrock_responses` | Native Bedrock Responses configuration and AWS credentials | Native Responses capabilities and model availability need separate qualification |
 | `openai_compatible` | Compatible base URL, optional key reference | Capabilities and pricing must match the deployed model |
 | `openai_responses` | Native Responses endpoint and key reference | Native capabilities must be declared and verified |
 
