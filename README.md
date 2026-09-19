@@ -4,6 +4,11 @@
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8.svg)](go.mod)
 [![Status](https://img.shields.io/badge/Status-alpha-orange.svg)](#status)
 
+[**Documentation**](https://inferplane.github.io/inferplane/) ·
+[Quickstart](docs/getting-started/quickstart.md) ·
+[Deployment profiles](docs/getting-started/deployment-profiles.md) ·
+[Production readiness](docs/operations/production-readiness.md)
+
 **inferplane** — a control plane for LLM consumption governance.
 Policy and budget are distributed from the center; **`mayu`**, the
 data plane, enforces them under the selected deployment profile. The control-plane
@@ -258,19 +263,26 @@ cd inferplane
 # 1. Build the static binary (pure Go, CGO off)
 CGO_ENABLED=0 go build -trimpath -o bin/mayu ./cmd/mayu
 
-# 2. Run against the example config (Anthropic direct; secrets via env refs only)
-export ANTHROPIC_API_KEY=sk-ant-...
-export INFERPLANE_ADMIN_TOKEN=admin-secret
-bin/mayu serve --config examples/config.json
+# 2. Prepare private state; credentials are read without shell-history values.
+umask 077
+mkdir -p .local/inferplane
+read -rsp 'Anthropic API key: ' ANTHROPIC_API_KEY; echo
+export ANTHROPIC_API_KEY
+INFERPLANE_ADMIN_TOKEN="$(openssl rand -hex 32)"
+export INFERPLANE_ADMIN_TOKEN
+bin/mayu pricing check --config examples/config.quickstart.json
 
-# 3. Issue a virtual key (plaintext ik_... is shown once, never recoverable)
-bin/mayu keys create --team demo --models '*' --store keys.db
-
-# 4. Point your coding agent at it
-export ANTHROPIC_BASE_URL=http://localhost:8080
-export ANTHROPIC_API_KEY=ik_...
-claude
+# 3. Issue a key into the SAME database the gateway uses.
+# Save its first output line securely; plaintext is shown once.
+bin/mayu keys create --team demo --models claude-sonnet-4-6 \
+  --config examples/config.quickstart.json
+bin/mayu serve --config examples/config.quickstart.json
 ```
+
+In a separate client terminal, use the issued virtual key and set
+`ANTHROPIC_BASE_URL=http://127.0.0.1:8080`; keep the upstream key in the server
+terminal. The [complete quickstart](docs/getting-started/quickstart.md) includes
+a request, Claude Code setup, audit verification, and expected errors.
 
 Governance rules live in CRD-style `GovernancePolicy` YAML — the same
 documents the control plane will distribute, applied locally today: add
@@ -286,7 +298,7 @@ no cloud key) start from
 [`examples/config.selfhosted.json`](examples/config.selfhosted.json); for
 Docker and Kubernetes (Helm chart in [`charts/inferplane`](charts/inferplane/)),
 config hot-reload, OIDC SSO, and `mayu login` short-lived keys, see
-[docs/onboarding.md](docs/onboarding.md).
+[the deployment guide](docs/operations/deployment.md).
 
 ## Status
 
@@ -298,7 +310,7 @@ config hot-reload, OIDC SSO, and `mayu login` short-lived keys, see
 | `inferplaned` control plane | Policy distribution + budget-lease ledger + usage telemetry + credential brokering working (ADR-034/036/040) |
 | Short-lived credential brokering (ADR-040) | Working, opt-in. `inferplaned` vends ≤1h STS Bedrock sessions over `POST /v1alpha1/credentials` when `INFERPLANED_BROKER_ROLE_ARN` is set; `mayu`'s bedrock provider opts in with `auth.mode: "broker"`. Bedrock only (1P Anthropic has no temporary-token mechanism). **v1 limitations, by design:** one shared broker token with caller-chosen dataplane ids, so CloudTrail attribution is the id *claimed*, not the machine; brokered sessions carry unrestricted `bedrock:Invoke*` (per-team session policies are the v2). Bypass prevention is real only where mayu's environment is not readable by its users — on a developer-owned machine it removes the standing node IAM grant but not the bypass |
 | `api/v1alpha1` policy schema + delivery channels | Working — same document via local file, control-plane push, Helm ConfigMap; CRD manifest for kubectl-native validation ([`deploy/crd/`](deploy/crd/)) |
-| `inferplaned` policy store + console (ADR-038) | **Experimental, under review.** Opt-in Postgres store with a console Policies tab and `PUT`/`DELETE /v1alpha1/policies`; the write path has no per-rule-kind authorization tier or change audit yet — a superseding ADR is pending (see ADR-003 §Alternatives) |
+| `inferplaned` policy store + console (ADR-038) | **Alpha.** Opt-in Postgres store with a console Policies tab and `PUT`/`DELETE /v1alpha1/policies`; writes use a dedicated credential and emit mutation records. Fine-grained org/team capabilities and transactionally durable before/after mutation evidence remain open. |
 
 The project targets CNCF Sandbox.
 

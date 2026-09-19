@@ -1,8 +1,9 @@
 # API Reference
 
 inferplane exposes two HTTP planes: the **data plane** (`:8080`, client traffic) and
-the **admin plane** (`:9090`, operations). All data-plane requests authenticate with a
-virtual key (`ik_...`).
+the **admin plane** (`:9090`, operations). Generation and model discovery authenticate
+with a virtual key (`ik_...`). Count and opt-in login bootstrap endpoints have the
+specific exceptions documented below.
 
 ## Data Plane (`:8080`)
 
@@ -32,13 +33,37 @@ GET  /v1/models
 
 ```
 POST /v1/chat/completions
+POST /v1/responses
 GET  /v1/models
 ```
 
 | Endpoint | Notes |
 |----------|-------|
 | `POST /v1/chat/completions` | Chat Completions; streaming via SSE when `"stream": true`. Converted via the canonical schema when the upstream protocol differs. |
+| `POST /v1/responses` | Native Responses or supported stateless text/tool bridging; see Responses and adaptive routing below. |
 | `GET /v1/models` | Lists models the principal may use. |
+
+### Bedrock-shaped ingress
+
+```text
+POST /model/{modelId}/invoke
+POST /model/{modelId}/invoke-with-response-stream
+POST /model/{modelId}/count-tokens
+```
+
+These gateway routes use virtual-key authentication (`x-api-key` or Bearer),
+not client AWS SigV4 identity. URL-encode the configured model identifier.
+Generation uses the common admission/routing controls; streaming uses the
+Bedrock response shape. Count requests retain the local HTTP-200 contract
+when authentication, readiness, routing or storage prevents generation.
+Provider credentials and AWS signing are applied separately on egress.
+
+### Usage
+
+`GET /v1/usage` returns the authenticated principal's usage view. Shared mode
+includes `enforcement_mode: shared` and subject-scoped `shared_limits`; `used`
+includes reservations/uncertainty, and `reserved` identifies the retained
+portion. This is separate from control-plane telemetry ingestion.
 
 ### CLI login (opt-in, ADR-028)
 
@@ -79,9 +104,11 @@ DELETE /admin/keys/{id}   # revoke a key
 |------|---------|
 | 400 | Bad request (malformed body) |
 | 401 | Missing/invalid virtual key (data plane) or admin token (admin plane) |
-| 403 | Model not in the principal's allow-list, or governance `block` (quota/budget/rate) |
-| 404 | Unknown model (not in the gateway's `models` map) |
-| 429 | Rate limit exceeded (`on_exceeded: block`) |
+| 402 | Monetary authority exhausted in durable/shared admission |
+| 403 | Access, privacy, region or policy refusal; some legacy governance denials |
+| 404 | No eligible route after configured model resolution/fallback |
+| 429 | Rate/token quota exhausted in the enforcing profile |
+| 503 | Required policy/identity readiness, authority or shared store unavailable |
 | 5xx | Upstream provider error (teed through) or gateway failure |
 
 Errors are returned in the shape of the ingress protocol (Anthropic error object on the
@@ -94,7 +121,12 @@ mayu serve  --config <path>
 mayu keys   create --team <t> --models <csv> --store <path>
 mayu keys   list   --store <path>
 mayu keys   revoke --id <key_id> --store <path>
+mayu keys   create --team <t> --models <csv> --config <path>  # select the configured backend
+mayu keys   list --config <path>
+mayu keys   revoke --id <key_id> --config <path>
+mayu keys   import --config <shared-config> --sqlite <old-db>
 mayu audit  verify --file <path>
+mayu report --file <path> --by team,model
 mayu pricing check --config <path>                                  # ADR-030, CI guard: exit 1 if any route has no rate
 mayu login  --gateway <url> [--team <t>] [--id-token-command <cmd>]  # ADR-028
 mayu token  [--export] [--raw]                                      # ADR-028, meant to run as apiKeyHelper
@@ -107,7 +139,7 @@ Anthropic Messages, OpenAI Chat Completions and native Bedrock generation use th
 same privacy-constrained attempt chain; security refusals return an ingress-shaped
 403. Anthropic and Bedrock token-count endpoints instead return local HTTP-200
 estimates with zero upstream calls on routing refusal, unready/stale governance,
-or oversized/unreadable bodies. This does not add a Responses endpoint.
+or oversized/unreadable bodies. Responses support was added separately in ADR-044.
 
 `x-inferplane-routing-reason` is a bounded decision reason and
 `x-inferplane-routed-model` identifies applied privacy/context selection. Context
