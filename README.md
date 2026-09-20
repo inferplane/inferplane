@@ -10,11 +10,26 @@
 [Deployment profiles](docs/getting-started/deployment-profiles.md) ·
 [Production readiness](docs/operations/production-readiness.md)
 
-**inferplane** — a control plane for LLM consumption governance.
-Policy and budget are distributed from the center; **`mayu`**, the
-data plane, enforces them under the selected deployment profile. The control-plane
-HTTP service is not called for per-request policy/budget admission; shared
-admission depends on Postgres. Broker credential renewal is a separate dependency.
+**inferplane — set the policy; let the data plane enforce it.**
+
+A governance plane for coding agents, with policy administration separated from
+inference traffic. Configure model access, sensitive-data handling, budget limits
+and approved routing choices. **`mayu`** applies them on requests and provider
+attempts; **`inferplaned`** distributes policy and budget authority without carrying
+prompts or response streams.
+
+Enabled policies turn operating rules into request-time decisions: route detected
+PII to approved internal models, mask and reinspect content, select a model using
+configured context signals, or switch to a lower-cost target at a budget
+threshold. Hard caps and privacy restrictions still constrain the result and its
+fallbacks. Operators supply and validate the rules, model metadata and processing
+boundaries; PII detection has finite coverage.
+[Why inferplane](docs/why-inferplane.md) · [한국어](docs/why-inferplane.ko.md).
+
+Control-plane HTTP is not called for per-request admission. Shared admission
+still depends on Postgres; finite authority, readiness/staleness gates and
+credential renewal have their own failure contracts. See
+[deployment profiles](docs/getting-started/deployment-profiles.md).
 
 `mayu` is a component name, not a project name — it holds the same position in
 inferplane that ztunnel/waypoint hold in Istio. It runs on localhost or on each
@@ -171,10 +186,10 @@ The node-local profile separates the control-plane HTTP service from the
 inference path. Its design goals differ from ADR-046's synchronous shared-DB
 admission:
 
-1. **Streaming latency.** Agent traffic is server-sent events; a central hop
-   taxes *every chunk* of *every response* and lands directly on time-to-first-
-   token. This is measurable — benchmark a proxied vs. direct stream and the
-   cost of the extra hop is visible on day one, before any queueing under load.
+1. **Inference path placement.** A node-local gateway avoids routing every
+   prompt and streamed response through a central management service. `mayu`
+   still adds processing and a proxy hop; latency improvements require a
+   measured comparison for the chosen topology and workload.
 2. **Fault isolation.** A node-local gateway can isolate inference from a
    control-plane-only outage while installed policy, readiness/staleness gates,
    credentials and any required local authority remain valid. This is bounded

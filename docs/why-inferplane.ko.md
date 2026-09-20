@@ -1,6 +1,6 @@
 ---
 translation_source: why-inferplane.md
-translation_source_sha256: ad5ebc0c66b7f5f8891a247ccecad134fd8a22d7e87d0d325b2cf86be03207cc
+translation_source_sha256: 7bb23ca5f7aad7f0b4dcf7b324dedf04690d7e270157a9bfbd4c9cbfa639328d
 title: inferplane의 강점
 description: 전용 거버넌스 제어 영역과 데이터 영역을 분리하고 코딩 에이전트의 접근·예산·개인정보 정책을 자동 집행합니다.
 ---
@@ -100,6 +100,8 @@ API 통합, 라우팅, 관측 기능은 게이트웨이의 유용한 기능입�
 ## 자동화해도 운영자가 결정해야 할 것 {#what-the-automation-does-not-decide-for-you}
 
 PII 검사는 이메일, 지원 전화번호, 카드, SSN, IPv4, 한국 주민등록번호 형식의 유한 범위를 다룹니다. 모든 개인정보 발견, 지역별 법규 준수, 공급자 신뢰를 입증하지 않습니다. 내부 목적지는 선언한 처리 경계를 실제로 만족해야 합니다. 안전한 경로를 확보할 수 없으면 엄격한 개인정보 규칙은 거부하며, 컨텍스트·비용 선호로 경계를 완화하지 않습니다.
+
+오탐, 놓치거나 난독화된 값, 검사할 수 없는 내용이 있을 수 있습니다. 보호 대상 구조 필드 때문에 안전한 마스킹이 불가능할 수도 있습니다. 워크로드에 맞는 정책을 선택하기 전에 [검사 계약](policy-routing.md#inspection-and-capability-limits)과 [마스킹 한계](adaptive-routing.md#privacy-and-cache-limits)를 확인하세요.
 
 사용자가 게이트웨이를 우회할 수 있는지는 네트워크 제어와 공급자 자격 증명에 달려 있습니다. 공격자가 제어하는 노드는 mayu 설치나 자격 증명 중개 활성화만으로 신뢰할 수 있게 되지 않습니다. HA 데이터베이스 배포, 복구 검증, 모델 품질 평가도 운영자 책임입니다.
 
