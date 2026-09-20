@@ -1,5 +1,5 @@
 site_name: inferplane
-site_description: Govern coding-agent traffic with model routing, identity, budgets, and auditable decisions.
+site_description: Separate policy management from inference. Automate model access, budget cutover, PII routing, and audit.
 site_url: https://inferplane.github.io/inferplane/
 repo_url: https://github.com/inferplane/inferplane
 repo_name: inferplane/inferplane
@@ -61,7 +61,7 @@ plugins:
         - locale: ko
           name: 한국어
           copyright: Copyright © inferplane 기여자 · Apache-2.0
-          site_description: 코딩 에이전트의 모델 접근, 예산, 개인정보 보호와 감사 기록을 관리하는 자체 호스팅 거버넌스 플랫폼.
+          site_description: 정책 관리와 추론 경로를 분리하고 모델 접근, 예산 전환, PII 라우팅과 감사를 요청마다 자동 집행하세요.
           theme:
             palette:
               - scheme: default
@@ -78,6 +78,7 @@ plugins:
                   name: 밝은 테마로 전환
           nav_translations:
             Overview: 소개
+            Why inferplane: inferplane의 강점
             Get started: 시작하기
             First request: 첫 요청 보내기
             Choose a deployment profile: 배포 프로파일 선택
@@ -138,6 +139,7 @@ extra:
 nav:
   - Overview: index.md
   - Get started:
+      - Why inferplane: why-inferplane.md
       - First request: getting-started/quickstart.md
       - Choose a deployment profile: getting-started/deployment-profiles.md
       - Connect clients: getting-started/clients.md

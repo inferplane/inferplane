@@ -1,6 +1,6 @@
 ---
-title: Govern your coding-agent traffic
-description: Route models, control spend, and trace usage with a self-hosted governance plane for coding agents.
+title: Set policy once. Govern every request.
+description: Separate policy management from inference traffic. Automate model access, budget cutover, PII routing, and audit with inferplane.
 hide:
   - toc
   - navigation
@@ -8,63 +8,75 @@ hide:
 
 <div class="ip-hero" markdown>
 
-<p class="ip-eyebrow">The governance plane for coding agents</p>
+<p class="ip-eyebrow">Central policy. Local enforcement.</p>
 
-# Give every request a policy.
+# Set the policy. Govern every request. {#give-every-request-a-policy}
 
-Connect coding agents to your models through inferplane. Control access, apply budget and privacy rules, and follow usage from request to audit record.
+Define who can use which models, how much they can spend, and where sensitive data may go. inferplane applies those rules automatically as coding agents work: select an approved model, switch at a budget threshold, route detected PII to an internal destination, and record the decision.
+
+A dedicated control plane manages policy and budget authority. Each `mayu` data plane enforces them on the inference path, close to your agents or inside your shared gateway fleet.
 
 <div class="ip-actions" markdown>
 
 [Make your first request](getting-started/quickstart.md){ .md-button .md-button--primary }
-[Choose your deployment](getting-started/deployment-profiles.md){ .md-button }
+[Why inferplane](why-inferplane.md){ .md-button }
 
 </div>
 </div>
 
 <div class="ip-facts">
-<span>Self-hosted</span><span>Apache-2.0</span><span>Two static Go binaries</span><span>Alpha · explicit operating limits</span>
+<span>Separate control &amp; data planes</span><span>Self-hosted · Apache-2.0</span><span>Two static Go binaries</span><span>Alpha</span>
 </div>
 
-## Your models. One place to govern access.
+## Govern centrally. Enforce at each gateway. {#your-models-one-place-to-govern-access}
 
-<div class="ip-flow" role="img" aria-label="Coding agents send requests to mayu, which applies access, routing, budget, and privacy checks before calling a configured provider.">
-  <div><b>Coding agents</b><small>Claude Code · Codex · OpenCode</small></div>
-  <span class="ip-arrow" aria-hidden="true">→</span>
-  <div class="ip-gateway"><b>mayu</b><small>Access · routing · budgets · audit</small></div>
-  <span class="ip-arrow" aria-hidden="true">→</span>
-  <div><b>Your providers</b><small>Anthropic · Bedrock · compatible APIs</small></div>
+<div class="ip-diagram" tabindex="0" role="region" aria-label="Architecture diagram; scroll horizontally on a small screen" markdown>
+
+![Operators configure inferplaned above the inference path. It distributes policy and budget authority to mayu. Agents send prompts to mayu, which applies access, privacy, routing and budget controls before calling approved providers. Only the shared profile calls Postgres for each admission.](assets/architecture.svg)
+
 </div>
 
-`mayu` handles inference traffic. Optional `inferplaned` distributes policy and budget authority without carrying prompts or response streams. Choose local enforcement, durable node-local money budgets, or synchronous shared Postgres admission. Each has a different [availability contract](getting-started/deployment-profiles.md).
+[Explore the architecture and failure boundaries](architecture.md) · [Open the diagram](assets/architecture.svg)
+
+**`inferplaned` manages; `mayu` enforces.** Prompts and response streams travel between agents, data planes and providers. They do not transit the control-plane HTTP service, and request inspection needs no remote classifier. A standalone `mayu` can instead load local policies.
+
+Choose the accounting boundary explicitly: local enforcement, durable global policy-money grants with local admission, or shared Postgres key/rate/token/money admission. The shared profile requires a database call for each admission; control-plane separation does not remove that dependency.
 
 <div class="grid cards" markdown>
 
--   **Control who can use what**
+-   **Turn governance into request-time behavior**
 
-    Issue virtual keys, constrain models, and opt into verified human and service identities without replacing historical accounts.
+    Configure virtual keys, model access and matching team/user policies. Each gateway applies the effective restrictions before billable egress, including on fallback.
 
-    [Understand identity →](verified-identity.md)
+    [See what runs automatically →](why-inferplane.md#configure-the-rules-the-gateway-applies-them)
 
--   **Make budget decisions before egress**
+-   **Make budgets change the route**
 
-    Reserve monetary authority, enforce limits, and configure approved lower-cost targets as spending changes.
+    Set a spending threshold and approved economy targets. Enable strict cutover to constrain subsequent attempts; keep a separate hard cap to stop spending.
 
-    [Explore durable budgets →](durable-budgets.md)
+    [Follow a budget cutover →](why-inferplane.md#one-configuration-several-automatic-decisions)
 
--   **Route with privacy constraints**
+-   **Route PII inside your approved boundary**
 
-    Compose model access, sensitive-data rules, context routing, and fallback restrictions across provider attempts.
+    Inspect supported request content locally. Choose internal-only routing, verified masking or blocking. Fallback keeps the same privacy restrictions.
 
-    [Configure routing →](policy-routing.md)
+    [Configure privacy and routing →](adaptive-routing.md)
 
--   **Explain usage and failures**
+-   **Keep decisions accountable**
 
-    Inspect request records, verify audit chains, and monitor latency, spending, and refusal signals.
+    Track requested, selected and attempted routes alongside usage and refusal reasons. Authority profiles reserve before each attempt and retain uncertain spend when usage is incomplete.
 
-    [Operate the gateway →](operations/observability.md)
+    [Understand durable accounting →](durable-budgets.md)
 
 </div>
+
+## Keep the client simple. Make the policy explicit.
+
+A coding agent can keep requesting an approved alias such as `auto`. With context routing enabled, mayu evaluates request size and configured keywords, then chooses a compatible target within access, privacy and budget constraints. Context starts in **Shadow** for evaluation; PII rules already enforce. Model capabilities, internal boundaries and prices remain operator-reviewed inputs.
+
+For example, the supplied adaptive policy routes detected PII to an approved internal `economy` model. At its illustrative $100 monthly switching threshold, strict budget routing selects `economy` for the configured model names. A separate $150 hard cap still blocks requests that cannot be admitted. These actions compose; one never bypasses another.
+
+[Read the scenario and configuration path](why-inferplane.md#one-configuration-several-automatic-decisions). Finite PII detectors and rule-based context signals have explicit limits; automatic routing does not promise universal detection, best-model selection or measured savings.
 
 ## Start small. Select the right enforcement scope.
 

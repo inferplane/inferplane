@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" lang="ko" xml:lang="ko" viewBox="0 0 1120 1060" role="img" aria-labelledby="title desc">
+<title id="title">mayu의 요청별 자동 거버넌스</title>
+<desc id="desc">활성 정책에 따라 접근·검사·라우팅·승인을 수행합니다. 개인정보·접근·엄격 예산 조건의 교집합 안에서만 시도합니다. 과금 호출은 승인 후에 이루어지며 허용된 폴백도 제약과 승인을 재검사합니다. 거부되거나 예산을 확보하지 못한 요청은 차단하고 사용량·불확실성을 기록합니다.</desc>
+<defs>
+<marker id="green" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#047857" stroke-width="1.5"/></marker>
+<marker id="blue" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#315c93" stroke-width="1.5"/></marker>
+<marker id="amber" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#996013" stroke-width="1.5"/></marker>
+<marker id="red" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#a43c3c" stroke-width="1.5"/></marker>
+<marker id="gray" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#64746b" stroke-width="1.5"/></marker>
+</defs>
+<rect width="1120" height="1060" rx="16" fill="#f0f5f2"/>
+<text x="32" y="43" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="27" font-weight="700" fill="#163c2c" text-anchor="start">요청 하나에 적용되는 모든 정책을 함께 집행합니다.</text>
+<text x="32" y="73" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">개념 흐름도: 뒤의 선호 조건이 앞의 필수 제한을 완화하지 않습니다.</text>
+<rect x="286" y="104" width="548" height="72" rx="12" fill="#e8eff8" stroke="#c1d0e5" stroke-width="1.5" stroke-dasharray=""/>
+<text x="560" y="134" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="18" font-weight="650" fill="#163c2c" text-anchor="middle">활성 정책 · 토폴로지 · 예산 상태</text>
+<text x="560" y="160" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">클라이언트는 auto 같은 허용된 모델 이름으로 요청</text>
+<path d="M560 176V210" fill="none" stroke="#315c93" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#blue)"/>
+<rect x="286" y="216" width="548" height="106" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<text x="310" y="247" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="21" font-weight="700" fill="#163c2c" text-anchor="start">1  인증과 로컬 검사</text>
+<text x="310" y="277" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">키·모델 접근 권한 · 지원되는 요청 원본 검사</text>
+<text x="310" y="304" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="start">유한 PII 신호와 검사 범위 확인 · 미확인은 안전 판정이 아님</text>
+<path d="M560 322V356" fill="none" stroke="#047857" stroke-width="2.2" stroke-dasharray="" marker-end="url(#green)"/>
+<rect x="286" y="362" width="548" height="121" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<text x="310" y="393" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="21" font-weight="700" fill="#163c2c" text-anchor="start">2  필수 개인정보 보호 경계 적용</text>
+<text x="310" y="423" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">InternalOnly: 승인된 내부 목적지의 교집합</text>
+<text x="310" y="450" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">Mask: 완전 변환 후 독립 재검사</text>
+<text x="310" y="474" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="15" font-weight="400" fill="#163c2c" text-anchor="start">Block 우선 · 마스킹도 InternalOnly 의무를 해제하지 않음</text>
+<path d="M560 483V517" fill="none" stroke="#047857" stroke-width="2.2" stroke-dasharray="" marker-end="url(#green)"/>
+<rect x="286" y="523" width="548" height="123" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<text x="310" y="554" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="21" font-weight="700" fill="#163c2c" text-anchor="start">3  모든 제약을 만족하는 목적지 선택</text>
+<text x="310" y="584" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">예산 티어: enforceTargets 활성화 시 목적지 제한</text>
+<text x="310" y="611" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">컨텍스트: Shadow 추천 / 명시적 Enforce 선택</text>
+<text x="310" y="637" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="start">폴백에도 접근·개인정보·리전·기능 제약 재검사</text>
+<path d="M560 646V680" fill="none" stroke="#047857" stroke-width="2.2" stroke-dasharray="" marker-end="url(#green)"/>
+<rect x="286" y="686" width="548" height="100" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<text x="310" y="717" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="21" font-weight="700" fill="#163c2c" text-anchor="start">4  과금되는 시도마다 사전 승인</text>
+<text x="310" y="747" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">준비 상태 + 하드 한도 · 권한 프로파일은 사전 예약</text>
+<text x="310" y="774" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="start">ADR-045: 비공개 저널 · ADR-046: 동기 Postgres</text>
+<path d="M560 786V820" fill="none" stroke="#047857" stroke-width="2.2" stroke-dasharray="" marker-end="url(#green)"/>
+<rect x="286" y="826" width="548" height="78" rx="12" fill="#e6f2eb" stroke="#047857" stroke-width="1.5" stroke-dasharray=""/>
+<text x="560" y="859" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="21" font-weight="700" fill="#163c2c" text-anchor="middle">5  승인된 공급자 호출과 스트리밍</text>
+<text x="560" y="888" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">출력 확정 후에는 실패한 스트림을 투명하게 재실행하지 않음</text>
+<path d="M560 904V938" fill="none" stroke="#047857" stroke-width="2.2" stroke-dasharray="" marker-end="url(#green)"/>
+<rect x="286" y="944" width="548" height="78" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<text x="560" y="977" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="19" font-weight="700" fill="#163c2c" text-anchor="middle">6  확인된 사용량 정산 · 불확실성 유지 · 감사</text>
+<text x="560" y="1006" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">증명되지 않은 환급 없음 · 분석은 예산 권한의 대체물이 아님</text>
+<rect x="32" y="534" width="212" height="170" rx="12" fill="#e8eff8" stroke="#c1d0e5" stroke-width="1.5" stroke-dasharray=""/>
+<text x="138" y="567" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="19" font-weight="700" fill="#315c93" text-anchor="middle">허용된 폴백</text>
+<text x="138" y="599" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="15" font-weight="400" fill="#315c93" text-anchor="middle">출력 확정 전</text>
+<text x="138" y="626" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="15" font-weight="400" fill="#315c93" text-anchor="middle">동일한 필수 제약</text>
+<text x="138" y="653" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="15" font-weight="400" fill="#315c93" text-anchor="middle">새 시도에 대한 승인</text>
+<text x="138" y="680" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="15" font-weight="400" fill="#315c93" text-anchor="middle">예산·PII 제한 우회 불가</text>
+<path d="M286 865H138V711" fill="none" stroke="#315c93" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#blue)"/>
+<path d="M138 534V500H263V584H279" fill="none" stroke="#315c93" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#blue)"/>
+<rect x="880" y="529" width="208" height="203" rx="12" fill="#fcf0ee" stroke="#d9b7b2" stroke-width="1.5" stroke-dasharray=""/>
+<text x="984" y="564" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="23" font-weight="700" fill="#a43c3c" text-anchor="middle">요청 거부</text>
+<text x="984" y="601" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="15" font-weight="400" fill="#843030" text-anchor="middle">접근 권한 없음</text>
+<text x="984" y="630" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="15" font-weight="400" fill="#843030" text-anchor="middle">개인정보 조건 불충족</text>
+<text x="984" y="659" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="15" font-weight="400" fill="#843030" text-anchor="middle">허용된 목적지 없음</text>
+<text x="984" y="688" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="15" font-weight="400" fill="#843030" text-anchor="middle">준비 미완료·권한 없음</text>
+<text x="984" y="715" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="15" font-weight="400" fill="#843030" text-anchor="middle">하드 한도 도달</text>
+<path d="M834 266H859V553H874" fill="none" stroke="#a43c3c" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#red)"/>
+<path d="M834 422H859" fill="none" stroke="#a43c3c" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#red)"/>
+<path d="M834 584H874" fill="none" stroke="#a43c3c" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#red)"/>
+<path d="M834 736H859V709H874" fill="none" stroke="#a43c3c" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#red)"/>
+<text x="32" y="1044" font-family="'Noto Sans CJK KR',system-ui,sans-serif" font-size="15" font-weight="400" fill="#163c2c" text-anchor="start">생성 요청 경로를 표시합니다. 토큰 계산 API는 별도의 로컬 HTTP 200 계약을 유지합니다.</text>
+</svg>
