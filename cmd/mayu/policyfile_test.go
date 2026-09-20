@@ -428,3 +428,42 @@ spec:
 		t.Fatalf("402 must be the DAILY window: %s", got)
 	}
 }
+
+// A wider policy rate cannot loosen the configured base limit. This exercises
+// the installed team-lookup closure, not only the scalar merge helper.
+func TestE2EPolicyRateCannotWidenConfig(t *testing.T) {
+	for _, dimension := range []string{"rpm", "tpm"} {
+		t.Run(dimension, func(t *testing.T) {
+			up := newAnthropicUpstream(t)
+			dataURL, adminURL, _ := bootGateway(t, func(cfg map[string]any, dir string) {
+				teamsAPIConfig(up.srv.URL)(cfg, dir)
+				rate := map[string]any{"requests_per_minute": 1}
+				if dimension == "tpm" {
+					rate = map[string]any{"tokens_per_minute": 1}
+				}
+				cfg["teams"] = map[string]any{"pol-team": map[string]any{"allowed_models": []any{"*"}, "rate_limit": rate}}
+				path := filepath.Join(dir, "rate.yaml")
+				body := "apiVersion: inferplane.dev/v1alpha1\nkind: GovernancePolicy\nmetadata: {name: wider-rate}\nspec:\n  subject: {team: pol-team}\n  rules:\n  - name: wider-rate\n    failurePolicy: FailClosed\n    rate: {" + dimension + ": 1000000}\n"
+				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				cfg["policies"] = []any{path}
+			})
+			_, key := createKey(t, adminURL, "pol-team", []string{"*"})
+			r := postMessages(t, dataURL, key, "claude-test")
+			io.Copy(io.Discard, r.Body)
+			r.Body.Close()
+			if dimension == "rpm" {
+				if r.StatusCode != 200 {
+					t.Fatalf("initial request=%d", r.StatusCode)
+				}
+				r = postMessages(t, dataURL, key, "claude-test")
+				io.Copy(io.Discard, r.Body)
+				r.Body.Close()
+			}
+			if r.StatusCode != 429 {
+				t.Fatalf("%s widened: got %d want 429", dimension, r.StatusCode)
+			}
+		})
+	}
+}

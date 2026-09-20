@@ -14,7 +14,10 @@ OIDC identity must come from verified issuer/subject claims. A key's free-form o
 
 A person controlling a gateway host can obtain locally accessible provider credentials, broker tokens or short-lived sessions. Brokering removes standing Bedrock IAM credentials but does not make a compromised developer laptop bypass-proof. Constrain direct upstream access in the infrastructure when mediation is a requirement.
 
-Keep admin/metrics endpoints restricted and use TLS for remote traffic. Shared admission requires reachable, authenticated Postgres; it fails closed on loss. Configure provider destinations and network egress together—an operator-assigned “internal” label does not establish an actual private boundary.
+Keep admin/metrics endpoints restricted and use TLS for remote traffic. Built-in
+`server.tls` covers the data listener only; the admin listener remains plaintext.
+Provide a TLS terminator or protected tunnel for remote administration rather
+than assuming data-plane TLS also protects admin tokens and captured bodies. Shared admission requires reachable, authenticated Postgres; it fails closed on loss. Configure provider destinations and network egress together—an operator-assigned “internal” label does not establish an actual private boundary.
 
 ## Privacy and audit
 

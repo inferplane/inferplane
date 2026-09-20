@@ -487,13 +487,10 @@ func newGateway(cfgPath string) (*gateway, error) {
 		// (ADR-016, TestTeamLookup_dbOnlyTeamEnforced). Returning ok=false
 		// here would not deny the team; it would make it UNGOVERNED, which
 		// is strictly worse than enforcing the declared budget/rate.
-		rpm, tpm := tl.RPM, tl.TPM
-		if rpm == 0 {
-			rpm = base.RatePerMin
-		}
-		if tpm == 0 {
-			tpm = base.TokensPerMinute
-		}
+		// Policy rates constrain the base; a wider nonzero overlay must
+		// not replace an already stricter config/keystore rate.
+		rpm := restrictiveRate(base.RatePerMin, tl.RPM)
+		tpm := restrictiveRate(base.TokensPerMinute, tl.TPM)
 		budgetMicros, budgetExceeded := base.BudgetMicrosPerMonth, base.BudgetExceeded
 		if tl.BudgetMicrosPerMonth > 0 {
 			if budgetMicros == 0 || tl.BudgetMicrosPerMonth < budgetMicros {

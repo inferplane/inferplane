@@ -1,6 +1,6 @@
 ---
 translation_source: reference/security.md
-translation_source_sha256: 06a8a8cf9c1d196902c226fede41c6cd7987d9038c6c49fa62a8d8e8395bb443
+translation_source_sha256: 3f0c24bc3a4516942f3fa84af68667f15c6d4cd3dea0533a4cd0731f8d1a743b
 ---
 
 # 보안 {#security}
@@ -57,3 +57,6 @@ InternalOnly는 승인된 정규 모델과 매 시도의 명시적 internal 공�
 거부된 분산 개인정보 세대는 유효 복구 전까지 해당 주체를 차단합니다. 로컬 시작 정책도 토폴로지 검사 후 서비스합니다. 새 규칙 전에 모든 바이너리·CRD를 올리고 첫 CP 동기화 전 보호에는 require_sync, 정책 나이에는 max_policy_age를 사용합니다. 계산 API는 준비되지 않거나 오래되거나 거부된 상태에서 로컬/200입니다. [한계·배포](../policy-routing.md)를 참고하세요.
 
 ADR-044의 유한한 완전 Mask는 외부 체인 반환 전에 수행하며 InternalOnly와 함께여도 필요합니다. 안전하지 않은 구조·숫자 변경, 남은 탐지, 불완전 변환은 거부합니다. 내부 모델 라벨만으로 Responses 원격 도구의 외부 호출을 허용할 수 없습니다. 엄격 예산은 거부된 정책 갱신을 차단하고 이후 컨텍스트·어피니티·폴백을 모두 필터링합니다. 세션 힌트는 범위가 지정된 HMAC 입력일 뿐 Principal이나 감사 차원이 아닙니다.
+
+내장 인증서·키 TLS 설정은 데이터 영역에만 적용됩니다. 관리 영역의 원격 접속은
+별도 TLS 종단 또는 보호된 터널을 필요로 합니다.

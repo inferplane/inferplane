@@ -1,6 +1,6 @@
 ---
 translation_source: operations/security.md
-translation_source_sha256: 0c50b33c15c93c9e69fd89a317f13202550e6f85a3f4f6e82a52eb1e3e60080d
+translation_source_sha256: f695a281997f80f2b5b6dbafc7bb86a089367d52653028edcac99303bcc4900e
 ---
 
 # 보안 경계 {#security-boundaries}
@@ -30,3 +30,7 @@ OIDC 신원은 검증된 발급자·주체 클레임에서 나와야 합니다. 
 ## 취약점 신고 {#report-a-vulnerability}
 
 비공개 신고는 [저장소 보안 정책](../../SECURITY.md)을 따르세요. 자격 증명, 원문 프롬프트, 신원 선언, 악용 가능한 세부 내용을 일반 이슈로 공개하지 마세요. 공개 이슈 템플릿은 민감 정보를 제거한 일반 결함에 사용합니다.
+
+내장 `server.tls`는 데이터 수신기에만 적용되며 관리 수신기는 평문입니다. 원격
+관리에는 TLS 종단이나 보호된 터널을 제공하세요. 데이터 영역 TLS만으로 관리 토큰과
+캡처 본문 전송도 보호된다고 가정하지 마세요.
