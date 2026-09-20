@@ -8,12 +8,53 @@ usage. **`inferplaned`** distributes policy and budget authority, aggregates usa
 and optionally brokers short-lived Bedrock credentials. Both are static Go
 binaries; a standalone `mayu` needs no control plane.
 
+<div class="ip-diagram" tabindex="0" role="region" aria-label="Control and data plane architecture; scroll horizontally on a small screen" markdown>
+
+![Operators configure policy and budgets in inferplaned. Policy and finite authority reach mayu outside the inference path. Agents send requests through mayu to approved internal or external targets. Shared Postgres admission is an explicit additional request-time dependency; local and durable node-local profiles use local admission state.](assets/architecture.svg)
+
+</div>
+
+[Open the architecture diagram](assets/architecture.svg)
+
+**Solid green arrows carry inference; dashed blue arrows carry policy, authority
+or usage synchronization. The amber edge is synchronous shared-DB access, only
+for ADR-046.** Prompts and response streams stay on the agent → mayu → provider
+path. Usage telemetry returns separately to the control plane.
+
 The control-plane HTTP service is not called for each inference admission.
 Dependencies still vary by [deployment profile](getting-started/deployment-profiles.md):
 local enforcement uses process-local counters; ADR-045 uses centrally committed
 monetary grants and a private local journal; ADR-046 synchronously resolves keys
 and reserves resources through Postgres. This separation is not an unconditional
 availability guarantee.
+
+## How configuration becomes automatic enforcement
+
+Operators declare model/provider topology, processing boundaries, capabilities,
+prices and referenced credentials on the data plane. `GovernancePolicy` supplies
+matching subject rules for model access, rates, quotas, budgets and routing.
+A gateway reads **either** watched local `policies` **or** an attached
+`control_plane`; configuration rejects both together. Central policy distribution
+does not automatically deploy provider topology or verify an internal destination.
+
+With a control plane, policy and authority synchronization runs outside the
+inference request. The gateway validates and installs the applicable state,
+subject to first-sync, staleness, identity and profile-specific authority gates.
+Changes propagate asynchronously, rather than atomically across every gateway.
+
+On each generation request, mayu combines the installed policy with current key
+access, request inspection and budget state. Configured PII actions, budget
+cutover and context preferences become routing decisions without the client
+choosing each transition. Context is Shadow unless explicitly enabled; privacy
+and strict budget targets still enforce. See
+[the configuration-to-decision walkthrough](why-inferplane.md#one-configuration-several-automatic-decisions).
+
+The architectural benefit is a separate management lifecycle plus local request
+inspection and enforcement. It does not eliminate storage or credential
+dependencies: ADR-045 can spend only existing valid grants during CP/DB loss;
+ADR-046 requires reachable Postgres on each admission. The
+[profile outage table](getting-started/deployment-profiles.md#understand-outages)
+defines when generation continues or refuses.
 
 ## Components
 
@@ -112,13 +153,33 @@ A compromised host can still obtain locally accessible credentials or sessions;
 provider boundary labels and identity fingerprints are not host attestation.
 See [security boundaries](operations/security.md).
 
-## mayu Component Diagram
+## Request decisions inside mayu {#mayu-component-diagram}
 
-![Coding agents reach providers through mayu. inferplaned distributes policy and authority; shared mode additionally uses synchronous Postgres admission.](assets/architecture.svg)
+<div class="ip-diagram" tabindex="0" role="region" aria-label="Request enforcement diagram; scroll horizontally on a small screen" markdown>
 
-The shared-DB edge applies to ADR-046. ADR-045 instead reserves from its private
-journal during inference and obtains new authority asynchronously. Local default
-mode has neither shared admission nor a mandatory control-plane dependency.
+![The authenticated request is inspected locally. Privacy, access and strict budget targets constrain model selection. Each attempt passes readiness and budget admission before provider egress. Eligible retries pass through the same restrictions; observed usage and uncertain spend are recorded.](assets/request-flow.svg)
+
+</div>
+
+[Open the decision-flow diagram](assets/request-flow.svg)
+
+This diagram describes combined decisions, not a promise that every ingress
+handler executes identical functions in this exact order. Access, privacy,
+capability, region and active strict-budget restrictions apply to every target.
+Context and cache preferences operate only within that eligible set.
+
+For `InternalOnly`, the model must belong to the allowed internal-model
+intersection and the provider must carry a compatible internal boundary.
+`Mask` requires complete transformation and independent reinspection before a
+usable chain is returned; it never cancels a separate `InternalOnly` obligation.
+`Block` wins. If no compatible target remains, the request refuses.
+
+With `enforceTargets: true`, an active budget tier constrains attempts to its
+configured target. It is separate from hard-cap admission and cannot buy more
+credit. Legacy optional substitution instead retains the original model when the
+alternative is unusable. Every authority-backed attempt reserves its own bound,
+including an allowed retry. A partial stream or unproven cost does not create a
+refund.
 
 ## Data Flow Summary
 

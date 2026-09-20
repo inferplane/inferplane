@@ -31,6 +31,10 @@
 .ip-hero > p:not(.ip-eyebrow) { max-width: 36rem; font-size: 1rem; }
 .ip-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.3rem; }
 .ip-facts { display: flex; flex-wrap: wrap; gap: .6rem 1.8rem; padding: 1rem 0; margin-bottom: 1rem; border-block: 1px solid var(--md-default-fg-color--lightest); font-size: .65rem; }
+.ip-diagram { max-width: 100%; overflow-x: auto; margin: 1.4rem 0; border: 1px solid var(--md-default-fg-color--lightest); border-radius: .6rem; background: #f0f5f2; }
+.ip-diagram:focus-visible { outline: 2px solid var(--md-accent-fg-color); outline-offset: 3px; }
+.ip-diagram p { margin: 0; }
+.md-typeset .ip-diagram img { display: block; width: 100%; min-width: 880px; max-width: none; }
 .ip-flow { display: grid; grid-template-columns: 1fr auto 1.25fr auto 1fr; gap: .75rem; align-items: center; margin: 1.2rem 0; padding: 1.4rem; background: var(--md-code-bg-color); border: 1px solid var(--md-default-fg-color--lightest); border-radius: .6rem; }
 .ip-flow div { padding: .8rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: .35rem; background: var(--md-default-bg-color); }
 .ip-flow b, .ip-flow small { display: block; }

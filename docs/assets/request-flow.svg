@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" lang="en" xml:lang="en" viewBox="0 0 1120 1060" role="img" aria-labelledby="title desc">
+<title id="title">Automatic request governance inside mayu</title>
+<desc id="desc">An active policy guides access, inspection, route selection and admission. Privacy, access and strict budget constraints intersect. Billable provider attempts follow admission; eligible fallback rechecks constraints and admission. Denied or unfunded requests refuse; usage and uncertainty are recorded.</desc>
+<defs>
+<marker id="green" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#047857" stroke-width="1.5"/></marker>
+<marker id="blue" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#315c93" stroke-width="1.5"/></marker>
+<marker id="amber" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#996013" stroke-width="1.5"/></marker>
+<marker id="red" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#a43c3c" stroke-width="1.5"/></marker>
+<marker id="gray" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#64746b" stroke-width="1.5"/></marker>
+</defs>
+<rect width="1120" height="1060" rx="16" fill="#f0f5f2"/>
+<text x="32" y="43" font-family="system-ui,sans-serif" font-size="27" font-weight="700" fill="#163c2c" text-anchor="start">One request. Every applicable policy.</text>
+<text x="32" y="73" font-family="system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">Conceptual flow: later preferences never loosen earlier restrictions.</text>
+<rect x="286" y="104" width="548" height="72" rx="12" fill="#e8eff8" stroke="#c1d0e5" stroke-width="1.5" stroke-dasharray=""/>
+<text x="560" y="134" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#163c2c" text-anchor="middle">Active policy · topology · budget state</text>
+<text x="560" y="160" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">Client keeps its approved model name, for example auto</text>
+<path d="M560 176V210" fill="none" stroke="#315c93" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#blue)"/>
+<rect x="286" y="216" width="548" height="106" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<text x="310" y="247" font-family="system-ui,sans-serif" font-size="21" font-weight="700" fill="#163c2c" text-anchor="start">1  Authenticate and inspect locally</text>
+<text x="310" y="277" font-family="system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">Key / model access · original supported request content</text>
+<text x="310" y="304" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="start">Finite PII signals; unknown input is not clean</text>
+<path d="M560 322V356" fill="none" stroke="#047857" stroke-width="2.2" stroke-dasharray="" marker-end="url(#green)"/>
+<rect x="286" y="362" width="548" height="121" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<text x="310" y="393" font-family="system-ui,sans-serif" font-size="21" font-weight="700" fill="#163c2c" text-anchor="start">2  Apply mandatory privacy boundaries</text>
+<text x="310" y="423" font-family="system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">InternalOnly: approved internal-model intersection</text>
+<text x="310" y="450" font-family="system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">Mask: complete redaction + independent reinspection</text>
+<text x="310" y="474" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#163c2c" text-anchor="start">Block wins; masking does not cancel InternalOnly</text>
+<path d="M560 483V517" fill="none" stroke="#047857" stroke-width="2.2" stroke-dasharray="" marker-end="url(#green)"/>
+<rect x="286" y="523" width="548" height="123" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<text x="310" y="554" font-family="system-ui,sans-serif" font-size="21" font-weight="700" fill="#163c2c" text-anchor="start">3  Select within all remaining constraints</text>
+<text x="310" y="584" font-family="system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">Budget tiers: strict targets with enforceTargets</text>
+<text x="310" y="611" font-family="system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">Context: Shadow proposes; Enforce selects</text>
+<text x="310" y="637" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="start">Revalidate access, privacy, region and capabilities</text>
+<path d="M560 646V680" fill="none" stroke="#047857" stroke-width="2.2" stroke-dasharray="" marker-end="url(#green)"/>
+<rect x="286" y="686" width="548" height="100" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<text x="310" y="717" font-family="system-ui,sans-serif" font-size="21" font-weight="700" fill="#163c2c" text-anchor="start">4  Admit before each billable attempt</text>
+<text x="310" y="747" font-family="system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">Readiness + hard limits; reserve in authority profiles</text>
+<text x="310" y="774" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="start">ADR-045: local journal · ADR-046: shared Postgres</text>
+<path d="M560 786V820" fill="none" stroke="#047857" stroke-width="2.2" stroke-dasharray="" marker-end="url(#green)"/>
+<rect x="286" y="826" width="548" height="78" rx="12" fill="#e6f2eb" stroke="#047857" stroke-width="1.5" stroke-dasharray=""/>
+<text x="560" y="859" font-family="system-ui,sans-serif" font-size="21" font-weight="700" fill="#163c2c" text-anchor="middle">5  Call an approved provider and stream</text>
+<text x="560" y="888" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">No transparent replay after output is committed</text>
+<path d="M560 904V938" fill="none" stroke="#047857" stroke-width="2.2" stroke-dasharray="" marker-end="url(#green)"/>
+<rect x="286" y="944" width="548" height="78" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<text x="560" y="977" font-family="system-ui,sans-serif" font-size="19" font-weight="700" fill="#163c2c" text-anchor="middle">6  Settle usage · retain uncertainty · audit</text>
+<text x="560" y="1006" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">No unproven refund; analytics do not replace authority</text>
+<rect x="32" y="534" width="212" height="170" rx="12" fill="#e8eff8" stroke="#c1d0e5" stroke-width="1.5" stroke-dasharray=""/>
+<text x="138" y="567" font-family="system-ui,sans-serif" font-size="19" font-weight="700" fill="#315c93" text-anchor="middle">Eligible fallback</text>
+<text x="138" y="599" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#315c93" text-anchor="middle">Before output commit</text>
+<text x="138" y="626" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#315c93" text-anchor="middle">Same constraints</text>
+<text x="138" y="653" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#315c93" text-anchor="middle">New attempt admission</text>
+<text x="138" y="680" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#315c93" text-anchor="middle">No premium/PII escape</text>
+<path d="M286 865H138V711" fill="none" stroke="#315c93" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#blue)"/>
+<path d="M138 534V500H263V584H279" fill="none" stroke="#315c93" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#blue)"/>
+<rect x="880" y="529" width="208" height="203" rx="12" fill="#fcf0ee" stroke="#d9b7b2" stroke-width="1.5" stroke-dasharray=""/>
+<text x="984" y="564" font-family="system-ui,sans-serif" font-size="23" font-weight="700" fill="#a43c3c" text-anchor="middle">Refuse</text>
+<text x="984" y="601" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#843030" text-anchor="middle">Denied access</text>
+<text x="984" y="630" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#843030" text-anchor="middle">Privacy cannot be met</text>
+<text x="984" y="659" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#843030" text-anchor="middle">No eligible target</text>
+<text x="984" y="688" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#843030" text-anchor="middle">Unready / no authority</text>
+<text x="984" y="715" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#843030" text-anchor="middle">Hard limit reached</text>
+<path d="M834 266H859V553H874" fill="none" stroke="#a43c3c" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#red)"/>
+<path d="M834 422H859" fill="none" stroke="#a43c3c" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#red)"/>
+<path d="M834 584H874" fill="none" stroke="#a43c3c" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#red)"/>
+<path d="M834 736H859V709H874" fill="none" stroke="#a43c3c" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#red)"/>
+<text x="32" y="1044" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#163c2c" text-anchor="start">Generation path shown. Count endpoints retain their separate local HTTP-200 contract.</text>
+</svg>

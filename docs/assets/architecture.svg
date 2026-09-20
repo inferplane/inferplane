@@ -1,50 +1,74 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 490" role="img" aria-labelledby="title desc">
-  <title id="title">inferplane component architecture</title>
-  <desc id="desc">Coding agents send inference to mayu and then providers. inferplaned delivers policy and finite authority, and uses Postgres when enabled. Shared ADR-046 gateways synchronously access Postgres for key lookup and admission. Each gateway writes its own audit and telemetry.</desc>
-  <defs>
-    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0 0 8 4 0 8" fill="none" stroke="#047857" stroke-width="1.5"/>
-    </marker>
-  </defs>
-  <rect width="960" height="490" rx="16" fill="#f0f5f2"/>
-  <g fill="#fff" stroke="#c1d4c9" stroke-width="1.5">
-    <rect x="340" y="30" width="250" height="82" rx="10"/>
-    <rect x="705" y="30" width="225" height="82" rx="10"/>
-    <rect x="30" y="230" width="215" height="85" rx="10"/>
-    <rect x="340" y="230" width="250" height="85" rx="10" stroke="#047857" stroke-width="2"/>
-    <rect x="705" y="230" width="225" height="85" rx="10"/>
-    <rect x="340" y="400" width="250" height="65" rx="10"/>
-  </g>
-  <g fill="none" stroke="#047857" stroke-width="2" marker-end="url(#arrow)">
-    <path d="M245 272H335"/>
-    <path d="M590 272H700"/>
-    <path d="M465 315V395"/>
-    <path d="M590 71H700" stroke-dasharray="6 5"/>
-    <path d="M465 112V224" stroke-dasharray="6 5"/>
-    <path d="M590 230 745 117" stroke-dasharray="6 5"/>
-  </g>
-  <g fill="#163c2c" font-family="system-ui,sans-serif" text-anchor="middle">
-    <g font-size="21" font-weight="650">
-      <text x="465" y="65">inferplaned</text>
-      <text x="817" y="65">Postgres</text>
-      <text x="137" y="267">Coding agents</text>
-      <text x="465" y="265">mayu</text>
-      <text x="817" y="267">Providers</text>
-      <text x="465" y="427" font-size="18">Audit + telemetry</text>
-    </g>
-    <g font-size="14">
-      <text x="465" y="91">Policy and budget authority</text>
-      <text x="817" y="91">When the profile enables it</text>
-      <text x="137" y="291">Virtual-key authentication</text>
-      <text x="465" y="291">Routing and admission</text>
-      <text x="817" y="291">Approved model targets</text>
-      <text x="465" y="449">Per-instance evidence</text>
-      <text x="361" y="162">Policy + finite</text>
-      <text x="361" y="181">authority</text>
-      <text x="796" y="165">ADR-046 only:</text>
-      <text x="796" y="184">synchronous admission</text>
-      <text x="630" y="256">Inference</text>
-      <text x="465" y="372">Observed usage and uncertainty</text>
-    </g>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" lang="en" xml:lang="en" viewBox="0 0 1120 880" role="img" aria-labelledby="title desc">
+<title id="title">inferplane: separate control and data planes</title>
+<desc id="desc">The control plane distributes policy and finite budget authority and receives usage. Prompts travel only from agents through mayu to providers. Shared Postgres has an explicit synchronous admission edge. Local and durable node-local modes use local admission state. Every gateway keeps its own audit evidence.</desc>
+<defs>
+<marker id="green" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#047857" stroke-width="1.5"/></marker>
+<marker id="blue" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#315c93" stroke-width="1.5"/></marker>
+<marker id="amber" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#996013" stroke-width="1.5"/></marker>
+<marker id="red" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#a43c3c" stroke-width="1.5"/></marker>
+<marker id="gray" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8" fill="none" stroke="#64746b" stroke-width="1.5"/></marker>
+</defs>
+<rect width="1120" height="880" rx="16" fill="#f0f5f2"/>
+<text x="32" y="42" font-family="system-ui,sans-serif" font-size="27" font-weight="700" fill="#163c2c" text-anchor="start">Manage centrally. Enforce on the inference path.</text>
+<text x="32" y="70" font-family="system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="start">Two binaries, distinct responsibilities, explicit accounting dependencies.</text>
+<rect x="24" y="94" width="1072" height="221" rx="12" fill="#e8eff8" stroke="#c1d0e5" stroke-width="1.5" stroke-dasharray=""/>
+<text x="46" y="125" font-family="system-ui,sans-serif" font-size="16" font-weight="700" fill="#315c93" text-anchor="start">CONTROL PLANE · policy administration and authority</text>
+<rect x="46" y="150" width="242" height="126" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<rect x="364" y="150" width="320" height="126" rx="12" fill="#fff" stroke="#315c93" stroke-width="1.5" stroke-dasharray=""/>
+<rect x="794" y="150" width="278" height="126" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<text x="167" y="185" font-family="system-ui,sans-serif" font-size="23" font-weight="700" fill="#163c2c" text-anchor="middle">Operators</text>
+<text x="167" y="216" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">GovernancePolicy</text>
+<text x="167" y="244" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">Access · budgets · privacy</text>
+<text x="524" y="185" font-family="system-ui,sans-serif" font-size="23" font-weight="700" fill="#163c2c" text-anchor="middle">inferplaned</text>
+<text x="524" y="216" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">Distribute policy + authority</text>
+<text x="524" y="244" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">Receive usage telemetry</text>
+<text x="933" y="185" font-family="system-ui,sans-serif" font-size="23" font-weight="700" fill="#163c2c" text-anchor="middle">Postgres</text>
+<text x="933" y="216" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">Durable / shared profiles</text>
+<text x="933" y="244" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">Policies + authority state</text>
+<path d="M288 214H357" fill="none" stroke="#315c93" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#blue)"/>
+<path d="M684 214H787" fill="none" stroke="#315c93" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#blue)"/>
+<text x="325" y="197" font-family="system-ui,sans-serif" font-size="14" font-weight="400" fill="#163c2c" text-anchor="middle">rules</text>
+<text x="740" y="197" font-family="system-ui,sans-serif" font-size="14" font-weight="400" fill="#163c2c" text-anchor="middle">authority</text>
+<rect x="24" y="387" width="1072" height="293" rx="12" fill="#e6f2eb" stroke="#b5d4c2" stroke-width="1.5" stroke-dasharray=""/>
+<text x="46" y="418" font-family="system-ui,sans-serif" font-size="16" font-weight="700" fill="#047857" text-anchor="start">DATA PLANE · inference and automatic enforcement</text>
+<rect x="46" y="486" width="235" height="112" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<rect x="357" y="447" width="340" height="199" rx="12" fill="#fff" stroke="#047857" stroke-width="1.5" stroke-dasharray=""/>
+<rect x="808" y="467" width="264" height="159" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<text x="167" y="523" font-family="system-ui,sans-serif" font-size="23" font-weight="700" fill="#163c2c" text-anchor="middle">Coding agents</text>
+<text x="167" y="552" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">Claude Code · Codex</text>
+<text x="167" y="579" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">OpenCode · virtual keys</text>
+<text x="527" y="480" font-family="system-ui,sans-serif" font-size="25" font-weight="700" fill="#163c2c" text-anchor="middle">mayu</text>
+<text x="378" y="511" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="start">1  Access + local PII inspection</text>
+<text x="378" y="540" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="start">2  Privacy / budget / context route</text>
+<text x="378" y="569" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="start">3  Admission before each attempt</text>
+<text x="378" y="598" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="start">4  Dispatch, settle, audit</text>
+<text x="527" y="628" font-family="system-ui,sans-serif" font-size="14" font-weight="400" fill="#163c2c" text-anchor="middle">Agent-local or shared fleet</text>
+<text x="940" y="502" font-family="system-ui,sans-serif" font-size="22" font-weight="700" fill="#163c2c" text-anchor="middle">Approved providers</text>
+<text x="940" y="535" font-family="system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="middle">Internal model targets</text>
+<text x="940" y="565" font-family="system-ui,sans-serif" font-size="17" font-weight="400" fill="#163c2c" text-anchor="middle">External model targets</text>
+<text x="940" y="602" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#163c2c" text-anchor="middle">Only policy-eligible routes</text>
+<path d="M281 551H350" fill="none" stroke="#047857" stroke-width="2.2" stroke-dasharray="" marker-end="url(#green)"/>
+<path d="M697 551H801" fill="none" stroke="#047857" stroke-width="2.2" stroke-dasharray="" marker-end="url(#green)"/>
+<text x="320" y="535" font-family="system-ui,sans-serif" font-size="13" font-weight="400" fill="#163c2c" text-anchor="middle">request</text>
+<text x="752" y="535" font-family="system-ui,sans-serif" font-size="13" font-weight="400" fill="#163c2c" text-anchor="middle">approved</text>
+<path d="M461 276V440" fill="none" stroke="#315c93" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#blue)"/>
+<path d="M608 447V283" fill="none" stroke="#315c93" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#blue)"/>
+<text x="441" y="344" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="end">Policy + finite</text>
+<text x="441" y="367" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="end">budget authority</text>
+<text x="628" y="344" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="start">Usage</text>
+<text x="628" y="367" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="start">reports</text>
+<path d="M697 480H744V439H967V283" fill="none" stroke="#996013" stroke-width="2.2" stroke-dasharray="" marker-end="url(#amber)"/>
+<rect x="785" y="332" width="292" height="58" rx="12" fill="#fff9ee" stroke="#ddc291" stroke-width="1.5" stroke-dasharray=""/>
+<text x="931" y="355" font-family="system-ui,sans-serif" font-size="16" font-weight="600" fill="#79501d" text-anchor="middle">ADR-046 only · synchronous</text>
+<text x="931" y="378" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#79501d" text-anchor="middle">Key lookup + resource admission</text>
+<rect x="46" y="723" width="644" height="88" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<rect x="744" y="723" width="328" height="88" rx="12" fill="#fff" stroke="#c1d4c9" stroke-width="1.5" stroke-dasharray=""/>
+<path d="M527 646V716" fill="none" stroke="#64746b" stroke-width="2.2" stroke-dasharray="" marker-end="url(#gray)"/>
+<text x="66" y="752" font-family="system-ui,sans-serif" font-size="18" font-weight="700" fill="#163c2c" text-anchor="start">Local admission state</text>
+<text x="66" y="777" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="start">Default: local counters · ADR-045: private grant journal</text>
+<text x="66" y="799" font-family="system-ui,sans-serif" font-size="14" font-weight="400" fill="#163c2c" text-anchor="start">ADR-046 uses shared Postgres admission instead.</text>
+<text x="908" y="752" font-family="system-ui,sans-serif" font-size="18" font-weight="700" fill="#163c2c" text-anchor="middle">Per-gateway evidence</text>
+<text x="908" y="778" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#163c2c" text-anchor="middle">Audit WAL · metrics · usage</text>
+<path d="M658 646V699H908V716" fill="none" stroke="#64746b" stroke-width="2.2" stroke-dasharray="" marker-end="url(#gray)"/>
+<text x="32" y="848" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#163c2c" text-anchor="start">Topology, prices and boundary labels are operator-managed. CP loss ≠ DB loss; profile gates still apply.</text>
 </svg>
