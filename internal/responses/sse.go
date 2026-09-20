@@ -50,6 +50,7 @@ type StreamState struct {
 	custom            map[string]bool
 	origins           map[string]toolOrigin
 	blocks            map[int]*streamBlock
+	ignored           map[int]bool
 	order             []int
 	usage             *schema.Usage
 	stop              string
@@ -65,7 +66,7 @@ func NewStreamState(model string, req ...*schema.ChatRequest) *StreamState {
 	}
 	var id [16]byte
 	_, _ = rand.Read(id[:])
-	return &StreamState{model: model, id: "resp_" + hex.EncodeToString(id[:]), created: time.Now().Unix(), custom: customTools(request), origins: toolOrigins(request), blocks: map[int]*streamBlock{}}
+	return &StreamState{model: model, id: "resp_" + hex.EncodeToString(id[:]), created: time.Now().Unix(), custom: customTools(request), origins: toolOrigins(request), blocks: map[int]*streamBlock{}, ignored: map[int]bool{}}
 }
 
 func itemID(responseID string, index int) string {
@@ -116,14 +117,23 @@ func (s *StreamState) Convert(chunk *schema.ChatChunk) ([]Event, error) {
 	case "message_start":
 		return out, nil
 	case "content_block_start":
-		if chunk.Index == nil || *chunk.Index < 0 || len(s.blocks) >= 4096 || chunk.ContentBlock == nil {
+		if chunk.Index == nil || *chunk.Index < 0 || len(s.blocks)+len(s.ignored) >= 4096 || chunk.ContentBlock == nil {
 			return nil, ErrInvalid
 		}
 		index := *chunk.Index
+		if _, seen := s.ignored[index]; seen {
+			return nil, ErrInvalid
+		}
 		if s.blocks[index] != nil {
 			return nil, ErrInvalid
 		}
 		b := *chunk.ContentBlock
+		// Foreign reasoning is not portable Responses encrypted state. Omit
+		// only these known blocks; retain all usage and validate lifecycles.
+		if b.Type == "thinking" || b.Type == "redacted_thinking" {
+			s.ignored[index] = false
+			return out, nil
+		}
 		if b.Type != "text" && b.Type != "tool_use" {
 			return nil, ErrUnsupported
 		}
@@ -174,6 +184,20 @@ func (s *StreamState) Convert(chunk *schema.ChatChunk) ([]Event, error) {
 		if chunk.Index == nil {
 			return nil, ErrInvalid
 		}
+		if closed, ignored := s.ignored[*chunk.Index]; ignored {
+			if closed {
+				return nil, ErrInvalid
+			}
+			d, err := object(chunk.Delta)
+			if err != nil {
+				return nil, err
+			}
+			kind := optionalText(d["type"])
+			if kind != "thinking_delta" && kind != "signature_delta" {
+				return nil, ErrUnsupported
+			}
+			return out, nil
+		}
 		b := s.blocks[*chunk.Index]
 		if b == nil || b.closed {
 			return nil, ErrInvalid
@@ -212,6 +236,13 @@ func (s *StreamState) Convert(chunk *schema.ChatChunk) ([]Event, error) {
 		if chunk.Index == nil {
 			return nil, ErrInvalid
 		}
+		if closed, ignored := s.ignored[*chunk.Index]; ignored {
+			if closed {
+				return nil, ErrInvalid
+			}
+			s.ignored[*chunk.Index] = true
+			return out, nil
+		}
 		closed, err := s.closeBlock(*chunk.Index, false)
 		if err != nil {
 			return nil, err
@@ -228,6 +259,11 @@ func (s *StreamState) Convert(chunk *schema.ChatChunk) ([]Event, error) {
 			}
 		}
 	case "message_stop":
+		for _, closed := range s.ignored {
+			if !closed {
+				return nil, ErrInvalid
+			}
+		}
 		if _, err := usageFromCanonical(s.usage); err != nil {
 			return nil, err
 		}

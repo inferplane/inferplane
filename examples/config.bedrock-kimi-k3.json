@@ -1,0 +1,84 @@
+{
+  "server": {
+    "listen": ":8080",
+    "admin_listen": ":9090",
+    "drain_grace": "10s",
+    "admin_auth": {
+      "token_refs": [
+        {
+          "env": "INFERPLANE_ADMIN_TOKEN"
+        }
+      ]
+    }
+  },
+  "key_store": {
+    "type": "sqlite",
+    "path": "/var/lib/inferplane/keys.db"
+  },
+  "audit": {
+    "failure_mode": "buffer_then_block",
+    "buffer": {
+      "path": "/var/lib/inferplane/audit.wal"
+    },
+    "sinks": [
+      {
+        "type": "stdout"
+      },
+      {
+        "type": "file",
+        "path": "/var/lib/inferplane/audit.jsonl"
+      }
+    ]
+  },
+  "providers": {
+    "bedrock-seoul": {
+      "type": "bedrock",
+      "region": "ap-northeast-2",
+      "auth": {
+        "mode": "irsa"
+      }
+    }
+  },
+  "models": {
+    "kimi-k3": {
+      "targets": [
+        {
+          "provider": "bedrock-seoul",
+          "model": "global.moonshotai.kimi-k3",
+          "api": "converse"
+        }
+      ],
+      "context_window": 1000000,
+      "capabilities": [
+        "tools"
+      ]
+    }
+  },
+  "teams": {
+    "demo": {
+      "allowed_models": [
+        "kimi-k3"
+      ],
+      "rate_limit": {
+        "requests_per_minute": 120
+      }
+    }
+  },
+  "pricing": {
+    "on_missing": "block",
+    "version": "aws-kimi-k3-global-standard-2026-09-19",
+    "overrides": {
+      "bedrock-seoul": {
+        "global.moonshotai.kimi-k3": {
+          "input_per_mtok": 3,
+          "output_per_mtok": 15,
+          "cache_read_per_mtok": 0.3,
+          "cache_write_5m_per_mtok": 3.75,
+          "cache_write_1h_per_mtok": 3.75
+        }
+      }
+    }
+  },
+  "_comment_kimi": "AWS SDK default credential chain: on EC2 use its instance role (no samples profile or extra AssumeRole). Global CRIS may process outside Korea. This is an opt-in example, not a deployment update.",
+  "_comment_pricing": "Standard Global CRIS USD per million tokens, AWS Kimi K3 model card 2026-09-19. Exact profile key prevents US CRIS inheriting Global rates. Untiered cache writes use the legacy 5m accounting bucket, not a TTL claim; both write buckets use the published $3.75 rate. Converse does not expose explicit cache controls."
+}

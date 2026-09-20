@@ -89,3 +89,13 @@ existing Chat Completions converter does not serialize canonical
 assistant/tool message order and call IDs. Native Responses remains verbatim.
 Tests exercise both the Responses replay and the actual Chat Completions
 conversion, including custom-tool arguments and the final answer after a result.
+
+## Foreign thinking output
+
+Cross-protocol output drops known Anthropic `thinking` and `redacted_thinking`
+blocks, including thinking/signature deltas; it does not turn them into visible
+text, portable reasoning summaries, or encrypted replay state. Input-side
+opaque reasoning remains rejected. Thinking block indices still participate
+in duplicate/lifecycle/size validation. Visible output indices stay contiguous,
+and original token usage (including billable reasoning) remains unchanged.
+Native Responses and Anthropic Messages traffic are unaffected.

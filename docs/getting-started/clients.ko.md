@@ -1,6 +1,6 @@
 ---
 translation_source: getting-started/clients.md
-translation_source_sha256: 221136ef8f8498904e450a5f6fd3a764326a90c2a5adaa404f1aaa3c0daf9b3d
+translation_source_sha256: 92cda2c11f72279069566ea711e337c7fa4bbb52024e2597738a87f32a4742af
 ---
 
 # 클라이언트와 공급자 연결 {#connect-clients-and-providers}
@@ -37,3 +37,6 @@ translation_source_sha256: 221136ef8f8498904e450a5f6fd3a764326a90c2a5adaa404f1aa
 5. 금지 모델이 거부되고, 폴백이 접근·개인정보·예산 제약을 유지하는지 확인합니다.
 
 Responses의 네이티브 모드와 무상태 브리지를 구분하세요. 불투명한 네이티브 이력과 호스팅·네이티브 전용 도구를 임의의 Chat Completions 백엔드로 옮길 수는 없습니다. [실행 도구 계약](../codex-launcher.md)에서 요구하면 새 세션을 시작하세요.
+
+가격을 포함한 Kimi K3·Fable 5.1 예제와 날짜별 검증 범위는
+[Bedrock 코딩 모델](../reference/bedrock-coding-models.md)을 참고하세요.

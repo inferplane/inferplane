@@ -9,6 +9,7 @@ func TestNeedsAdaptiveRewrite(t *testing.T) {
 	broken := []string{
 		"global.anthropic.claude-opus-4-8",
 		"anthropic.claude-fable-5",
+		"global.anthropic.claude-fable-5-1",
 		"global.anthropic.claude-sonnet-5",
 		"anthropic.claude-opus-4-7",
 		"anthropic.claude-mythos-preview",
