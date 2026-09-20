@@ -1,5 +1,13 @@
 # Adaptive routing and Codex
 
+Configure approved destinations and constraints; `mayu` applies them to eligible
+requests without requiring users to switch models for each task. Context-based
+model selection, PII handling and budget-driven cutover run in the data plane
+within the configured rules. Operators choose the policy and verify the targets;
+context starts in Shadow while privacy rules enforce independently.
+
+[Why this matters](why-inferplane.md) · [Architecture](architecture.md)
+
 Use `examples/config.adaptive-routing.json` as an isolated node-local example.
 The endpoints, model IDs, context windows, capabilities and prices are
 illustrative; replace them with verified deployment values. Qwen, Gemma and Kimi

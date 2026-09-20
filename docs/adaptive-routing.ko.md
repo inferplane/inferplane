@@ -1,9 +1,13 @@
 ---
 translation_source: adaptive-routing.md
-translation_source_sha256: 7d1599053d6bf4b9d8377a2c29990a5736879aa3ae36ba7595c90ee671e4c988
+translation_source_sha256: 4aab86d568087848ef70870e04fe1cef82332367d805ea940383ae160911ac90
 ---
 
 # 적응형 라우팅과 Codex {#adaptive-routing-and-codex}
+
+승인된 목적지와 제한을 설정하면 `mayu`가 해당되는 요청에 적용하므로 사용자가 작업마다 모델을 직접 바꿀 필요가 없습니다. 컨텍스트 기반 모델 선택, PII 처리, 예산에 따른 전환은 설정된 규칙 안에서 데이터 영역이 수행합니다. 운영자는 정책을 선택하고 목적지를 검증해야 합니다. 컨텍스트는 Shadow로 시작하며 개인정보 규칙은 독립적으로 집행됩니다.
+
+[이 방식의 강점](why-inferplane.md) · [아키텍처](architecture.md)
 
 `examples/config.adaptive-routing.json`은 독립된 노드 로컬 예제입니다. 엔드포인트·모델 ID·컨텍스트·기능·가격을 검증한 배포 값으로 바꾸세요. Qwen·Gemma·Kimi라는 이름만으로 비용, 모델 크기, 프로토콜, 데이터 경계를 정하지 않습니다.
 

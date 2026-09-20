@@ -155,6 +155,12 @@ compliance or provider trust. Internal targets must really meet the processing
 boundary you declare. If a safe route cannot be established, restrictive privacy
 rules refuse rather than letting context or cost preferences relax the boundary.
 
+False positives, missed or obfuscated values, and uninspectable content remain
+possible. Protected structural fields can also prevent safe masking. See the
+[inspection contract](policy-routing.md#inspection-and-capability-limits) and
+[masking limits](adaptive-routing.md#privacy-and-cache-limits) before choosing the
+policy for your workload.
+
 Network controls and provider credentials determine whether users can bypass
 your gateway. A node controlled by an adversary is not made trustworthy by
 installing mayu or enabling credential brokering. Operators also own HA database
