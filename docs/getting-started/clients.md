@@ -32,3 +32,6 @@ Examples: [Anthropic/Bedrock](../../examples/config.json), [self-hosted](../../e
 5. Verify a forbidden model is refused and a configured fallback preserves access, privacy, and budget constraints.
 
 For Responses, distinguish native mode from the stateless bridge. Opaque native history and hosted/native-only tools cannot simply move to an arbitrary Chat Completions backend. Start a new session when required by the [launcher contract](../codex-launcher.md).
+
+For priced Kimi K3 and Fable 5.1 route examples and the dated acceptance limits,
+see [Bedrock coding models](../reference/bedrock-coding-models.md).

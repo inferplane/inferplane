@@ -227,8 +227,13 @@ func responseObject(resp *schema.ChatResponse, custom map[string]bool, origins m
 			break
 		}
 	}
-	for i, block := range resp.Content {
-		item, err := outputItem(block, id, i, custom, phase, origins)
+	for _, block := range resp.Content {
+		// Match streaming: do not expose provider-specific thought/signature
+		// payloads as text or invent portable encrypted reasoning.
+		if block.Type == "thinking" || block.Type == "redacted_thinking" {
+			continue
+		}
+		item, err := outputItem(block, id, len(items), custom, phase, origins)
 		if err != nil {
 			return nil, err
 		}

@@ -1,0 +1,84 @@
+{
+  "server": {
+    "listen": ":8080",
+    "admin_listen": ":9090",
+    "drain_grace": "10s",
+    "admin_auth": {
+      "token_refs": [
+        {
+          "env": "INFERPLANE_ADMIN_TOKEN"
+        }
+      ]
+    }
+  },
+  "key_store": {
+    "type": "sqlite",
+    "path": "/var/lib/inferplane/keys.db"
+  },
+  "audit": {
+    "failure_mode": "buffer_then_block",
+    "buffer": {
+      "path": "/var/lib/inferplane/audit.wal"
+    },
+    "sinks": [
+      {
+        "type": "stdout"
+      },
+      {
+        "type": "file",
+        "path": "/var/lib/inferplane/audit.jsonl"
+      }
+    ]
+  },
+  "providers": {
+    "bedrock-seoul": {
+      "type": "bedrock",
+      "region": "ap-northeast-2",
+      "auth": {
+        "mode": "irsa"
+      }
+    }
+  },
+  "models": {
+    "global.anthropic.claude-fable-5-1": {
+      "context_window": 1000000,
+      "targets": [
+        {
+          "provider": "bedrock-seoul",
+          "model": "global.anthropic.claude-fable-5-1",
+          "api": "invoke_model"
+        }
+      ],
+      "capabilities": [
+        "tools"
+      ]
+    }
+  },
+  "teams": {
+    "demo": {
+      "allowed_models": [
+        "global.anthropic.claude-fable-5-1"
+      ],
+      "rate_limit": {
+        "requests_per_minute": 120
+      }
+    }
+  },
+  "pricing": {
+    "on_missing": "block",
+    "version": "aws-fable-5-1-global-standard-2026-09-20",
+    "overrides": {
+      "bedrock-seoul": {
+        "global.anthropic.claude-fable-5-1": {
+          "input_per_mtok": 10,
+          "output_per_mtok": 50,
+          "cache_read_per_mtok": 0.25,
+          "cache_write_5m_per_mtok": 12.5,
+          "cache_write_1h_per_mtok": 20
+        }
+      }
+    }
+  },
+  "_comment_pricing": "Standard Global USD per million tokens from AmazonBedrockFoundationModels ap-northeast-2, published 2026-09-11, checked 2026-09-20. Cache read is $0.25 (NOT Fable 5 $1.00 and NOT the default 0.1x input). Exact profile prices prevent inheritance by US CRIS.",
+  "_comment_fable": "Uses the EC2 instance role via the default SDK credential chain, not samples. Global routing is not Korean residency. AWS requires aws_review data retention opt-in; do not enable it automatically. Adaptive thinking is always on. Omit sampling parameters; top_k is unsupported. InvokeModel preserves refusal stop_reason and stop_details."
+}
