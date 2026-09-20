@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: 2d2d33cce793747a30e91948ed4ef13a2976d8c6e301ac3bb4a1d9577514cd51
+translation_source_sha256: 854ddb621f7434893682c79722ffc46251ab7788c9ff2d2bda91f60e11d65a37
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -29,7 +29,7 @@ translation_source_sha256: 2d2d33cce793747a30e91948ed4ef13a2976d8c6e301ac3bb4a1d
 | 지속적인 준비 상태 실패·503 | 정책 동기화, 신원 지문, DB, 권한 발급·저널 |
 | `inferplane_pricing_miss_total` | 경로 가격 누락·가격 메타데이터 오류 |
 | `inferplane_audit_write_failures_total` | 저장 권한·용량·하위 시스템 가용성 |
-| `inferplane_audit_buffer_utilization_ratio` | WAL 누적과 감사 실패 시 거부 가능성 |
+| `inferplane_audit_buffer_utilization_ratio` | WAL 누적과 저장 실패 조사. 자동 요청 차단의 증거는 아님 |
 | `inferplane_audit_anchor_failures_total` | 객체 저장소·IAM·보존 설정 |
 | `gen_ai_server_time_to_first_token_seconds` | 업스트림·요청 경로 지연 |
 | `inferplane_fallback_total`·회로 차단기 상태 | 공급자 실패·비호환 |
@@ -62,3 +62,11 @@ bin/mayu report --file /path/to/instance-audit.jsonl --by team,model
 인스턴스·재시작 구간을 구분해 보관하세요. 로컬 체인이 유효해도 호스트의 이력 재작성에 대한 저항성을 증명하지는 않습니다. 필요한 경우 [외부 앵커링](../runbooks/audit-anchoring.md)을 구성하고 검증하세요.
 
 문제 보고에는 커밋·이미지, 프로파일, 클라이언트 버전, 상태·오류 종류, 비밀을 제거한 설정, 외부 호출 전인지 스트리밍 중인지 포함합니다. 키·자격 증명·원문 프롬프트·신원 선언·DSN은 제외하세요. 보안 문제는 [비공개 보안 신고 정책](../../SECURITY.md)을 따릅니다.
+
+## 감사 내구성 한계 {#audit-durability-limits}
+
+감사 저장 대상을 명시적으로 설정하세요. 기본 차트는 이를 제공하지 않습니다.
+필수 저장 대상 실패는 진단 지표를 증가시키지만 현재 자동 fail-closed 요청 차단을
+보장하지 않습니다. WAL 자동 재생·복구도 미완성이므로 준비 상태나 로컬 체인 검증을
+모든 과거 기록의 보존 증거로 취급하지 마세요. 저장 실패 시 증거를 보존하고 영향을
+받는 트래픽을 중지하세요.

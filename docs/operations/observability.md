@@ -24,7 +24,7 @@ Start with the [Grafana dashboard](../../deploy/grafana/inferplane.json). Config
 | Sustained readiness failures / 503s | Policy sync, identity fingerprint, DB availability, authority grant/journal |
 | `inferplane_pricing_miss_total` | Missing route rates or incorrect pricing metadata |
 | `inferplane_audit_write_failures_total` | Sink permissions, capacity, downstream availability |
-| `inferplane_audit_buffer_utilization_ratio` | WAL filling; possible fail-closed audit backpressure |
+| `inferplane_audit_buffer_utilization_ratio` | WAL filling; investigate sink failures (not proof of automatic admission blocking) |
 | `inferplane_audit_anchor_failures_total` | Object storage/IAM/retention configuration |
 | `gen_ai_server_time_to_first_token_seconds` | Upstream or request-path latency |
 | `inferplane_fallback_total` / circuit state | Provider failure or incompatibility |
@@ -57,3 +57,11 @@ bin/mayu report --file /path/to/instance-audit.jsonl --by team,model
 Keep instance/restart segments distinct. A valid local chain does not prove resistance to a host rewriting its history; configure and verify [external anchoring](../runbooks/audit-anchoring.md) when that evidence is required.
 
 For an issue report, include the commit/image, profile, client version, status/error class, sanitized configuration, and whether the failure occurs before egress or during streaming. Exclude keys, credentials, raw prompts, identity declarations and DSNs. Send security reports through the [private security policy](../../SECURITY.md).
+
+## Audit durability limits
+
+Configure audit sinks explicitly; the default chart does not supply one. A
+required-sink failure increments diagnostics but does not currently provide a
+guaranteed fail-closed admission gate. Automatic WAL replay/recovery is incomplete;
+do not treat process readiness or a local chain check as proof that all prior
+records survived. Preserve evidence and stop affected traffic during sink failures.

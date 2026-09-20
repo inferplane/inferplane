@@ -161,8 +161,8 @@ rejects mutable SQLite provider topology; model/provider rollout remains explici
 
 **Standalone and legacy budget counters are not durable.** In standalone mode they live only in
 memory: restarting `mayu` mid-window resets every team, key, and user counter
-to zero, even though the spend stays in the audit chain (`mayu report` still
-shows it). With a control plane attached, a hard-cap lease fails *closed* only
+to zero, configured audit sinks may retain observed spend for `mayu report`, but
+that is not a guarantee of complete or crash-safe audit recovery. With a control plane attached, a hard-cap lease fails *closed* only
 once a lease has been received — if the control plane is unreachable at
 `mayu` boot, each replica enforces its own local limit with no clamp until the
 first heartbeat succeeds. Set `control_plane.require_sync: true` (optionally with
@@ -178,7 +178,7 @@ for standing node Bedrock IAM credentials, but a compromised host can obtain its
 broker token or vended sessions; it is not bypass-proof, and sessions are not yet
 per-team scoped. Guardrails and region restrictions require correct provider/team
 configuration; ADR-046 shares team records but does not make host credentials
-unreadable. See `review/fable5/08-control-plane-bypass.md` for the threat boundary.
+unreadable. See [security boundaries](docs/operations/security.md) for the threat boundary.
 
 ## Why not a central gateway?
 
@@ -262,8 +262,13 @@ Postgres transactions. Legacy CP allowances are not a durable escrow ledger.
   node-accessible credentials; this does not protect against a compromised host.
   Initial broker acquisition fails boot/reload rather than falling back to the
   node's own AWS identity.
-- **Audit** — a tamper-evident hash-chain of every request, with chargeback
-  reporting (`mayu report`).
+- **Audit** — exact-byte hash chains sent to configured sinks, with observed
+  chargeback reporting (`mayu report`). Default chart configuration has no audit
+  sink; configure one explicitly. Local verification checks internal consistency,
+  not independent proof against complete host-side history rewriting. Required
+  sink failure, WAL replay and crash recovery remain open hardening work; use
+  [external anchors](docs/runbooks/audit-anchoring.md) when independent evidence
+  is required.
 
 ## Quick start — `mayu` standalone
 
