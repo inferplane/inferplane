@@ -35,6 +35,7 @@ func TestCompleteRejectsUnsettleableSuccess(t *testing.T) {
 		})
 	}
 }
+
 func TestCompletePreservesExplicitZeroUsageAndRawBytes(t *testing.T) {
 	body := ` {"type":"message","content":[],"usage":{"input_tokens":0,"output_tokens":0}} `
 	p := &provider{inv: &fakeInvoker{respBody: []byte(body)}}

@@ -3,11 +3,12 @@ package anthropic
 import (
 	"context"
 	"errors"
-	"github.com/inferplane/inferplane/providers"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/inferplane/inferplane/providers"
 )
 
 func TestCompleteRejectsUnsettleableSuccess(t *testing.T) {
@@ -38,6 +39,7 @@ func TestCompleteRejectsUnsettleableSuccess(t *testing.T) {
 		})
 	}
 }
+
 func TestCompletePreservesExplicitZeroUsageAndRawBytes(t *testing.T) {
 	body := ` {"type":"message","content":[],"usage":{"input_tokens":0,"output_tokens":0}} `
 	p, err := factory(providers.Config{HTTPClient: accountingClient(http.StatusOK, body)})
@@ -59,11 +61,13 @@ func TestCompletePreservesExplicitZeroUsageAndRawBytes(t *testing.T) {
 type accountingTransport func(*http.Request) (*http.Response, error)
 
 func (f accountingTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func accountingClient(status int, body string) *http.Client {
 	return &http.Client{Transport: accountingTransport(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})}
 }
+
 func TestCompletePreservesNonSuccessResponse(t *testing.T) {
 	body := `{"type":"error","error":{"type":"overloaded_error","message":"busy"}}`
 	p, err := factory(providers.Config{HTTPClient: accountingClient(http.StatusServiceUnavailable, body)})
