@@ -99,9 +99,12 @@ func (p *provider) completeInvoke(ctx context.Context, req *providers.ProxyReque
 	}
 	out := &providers.ProxyResponse{StatusCode: 200, RawBody: respBody}
 	var parsed schema.ChatResponse
-	if json.Unmarshal(respBody, &parsed) == nil {
-		out.Parsed = &parsed
+	if json.Unmarshal(respBody, &parsed) != nil || parsed.Usage == nil {
+		// Match the Mantle/OpenAI-compatible refusal: a successful body with
+		// no usable accounting must not be served as a free completion.
+		return nil, synthError(502, "bedrock: upstream 2xx carried invalid or missing usage")
 	}
+	out.Parsed = &parsed
 	return out, nil
 }
 
