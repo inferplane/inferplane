@@ -42,6 +42,12 @@ func factory(cfg providers.Config) (providers.Provider, error) {
 	return &provider{baseURL: base, apiKey: cfg.APIKey, bearer: cfg.Settings["auth_header"] == "bearer", client: &client}, nil
 }
 
+// defaultAnthropicVersion is sent only when the client supplied no
+// Anthropic-Version header — i.e. on the openai ingress, whose clients have
+// never heard of it. Anthropic-ingress clients always carry their own, which
+// is forwarded untouched. Single source so the pin has one place to move.
+const defaultAnthropicVersion = "2023-06-01"
+
 func (p *provider) Name() string { return "anthropic" }
 
 func (p *provider) Models() []schema.ModelInfo { return nil } // M2: models come from config
@@ -57,7 +63,25 @@ func redirectError() *providers.UpstreamError {
 }
 
 func (p *provider) buildUpstream(ctx context.Context, path string, req *providers.ProxyRequest) (*http.Request, error) {
-	body, err := rewriteTopLevelModel(req.RawBody, req.Upstream)
+	raw := req.RawBody
+	if req.IngressProtocol == "openai" && req.Parsed != nil {
+		// Cross-protocol: RawBody holds the client's OpenAI bytes (kept by the
+		// ingress for the cache invariant); the Messages wire needs the
+		// canonical render — `max_tokens`, `input_schema`, tool_use blocks —
+		// not `max_completion_tokens` / `tools[].function`. The chat ingress
+		// always supplies Parsed; a nil Parsed under the openai label is a
+		// caller sending Anthropic-shaped bytes itself and passes through like
+		// the anthropic ingress below this branch (same rule as
+		// providers/bedrock's anthropicRequest).
+		canonical := *req.Parsed
+		stream := req.Stream
+		canonical.Stream = &stream
+		var err error
+		if raw, err = json.Marshal(&canonical); err != nil {
+			return nil, fmt.Errorf("anthropic: render canonical request: %w", err)
+		}
+	}
+	body, err := rewriteTopLevelModel(raw, req.Upstream)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +96,9 @@ func (p *provider) buildUpstream(ctx context.Context, path string, req *provider
 	}
 	if u.Header.Get("Content-Type") == "" {
 		u.Header.Set("Content-Type", "application/json")
+	}
+	if req.IngressProtocol == "openai" && u.Header.Get("Anthropic-Version") == "" {
+		u.Header.Set("Anthropic-Version", defaultAnthropicVersion)
 	}
 	// gateway's credential, never the client's — header choice per auth_header.
 	if p.bearer {

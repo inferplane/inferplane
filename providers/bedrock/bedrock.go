@@ -125,7 +125,20 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 }
 
 func (p *provider) complete(ctx context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {
-	switch p.apiFor(req.Upstream) {
+	// Invoke and Converse both parse RawBody as Anthropic Messages JSON; an
+	// openai-ingress request must be re-rendered from Parsed first or its
+	// tools / tool history / max_completion_tokens are silently dropped
+	// (Converse) or forwarded as unknown fields (Invoke). Mantle owns its own
+	// per-route rendering and is skipped; every other ingress passes through.
+	api := p.apiFor(req.Upstream)
+	if api != "mantle" {
+		converted, err := anthropicRequest(req)
+		if err != nil {
+			return nil, err
+		}
+		req = converted
+	}
+	switch api {
 	case "converse":
 		return p.completeConverse(ctx, req)
 	case "mantle":
@@ -154,7 +167,16 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 }
 
 func (p *provider) stream(ctx context.Context, req *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
-	switch p.apiFor(req.Upstream) {
+	// Same cross-protocol re-render as complete(); see anthropicRequest.
+	api := p.apiFor(req.Upstream)
+	if api != "mantle" {
+		converted, err := anthropicRequest(req)
+		if err != nil {
+			return nil, err
+		}
+		req = converted
+	}
+	switch api {
 	case "converse":
 		return p.streamConverse(ctx, req)
 	case "mantle":
