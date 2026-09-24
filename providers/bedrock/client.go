@@ -679,6 +679,12 @@ func uncertainSDKUsage(u *brtypes.TokenUsage) bool {
 	if u == nil || u.InputTokens == nil || u.OutputTokens == nil {
 		return true
 	}
+	// A nonzero flat cache-write total does not establish its TTL mix.
+	// Keep the cheaper-tier estimate, but never attest it as exact usage.
+	// An explicit zero needs no split; a negative total is also uncertain.
+	if len(u.CacheDetails) == 0 && u.CacheWriteInputTokens != nil && *u.CacheWriteInputTokens != 0 {
+		return true
+	}
 	var total int64
 	for _, detail := range u.CacheDetails {
 		if detail.InputTokens == nil || (detail.Ttl != brtypes.CacheTTLFiveMinutes && detail.Ttl != brtypes.CacheTTLOneHour) {

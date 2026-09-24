@@ -138,9 +138,16 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 	out := &providers.ProxyResponse{StatusCode: resp.StatusCode, Headers: resp.Header, RawBody: body}
 	if resp.StatusCode/100 == 2 {
 		var parsed schema.ChatResponse
-		if json.Unmarshal(body, &parsed) == nil {
-			out.Parsed = &parsed
+		if json.Unmarshal(body, &parsed) != nil || parsed.Usage == nil {
+			// Never serve a successful response the ingresses cannot settle.
+			// Use a fixed error: upstream bodies may contain private content.
+			return nil, &providers.UpstreamError{
+				StatusCode: http.StatusBadGateway,
+				Header:     http.Header{"Content-Type": {"application/json"}},
+				Body:       []byte(`{"type":"error","error":{"type":"api_error","message":"anthropic: upstream 2xx carried invalid or missing usage"}}`),
+			}
 		}
+		out.Parsed = &parsed
 	}
 	return out, nil
 }
