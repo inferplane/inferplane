@@ -1,4 +1,4 @@
-# Bedrock coding models: Kimi K3 and Fable 5.1
+# Bedrock coding models: Kimi K3, Fable 5.1 and Opus 5.5
 
 These opt-in examples extend existing model routing; they do not introduce a
 second Responses ingress or replace the main branch's policy/identity pipeline.
@@ -9,8 +9,9 @@ Do not replace a running production configuration with an example.
 | --- | --- | --- | --- | --- |
 | [Kimi K3](../../examples/config.bedrock-kimi-k3.json) | `kimi-k3` | `global.moonshotai.kimi-k3` | Converse | 1,000,000 |
 | [Fable 5.1](../../examples/config.bedrock-fable-5-1.json) | `global.anthropic.claude-fable-5-1` | Same as public ID | InvokeModel | 1,000,000 |
+| [Opus 5.5](../../examples/config.bedrock-opus-5-5.json) | `global.anthropic.claude-opus-5-5` | Same as public ID | InvokeModel | 1,000,000 |
 
-Both examples use Seoul as source region, declare `tools`, and block missing
+All examples use Seoul as source region, declare `tools`, and block missing
 pricing. Global profiles may process outside Korea; an endpoint region is not
 data residency. The SDK default credential chain can use the EC2 instance role;
 no sample-account profile or extra AssumeRole is required. Remove unintended
@@ -18,12 +19,13 @@ credential/profile overrides if the instance role is the intended identity.
 
 ## Pricing and capability boundaries
 
-Standard Global USD per million tokens, checked 2026-09-20:
+Standard Global USD per million tokens, checked 2026-09-20 (Opus 5.5: 2026-09-23):
 
 | Model | Input | Output | Cache read | Cache write |
 | --- | --- | --- | --- | --- |
 | Kimi K3 | 3 | 15 | 0.30 | 3.75 |
 | Fable 5.1 | 10 | 50 | 0.25 | 12.50 (5m), 20 (1h) |
+| Opus 5.5 | 4 | 20 | 0.20 | 5 (5m), 8 (1h) |
 
 Prices are keyed to the exact global profile; US CRIS must have its own prices.
 K3 untiered cache writes use the legacy 5m accounting bucket, not a claim of a
@@ -40,6 +42,16 @@ the existing Fable legacy-thinking adapter also matches `fable-5-1`. AWS require
 `aws_review` retention opt-in; these examples do not change that account setting.
 Obtain explicit organizational approval before enabling AWS review. Refusals are
 HTTP 200 with a refusal stop reason, not successful execution of a requested task.
+
+Opus 5.5 cache reads are 0.05x input, so its example declares every cache rate
+instead of relying on the derived 0.1x default. Thinking cannot be disabled:
+`thinking.type: disabled` and `enabled` with `budget_tokens` both return 400. The
+legacy-thinking adapter matches `opus-5` (Opus 5 and 5.5) and rewrites only the
+`budget_tokens` form; `disabled` passes through and fails. Default effort is
+`medium`, one level below Opus 5. Forced `tool_choice` (`any`/`tool`) returns 400,
+so an OpenAI or Responses client sending `tool_choice: required` is rejected
+upstream; the gateway does not weaken it to `auto`. No client acceptance has
+been recorded for Opus 5.5.
 
 ## Client setup and acceptance status
 

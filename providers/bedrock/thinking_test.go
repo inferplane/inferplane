@@ -12,6 +12,8 @@ func TestNeedsAdaptiveRewrite(t *testing.T) {
 		"global.anthropic.claude-fable-5-1",
 		"global.anthropic.claude-sonnet-5",
 		"anthropic.claude-opus-4-7",
+		"anthropic.claude-opus-5",
+		"global.anthropic.claude-opus-5-5",
 		"anthropic.claude-mythos-preview",
 	}
 	for _, upstream := range broken {
@@ -29,6 +31,8 @@ func TestNeedsAdaptiveRewrite(t *testing.T) {
 		"global.anthropic.claude-haiku-4-5-20251001-v1:0",
 		// substring trap: "sonnet-4-5" must not match the "sonnet-5" pattern.
 		"global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+		// substring trap: "opus-4-5" must not match the "opus-5" pattern.
+		"anthropic.claude-opus-4-5-20251101-v1:0",
 		"anthropic.claude-3-haiku-20240307-v1:0",
 	}
 	for _, upstream := range ok {
