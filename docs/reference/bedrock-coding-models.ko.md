@@ -1,9 +1,9 @@
 ---
 translation_source: reference/bedrock-coding-models.md
-translation_source_sha256: 2ba552f6c37e8f6ad918e3fd0953a7eed40440dfe86fa35f8796a3660266d921
+translation_source_sha256: a68b27fe01c34d323e682bc03451d46eddb90c4c37bd3f53987bf6087984ba4f
 ---
 
-# Bedrock 코딩 모델: Kimi K3와 Fable 5.1
+# Bedrock 코딩 모델: Kimi K3, Fable 5.1, Opus 5.5
 
 이 예제는 기존 모델 라우팅을 확장합니다. 별도의 Responses 수신 경로나 main의
 정책·신원 파이프라인 대체 구현을 추가하지 않습니다. 공급자·모델·허용 목록·가격
@@ -13,8 +13,9 @@ translation_source_sha256: 2ba552f6c37e8f6ad918e3fd0953a7eed40440dfe86fa35f8796a
 | --- | --- | --- | --- | --- |
 | [Kimi K3](../../examples/config.bedrock-kimi-k3.json) | `kimi-k3` | `global.moonshotai.kimi-k3` | Converse | 1,000,000 |
 | [Fable 5.1](../../examples/config.bedrock-fable-5-1.json) | `global.anthropic.claude-fable-5-1` | 공개 모델명과 동일 | InvokeModel | 1,000,000 |
+| [Opus 5.5](../../examples/config.bedrock-opus-5-5.json) | `global.anthropic.claude-opus-5-5` | 공개 모델명과 동일 | InvokeModel | 1,000,000 |
 
-두 예제는 서울을 요청 리전으로 사용하고 `tools`를 선언하며 가격 누락 시 차단합니다.
+모든 예제는 서울을 요청 리전으로 사용하고 `tools`를 선언하며 가격 누락 시 차단합니다.
 Global 프로파일은 한국 밖에서 처리할 수 있습니다. 엔드포인트 리전은 데이터
 상주 보장이 아닙니다. SDK 기본 자격 증명 체인으로 EC2 인스턴스 역할을 사용할 수
 있으며 samples 프로파일이나 추가 AssumeRole은 필요하지 않습니다. 인스턴스 역할이
@@ -22,12 +23,13 @@ Global 프로파일은 한국 밖에서 처리할 수 있습니다. 엔드포인
 
 ## 가격과 기능 경계
 
-2026-09-20 확인한 Standard Global 가격이며 단위는 100만 토큰당 USD입니다.
+2026-09-20(Opus 5.5는 2026-09-23) 확인한 Standard Global 가격이며 단위는 100만 토큰당 USD입니다.
 
 | 모델 | 입력 | 출력 | 캐시 읽기 | 캐시 쓰기 |
 | --- | --- | --- | --- | --- |
 | Kimi K3 | 3 | 15 | 0.30 | 3.75 |
 | Fable 5.1 | 10 | 50 | 0.25 | 12.50 (5m), 20 (1h) |
+| Opus 5.5 | 4 | 20 | 0.20 | 5 (5m), 8 (1h) |
 
 가격 키는 정확한 global 프로파일입니다. US CRIS에는 별도 가격을 설정해야 합니다.
 K3의 TTL 미분류 쓰기는 기존 5m 회계 버킷을 사용하지만 실제 TTL이 5분이라는 뜻은
@@ -43,6 +45,15 @@ Fable 5.1은 adaptive thinking이 항상 켜져 있습니다. 미지원 sampling
 기존 Fable legacy-thinking 어댑터는 `fable-5-1`에도 적용됩니다. AWS는 `aws_review`
 보존 동의를 요구하지만 예제는 계정 설정을 변경하지 않습니다. 활성화 전 조직의
 명시적 승인을 받으세요. refusal은 HTTP 200으로 올 수 있으며 작업 성공을 뜻하지 않습니다.
+
+Opus 5.5의 캐시 읽기는 입력의 0.05배이므로 예제는 기본 0.1배 파생값 대신 모든 캐시
+단가를 명시합니다. thinking은 끌 수 없습니다. `thinking.type: disabled`와
+`budget_tokens`를 쓴 `enabled`는 모두 400을 반환합니다. legacy-thinking 어댑터는
+`opus-5`(Opus 5와 5.5)에 적용되며 `budget_tokens` 형태만 재작성합니다. `disabled`는
+그대로 전달돼 실패합니다. 기본 effort는 Opus 5보다 한 단계 낮은 `medium`입니다.
+강제 `tool_choice`(`any`/`tool`)는 400을 반환하므로 OpenAI·Responses 클라이언트의
+`tool_choice: required`는 업스트림에서 거부됩니다. 게이트웨이는 이를 `auto`로 약화하지
+않습니다. Opus 5.5의 클라이언트 검증 기록은 아직 없습니다.
 
 ## 클라이언트 연결과 검증 상태
 

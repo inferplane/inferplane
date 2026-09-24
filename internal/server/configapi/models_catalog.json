@@ -1,5 +1,6 @@
 {
   "anthropic": [
+    "claude-opus-5-5",
     "claude-opus-4-8",
     "claude-sonnet-4-6",
     "claude-haiku-4-5-20251001",
@@ -17,6 +18,7 @@
     "deepseek-r1"
   ],
   "bedrock": [
+    "anthropic.claude-opus-5-5",
     "anthropic.claude-sonnet-4-6-v1:0",
     "anthropic.claude-3-5-sonnet-20241022-v2:0",
     "anthropic.claude-3-5-haiku-20241022-v1:0",
