@@ -99,3 +99,19 @@ func TestRedactionDoesNotRewriteNestedSchemaConstraints(t *testing.T) {
 		}
 	}
 }
+
+func TestRedactionPreservesToolSearchReferences(t *testing.T) {
+	raw := []byte(`{"messages":[{"role":"user","content":"mail a@example.test"},{"role":"assistant","content":[{"type":"server_tool_use","id":"s","name":"tool_search_tool_regex","input":{"pattern":"mail"}},{"type":"tool_search_tool_result","tool_use_id":"s","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"send_mail"}]}},{"type":"tool_use","id":"t","name":"find_tools","input":{"q":"x"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":[{"type":"tool_reference","tool_name":"lookup_user"}]}]}]}`)
+	masked, err := NewRedactor().Redact(context.Background(), "anthropic", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(masked), "a@example.test") {
+		t.Fatal("email survived redaction")
+	}
+	for _, name := range []string{`"tool_name":"send_mail"`, `"tool_name":"lookup_user"`, `"type":"tool_search_tool_search_result"`} {
+		if !strings.Contains(string(masked), name) {
+			t.Fatalf("tool search structure %s was not preserved: %s", name, masked)
+		}
+	}
+}

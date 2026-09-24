@@ -273,6 +273,22 @@ func (r *Result) block(protocol string, block map[string]any) {
 			r.Complete = false
 		}
 		r.content(protocol, block["content"])
+	case "tool_search_tool_result":
+		// Server-side tool search replays its result in assistant history.
+		r.HasTools = true
+		fields = []string{"tool_use_id", "content"}
+		if protocol == "openai" {
+			r.Complete = false
+		}
+		r.toolSearchResult(block["content"])
+	case "tool_reference":
+		// Names a deferred tool (tool search result or custom search tool_result).
+		r.HasTools = true
+		r.requireText(block, "tool_name")
+		fields = []string{"tool_name"}
+		if protocol == "openai" {
+			r.Complete = false
+		}
 	case "thinking":
 		r.HasReasoning = true
 		r.requireText(block, "thinking")
@@ -307,6 +323,40 @@ func (r *Result) block(protocol string, block map[string]any) {
 				r.Complete = false
 			}
 		}
+	}
+}
+
+// toolSearchResult accepts the two documented tool_search_tool_result content
+// objects. Every string, including error text, was already scanned by walker.
+func (r *Result) toolSearchResult(value any) {
+	content, ok := value.(map[string]any)
+	if !ok {
+		r.Complete = false
+		return
+	}
+	switch content["type"] {
+	case "tool_search_tool_search_result":
+		r.onlyFields(content, "type", "tool_references")
+		refs, ok := content["tool_references"].([]any)
+		if !ok {
+			r.Complete = false
+			return
+		}
+		for _, value := range refs {
+			ref, ok := value.(map[string]any)
+			if !ok || ref["type"] != "tool_reference" {
+				r.Complete = false
+				continue
+			}
+			r.onlyFields(ref, "type", "tool_name")
+			r.requireText(ref, "tool_name")
+		}
+	case "tool_search_tool_result_error":
+		r.onlyFields(content, "type", "error_code", "error_message")
+		r.requireText(content, "error_code")
+		r.optionalText(content, "error_message")
+	default:
+		r.Complete = false
 	}
 }
 
