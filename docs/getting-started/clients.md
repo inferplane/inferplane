@@ -31,6 +31,18 @@ Examples: [Anthropic/Bedrock](../../examples/config.json), [self-hosted](../../e
 4. Exercise a tool round trip if the client uses tools.
 5. Verify a forbidden model is refused and a configured fallback preserves access, privacy, and budget constraints.
 
+## Claude Code MCP tool search
+
+Claude Code disables MCP tool search (deferred tool loading) when `ANTHROPIC_BASE_URL`
+points to a non-first-party host, so every MCP tool definition is sent up front.
+Set `ENABLE_TOOL_SEARCH=true` in the client environment to enable it through `mayu`.
+Anthropic and Bedrock `invoke_model` routes forward `defer_loading`, the search tool
+and `tool_reference` history unchanged, and privacy inspection accepts those blocks;
+Bedrock Converse cannot express them and drops the search tool, so deferred tools
+load up front there. Verified on 2026-09-24 against Bedrock InvokeModel (Claude Haiku 4.5):
+server-side search, a client-side `tool_reference` result and streaming, with and
+without a `sensitiveData` policy. This is not qualification of every MCP server or model.
+
 For Responses, distinguish native mode from the stateless bridge. Opaque native history and hosted/native-only tools cannot simply move to an arbitrary Chat Completions backend. Start a new session when required by the [launcher contract](../codex-launcher.md).
 
 For priced Kimi K3 and Fable 5.1 route examples and the dated acceptance limits,

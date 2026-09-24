@@ -110,7 +110,8 @@ visited. Finite detectors cover:
 - Valid IPv4 literals and Korean resident-registration number shapes.
 
 These signals have false positives/negatives and do not cover every PII type or
-obfuscation. Inspectable reasoning text is scanned. Opaque image/audio/document/file
+obfuscation. Inspectable reasoning text is scanned, as are MCP tool-search blocks
+(`tool_search_tool_result`, `tool_reference`). Opaque image/audio/document/file
 payloads, encrypted/redacted thinking, unknown content blocks, and unknown body
 shapes are uninspectable. The example blocks those requests. No remote fetch or
 arbitrary binary decode occurs. Malformed JSON, cancellation, and inspection-limit

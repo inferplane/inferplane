@@ -1,6 +1,6 @@
 ---
 translation_source: getting-started/clients.md
-translation_source_sha256: 92cda2c11f72279069566ea711e337c7fa4bbb52024e2597738a87f32a4742af
+translation_source_sha256: 2142c1b5221a300fbb528a7e6029f3ed45386a594f421d5d76fcc5395e1d1756
 ---
 
 # 클라이언트와 공급자 연결 {#connect-clients-and-providers}
@@ -35,6 +35,17 @@ translation_source_sha256: 92cda2c11f72279069566ea711e337c7fa4bbb52024e2597738a8
 3. 스트리밍 요청과 취소를 시험합니다.
 4. 도구를 사용하는 클라이언트이면 도구 호출 왕복을 시험합니다.
 5. 금지 모델이 거부되고, 폴백이 접근·개인정보·예산 제약을 유지하는지 확인합니다.
+
+## Claude Code MCP 도구 검색 {#claude-code-mcp-tool-search}
+
+Claude Code는 `ANTHROPIC_BASE_URL`이 Anthropic이 아닌 호스트이면 MCP 도구 검색(지연 로딩)을
+끄고 모든 MCP 도구 정의를 처음부터 보냅니다. `mayu`를 통해 쓰려면 클라이언트 환경에
+`ENABLE_TOOL_SEARCH=true`를 설정하세요. Anthropic과 Bedrock `invoke_model` 경로는
+`defer_loading`, 검색 도구, `tool_reference` 이력을 그대로 전달하고 개인정보 검사도 이
+블록을 인식합니다. Bedrock Converse는 이를 표현할 수 없어 검색 도구를 버리므로 지연 도구가
+처음부터 로드됩니다. 2026-09-24 Bedrock InvokeModel(Claude Haiku 4.5)에서 서버 측 검색,
+클라이언트 측 `tool_reference` 결과, 스트리밍을 `sensitiveData` 정책 유무별로 검증했습니다.
+모든 MCP 서버·모델에 대한 검증은 아닙니다.
 
 Responses의 네이티브 모드와 무상태 브리지를 구분하세요. 불투명한 네이티브 이력과 호스팅·네이티브 전용 도구를 임의의 Chat Completions 백엔드로 옮길 수는 없습니다. [실행 도구 계약](../codex-launcher.md)에서 요구하면 새 세션을 시작하세요.
 
