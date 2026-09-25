@@ -60,8 +60,34 @@ For an issue report, include the commit/image, profile, client version, status/e
 
 ## Audit durability limits
 
-Configure audit sinks explicitly; the default chart does not supply one. A
+The default chart writes audit records to container stdout (a best-effort sink)
+with a WAL on the data volume and the local analytics index disabled, so nothing
+grows on the pod volume; see [Collect audit records](#collect-audit-records). Any
+other deployment must configure its sinks explicitly. A
 required-sink failure increments diagnostics but does not currently provide a
 guaranteed fail-closed admission gate. Automatic WAL replay/recovery is incomplete;
 do not treat process readiness or a local chain check as proof that all prior
 records survived. Preserve evidence and stop affected traffic during sink failures.
+
+## Collect audit records
+
+[`examples/otel-collector/audit-filelog.yaml`](../../examples/otel-collector/audit-filelog.yaml)
+is an OpenTelemetry Collector (contrib) configuration for a node DaemonSet. It tails
+`/var/log/pods/*/inferplane/*.log`, keeps only lines that start with
+`{"schema_version"` (mayu also prints startup lines), and exports each body
+verbatim to S3 as JSONL. Checkpoints and the send queue persist in `file_storage`.
+
+- Do not parse and re-serialize record bodies: each `prev_hash` covers the previous
+  line's exact bytes, and a rewritten line fails `mayu audit verify`.
+- stdout is not a required sink, so the rotated container log is the only local
+  copy until the collector ships it. Kubelet rotation is size-based
+  (`containerLogMaxSize` × `containerLogMaxFiles`); size it for the longest
+  collector outage you must survive (about 1.3 KB per request).
+- Verify each instance's collected records at the destination, together with
+  [external anchoring](../runbooks/audit-anchoring.md): a truncated or restarted
+  chain still verifies without an anchor.
+
+Verified on 2026-09-25 with otelcol-contrib 0.119.0 against a CRI-format log that
+included a split (partial) line: 41 records exported byte-identically and the
+collected file verified with `mayu audit verify`. The S3 upload itself was not
+exercised.

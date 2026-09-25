@@ -29,7 +29,7 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
   additionally requires `ingress.admin.enabled: true` to be routed — it carries
   key-issuance/governance actions, so exposing it is an explicit second opt-in, not
   a side effect of turning on the data-plane Ingress.
-- **OTel Collector contract — three channels, only one of them OTLP.** A collector
+- **OTel Collector contract — four channels, only one of them OTLP.** A collector
   cannot pick up everything from one receiver, so the split is deliberate:
   - **metrics** — a `prometheus` receiver scrapes `http://<svc>:9090/metrics` (the
     Service's named `admin` port). The Prometheus registry (`internal/metrics`) is the
@@ -46,7 +46,13 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
   - **usage windows** — `POST /v1alpha1/usage` to `inferplaned` (ADR-036). This is
     inferplane's own protocol on its own channel; it is NOT OTLP and no collector
     receiver consumes it.
-  Give the collector separate `metrics` and `traces` pipelines, each with a `batch`
+  - **audit records** — the chart default writes them to container stdout (a
+    best-effort sink; the WAL stays on the data volume and the local analytics index
+    is disabled). A node collector's `filelog` receiver tails the container log and
+    exports each record body verbatim, never re-serialized, because the hash chain
+    covers exact line bytes ([example](../../examples/otel-collector/audit-filelog.yaml),
+    [collection](../operations/observability.md#collect-audit-records)).
+  Give the collector separate `metrics`, `traces` and audit `logs` pipelines, each with a `batch`
   processor. `/metrics` is unauthenticated by design and must stay cluster-internal
   (it is on the admin port, which `ingress.admin.enabled` gates) — it is
   cardinality-bounded and carries no secret or `key_id`, but it is still spend data.
