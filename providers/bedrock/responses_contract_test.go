@@ -95,7 +95,7 @@ func TestResponsesToolAliasCollisionAndOrder(t *testing.T) {
 
 func TestResponsesToolNameBoundaries(t *testing.T) {
 	b := newResponsesBackend(t, "converse")
-	names := []string{"a", strings.Repeat("a", 64), strings.Repeat("a", 65), "9tool", "_tool", "a-b", "한글도구"}
+	names := []string{"a", strings.Repeat("a", 64), "a-b", strings.Repeat("a", 65), "9tool", "_tool", "a.b", "한글도구"}
 	var tools []any
 	for _, name := range names {
 		tools = append(tools, map[string]any{"type": "function", "name": name, "strict": false, "parameters": map[string]any{"type": "object"}})
@@ -105,10 +105,10 @@ func TestResponsesToolNameBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := bridgeToolNames(t, b.request(t))
-	if len(got) != len(names) || got[0] != names[0] || got[1] != names[1] {
+	if len(got) != len(names) || got[0] != names[0] || got[1] != names[1] || got[2] != names[2] {
 		t.Fatalf("valid names changed: %v", got)
 	}
-	for i := 2; i < len(names); i++ {
+	for i := 3; i < len(names); i++ {
 		if got[i] == names[i] || !bedrockToolNameRE.MatchString(got[i]) || len(got[i]) > 64 {
 			t.Fatalf("invalid alias: %q", got[i])
 		}
@@ -486,9 +486,15 @@ func TestResponsesMantleParallelInterleavedStream(t *testing.T) {
 			t.Fatalf("namespace lost: %+v", item)
 		}
 	}
+	// Only names this provider rewrote (iptool_ digests) are backend-private;
+	// the responses layer's ns_ aliases are valid Bedrock names forwarded
+	// as-is and restored to namespace+name by state.Convert (checked above).
 	for _, alias := range aliases {
-		if strings.Contains(raw.String(), alias) {
+		if strings.HasPrefix(alias, "iptool_") && strings.Contains(raw.String(), alias) {
 			t.Fatalf("backend alias leaked in translated Raw: %s", alias)
 		}
+	}
+	if strings.Contains(raw.String(), "iptool_") {
+		t.Fatalf("backend alias leaked in translated Raw: %s", raw.String())
 	}
 }

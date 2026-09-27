@@ -96,20 +96,22 @@ func TestToConverseRequestSkipsOversizedToolNames(t *testing.T) {
 }
 
 func TestToConverseRequestSkipsInvalidCharsetToolNames(t *testing.T) {
-	// Bedrock's ToolSpecification.Name only allows [a-zA-Z][a-zA-Z0-9_]* — no
-	// hyphens, dots, or colons. Claude Code / MCP tool names commonly contain
-	// hyphens (e.g. an MCP-qualified name), which is well within the 64-char
-	// limit but still rejected by Bedrock with a ValidationException.
+	// ToolSpecification.Name allows [a-zA-Z0-9_-]: hyphenated MCP-qualified
+	// names must be forwarded (dropping them left Converse models without the
+	// tool), while dots, colons and spaces are still dropped.
 	raw := []byte(`{"messages":[{"role":"user","content":"hi"}],"tools":[
 		{"name":"bash","input_schema":{"type":"object"}},
-		{"name":"mcp__aws-sdk-v3__getObject","input_schema":{"type":"object"}}
+		{"name":"mcp__aws-sdk-v3__getObject","input_schema":{"type":"object"}},
+		{"name":"mcp__srv__tool.v2","input_schema":{"type":"object"}},
+		{"name":"ns:tool","input_schema":{"type":"object"}},
+		{"name":"has space","input_schema":{"type":"object"}}
 	]}`)
 	cr, err := toConverseRequest(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cr.Tools) != 1 || cr.Tools[0].Name != "bash" {
-		t.Fatalf("expected the hyphenated tool name to be dropped, got %+v", cr.Tools)
+	if len(cr.Tools) != 2 || cr.Tools[0].Name != "bash" || cr.Tools[1].Name != "mcp__aws-sdk-v3__getObject" {
+		t.Fatalf("expected bash and the hyphenated tool only, got %+v", cr.Tools)
 	}
 }
 
