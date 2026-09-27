@@ -511,11 +511,17 @@ func buildToolConfig(tools []ConverseTool, choice ConverseToolChoice) *brtypes.T
 	}
 	cfg := &brtypes.ToolConfiguration{}
 	for _, t := range tools {
-		cfg.Tools = append(cfg.Tools, &brtypes.ToolMemberToolSpec{Value: brtypes.ToolSpecification{
+		spec := brtypes.ToolSpecification{
 			Name:        aws.String(t.Name),
-			Description: aws.String(t.Description),
 			InputSchema: &brtypes.ToolInputSchemaMemberJson{Value: document.NewLazyDocument(rawJSONToAny(t.InputSchema))},
-		}})
+		}
+		// Description is optional but, when present, must be non-empty: an
+		// explicit "" is a ValidationException that fails the WHOLE request.
+		// MCP servers (e.g. AgentCore Gateway targets) often omit it.
+		if t.Description != "" {
+			spec.Description = aws.String(t.Description)
+		}
+		cfg.Tools = append(cfg.Tools, &brtypes.ToolMemberToolSpec{Value: spec})
 	}
 	switch choice.Type {
 	case "any":

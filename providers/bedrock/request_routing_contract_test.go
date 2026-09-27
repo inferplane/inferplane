@@ -38,7 +38,7 @@ func TestRequestRoutingConverseTransportContract(t *testing.T) {
 		stop                 []string
 		tool, choice         string
 	}{
-		{name: "invalid tool and forced choice", protocol: "anthropic", privacy: true, body: `{"messages":[{"role":"user","content":"person@example.test"}],"max_tokens":32,"tools":[{"name":"mcp__aws-sdk-v3__getObject","input_schema":{"type":"object"}}],"tool_choice":{"type":"tool","name":"mcp__aws-sdk-v3__getObject"}}`, max: 32},
+		{name: "invalid tool and forced choice", protocol: "anthropic", privacy: true, body: `{"messages":[{"role":"user","content":"person@example.test"}],"max_tokens":32,"tools":[{"name":"mcp__aws.sdk.v3__getObject","input_schema":{"type":"object"}}],"tool_choice":{"type":"tool","name":"mcp__aws.sdk.v3__getObject"}}`, max: 32},
 		{name: "oversized tool", protocol: "anthropic", privacy: true, body: `{"messages":[{"role":"user","content":"person@example.test"}],"tools":[{"name":"` + strings.Repeat("a", 65) + `","input_schema":{"type":"object"}}]}`},
 		{name: "missing schema", protocol: "anthropic", privacy: true, body: `{"messages":[{"role":"user","content":"person@example.test"}],"tools":[{"name":"lookup"}]}`},
 		{name: "missing forced tool", protocol: "anthropic", privacy: true, body: `{"messages":[{"role":"user","content":"person@example.test"}],"tools":[{"name":"lookup","input_schema":{"type":"object"}}],"tool_choice":{"type":"tool","name":"absent"}}`, tool: "lookup"},

@@ -183,14 +183,16 @@ func messageBlocks(m schema.Message) []schema.ContentBlock {
 // model loses that one capability instead of the whole request failing.
 const bedrockToolNameMax = 64
 
-// bedrockToolNameRE is Bedrock's ToolSpecification.Name charset: it must start
-// with a letter and contain only letters, digits, and underscores — no
-// hyphens, dots, colons, or spaces. Claude Code / MCP tool names routinely
-// contain hyphens (e.g. "mcp__aws-sdk-v3__getObject"), which pass every other
-// check here but make Bedrock reject the WHOLE request with a
-// ValidationException. Same drop-and-continue trade-off as the oversized-name
-// case below.
-var bedrockToolNameRE = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]*$`)
+// bedrockToolNameRE is the ToolSpecification.Name charset forwarded as-is.
+// The API reference pattern is [a-zA-Z0-9_-]+: hyphens ARE valid, and Claude
+// Code / MCP tool names routinely contain them (e.g.
+// "mcp__websearch__ttobak-web-search-tool___WebSearch"); dropping them hid
+// every such tool from Converse models, so Claude Code's ToolSearch looped on
+// a tool the model never received. Dots, colons and spaces still make Bedrock
+// reject the WHOLE request with a ValidationException, so those names take the
+// drop-and-continue trade-off of the oversized-name case below. The leading
+// letter is kept as a conservative bound the API pattern does not require.
+var bedrockToolNameRE = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 
 // parseTools decodes Anthropic's "tools" array into Bedrock-shaped tool specs,
 // skipping any tool Bedrock would reject outright: no input_schema (server-tool

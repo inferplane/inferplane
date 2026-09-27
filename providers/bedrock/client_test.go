@@ -113,6 +113,23 @@ func TestBuildToolConfigNoTools(t *testing.T) {
 	}
 }
 
+func TestBuildToolConfigOmitsEmptyDescription(t *testing.T) {
+	// Bedrock rejects an explicit "" description (min length 1) with a
+	// ValidationException for the whole request; MCP tools often have none.
+	tools := []ConverseTool{
+		{Name: "described", Description: "does things", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		{Name: "bare", InputSchema: json.RawMessage(`{"type":"object"}`)},
+	}
+	cfg := buildToolConfig(tools, ConverseToolChoice{})
+	got := func(i int) *string { return cfg.Tools[i].(*brtypes.ToolMemberToolSpec).Value.Description }
+	if d := got(0); d == nil || *d != "does things" {
+		t.Fatalf("non-empty description lost: %v", d)
+	}
+	if d := got(1); d != nil {
+		t.Fatalf("empty description must be omitted, got %q", *d)
+	}
+}
+
 func TestToolResultTextFlattensStringAndBlockArray(t *testing.T) {
 	if got := toolResultText(json.RawMessage(`"plain"`)); got != "plain" {
 		t.Fatalf("string form: %q", got)
