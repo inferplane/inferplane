@@ -1,0 +1,57 @@
+# OpenTelemetry Collector (contrib) config: ship mayu audit records from
+# container stdout to S3 without altering their bytes.
+#
+# Run as a DaemonSet with /var/log/pods mounted read-only and a hostPath (or
+# per-node PVC) at /var/lib/otelcol for checkpoints and the send queue.
+# Pairs with the chart default `audit.sinks: [{type: stdout}]`.
+#
+# Why each setting matters for the hash chain (`mayu audit verify`):
+# - each record's prev_hash covers the previous line's exact bytes, so the log
+#   body is exported verbatim (marshaler: body); do not parse and re-serialize it;
+# - mayu also prints startup lines to stdout, so only lines that start with
+#   {"schema_version" are kept;
+# - checkpoints and the send queue persist in file_storage, so a collector
+#   restart or an S3 outage resumes instead of dropping records. Local copies
+#   exist only until kubelet rotates the container log; size
+#   containerLogMaxSize/containerLogMaxFiles for the longest collector outage
+#   you must survive.
+extensions:
+  file_storage:
+    directory: /var/lib/otelcol/file_storage
+    create_directory: true
+
+receivers:
+  filelog/inferplane-audit:
+    # /var/log/pods/<namespace>_<pod>_<uid>/<container>/<n>.log; the chart's
+    # container is named "inferplane".
+    include: [/var/log/pods/*/inferplane/*.log]
+    include_file_path: true # the container parser derives k8s.* attributes from the path
+    start_at: beginning
+    storage: file_storage
+    operators:
+      - type: container # strips the CRI prefix, rejoins partial lines, adds k8s.* resource attributes
+      - type: filter
+        expr: 'not (body startsWith "{\"schema_version\"")'
+
+processors:
+  batch: {}
+
+exporters:
+  awss3/audit:
+    s3uploader:
+      region: us-east-1 # replace
+      s3_bucket: REPLACE-audit-bucket
+      s3_prefix: inferplane/audit
+      s3_partition: minute # year=/month=/day=/hour=/minute= key prefixes
+    marshaler: body # one JSONL line per record, byte-identical to mayu's output
+    sending_queue:
+      enabled: true
+      storage: file_storage
+
+service:
+  extensions: [file_storage]
+  pipelines:
+    logs/inferplane-audit:
+      receivers: [filelog/inferplane-audit]
+      processors: [batch]
+      exporters: [awss3/audit]

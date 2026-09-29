@@ -64,6 +64,20 @@ config:
   models:
     claude-sonnet-4-6:
       targets: [ { provider: anthropic-direct, model: claude-sonnet-4-6 } ]
+  # Audit: records go to container stdout, collected off the node by an OTel
+  # Collector filelog receiver (examples/otel-collector/audit-filelog.yaml);
+  # kubelet log rotation bounds local disk. Nothing grows on the pod volume:
+  # the WAL is truncated after each delivered record. stdout is best-effort
+  # (not a required sink), so the container log file is the only local copy
+  # until the collector ships it — size kubelet rotation for collector outages.
+  audit:
+    failure_mode: buffer_then_block
+    buffer: { path: /var/lib/inferplane/audit.wal }
+    sinks: [ { type: stdout } ]
+  # The local analytics index (GET /admin/logs, console usage) has no retention
+  # and grows with traffic; keep it off here and query the collected records,
+  # or use the shared Postgres store (analytics.mode_b, ADR-015).
+  analytics: { disabled: true }
   # Opt-in OTLP TRACE export (ADR-011). Traces are the only signal mayu speaks
   # OTLP: metrics stay Prometheus exposition on the admin port (scrape
   # http://<svc>:9090/metrics — the Service's named `admin` port), and usage
@@ -75,7 +89,12 @@ config:
   #   insecure: true        # in-cluster plaintext to the collector
   #   sample_ratio: 0.1     # omit for 1.0; explicit 0.0 samples none
   #   service_name: inferplane
-resources: {}
+# Measured 2026-09-25 (fake upstream, 2–200 KB requests): RSS 27 MB idle, 79 MB
+# peak at >1,000 req/s; CPU 0.8–8.5 ms per request, scaling with body size.
+# No CPU limit: throttling would add latency to every in-flight stream.
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { memory: 256Mi }
 
 # GovernancePolicy documents (api/v1alpha1, ADR-033/035): filename → document
 # body (multi-doc YAML allowed). Rendered into a ConfigMap mounted at

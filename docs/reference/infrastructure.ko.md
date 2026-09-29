@@ -1,6 +1,6 @@
 ---
 translation_source: reference/infrastructure.md
-translation_source_sha256: ddece87d82dc93383d564cb44e609a2c7a068f27b554924f4865441fdeb9a1e7
+translation_source_sha256: e8b214765d6e218423fddb5b4b57ac75a23d891a4bbed6d5f5ca8ef98e2e66c2
 ---
 
 # 인프라 {#infrastructure}
@@ -32,8 +32,8 @@ mayu·inferplaned를 각각 정적 바이너리로 빌드해 별도의 distroles
 - **영속성:** 로컬은 기존 Deployment·PVC 동작, 공유는 키·카운터를 Postgres에 두고 복제본별 PVC에 감사 구간을 저장합니다. WAL을 공유하지 마세요.
 - 차트는 existingSecret만 참조하고 비밀을 만들지 않습니다.
 - Ingress는 기본 비활성입니다. 켜더라도 관리 경로는 `ingress.admin.enabled: true`를 추가로 지정해야 합니다. 데이터 영역 활성화가 관리 노출을 자동으로 허용하지 않습니다.
-- **수집 신호 세 가지:** 메트릭은 `:9090/metrics` Prometheus이며 OTLP 메트릭 내보내기는 없습니다. 중복 계측·원장 불일치를 피하기 위함입니다. `gen_ai_*` 이름도 전송은 Prometheus입니다. 트레이스는 선택적 config.otel이 HTTP 4318·gRPC 4317로 전송합니다. GenAI, 캐시 read/5m/1h, 정수 비용·가격 누락, 부분 스트림 필드를 포함합니다. HTTP 200을 이미 보낸 부분 스트림도 span은 Error입니다. 사용량 윈도는 inferplaned `/v1alpha1/usage`의 자체 프로토콜이며 OTLP 수신기가 처리하지 않습니다.
-- 수집기에 메트릭·트레이스 파이프라인과 각각 batch 처리기를 구성하세요. 메트릭은 인증이 없고 비밀·key_id가 없지만 비용 정보이므로 클러스터 내부에 둡니다. 차트는 운영자 모니터링 스택의 CRD인 ServiceMonitor·PodMonitor를 제공하지 않으며 이름이 admin인 포트로 수집하면 됩니다.
+- **수집 신호 네 가지:** 메트릭은 `:9090/metrics` Prometheus이며 OTLP 메트릭 내보내기는 없습니다. 중복 계측·원장 불일치를 피하기 위함입니다. `gen_ai_*` 이름도 전송은 Prometheus입니다. 트레이스는 선택적 config.otel이 HTTP 4318·gRPC 4317로 전송합니다. GenAI, 캐시 read/5m/1h, 정수 비용·가격 누락, 부분 스트림 필드를 포함합니다. HTTP 200을 이미 보낸 부분 스트림도 span은 Error입니다. 사용량 윈도는 inferplaned `/v1alpha1/usage`의 자체 프로토콜이며 OTLP 수신기가 처리하지 않습니다. 감사 기록은 차트 기본값이 컨테이너 stdout(최선 노력 저장 대상, WAL은 데이터 볼륨, 로컬 분석 인덱스 비활성)으로 내보내며, 노드 collector의 `filelog` 수신기가 컨테이너 로그를 읽어 본문을 다시 직렬화하지 않고 그대로 내보냅니다. 해시 체인이 줄의 정확한 바이트를 기준으로 하기 때문입니다([예제](../../examples/otel-collector/audit-filelog.yaml), [수집](../operations/observability.md#collect-audit-records)).
+- 수집기에 메트릭·트레이스·감사 로그 파이프라인과 각각 batch 처리기를 구성하세요. 메트릭은 인증이 없고 비밀·key_id가 없지만 비용 정보이므로 클러스터 내부에 둡니다. 차트는 운영자 모니터링 스택의 CRD인 ServiceMonitor·PodMonitor를 제공하지 않으며 이름이 admin인 포트로 수집하면 됩니다.
 - NOTES.txt는 실제 Ingress 주소 또는 port-forward, 첫 키 명령, Claude Code 환경 변수를 출력해 values에서 다시 계산하지 않고 시작할 수 있게 합니다.
 
 ### 4. 코드 위치 {#4-code-pointers}

@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: 854ddb621f7434893682c79722ffc46251ab7788c9ff2d2bda91f60e11d65a37
+translation_source_sha256: 29e28a6de13ed59c5d95121b5621c0625d4c80b6e3855c92542ca7bdb4bcaac6
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -65,8 +65,29 @@ bin/mayu report --file /path/to/instance-audit.jsonl --by team,model
 
 ## 감사 내구성 한계 {#audit-durability-limits}
 
-감사 저장 대상을 명시적으로 설정하세요. 기본 차트는 이를 제공하지 않습니다.
+기본 차트는 감사 기록을 컨테이너 stdout(최선 노력 저장 대상)으로 내보내고, WAL은 데이터
+볼륨에 두며 로컬 분석 인덱스는 끕니다. 따라서 파드 볼륨에서 계속 커지는 파일이 없습니다.
+[감사 기록 수집](#collect-audit-records)을 참고하세요. 다른 배포는 저장 대상을 명시적으로 설정하세요.
 필수 저장 대상 실패는 진단 지표를 증가시키지만 현재 자동 fail-closed 요청 차단을
 보장하지 않습니다. WAL 자동 재생·복구도 미완성이므로 준비 상태나 로컬 체인 검증을
 모든 과거 기록의 보존 증거로 취급하지 마세요. 저장 실패 시 증거를 보존하고 영향을
 받는 트래픽을 중지하세요.
+
+## 감사 기록 수집 {#collect-audit-records}
+
+[`examples/otel-collector/audit-filelog.yaml`](../../examples/otel-collector/audit-filelog.yaml)은
+노드 DaemonSet용 OpenTelemetry Collector(contrib) 설정입니다. `/var/log/pods/*/inferplane/*.log`를
+읽고, `{"schema_version"`으로 시작하는 줄만 남기며(mayu는 시작 메시지도 출력합니다), 각 본문을
+그대로 JSONL로 S3에 내보냅니다. 읽은 위치와 전송 큐는 `file_storage`에 영속됩니다.
+
+- 기록 본문을 파싱해 다시 직렬화하지 마세요. 각 `prev_hash`는 앞 줄의 정확한 바이트를
+  기준으로 하므로, 다시 쓴 줄은 `mayu audit verify`에서 실패합니다.
+- stdout은 필수 저장 대상이 아니므로 collector가 전송하기 전까지는 순환되는 컨테이너 로그가
+  유일한 로컬 사본입니다. kubelet 순환은 크기 기준(`containerLogMaxSize` × `containerLogMaxFiles`)이니
+  견뎌야 할 가장 긴 collector 장애 시간에 맞춰 정하세요(요청당 약 1.3KB).
+- 수집한 인스턴스별 기록은 목적지에서 [외부 앵커링](../runbooks/audit-anchoring.md)과 함께
+  검증하세요. 앵커가 없으면 잘리거나 새로 시작된 체인도 검증을 통과합니다.
+
+2026-09-25 otelcol-contrib 0.119.0으로, 분할(partial) 줄을 포함한 CRI 형식 로그에서 검증했습니다.
+기록 41건이 바이트 단위로 동일하게 내보내졌고 수집 파일이 `mayu audit verify`를 통과했습니다.
+S3 업로드 자체는 실행하지 않았습니다.
