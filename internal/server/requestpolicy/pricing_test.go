@@ -16,6 +16,8 @@ func TestTieredPricingRefusesUnpricedServiceBeforeBilling(t *testing.T) {
 	}{
 		{`{"input":"hello"}`, true}, {`{"service_tier":null}`, true}, {`{"service_tier":"default"}`, true},
 		{`{"service_tier":"ultrafast"}`, false}, {`{"service_tier":"priority"}`, false}, {`{"service_tier":"flex"}`, false}, {`{"service_tier":true}`, false},
+		{`{"service_tier":"priority","service_tier":"default"}`, false}, {`{"service_tier":"default","service_tier":"priority"}`, false},
+		{`{"meta":{"service_tier":"x"},"service_tier":"default"}`, true},
 	} {
 		if got := PricingGuard(table, targets, []byte(tc.body)); got.Allowed != tc.allowed {
 			t.Fatalf("body=%s decision=%+v", tc.body, got)
