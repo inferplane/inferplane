@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: 9b8f7f406fe12ccd3c87422abed9beb876b49eb3effe0571b7fccd4f142fccf0
+translation_source_sha256: 795de3931a2d34e0b22ededc32f89ebe52e8dce979edf1bd2d7dcb68b71e359d
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -82,9 +82,11 @@ bin/mayu report --file /path/to/instance-audit.jsonl --by team,model
 
 - 기록 본문을 파싱해 다시 직렬화하지 마세요. 각 `prev_hash`는 앞 줄의 정확한 바이트를
   기준으로 하므로, 다시 쓴 줄은 `mayu audit verify`에서 실패합니다.
-- stdout은 필수 저장 대상이 아니므로 collector가 전송하기 전까지는 순환되는 컨테이너 로그가
-  유일한 로컬 사본입니다. kubelet 순환은 크기 기준(`containerLogMaxSize` × `containerLogMaxFiles`)이니
-  견뎌야 할 가장 긴 collector 장애 시간에 맞춰 정하세요(요청당 약 1.3KB).
+- stdout은 필수 저장 대상이 아니므로 collector가 기록을 영속 큐에 넣기 전까지는
+  컨테이너 로그가 게이트웨이의 남은 로컬 사본입니다. collector의 영속 큐는 내보내기가
+  끝날 때까지 별도 로컬 사본을 보관합니다. kubelet 순환은 크기 기준
+  (`containerLogMaxSize` × `containerLogMaxFiles`)이니 collector가 읽지 못하는 가장 긴
+  시간에 맞춰 정하세요(요청당 약 1.3KB).
 - 수집한 인스턴스별 기록은 목적지에서 [외부 앵커링](../runbooks/audit-anchoring.md)과 함께
   검증하세요. 앵커가 없으면 잘리거나 새로 시작된 체인도 검증을 통과합니다.
 

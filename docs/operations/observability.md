@@ -79,10 +79,11 @@ verbatim to S3 as JSONL. Checkpoints and the send queue persist in `file_storage
 
 - Do not parse and re-serialize record bodies: each `prev_hash` covers the previous
   line's exact bytes, and a rewritten line fails `mayu audit verify`.
-- stdout is not a required sink, so the rotated container log is the only local
-  copy until the collector ships it. Kubelet rotation is size-based
-  (`containerLogMaxSize` × `containerLogMaxFiles`); size it for the longest
-  collector outage you must survive (about 1.3 KB per request).
+- stdout is not a required sink, so the container log is the gateway's remaining
+  local copy until the collector durably enqueues the record. The collector's
+  persistent queue holds a separate local copy pending export. Kubelet rotation
+  is size-based (`containerLogMaxSize` × `containerLogMaxFiles`); size it for the
+  longest period when the collector cannot ingest (about 1.3 KB per request).
 - Verify each instance's collected records at the destination, together with
   [external anchoring](../runbooks/audit-anchoring.md): a truncated or restarted
   chain still verifies without an anchor.

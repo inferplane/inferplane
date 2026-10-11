@@ -11,10 +11,11 @@
 # - mayu also prints startup lines to stdout, so only lines that start with
 #   {"schema_version" are kept;
 # - checkpoints and the send queue persist in file_storage, so a collector
-#   restart or an S3 outage resumes instead of dropping records. Local copies
-#   exist only until kubelet rotates the container log; size
-#   containerLogMaxSize/containerLogMaxFiles for the longest collector outage
-#   you must survive.
+#   restart or an S3 outage can resume queued records. The container log is the
+#   gateway's remaining local copy until durable collector ingestion; queued
+#   records have a separate local copy in file_storage pending export. Size
+#   containerLogMaxSize/containerLogMaxFiles for the longest period when the
+#   collector cannot ingest; rotation does not control the stored queue.
 extensions:
   file_storage:
     directory: /var/lib/otelcol/file_storage

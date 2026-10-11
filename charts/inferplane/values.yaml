@@ -69,7 +69,8 @@ config:
   # kubelet log rotation bounds local disk. Nothing grows on the pod volume:
   # the WAL is truncated after each delivered record. stdout is best-effort
   # (not a required sink), so the container log file is the only local copy
-  # until the collector ships it — size kubelet rotation for collector outages.
+  # until the collector durably enqueues it. The collector's persistent queue
+  # holds a separate copy pending export; size kubelet rotation for ingestion outages.
   audit:
     failure_mode: buffer_then_block
     buffer: { path: /var/lib/inferplane/audit.wal }
