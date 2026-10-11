@@ -22,6 +22,15 @@ client and upstream protocols without losing thinking blocks or `cache_control`.
 | PII mask filter | `plugins/piimask/` | opt-in regex+Luhn PII masking → typed placeholders; one-way (no vault); masks messages text only |
 | Tracing | `internal/tracing/` | opt-in OTel: OTLP **trace** exporter + GenAI-semconv spans (+ `inferplane.*` cache-tier / cost / partial attributes) + W3C propagation + trace_id in audit; no-op default (ADR-011) |
 
+Settled spans also expose `inferplane.cost.pricing_version` and bounded
+`inferplane.cost.context_tier`. Each settlement appends an
+`inferplane.cost.settled` event with integer microUSD, missingness and price
+metadata so retries cannot overwrite earlier attempt evidence. The compatible
+span-level amount remains the last settled attempt. Sampling/export loss means
+neither is an accounting ledger; content-free per-attempt audit remains the
+durable source. These are gateway-config estimates, not a client-reported cost
+or an AWS invoice. Context pricing is described in [the pricing guide](pricing.md).
+
 ### 3. Key Decisions
 - One package per provider; adding a provider is one package + a blank import (zero core diff, §8).
 - Canonical schema is an Anthropic-superset so thinking blocks and `cache_control` survive conversion.

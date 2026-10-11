@@ -137,8 +137,20 @@ func safeHeaders(in http.Header) http.Header {
 	return out
 }
 
-func upstreamError(status int, header http.Header) *providers.UpstreamError {
-	return &providers.UpstreamError{StatusCode: status, Header: safeHeaders(header), Body: []byte(`{"error":{"type":"upstream_error","message":"Responses upstream request failed"}}`)}
+func upstreamError(status int, header http.Header, reader io.Reader) *providers.UpstreamError {
+	// Consume only a bounded error envelope. Preserve machine-readable recovery
+	// signals without leaking upstream messages, params, or unknown codes.
+	body := []byte(`{"error":{"type":"upstream_error","message":"Responses upstream request failed"}}`)
+	raw, err := io.ReadAll(io.LimitReader(reader, (64<<10)+1))
+	if err == nil {
+		if code := providers.ResponseErrorCode(raw); code != "" {
+			body, _ = json.Marshal(map[string]any{"error": map[string]string{
+				"type": "invalid_request_error", "code": code,
+				"message": "Responses upstream rejected the request",
+			}})
+		}
+	}
+	return &providers.UpstreamError{StatusCode: status, Header: safeHeaders(header), Body: body}
 }
 
 func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {
@@ -152,17 +164,17 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		failure := upstreamError(resp.StatusCode, resp.Header)
+		failure := upstreamError(resp.StatusCode, resp.Header, resp.Body)
 		return &providers.ProxyResponse{StatusCode: failure.StatusCode, Headers: failure.Header, RawBody: failure.Body}, nil
 	}
 	const maxResponse = 32 << 20
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse+1))
 	if err != nil || len(raw) > maxResponse {
-		return nil, upstreamError(http.StatusBadGateway, nil)
+		return nil, upstreamError(http.StatusBadGateway, nil, strings.NewReader(""))
 	}
 	usage, usageErr := responses.ResponseUsage(raw)
 	if usageErr != nil {
-		return nil, upstreamError(http.StatusBadGateway, nil)
+		return nil, upstreamError(http.StatusBadGateway, nil, strings.NewReader(""))
 	}
 	parsed, parseErr := responses.ResponseToCanonical(raw)
 	var envelope struct {
@@ -174,7 +186,7 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 		// tokens. Return a safe non-2xx observation rather than losing usage
 		// in a generic error. The ingress must settle this attempt before it
 		// considers fallback; none of the remote output/error is client-safe.
-		failure := upstreamError(http.StatusBadGateway, resp.Header)
+		failure := upstreamError(http.StatusBadGateway, resp.Header, strings.NewReader(""))
 		return &providers.ProxyResponse{
 			StatusCode: failure.StatusCode, Headers: failure.Header, RawBody: failure.Body,
 			Parsed: &schema.ChatResponse{Model: req.Model, Usage: usage},
@@ -194,8 +206,9 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 		return nil, transportError(ctx)
 	}
 	if resp.StatusCode/100 != 2 {
+		failure := upstreamError(resp.StatusCode, resp.Header, resp.Body)
 		resp.Body.Close()
-		return nil, upstreamError(resp.StatusCode, resp.Header)
+		return nil, failure
 	}
 	return func(yield func(*providers.StreamEvent, error) bool) {
 		defer resp.Body.Close()

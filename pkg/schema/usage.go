@@ -1,5 +1,7 @@
 package schema
 
+import "math"
+
 // MergeUsage folds a newly-observed Usage into a running one and returns the
 // result. Each field takes the latest NON-NIL value seen — Anthropic refines
 // and repeats counts across streaming frames rather than adding to them, so
@@ -53,10 +55,11 @@ func MergeUsage(acc, next *Usage) *Usage {
 //
 // Two wire shapes carry the same information and MUST NOT be added together:
 //   - `cache_creation: {ephemeral_5m_input_tokens, ephemeral_1h_input_tokens}`
-//     — the TTL-split form. Authoritative when present.
+//     — the TTL-split form. Complete, consistent splits set the tier counts.
 //   - `cache_creation_input_tokens` — a flat total that predates the split.
-//     Used only as a fallback, attributed to the cheaper 5m tier so an
-//     unknown mix is never over-billed.
+//     A flat total also preserves tokens omitted by a partial split. Known
+//     1h tokens retain that tier; the remainder uses the legacy 5m estimate.
+//     This estimate does not establish the actual TTL or authorize refunds.
 //
 // Summing both would double-count every cache write, since a provider that
 // sends the split generally also sends the flat total.
@@ -65,19 +68,59 @@ func MergeUsage(acc, next *Usage) *Usage {
 // open-coded at six call sites (settle + observeTokens across three ingress
 // handlers) and every one of them dropped the 1h tier — see ADR-030.
 func (u *Usage) CacheWriteTiers() (write5m, write1h int64) {
+	c := u.CacheWriteAccounting()
+	return c.FiveMinutes, c.OneHour
+}
+
+// CacheWriteCounts separates a known quantity from known TTL prices. Unknown
+// TTLs use the legacy 5m estimate but never become evidence for a money refund.
+// Invalid observations are retained for audit; callers must check Invalid
+// before using these numbers to mutate accounting.
+type CacheWriteCounts struct {
+	FiveMinutes, OneHour, Total      int64
+	QuantityKnown, TTLKnown, Invalid bool
+}
+
+// CacheWriteAccounting never mutates the wire. A partial split cannot hide a
+// larger reported total: retain its known 1h portion and assign only the
+// remaining unknown quantity to the legacy 5m estimate. Never add the flat
+// total to the split. A complete contradictory split is invalid, not a refund.
+func (u *Usage) CacheWriteAccounting() CacheWriteCounts {
+	c := CacheWriteCounts{QuantityKnown: true, TTLKnown: true}
 	if u == nil {
-		return 0, 0
+		return c
 	}
-	if u.CacheCreation != nil {
-		w5 := deref64(u.CacheCreation.Ephemeral5mInputTokens)
-		w1 := deref64(u.CacheCreation.Ephemeral1hInputTokens)
-		if w5 != 0 || w1 != 0 {
-			return w5, w1
+	flat := deref64(u.CacheCreationInputTokens)
+	cc := u.CacheCreation
+	if cc == nil {
+		c.FiveMinutes, c.Total = flat, flat
+		c.Invalid = flat < 0
+		c.QuantityKnown = !c.Invalid
+		c.TTLKnown = flat == 0
+		return c
+	}
+	c.FiveMinutes, c.OneHour = deref64(cc.Ephemeral5mInputTokens), deref64(cc.Ephemeral1hInputTokens)
+	c.Invalid = flat < 0 || c.FiveMinutes < 0 || c.OneHour < 0 || c.FiveMinutes > math.MaxInt64-c.OneHour
+	c.QuantityKnown, c.TTLKnown = false, false
+	if c.Invalid {
+		return c
+	}
+	split := c.FiveMinutes + c.OneHour
+	complete := cc.Ephemeral5mInputTokens != nil && cc.Ephemeral1hInputTokens != nil
+	c.Total = split
+	if u.CacheCreationInputTokens != nil {
+		if flat < split || (complete && split != 0 && flat != split) {
+			c.Invalid = true
+			return c
 		}
-		// An all-zero split is not evidence of no cache write — fall through
-		// to the flat total rather than reporting zero over it.
+		c.Total = flat
+		c.FiveMinutes += flat - split
+		c.QuantityKnown = len(cc.Extra) == 0
+	} else {
+		c.QuantityKnown = complete && len(cc.Extra) == 0
 	}
-	return deref64(u.CacheCreationInputTokens), 0
+	c.TTLKnown = complete && len(cc.Extra) == 0 && c.Total == split
+	return c
 }
 
 func deref64(p *int64) int64 {

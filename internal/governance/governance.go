@@ -299,10 +299,11 @@ func PricingVersionOf(table *pricing.Table) string {
 // GovDecision is the PreCheck verdict. Status is the HTTP status to return when
 // !Allowed: 429 (rate/quota), 402 (budget), 0 (allowed).
 type GovDecision struct {
-	Allowed bool
-	Status  int
-	Reason  string
-	Code    audit.DenyReason
+	Admission *Admission // owned by the caller only when Allowed
+	Allowed   bool
+	Status    int
+	Reason    string
+	Code      audit.DenyReason
 }
 
 // mustDenyBudget decides whether a budget.Check result should deny the
@@ -325,12 +326,28 @@ func mustDenyBudget(dec budget.Decision, onExceeded string) bool {
 // (but a key limit, if any, still applies — see KeyPolicy). Subject.KeyID
 // scopes the key-level counters; Subject.User, when set and a UserPolicy is
 // found, adds a third scope (see below).
-func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDecision {
+func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) (decision GovDecision) {
+	a := &Admission{estimate: estimateTokens, missing: true}
+	defer func() {
+		if !decision.Allowed {
+			a.Close()
+		}
+	}()
+	if estimateTokens < 0 {
+		return GovDecision{Status: 429, Reason: "invalid token estimate", Code: audit.DenyTeamTokenRateLimited}
+	}
+	reserve := func(key string, rate int64) bool {
+		finish, allowed := g.lim.ReserveRate(key, estimateTokens, rate, rate)
+		if allowed {
+			a.rates = append(a.rates, finish)
+		}
+		return allowed
+	}
 	if g.HasSharedAuthority() {
 		// Every resource is reserved atomically at the per-attempt seam, with
 		// current DB policy and key/team metadata. Local buckets are not a
 		// second authority and must neither double-charge nor loosen it.
-		return GovDecision{Allowed: true}
+		return GovDecision{Allowed: true, Admission: a}
 	}
 	// Budget-lease gate (ADR-034) first: an expired hard-cap lease means the
 	// global budget can no longer be verified locally — fail closed before
@@ -347,7 +364,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 		}
 		// token rate limit (TPM): charge the request estimate against a per-minute
 		// token bucket whose burst is one minute's worth of tokens.
-		if p.TokensPerMinute > 0 && !g.lim.AllowRate("tpm:"+s.Team, estimateTokens, p.TokensPerMinute, p.TokensPerMinute) {
+		if p.TokensPerMinute > 0 && !reserve("tpm:"+s.Team, p.TokensPerMinute) {
 			return GovDecision{Status: 429, Reason: "token rate limit exceeded", Code: audit.DenyTeamTokenRateLimited}
 		}
 		// quota (daily tokens)
@@ -402,7 +419,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 	if kp.RatePerMin > 0 && !g.lim.AllowRate("rate:key:"+s.KeyID, 1, kp.RatePerMin, kp.RatePerMin) {
 		return GovDecision{Status: 429, Reason: "key rate limit exceeded", Code: audit.DenyKeyRateLimited}
 	}
-	if kp.TokensPerMinute > 0 && !g.lim.AllowRate("tpm:key:"+s.KeyID, estimateTokens, kp.TokensPerMinute, kp.TokensPerMinute) {
+	if kp.TokensPerMinute > 0 && !reserve("tpm:key:"+s.KeyID, kp.TokensPerMinute) {
 		return GovDecision{Status: 429, Reason: "key token rate limit exceeded", Code: audit.DenyKeyTokenRateLimited}
 	}
 	// Per-key budget: same two-window shape as the team block above, minus the
@@ -472,7 +489,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) GovDe
 			}
 		}
 	}
-	return GovDecision{Allowed: true}
+	return GovDecision{Allowed: true, Admission: a}
 }
 
 // budgetExceededMessage builds the 402 body: when it resets — rendered in the
@@ -595,13 +612,25 @@ func (g *Governor) UsageOf(s Subject, kp KeyPolicy) UsageStatus {
 // Settle records actual token usage against quota and computes+debits cost.
 // Returns the cost µUSD and whether pricing was missing (for the audit record).
 // An unknown team still computes cost (so the audit record carries it) but
-// debits nothing. keyID/kp mirror PreCheck's per-key budget. estimatedTokens
-// is the exact value PreCheck charged against the TPM bucket(s) (its
-// estimateTokens argument) — Settle uses it to true up TPM against the real
-// token count now that the response has completed (see AdjustRate).
+// debits nothing. keyID/kp mirror PreCheck's per-key budget. admission
+// is the handle returned by PreCheck. It owns the captured TPM reservations
+// and makes settlement exactly once. Nil is accounting-only, with no TPM refund.
 // Key-level spend is deliberately NOT added to /metrics: metric labels are
 // config-bounded (CLAUDE.md) and must never carry a key_id.
-func (g *Governor) Settle(s Subject, kp KeyPolicy, provider, model string, u pricing.Usage, table *pricing.Table, estimatedTokens int64) (costMicros int64, pricingMissing bool) {
+func (g *Governor) Settle(s Subject, kp KeyPolicy, provider, model string, u pricing.Usage, table *pricing.Table, admission *Admission) (costMicros int64, pricingMissing bool) {
+	if admission == nil {
+		return g.settle(s, kp, provider, model, u, table, nil)
+	}
+	admission.once.Do(func() { admission.cost, admission.missing = g.settle(s, kp, provider, model, u, table, admission) })
+	return admission.cost, admission.missing
+}
+
+func (g *Governor) settle(s Subject, kp KeyPolicy, provider, model string, u pricing.Usage, table *pricing.Table, admission *Admission) (costMicros int64, pricingMissing bool) {
+	defer admission.finishRates(nil)
+	actualTokens, err := u.TotalTokens()
+	if err != nil {
+		return 0, true
+	}
 	if g.HasSharedAuthority() {
 		if table == nil {
 			return 0, true
@@ -619,26 +648,20 @@ func (g *Governor) Settle(s Subject, kp KeyPolicy, provider, model string, u pri
 	// Excluding cache tokens here used to make a cache-read-heavy request
 	// (Claude Code's common case) debit far less quota than it actually
 	// consumed, the mirror image of ADR-030's pricing bug in the quota path.
-	actualTokens := u.Input + u.Output + u.CacheRead + u.CacheWrite5m + u.CacheWrite1h
 	if p.TokensPerDay > 0 {
 		g.lim.DebitQuota("quota:"+s.Team, actualTokens, 24*time.Hour)
 		// Reflect the post-debit daily quota utilization into the gauge (0..1).
 		used := g.lim.QuotaUsed("quota:"+s.Team, 24*time.Hour)
 		g.metrics.SetQuotaUtilization(s.Team, "day", float64(used)/float64(p.TokensPerDay))
 	}
-	// TPM true-up (§5.3): PreCheck pre-blocked on a coarse pre-request byte
-	// estimate (estimateTokens); now that actualTokens is known, correct the
-	// bucket(s) it charged — credit back an over-charge, debit an
-	// under-charge — instead of leaving the estimate as the permanent charge.
-	// Claude Code's cache-heavy requests are the case this matters for: the
-	// byte estimate counts the full cached prefix even though a cache HIT
-	// costs a fraction of that in real load.
-	tpmDelta := estimatedTokens - actualTokens
-	if p.TokensPerMinute > 0 {
-		g.lim.AdjustRate("tpm:"+s.Team, tpmDelta, p.TokensPerMinute)
-	}
-	if kp.TokensPerMinute > 0 {
-		g.lim.AdjustRate("tpm:key:"+s.KeyID, tpmDelta, kp.TokensPerMinute)
+	// Reconcile only the buckets actually charged at admission, even if the
+	// policy changed meanwhile. Unknown quantities may debit more, never refund.
+	if admission != nil {
+		actual := actualTokens
+		if u.Uncertain {
+			actual = max(actual, admission.estimate)
+		}
+		admission.finishRates(&actual)
 	}
 	if table == nil {
 		costMicros, pricingMissing = 0, true

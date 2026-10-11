@@ -284,18 +284,27 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// between now and Settle must not bill at a different generation's rates.
 	table := st.Pricing()
 	// Context-window fast-fail: when the operator declared the model's window
-	// (config models.<name>.context_window) and even the COARSE byte estimate
-	// already exceeds it, refuse here with a message that names both numbers —
+	// (config models.<name>.context_window) and the COARSE non-image byte
+	// estimate already exceeds it, refuse with a message naming both numbers —
 	// the upstream's own rejection reaches the client as an opaque scrubbed
 	// ValidationException (providers/bedrock/errors.go never echoes upstream
 	// text). Estimate-only, no max_tokens added: the estimate is an upper-ish
 	// bound and adding output budget would false-reject borderline VALID
 	// requests; anything borderline falls through to the upstream's exact
-	// check. Runs before PreCheck so a doomed request never charges the TPM
-	// estimate.
+	// check. Large inline-image requests need a second pass: base64 transport
+	// bytes are not text tokens, and image/combined-context validation belongs
+	// to the upstream. This does not change the governance/settlement estimate.
+	// Runs before PreCheck so a refused request never charges the TPM estimate.
+	// Keep the Anthropic "prompt is too long: N tokens > M" spelling: Claude
+	// Code uses it to recognize overflow and size compaction. A generic 400
+	// instead triggers model fallback with the same oversized history.
 	if win := requestpolicy.ContextWindow(st, model); win > 0 {
-		if est := estimateTokens(raw); est > win {
-			msg := fmt.Sprintf("request is ~%d tokens but model %s has a %d-token context window — reduce the input (or raise models.%s.context_window if the declaration is wrong)", est, model, win, model)
+		est := estimateTokens(raw)
+		if est > win {
+			est = requestpolicy.ContextTextEstimate("anthropic", raw)
+		}
+		if est > win {
+			msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum (gateway text estimate excluding inline image payloads; model %s has a %d-token context window). Compact the conversation or reduce the input.", est, win, model, win)
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "context window exceeded")
@@ -311,7 +320,7 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// models, fallback-appended targets). Same table used to settle below.
 	// NOT gated on h.gov: on_missing "block" is a pricing setting, and a
 	// deployment with governance off would otherwise serve unpriced traffic free.
-	if dec := governance.PricingGuard(table, pricedTargets(chain)); !dec.Allowed {
+	if dec := requestpolicy.PricingGuard(table, pricedTargets(chain), raw); !dec.Allowed {
 		h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, false, traceID)
 		h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
 		tracing.SetStatus(span, false, "pricing missing")
@@ -327,6 +336,8 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			writeErr(w, dec.Status, govErrType(dec.Status), dec.Reason)
 			return
 		}
+		req = requestpolicy.WithAdmission(req, dec.Admission)
+		defer dec.Admission.Close()
 	}
 	// request_started: the request passed auth + allow-list + governance and
 	// resolved a target (the first in the priority chain).
@@ -482,7 +493,7 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	var cost *audit.CostRef
 	if resp.Parsed != nil {
 		usage = usageRef(resp.Parsed.Usage)
-		cost = h.settle(p, providerName, model, upstream, resp.Parsed.Usage, table, estimateTokens(pr.RawBody))
+		cost = h.settle(p, providerName, model, upstream, resp.Parsed.Usage, table, requestpolicy.AdmissionFrom(req))
 		requestpolicy.SettleBudget(req, cost, resp.Parsed.Usage, resp.StatusCode/100 == 2)
 		h.observeTokens(model, providerName, p.Team, resp.Parsed.Usage)
 	}
@@ -496,7 +507,7 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, resp.RawBody)
 	}
 	h.auditCompleted(req.Context(), recID, p, model, upstream, resp.StatusCode, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
-	recordSpanSettled(req, prov.Name(), upstream, usage, cost, resp.StatusCode < 400, false)
+	recordSpanSettled(req, prov.Name(), providerName, upstream, usage, cost, resp.StatusCode < 400, false)
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, resp.StatusCode, time.Since(start).Seconds(), 0)
 	return false
 }
@@ -571,7 +582,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 			// cost — bill them (ADR-030). Before this, a stream that broke
 			// mid-flight skipped settle() entirely and everything already
 			// streamed was free, with no pricing_missing flag to show it.
-			partialCost := h.settle(p, providerName, model, upstream, lastUsage, table, estimateTokens(pr.RawBody))
+			partialCost := h.settle(p, providerName, model, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 			requestpolicy.SettleBudget(req, partialCost, lastUsage, false)
 			// …and count them, on the same usage settle() just billed. Metering
 			// only the clean path left gen_ai_client_token_usage_total below the
@@ -579,7 +590,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 			// interrupted stream.
 			h.observeTokens(model, providerName, p.Team, lastUsage)
 			h.auditCompletedPartial(req.Context(), p, model, upstream, usage, partialCost, tracing.TraceID(req.Context()))
-			recordSpanSettled(req, prov.Name(), upstream, usage, partialCost, false, true) // committed (partial)
+			recordSpanSettled(req, prov.Name(), providerName, upstream, usage, partialCost, false, true) // committed (partial)
 			h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 200, time.Since(start).Seconds(), ttft)
 			return false
 		}
@@ -606,7 +617,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 			usage = usageRef(lastUsage)
 		}
 	}
-	cost := h.settle(p, providerName, model, upstream, lastUsage, table, estimateTokens(pr.RawBody))
+	cost := h.settle(p, providerName, model, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 	requestpolicy.SettleBudget(req, cost, lastUsage, streamCompleted && !streamFailed)
 	if streamCompleted && !streamFailed && lastUsage != nil {
 		requestpolicy.RecordSuccess(req)
@@ -622,7 +633,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, nil)
 	}
 	h.auditCompleted(req.Context(), recID, p, model, upstream, 200, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
-	recordSpanSettled(req, prov.Name(), upstream, usage, cost, true, false) // committed stream success
+	recordSpanSettled(req, prov.Name(), providerName, upstream, usage, cost, true, false) // committed stream success
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 200, time.Since(start).Seconds(), ttft)
 	return false
 }
@@ -635,19 +646,12 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 // the two tiers are resolved separately via schema.Usage.CacheWriteTiers rather
 // than collapsed into the cheaper one (ADR-030 — the collapse under-billed 1h
 // writes by ~40%).
-func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table, estimatedTokens int64) *audit.CostRef {
+func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table, admission *governance.Admission) *audit.CostRef {
 	if h.gov == nil || u == nil {
 		return nil
 	}
-	write5m, write1h := u.CacheWriteTiers()
-	pu := pricing.Usage{
-		Input:        deref(u.InputTokens),
-		Output:       deref(u.OutputTokens),
-		CacheRead:    deref(u.CacheReadInputTokens),
-		CacheWrite5m: write5m,
-		CacheWrite1h: write1h,
-	}
-	cost, missing := h.gov.Settle(subjectOf(p), keyPolicyOf(p), providerName, upstream, pu, table, estimatedTokens)
+	pu := pricing.FromUsage(u)
+	cost, missing := h.gov.Settle(subjectOf(p), keyPolicyOf(p), providerName, upstream, pu, table, admission)
 	if h.usage != nil {
 		// Attribute to the UPSTREAM model — the name pricing billed.
 		h.usage.Record(p.Team, requestpolicy.TelemetrySubject(p), upstream, pu, cost)
@@ -656,6 +660,7 @@ func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upst
 		AmountUSDMicros: cost,
 		PricingMissing:  missing,
 		PricingVersion:  governance.PricingVersionOf(table),
+		ContextTier:     table.ContextTier(providerName, upstream, pu),
 	}
 }
 
@@ -683,6 +688,9 @@ func keyPolicyOf(p keystore.Principal) governance.KeyPolicy {
 // arg is the CONFIG provider name (pricing/metrics key), matching the request
 // metric labels. No-op when usage is nil or metrics is nil.
 func (h *MessagesHandler) observeTokens(model, provider, team string, u *schema.Usage) {
+	if _, err := pricing.FromUsage(u).TotalTokens(); err != nil {
+		return
+	}
 	if u == nil {
 		return
 	}
@@ -817,7 +825,7 @@ const partialSpanDesc = "upstream stream interrupted"
 // partial (it was committed before the break), so the span is the only place a
 // trace consumer can see the truncation. Callers with no settlement (a terminal
 // pre-commit failure) keep using recordSpanResponse.
-func recordSpanSettled(req *http.Request, system, upstream string, usage *audit.UsageRef, cost *audit.CostRef, ok, partial bool) {
+func recordSpanSettled(req *http.Request, system, providerName, upstream string, usage *audit.UsageRef, cost *audit.CostRef, ok, partial bool) {
 	span := trace.SpanFromContext(req.Context())
 	var in, out, cacheRead, write5m, write1h int64
 	if usage != nil {
@@ -828,7 +836,7 @@ func recordSpanSettled(req *http.Request, system, upstream string, usage *audit.
 	tracing.SetGenAIResponse(span, system, upstream, in, out)
 	tracing.SetUsageDetail(span, cacheRead, write5m, write1h)
 	if cost != nil {
-		tracing.SetCost(span, cost.AmountUSDMicros, cost.PricingMissing)
+		requestpolicy.RecordCost(span, system, providerName, upstream, usage, cost, partial)
 	}
 	if partial {
 		tracing.SetPartial(span)
@@ -849,18 +857,7 @@ func recordSpanSettled(req *http.Request, system, upstream string, usage *audit.
 // standard shape, so the audit record showed no cache write on a request that
 // was billed for one.
 func usageRef(u *schema.Usage) *audit.UsageRef {
-	if u == nil {
-		return nil
-	}
-	write5m, write1h := u.CacheWriteTiers()
-	return &audit.UsageRef{
-		InputTokens:                deref(u.InputTokens),
-		OutputTokens:               deref(u.OutputTokens),
-		CacheReadInputTokens:       deref(u.CacheReadInputTokens),
-		CacheCreationInputTokens:   write5m + write1h,
-		CacheCreation5mInputTokens: write5m,
-		CacheCreation1hInputTokens: write1h,
-	}
+	return audit.UsageFrom(u)
 }
 
 func deref(p *int64) int64 {

@@ -185,6 +185,54 @@ upstream deployment names are not exposed. A mixed native/bridge target chain
 advertises the portable bridge contract. Metadata describes configured
 capabilities, while inference-time policy and provider checks remain authoritative.
 
+### Opt-in Mantle Web Search
+
+With a verified native `bedrock_responses` route, opt the launcher into
+text-only, AWS-index/cache search:
+
+```bash
+INFERPLANE_CODEX_WEB_SEARCH=cached scripts/inferplane-codex -m openai.gpt-6-astra
+# Or a separately configured native GPT-5.6 route:
+INFERPLANE_CODEX_WEB_SEARCH=cached scripts/inferplane-codex -m openai.gpt-5.6-sol
+```
+
+`INFERPLANE_API_KEY` must contain the gateway virtual key as usual. The default
+remains `disabled`; only `disabled` and `cached` are accepted. Search sessions
+use a native-only model catalog, `web_search_tool_type: text`, and full Responses
+instead of Responses Lite (Codex 0.157 omits hosted search on the Lite path).
+The launcher overrides inherited `web_search="live"` with `cached`; the client
+sends `external_web_access:false`. Do not advertise OpenAI's image-search
+extensions on Mantle. Restart without this opt-in for portable model switching.
+The `--search` CLI flag requests live search and is rejected by this launcher.
+
+Use Mantle model IDs such as `openai.gpt-5.6-sol`, not the `global.*` runtime
+profile IDs. Adding `api: mantle` to the ordinary `bedrock` provider selects
+Chat/Messages, **not** native Responses, and does not enable hosted search.
+Keep region-specific providers: GPT-5.6 Sol and GPT-6 Sol/Luna can use
+`https://bedrock-mantle.us-east-1.api.aws/openai`, whereas GPT-6 Astra requires
+`us-west-2`. GPT-5.6 Terra/Luna are also available in `us-west-2`. Check each
+model card instead of assuming one Mantle region serves the entire family.
+The model name or native transport alone does not prove upstream tool support:
+verify the model and region, and grant the gateway IAM identity
+`bedrock-websearch:InvokeSearch` and `bedrock-websearch:InvokeFetch`. This mode
+does not need or grant `bedrock-websearch:ExternalWebAccess`.
+
+Mayu preserves search-call output, citations and SSE, with existing identity,
+privacy, guardrail-refusal and token-accounting gates unchanged. **Separate AWS
+Web Search operation fees are not included in mayu's token-based cost meters or
+hard caps.** Account for those fees separately. Static price overrides also
+need an explicit policy for short/long-context inference tiers; they do not
+automatically reproduce every upstream pricing tier.
+
+References:
+- [AWS Web Search](https://docs.aws.amazon.com/bedrock/latest/userguide/web-search.html)
+- [AWS Web Search IAM](https://docs.aws.amazon.com/bedrock/latest/userguide/security-web-search.html)
+- [GPT-5.6 Sol regions](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-sol.html)
+- [GPT-6 Sol regions](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-sol.html)
+- [GPT-6 Luna regions](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-luna.html)
+- [OpenAI Web Search](https://developers.openai.com/api/docs/guides/tools-web-search)
+- [Codex configuration](https://developers.openai.com/codex/config-reference)
+
 Portable clients may send `reasoning: {"effort": "none"}` to clear an inherited
 native-model effort preference. This requests no backend effort-control feature;
 the bridge carries text and tool results, and generation remains provider-defined.

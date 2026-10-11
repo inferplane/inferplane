@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private static inferplaned dashboard assets for an existing CloudFront distribution; no CP/API changes.
+Parameters:
+  DistributionId:
+    Type: String
+    AllowedPattern: 'E[A-Z0-9]+'
+    Description: Existing distribution allowed to read this bucket through OAC.
+  ContentSecurityPolicy:
+    Type: String
+    MinLength: 1
+    MaxLength: 2048
+    AllowedPattern: "default-src 'self';.*frame-ancestors 'none'.*"
+    Description: Existing CP CSP, including its configured public OIDC login origins; no secrets.
+Resources:
+  Assets:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+  AssetsPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Assets
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ExistingCloudFrontOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${Assets.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${DistributionId}'
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt Assets.Arn
+              - !Sub '${Assets.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+  AccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-assets'
+        Description: Signed requests to the private dashboard REST origin.
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+  SecurityHeaders:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub '${AWS::StackName}-headers'
+        Comment: Same CSP as CP shell; no inline scripts/styles or external fonts.
+        SecurityHeadersConfig:
+          ContentSecurityPolicy:
+            ContentSecurityPolicy: !Ref ContentSecurityPolicy
+            Override: true
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: no-referrer
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: false
+            Preload: false
+            Override: true
+        CustomHeadersConfig:
+          Items:
+            - Header: Cache-Control
+              Value: no-store
+              Override: true
+  EntryRedirect:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub '${AWS::StackName}-entry'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Redirect only / and /ui to canonical /ui/; leave all API paths untouched.
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          if (request.uri === '/' || request.uri === '/ui') {
+            return { statusCode: 302, statusDescription: 'Found', headers: {
+              location: { value: '/ui/' }, 'cache-control': { value: 'no-store' }
+            }};
+          }
+          return request;
+        }
+Outputs:
+  AssetsBucket:
+    Description: Private versioned assets bucket.
+    Value: !Ref Assets
+  AssetsDomain:
+    Description: S3 REST endpoint, never the public website endpoint.
+    Value: !GetAtt Assets.RegionalDomainName
+  AccessControlId:
+    Description: OAC for the distribution's asset origin.
+    Value: !Ref AccessControl
+  SecurityHeadersId:
+    Description: Strict static response headers policy.
+    Value: !Ref SecurityHeaders
+  EntryFunctionArn:
+    Description: Root-only redirect function ARN.
+    Value: !GetAtt EntryRedirect.FunctionMetadata.FunctionARN

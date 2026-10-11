@@ -3,70 +3,83 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>inferplane — usage</title>
+  <meta name="color-scheme" content="light dark">
+  <title>inferplane — Control plane</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>inferplane usage</h1>
-    <p class="sub">control-plane view · integer µUSD · read-only</p>
-  </header>
-
-  <nav id="nav" hidden>
-    <button id="nav-usage">Usage</button>
-    <button id="nav-policies">Policies</button>
-  </nav>
-
-  <section id="auth-section">
-    <label for="token">Control-plane token</label>
-    <input type="password" id="token" autocomplete="off" placeholder="INFERPLANED_TOKEN">
-    <button id="connect">Connect</button>
-    <p class="hint">Held in page memory only — never stored.</p>
-    <p id="sso-divider" class="hint" hidden>or</p>
-    <button id="sso-button" hidden>Sign in with SSO</button>
-  </section>
-
-  <div id="usage-view">
-  <section id="controls" hidden>
-    <label for="since">From</label>
-    <input type="date" id="since">
-    <label for="until">To</label>
-    <input type="date" id="until">
-    <button id="refresh">Refresh</button>
-  </section>
-
-  <div id="degraded-banner" class="banner" hidden>
-    history incomplete — durable store unavailable (showing recent in-memory data only)
+  <a class="skip-link" href="#main">Skip to content</a>
+  <aside class="sidebar" aria-label="Control plane navigation">
+    <a class="brand" href="./"><span class="brand-mark" aria-hidden="true">ip</span><span>inferplane<small>CONTROL PLANE</small></span></a>
+    <div class="workspace"><span class="workspace-icon" aria-hidden="true">C</span><div>Governance console<small>inferplaned</small></div><span class="badge">CP</span></div>
+    <p class="nav-label">WORKSPACE</p>
+    <nav id="nav" aria-label="Main">
+      <button id="nav-overview" class="nav-item active" aria-current="page" disabled><span aria-hidden="true">◫</span>Overview</button>
+      <button id="nav-usage" class="nav-item" disabled><span aria-hidden="true">▥</span>Usage &amp; costs</button>
+      <button id="nav-budgets" class="nav-item" disabled><span aria-hidden="true">◉</span>Budgets<span id="budget-nav-count" class="nav-count" hidden></span></button>
+      <button id="nav-fleet" class="nav-item" disabled><span aria-hidden="true">▦</span>Data planes<span id="fleet-nav-count" class="nav-count" hidden></span></button>
+      <button id="nav-policies" class="nav-item" disabled><span aria-hidden="true">≡</span>Policies<span id="policy-nav-count" class="nav-count" hidden></span></button>
+    </nav>
+    <div class="sidebar-bottom"><div class="architecture-note"><strong>● Governance, not inference</strong><p>Policies down. Telemetry up.<br>LLM traffic stays on mayu.</p></div><div class="sidebar-footer">inferplane <span>α</span></div></div>
+  </aside>
+  <div class="main-shell">
+    <header class="topbar"><div class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb">Overview</strong></div><div class="topbar-actions"><button id="theme-toggle" class="quiet-button" aria-label="Switch color theme">Theme</button><span id="connection-status" class="badge neutral" role="status">Not connected</span><button id="disconnect" class="quiet-button" hidden>Disconnect</button></div></header>
+    <main id="main" tabindex="-1">
+      <section class="page-heading"><div><p class="eyebrow">GOVERNANCE WORKSPACE</p><h1 id="page-title">Your fleet. One control plane.</h1><p id="page-description" class="muted">Consumption, policy distribution, and the nodes reporting in.</p></div><div id="heading-actions" class="heading-actions" hidden><span id="last-updated" class="muted small" role="status">Not refreshed</span><button id="refresh" class="button secondary">↻ Refresh</button></div></section>
+      <div id="error" class="banner danger" role="alert" hidden></div>
+      <div id="notice" class="banner success" role="status" hidden></div>
+      <section id="auth-section" class="auth-layout">
+        <div class="auth-card panel"><span class="badge accent">SECURE WORKSPACE</span><h2>Connect to your control plane</h2><p class="muted">Use your console identity or a read token to inspect usage and distributed policies.</p><form id="connect-form"><label for="token">Control-plane read token</label><input type="password" id="token" autocomplete="off" spellcheck="false" placeholder="INFERPLANED_TOKEN · empty for loopback dev"><button id="connect" class="button primary" type="submit">Connect to workspace →</button></form><p class="hint">Credentials stay in page memory. Refreshing or disconnecting clears them.</p><div id="sso-divider" class="auth-divider" hidden>or use your organization identity</div><button id="sso-button" class="button secondary full-width" hidden>Sign in with SSO</button></div>
+        <div class="auth-context"><p class="eyebrow">BUILT FOR OPERATORS</p><h2>Less guesswork.<br>More control.</h2><p class="muted">Start with what needs attention, then drill into the evidence.</p><ol class="capability-list"><li><span>01</span><div><strong>Understand consumption</strong><p>Reported spend and separate cache token classes.</p></div></li><li><span>02</span><div><strong>Inspect policy distribution</strong><p>Generation coverage and recorded rejection reasons.</p></div></li><li><span>03</span><div><strong>Make deliberate changes</strong><p>Review policy documents before publishing.</p></div></li></ol><p class="hint">Virtual keys and inference routing belong to the data plane, not this console.</p></div>
+      </section>
+      <div id="workspace-content" hidden>
+        <section id="controls" class="filterbar panel" aria-label="Usage date range"><div class="range-label"><strong>Reporting period</strong><span class="muted small">UTC · inclusive dates</span></div><label for="since">From<input type="date" id="since" required></label><label for="until">To<input type="date" id="until" required></label><button id="apply-range" class="button secondary">Apply range</button><span id="range-summary" class="muted small"></span></section>
+        <div id="degraded-banner" class="banner warning" role="status" hidden><strong>History is incomplete.</strong> The durable usage store is unavailable. These totals include only the recent in-memory fallback, not complete billing history.</div>
+        <section id="overview-view" aria-label="Overview">
+          <div class="stat-grid"><article class="stat-card panel"><span>Reported spend</span><strong id="stat-spend">—</strong><small id="stat-spend-detail">Selected reporting period</small></article><article class="stat-card panel"><span>Teams reporting usage</span><strong id="stat-teams">—</strong><small>Not the team registry</small></article><article class="stat-card panel"><span>Tokens reported</span><strong id="stat-tokens">—</strong><small>Input + output + cache classes</small></article><article class="stat-card panel"><span>Recent data planes</span><strong id="stat-nodes">—</strong><small id="stat-nodes-detail">Seen within the last 10 minutes</small></article></div>
+          <div class="overview-grid"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">CONSUMPTION</p><h2>Spend by team</h2></div><button id="open-usage" class="text-button">View usage →</button></div><div id="spend-breakdown" class="spend-breakdown"></div><div class="panel-footnote">Gateway-reported settlements · not an AWS invoice</div></section><section class="panel"><div class="panel-heading"><div><p class="eyebrow">OPERATIONS</p><h2>Needs attention</h2></div><span id="attention-count" class="badge neutral">—</span></div><div id="attention-list" class="attention-list"></div><div class="panel-footnote">Observations, not readiness or availability guarantees</div></section></div>
+          <section class="panel"><div class="panel-heading"><div><p class="eyebrow">DISTRIBUTION</p><h2>Recent data planes</h2></div><button id="open-fleet" class="text-button">Inspect fleet →</button></div><div id="fleet-preview-list"></div></section>
+        </section>
+        <section id="usage-view" hidden aria-label="Usage and costs"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">REPORTED SETTLEMENTS</p><h2>Team usage</h2></div><button id="export-usage" class="button secondary">Export JSON</button></div><div class="table-toolbar"><label for="team-search">Filter teams<input id="team-search" type="search" placeholder="Find a team…"></label><label for="usage-sort">Sort by<select id="usage-sort"><option value="spend">Highest spend</option><option value="name">Team name</option></select></label><span id="usage-total" class="badge accent">—</span></div><div class="table-scroll"><table id="teams"><caption class="sr-only">Reported usage by team. Select a team for its model breakdown.</caption><thead><tr><th scope="col">Team</th><th scope="col">Spend (USD)</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Cache read</th><th scope="col">Cache write 5m</th><th scope="col">Cache write 1h</th></tr></thead><tbody></tbody></table></div><div class="panel-footnote">All six cost decimals are displayed. Cache classes are separate; output already includes reasoning.</div></section><section id="models-section" class="panel model-panel" hidden><div class="panel-heading"><div><p class="eyebrow">MODEL BREAKDOWN</p><h2 id="model-team-label">Models</h2></div><button id="close-models" class="quiet-button">Close</button></div><p id="model-status" class="model-status muted" role="status"></p><div class="table-scroll"><table id="models"><caption class="sr-only">Model usage for the selected team</caption><thead><tr><th scope="col">Model</th><th scope="col">Spend (USD)</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Cache read</th><th scope="col">Cache write 5m</th><th scope="col">Cache write 1h</th></tr></thead><tbody></tbody></table></div></section></section>
+        <section id="fleet-view" hidden aria-label="Data planes"><div class="fleet-summary panel"><div><span class="eyebrow">CURRENT GENERATION</span><code id="fleet-generation">—</code></div><div><span class="eyebrow">CONTROL-PLANE API VERSIONS</span><code id="fleet-api-versions">—</code></div><span id="fleet-coverage" class="badge neutral">—</span></div><section class="panel"><div class="panel-heading"><div><p class="eyebrow">HEARTBEAT OBSERVATIONS</p><h2>Data plane inventory</h2></div><label for="fleet-search">Filter nodes<input id="fleet-search" type="search" placeholder="Find a data plane…"></label></div><p class="panel-description">Only nodes seen within 10 minutes are returned. Absent nodes cannot be classified as offline. Rejections may be historical; matching generation is not proof of readiness.</p><div class="table-scroll"><table id="fleet-table"><caption class="sr-only">Recent generation and heartbeat observations</caption><thead><tr><th scope="col">Data plane</th><th scope="col">Distribution</th><th scope="col">Generation</th><th scope="col">API versions</th><th scope="col">Last heartbeat (UTC)</th><th scope="col">Recorded rejections</th></tr></thead><tbody></tbody></table></div></section><section id="node-details" class="panel model-panel" hidden><div class="panel-heading"><h2 id="node-title">Rejection details</h2><button id="close-node" class="quiet-button">Close</button></div><div id="node-rejections" class="rejection-list"></div></section></section>
+        <section id="policies-view" hidden aria-label="Policies"><section class="panel policy-access"><div class="panel-heading"><div><p class="eyebrow">GOVERNANCE DOCUMENTS</p><h2>Policy authority</h2></div><span id="policy-store-status" class="badge neutral">—</span></div><p id="policies-readonly" class="panel-description" hidden>No policy store is configured. Edit the --policies files and redeploy; set INFERPLANED_POLICY_DSN to enable persisted changes.</p><div id="write-controls"><p class="panel-description">A writable store is not write permission. Publishing requires a console OIDC identity or INFERPLANED_POLICY_WRITE_TOKEN. The heartbeat read token cannot write.</p><form id="write-token-form" class="write-token-form"><label for="write-token">Dedicated policy write token<input id="write-token" type="password" autocomplete="off" spellcheck="false" placeholder="Memory only · optional for SSO"></label><button class="button secondary" type="submit">Set write credential</button><button id="clear-write-token" class="quiet-button" type="button">Clear</button></form><p id="write-status" class="hint" role="status">No dedicated write credential selected.</p></div></section><div class="section-toolbar"><label for="policy-search">Filter policies<input id="policy-search" type="search" placeholder="Find a policy or subject…"></label><button id="new-policy" class="button primary" disabled>+ New policy</button></div><p id="policy-generation" class="muted small"></p><div id="policies-list"></div></section>
+        <section id="budgets-view" hidden aria-label="Budgets">
+          <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">SPENDING LIMITS</p><h2>Team &amp; user budgets</h2></div><button id="new-budget" class="button primary" disabled>+ New budget</button></div>
+            <p class="panel-description">Set daily and monthly limits independently. All matching caps apply; adding a budget does not replace a stricter existing limit.</p>
+            <div class="table-toolbar"><label for="budget-search">Filter budgets<input id="budget-search" type="search" placeholder="Policy, rule, team or user…"></label><label for="budget-period-filter">Window<select id="budget-period-filter"><option value="">All windows</option><option value="CalendarDay">Daily</option><option value="CalendarMonth">Monthly</option><option value="unlimited">Unlimited declarations</option></select></label></div>
+            <div class="panel-footnote"><span id="budget-access-status" role="status"></span> <button id="budget-open-policies" class="text-button">Policy access &amp; advanced settings →</button></div>
+          </section>
+          <p class="hint">These are configured limits. Reported usage is available in Usage &amp; costs; remaining admission credit is not available in this view. Enforcement and reset time follow the deployment's governance profile.</p>
+          <div id="budgets-list"></div>
+        </section>
+      </div>
+      <footer class="page-footer"><span>inferplaned · control plane</span><span>Local view · no inference on this path</span></footer>
+    </main>
   </div>
-
-  <section id="teams-section" hidden>
-    <h2>Spend by team</h2>
-    <table id="teams">
-      <thead><tr><th>Team</th><th>Spend (USD)</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write 5m</th><th>Cache write 1h</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </section>
-
-  <section id="models-section" hidden>
-    <h2>Breakdown by model <span id="model-team-label"></span></h2>
-    <table id="models">
-      <thead><tr><th>Model</th><th>Spend (USD)</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write 5m</th><th>Cache write 1h</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </section>
-  </div>
-
-  <p id="error" class="error" hidden></p>
-
-  <div id="policies-view" hidden>
-    <h2>GovernancePolicy documents</h2>
-    <p id="policies-readonly" class="hint" hidden>
-      Read-only: no policy store is configured. Set INFERPLANED_POLICY_DSN on inferplaned
-      to edit policies here; until then, edit the --policies files and redeploy.
-    </p>
-    <div id="policies-list"></div>
-  </div>
-
+  <dialog id="policy-dialog" aria-labelledby="dialog-title">
+    <div class="dialog-heading"><div><p class="eyebrow">POLICY CHANGE</p><h2 id="dialog-title">Review before publishing</h2></div><button id="dialog-close" class="quiet-button" aria-label="Close policy dialog">✕</button></div>
+    <p id="dialog-description" class="muted"></p>
+    <div id="budget-form-fields" hidden>
+      <div class="budget-form-grid">
+        <label for="bf-policy">Policy<select id="bf-policy"></select></label>
+        <label for="bf-policy-name">Policy name<input id="bf-policy-name" type="text" autocomplete="off" required></label>
+        <label for="bf-team">Team<input id="bf-team" type="text" autocomplete="off"></label>
+        <label for="bf-user">User account reference (optional)<input id="bf-user" type="text" autocomplete="off" aria-describedby="budget-subject-hint"></label>
+      </div>
+      <p id="budget-subject-hint" class="hint">Select a team, a user, or both. Use the declared account reference for verified identities. Both fields together select that user within that team. Existing policy subjects are preserved.</p>
+      <div class="budget-form-grid">
+        <label for="bf-rule">Budget name<input id="bf-rule" type="text" autocomplete="off" required></label>
+        <label for="bf-period">Reset window<select id="bf-period"><option value="CalendarMonth">Calendar month</option><option value="CalendarDay">Calendar day</option></select></label>
+        <label for="bf-limit">Limit (USD)<input id="bf-limit" type="text" inputmode="decimal" placeholder="100.000" autocomplete="off" required aria-describedby="budget-limit-hint"></label>
+        <label for="bf-contact">Admin contact (optional)<input id="bf-contact" type="text" autocomplete="off"></label>
+      </div>
+      <p id="budget-limit-hint" class="hint">Enter a positive amount with up to three decimal places. Add another budget for the other window; both limits apply.</p>
+      <label class="budget-hard-label" for="bf-hard"><input id="bf-hard" type="checkbox">Hard cap — block when the limit is reached</label>
+      <p class="hint">Hard caps require fail-closed enforcement. A soft budget is an accounting threshold, not a blocking cap. Existing failure handling and lease settings are retained; advanced changes are available in Policies.</p>
+    </div>
+    <label id="editor-label" for="policy-editor" hidden>GovernancePolicy document (JSON)</label><textarea id="policy-editor" rows="18" spellcheck="false" hidden></textarea><pre id="policy-review"></pre><p id="dialog-error" class="error" role="alert" hidden></p><div class="dialog-footer"><button id="dialog-cancel" class="button secondary">Cancel</button><button id="dialog-confirm" class="button primary">Publish policy</button></div>
+  </dialog>
   <script src="app.js"></script>
 </body>
 </html>

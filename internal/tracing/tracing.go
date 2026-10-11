@@ -13,6 +13,8 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/inferplane/inferplane/pkg/ulid"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -156,42 +158,66 @@ func SetGenAIResponse(span trace.Span, system, model string, inputTokens, output
 		span.SetAttributes(attribute.String("gen_ai.system", system))
 	}
 	span.SetAttributes(attribute.String("gen_ai.response.model", model))
-	if inputTokens > 0 {
-		span.SetAttributes(attribute.Int64("gen_ai.usage.input_tokens", inputTokens))
-	}
-	if outputTokens > 0 {
-		span.SetAttributes(attribute.Int64("gen_ai.usage.output_tokens", outputTokens))
-	}
+	// Explicit zeros replace a previous attempt's counts on a shared span.
+	span.SetAttributes(attribute.Int64("gen_ai.usage.input_tokens", inputTokens),
+		attribute.Int64("gen_ai.usage.output_tokens", outputTokens))
 }
 
 // SetUsageDetail adds the cache-tier token counts that GenAI semconv does not
 // define. They go under an `inferplane.` prefix on purpose: inventing a
 // `gen_ai.*` name the spec may later assign differently would leave a collector
-// double-reporting the same number under two keys. A zero tier is omitted —
-// absence of a cache write is not a fact worth an attribute (SetGenAIResponse
-// applies the same rule to the token counts).
+// double-reporting the same number under two keys. Zeros replace any previous
+// attempt's cache counts; usage evidence distinguishes estimates from facts.
 func SetUsageDetail(span trace.Span, cacheReadTokens, cacheWrite5mTokens, cacheWrite1hTokens int64) {
-	if cacheReadTokens > 0 {
-		span.SetAttributes(attribute.Int64("inferplane.usage.cache_read_input_tokens", cacheReadTokens))
-	}
-	if cacheWrite5mTokens > 0 {
-		span.SetAttributes(attribute.Int64("inferplane.usage.cache_write_5m_input_tokens", cacheWrite5mTokens))
-	}
-	if cacheWrite1hTokens > 0 {
-		span.SetAttributes(attribute.Int64("inferplane.usage.cache_write_1h_input_tokens", cacheWrite1hTokens))
-	}
+	span.SetAttributes(attribute.Int64("inferplane.usage.cache_read_input_tokens", cacheReadTokens),
+		attribute.Int64("inferplane.usage.cache_write_5m_input_tokens", cacheWrite5mTokens),
+		attribute.Int64("inferplane.usage.cache_write_1h_input_tokens", cacheWrite1hTokens))
+}
+
+// CostDetails carries bounded tier evidence and the operator's price version.
+type CostDetails struct {
+	PricingVersion string
+	ContextTier    string
+	System         string
+	Provider       string // config alias used to look up the rate
+	Model          string // routed upstream ID, not an attested response model
+	Partial        bool
+	Usage          *UsageDetails
 }
 
 // SetCost adds the settled cost in integer µUSD (never a float — the audit and
 // budget paths are integer-only, and a span must not be the one place a
 // rounding artifact appears). pricingMissing is always set when a cost is
-// recorded: a 0 with the flag is "no rate configured", a 0 without it is
+// recorded: a 0 with the flag is "no usable price", a 0 without it is
 // "genuinely free", and a consumer cannot tell them apart otherwise.
-func SetCost(span trace.Span, costUSDMicros int64, pricingMissing bool) {
-	span.SetAttributes(
+func SetCost(span trace.Span, costUSDMicros int64, pricingMissing bool, details ...CostDetails) {
+	if !span.IsRecording() {
+		return
+	}
+	attrs := []attribute.KeyValue{
 		attribute.Int64("inferplane.cost.amount_usd_micros", costUSDMicros),
 		attribute.Bool("inferplane.cost.pricing_missing", pricingMissing),
-	)
+	}
+	if len(details) > 0 {
+		attrs = append(attrs, attribute.String("inferplane.cost.pricing_version", details[0].PricingVersion),
+			attribute.String("inferplane.cost.context_tier", details[0].ContextTier))
+	}
+	span.SetAttributes(attrs...)
+	attrs = append(attrs, attribute.String("inferplane.cost.event_id", ulid.New()))
+	if len(details) > 0 {
+		d := details[0]
+		attrs = append(attrs, attribute.String("gen_ai.system", d.System),
+			attribute.String("gen_ai.response.model", d.Model),
+			attribute.String("inferplane.provider.name", d.Provider),
+			attribute.Bool("inferplane.response.partial", d.Partial))
+		usageAttrs := d.Usage.attributes()
+		span.SetAttributes(usageAttrs...)
+		attrs = append(attrs, usageAttrs...)
+	}
+	// The span-level amount remains the last attempt for compatibility. Each
+	// settled attempt also gets an event so fallback cannot overwrite earlier
+	// observed spend. Sampling/export loss still makes traces diagnostic only.
+	span.AddEvent("inferplane.cost.settled", trace.WithAttributes(attrs...))
 }
 
 // SetPartial marks a response that was committed to the client and then

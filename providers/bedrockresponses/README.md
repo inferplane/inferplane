@@ -46,3 +46,18 @@ Tests inject a credential-provider factory and capturing HTTP transports;
 they require no AWS credentials or network access. They establish transport
 behavior, not live IAM permissions, model availability, or model quality.
 The application must blank-import this package to enable its registration.
+
+## Hosted Web Search
+
+On supported Mantle models, native `tools:[{"type":"web_search",
+"external_web_access":false}]` requests pass through without conversion.
+Search-call items, citations and SSE are preserved. The gateway's IAM identity
+needs `bedrock-websearch:InvokeSearch` and `bedrock-websearch:InvokeFetch`;
+this cached mode does not require external-web access permission.
+
+For Codex, use the launcher's explicit cached-search mode documented in
+[adaptive routing](../../docs/adaptive-routing.md#opt-in-mantle-web-search).
+It uses full Responses and text-only search, not the inherited Responses Lite
+or image-search profile. Tests prove transport behavior, not model/region
+availability. Additional hosted-search fees are not part of mayu's token-cost
+accounting or hard caps.

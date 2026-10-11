@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "pricing_version": "aws-gpt-standard-2026-10-02",
+  "currency": "USD",
+  "cost_basis": "gateway_config_estimate",
+  "model": "openai.gpt-6.1-sol",
+  "profile": "commercial-regional-mantle-standard",
+  "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-1-sol.html",
+  "live_probe_records": [
+    {
+      "model": "openai.gpt-6.1-sol",
+      "declared_context": 1050000,
+      "synthetic_units": 271974,
+      "request_bytes": 544122,
+      "reserved_micro_usd": 2994783,
+      "held_micro_usd": 748053,
+      "state": "accepted",
+      "utc": "2026-10-02T01:12:47Z",
+      "http_status": 200,
+      "input_tokens": 272000,
+      "output_tokens": 5,
+      "elapsed_seconds": 8.745
+    },
+    {
+      "model": "openai.gpt-6.1-sol",
+      "declared_context": 1050000,
+      "synthetic_units": 271975,
+      "request_bytes": 544124,
+      "reserved_micro_usd": 2994794,
+      "held_micro_usd": 1496085,
+      "state": "accepted",
+      "utc": "2026-10-02T01:14:44Z",
+      "http_status": 200,
+      "input_tokens": 272001,
+      "output_tokens": 5,
+      "elapsed_seconds": 5.036
+    }
+  ],
+  "audit_boundary_records": [
+    {
+      "total_input": 272000,
+      "output": 5,
+      "uncached_input": 2,
+      "cache_read": 0,
+      "cache_write": 271998,
+      "cost": {
+        "amount_usd_micros": 748053,
+        "pricing_missing": false,
+        "pricing_version": "aws-gpt-standard-2026-10-02",
+        "context_tier": "short"
+      },
+      "status": 200
+    },
+    {
+      "total_input": 272001,
+      "output": 5,
+      "uncached_input": 2,
+      "cache_read": 0,
+      "cache_write": 271999,
+      "cost": {
+        "amount_usd_micros": 1496085,
+        "pricing_missing": false,
+        "pricing_version": "aws-gpt-standard-2026-10-02",
+        "context_tier": "long"
+      },
+      "status": 200
+    }
+  ],
+  "versioned_gpt_records_without_tier": 0,
+  "total_verified_cost_micro_usd": 2244138,
+  "notes": [
+    "Observed provider usage and audit amount/tier agree at exactly 272000 and 272001 input tokens.",
+    "Cache-write tokens are included in the threshold; the longer response uses long rates for every class.",
+    "Prices are configured AWS list estimates, not invoice reconciliation. No prompt, identity, virtual key or session ID recorded."
+  ]
+}

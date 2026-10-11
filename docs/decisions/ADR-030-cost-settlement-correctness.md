@@ -63,6 +63,50 @@ caught defect 1.
 
 ## Decision
 
+### 2026-10-02 extension: per-attempt whole-context price tiers
+
+An optional paired `short_context_limit`/`long_context` config declaration
+selects rates from the full disjoint input/cache sum. Equality stays short;
+strictly exceeding the limit applies long rates to the entire attempt, including
+output. All ingress settlement paths and checked shared/durable settlement use
+the same selector. Reservations conservatively take each token class's maximum
+across both tiers; a long rate may be lower for one class and higher for another.
+Malformed overlays cannot borrow a bundled/base price to bypass refusal.
+
+`CostRef.context_tier` is appended with `omitempty`, backed by an exact legacy
+fixture and mixed-version/tamper hash-chain test. OTel settlement events retain
+each retry's observed amount and version/tier; span scalar cost remains the last
+attempt for compatibility. Audit remains the ledger because trace sampling and
+export loss are possible. Historical audit/financial liabilities are not repriced.
+
+Verified Standard commercial GPT cards require exact global/regional price
+rows, explicit model-specific cache prices, and special treatment where a card
+publishes no cache-write price. The old blanket statements below about region
+price parity and fixed cache ratios are legacy defaults, not current provider
+facts. Tiered Standard requests explicitly selecting an unpriced service tier
+refuse before billing. An existing tiered row cannot be flattened by
+`pricing sync`. See [the pricing guide](../reference/pricing.md).
+
+### Observation evidence and sync protection (2026-10-02)
+
+Usage-to-audit conversion is shared across the four inference ingresses. New
+records append optional completeness/TTL evidence without changing historical
+bytes, legacy cost calculation or durable authority settlement. A flat cache
+write mapped to 5m is an estimate, not a measured TTL. Unknown or unsupported
+TTLs must remain distinguishable from complete 5m/1h observations.
+
+Each traced cost settlement snapshots its own routed model, config provider,
+token counts, price metadata and uncertainty, with a generated event ID for
+export deduplication. The span scalar remains the last settled attempt. Events
+are diagnostic and do not establish complete billing coverage or correlate client
+and gateway records. No user, key, session or prompt data is added to metrics.
+
+The input/output-only sync generator must preserve richer existing overrides,
+reject bounded single dimensions as well as multiple dimensions, and explicitly
+report unsupported native Bedrock Responses routes. It must not manufacture a
+region/cache/service-tier price. See the [pricing guide](../reference/pricing.md)
+for the consumer contract and remaining integration limits.
+
 ### 1. Fold streaming usage across frames; never overwrite
 
 New `schema.MergeUsage(acc, next)` folds each field to its latest non-nil value
@@ -72,8 +116,19 @@ double-bill). All three ingress handlers now fold both `ev.Chunk.Message.Usage`
 
 ### 2. Resolve cache-write TTL tiers in one place
 
+**Follow-up (2026-10-11):** `CacheWriteAccounting` separates known total quantity
+from known TTL breakdown. A partial split must not replace a larger flat total:
+total 100 plus reported 5m 40 still counts 100 tokens for quota and context-price
+selection. Known 1h tokens retain that price; the unclassified remainder follows
+the legacy 5m estimate with unknown TTL evidence. Flat and split are never added.
+Negative, overflowing or contradictory nonzero complete splits are invalid and
+cannot mutate accounting counters. The legacy all-zero split fallback remains.
+Unknown TTL fields cannot prove a monetary authority refund. Wire observations
+and historical audit bytes are preserved. See ADR-039's lifecycle follow-up for
+checked totals and reservation ownership.
+
 New `schema.Usage.CacheWriteTiers()` returns `(write5m, write1h)`. The TTL split
-is authoritative when present; the flat `cache_creation_input_tokens` is a
+is authoritative when complete and consistent; the flat `cache_creation_input_tokens` is a
 fallback attributed to the cheaper 5m tier. **Never summed** — a provider
 sending both would otherwise double-count every cache write.
 

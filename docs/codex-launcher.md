@@ -125,6 +125,25 @@ entries retain bundled headroom with an 80% compaction threshold. Codex may
 further clamp compaction, or apply a caller's explicit compaction setting.
 Invalid bounds, duplicates, and malformed entries fail closed.
 
+An operator can opt into model-specific headroom and compaction with
+`INFERPLANE_CODEX_CONTEXT_PROFILES=/path/to/profiles.json`. The reviewed
+[example profile](../examples/codex/context-profiles.json) follows the
+[2026-10-02 synthetic live probes](reference/context-window-validation.md).
+It raises Qwen's usable share to 95% and Grok 4.7's to 85%; unlisted models keep
+their existing defaults. Each entry declares `context_window`, `usable_percent`
+and `compact_percent`; compaction must be below the usable percentage. This
+changes client behavior, not the gateway's context bound, authorization or
+budget policy. If the declared bound changes, the launcher refuses the stale
+profile until it is requalified. Missing bounds cannot be qualified by the
+16,384-token fallback. The file is a trusted operator input, not remotely
+fetched evidence or an automatic measurement of backend capacity.
+
+The probe command is opt-in, cost-bounded and uses the gateway only. It records
+actual usage, retains reservations on unknown failures and does not equate a
+generic HTTP 400, a quota refusal or a body-size error with a context limit.
+An accepted synthetic text request proves a lower bound for that request
+shape, not a maximum, tool-history quality, or availability across regions.
+
 The catalog is a startup snapshot. Newly added models/metadata require
 relaunching; the gateway remains responsible for request-time authorization
 and routing. A picker entry is not proof of Responses/tool compatibility.
@@ -332,3 +351,36 @@ icodex() (
 ```
 
 This task does not modify `.bashrc`, install the helper, or access `mayu.env`.
+
+## HUD integration
+
+On interactive stdin/stdout, the launcher detects `codex-hud` on `PATH` and
+starts `codex-hud start --language ko --` with the same generated Codex arguments
+and environment. This avoids bypassing the HUD as Python subprocesses do not
+invoke the shell's `codex()` function. The private catalog remains alive until
+the HUD process exits. There is no shell evaluation or credential loading by HUD
+selection. `exec`, review, app-server, management commands and piped input/output
+continue to launch Codex directly. Missing HUD falls back to direct Codex.
+
+Set `INFERPLANE_CODEX_HUD=off` to disable detection or
+`INFERPLANE_CODEX_HUD_LANGUAGE=en` for English (`ko` is the default).
+This is PATH-based integration; project-specific shell HUD overrides are not
+read. The HUD's own terminal and clipboard behavior remains its responsibility.
+
+## Long-session upstream errors
+
+A generic `upstream stream failed` is not proof of context exhaustion. Native
+Responses HTTP errors now retain only the exact allowlisted machine codes
+`context_length_exceeded` and `invalid_encrypted_content`, in both streaming
+startup and non-streaming responses. Arbitrary messages, params and unknown
+codes remain redacted; parsing is bounded to 64 KiB. The code is also recorded
+in the existing audit outcome error field. This preserves client recovery
+signals without bypassing policy, changing history, silently retrying or
+inventing usage. Already-committed SSE failure handling is unchanged.
+
+For diagnosis compare the same model, region, history and client settings.
+Cumulative session token usage is not current context occupancy. A lower
+`model_auto_compact_token_limit` can mitigate failures but does not establish the
+upstream's actual context limit. Historical errors whose bodies were discarded
+cannot be classified retroactively; an updated runtime and reproduction are
+needed to establish the live cause.

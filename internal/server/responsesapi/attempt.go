@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/inferplane/inferplane/internal/governance"
 	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/pricing"
 	"github.com/inferplane/inferplane/internal/responses"
@@ -23,7 +24,8 @@ type attempt struct {
 	proxy     *providers.ProxyRequest
 	table     *pricing.Table
 	started   time.Time
-	estimate  int64
+	admission *governance.Admission
+	errorCode string // bounded, allowlisted upstream failure evidence
 	inputBody []byte // sanitized client wire; proxy.RawBody may be translated
 }
 
@@ -40,11 +42,12 @@ func (a attempt) complete(w http.ResponseWriter, last bool) bool {
 	resp, err := a.target.Provider.Complete(a.req.Context(), a.proxy)
 	if err != nil || resp == nil {
 		status := errorStatus(err)
+		a.errorCode = upstreamCode(err)
 		a.finish(status, nil, nil, false, 0)
 		if !last && retryStatus(status) && a.req.Context().Err() == nil {
 			return true
 		}
-		writeError(w, status, "upstream_error", "upstream request failed")
+		writeCodedError(w, status, "upstream request failed", a.errorCode)
 		return false
 	}
 	if resp.StatusCode/100 != 2 {
@@ -52,11 +55,12 @@ func (a attempt) complete(w http.ResponseWriter, last bool) bool {
 		if resp.Parsed != nil {
 			observed = resp.Parsed.Usage
 		}
+		a.errorCode = providers.ResponseErrorCode(resp.RawBody)
 		a.finish(resp.StatusCode, observed, nil, false, 0)
 		if !last && retryStatus(resp.StatusCode) {
 			return true
 		}
-		writeError(w, resp.StatusCode, "upstream_error", "upstream request failed")
+		writeCodedError(w, resp.StatusCode, "upstream request failed", a.errorCode)
 		return false
 	}
 	if resp.Parsed == nil || resp.Parsed.Usage == nil {
@@ -96,11 +100,12 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 	seq, err := a.target.Provider.Stream(a.req.Context(), a.proxy)
 	if err != nil || seq == nil {
 		status := errorStatus(err)
+		a.errorCode = upstreamCode(err)
 		a.finish(status, nil, nil, false, 0)
 		if !last && retryStatus(status) && a.req.Context().Err() == nil {
 			return true
 		}
-		writeError(w, status, "upstream_error", "upstream stream failed")
+		writeCodedError(w, status, "upstream stream failed", a.errorCode)
 		return false
 	}
 	native := a.target.Provider.Name() == "openai_responses"
@@ -121,11 +126,12 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 	fail := func(cause error) bool {
 		if !committed {
 			status := errorStatus(cause)
+			a.errorCode = upstreamCode(cause)
 			a.finish(status, usage, nil, false, ttft)
 			if conversionErr == nil && !last && retryStatus(status) && a.req.Context().Err() == nil {
 				return true
 			}
-			writeError(w, status, "upstream_error", "upstream stream failed")
+			writeCodedError(w, status, "upstream stream failed", a.errorCode)
 			return false
 		}
 		// Never expose arbitrary provider error strings or restart a committed
@@ -199,4 +205,25 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 	requestpolicy.RecordSuccess(a.req)
 	a.finish(200, usage, nil, false, ttft)
 	return false
+}
+
+// Never copy a provider's raw error message into the client response.
+func upstreamCode(err error) string {
+	var upstream *providers.UpstreamError
+	if errors.As(err, &upstream) {
+		return providers.ResponseErrorCode(upstream.Body)
+	}
+	return ""
+}
+
+func writeCodedError(w http.ResponseWriter, status int, message, code string) {
+	if code == "" {
+		writeError(w, status, "upstream_error", message)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+		"type": "invalid_request_error", "code": code, "param": nil, "message": message,
+	}})
 }

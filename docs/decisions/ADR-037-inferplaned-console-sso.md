@@ -160,3 +160,64 @@ reconfiguration when an operator turns SSO on.
 - **Disconnect is a local lock only** (ADR-026 precedent, unchanged): clearing
   the console's in-memory token does not invalidate the IdP session; a
   re-click re-logs-in frictionlessly. RP-initiated logout stays out of scope.
+
+## Operations workspace extension (2026-10-07)
+
+The embedded console is redesigned into overview, usage/costs, recent data
+planes and policy views; the original SSO and public-shell posture remain.
+No API, server authorization, financial authority or inference path is added.
+All assets still ship as the existing three embedded files without a frontend
+build dependency. The browser validates connection before revealing data,
+clears both credentials and fetched DOM data on disconnect, and fences stale
+responses. Theme selection is memory-only.
+
+Policy-store capability and write authority are intentionally separate. Static
+read sessions select the dedicated policy-write token in a second memory-only
+closure variable; OIDC sessions reuse their console credential. The server
+remains the authorization authority. Complete-document cloning, separate
+quick-edit fields for each budget rule, explicit review before PUT and a typed
+name before DELETE replace immediate mutation. Unedited fields and existing
+FailClosed survive quick edits. The full JSON editor supports other rule kinds
+without partially reconstructing those documents. There is no revision/CAS
+contract, simulated lease control, or inferred node readiness.
+
+Cost parsing and export retain int64 integers above JavaScript's safe-number
+range and display all six microUSD decimals. Fleet coverage means only reported
+generation equality; the API's ten-minute node omission and historical rejection
+ring remain visible limitations. Unmounted APIs and incomplete durable history
+are never presented as healthy or zero. See the
+[operations runbook](../runbooks/inferplaned-dashboard.md) for the operator flow,
+verification commands and remaining limitations.
+
+### Guided budget settings (2026-10-07)
+
+The workspace also exposes a dedicated **Budgets** view. Guided forms create
+new policies or append a budget to an existing document and edit individual
+daily/monthly limits in USD. This addresses the earlier dependence on JSON
+authoring to create a budget. Amounts use decimal-text-to-BigInt conversion at
+the wire's milliUSD precision and reject values above the internal int64
+microUSD ceiling. Existing subjects, other rules, lease settings and omitted
+defaults survive edits. Each form enters the same explicit policy review/PUT
+flow with the existing write-authority gate; no financial API or enforcement
+semantics are added. Configured limits are shown without inventing remaining
+credit from telemetry. File-authoritative deployments stay read-only.
+
+### SSO bootstrap scheduling follow-up (2026-10-07)
+
+The new three-query bootstrap exposed the deployed verifier's in-flight
+signature-check refusal: the first JWT request could be valid while the other
+two returned 401, causing the client to lock the session. The client now queues
+OIDC API reads/writes across bootstrap, refresh, drill-down and export. This is
+not a retry or a fallback to the static bearer; genuine 401/403 still refuse.
+Disconnect aborts the active request and session-fences queued jobs. Server
+signature/audience/issuer/group checks and Cognito configuration are unchanged.
+Separate clients can still contend at the existing server limiter; the client
+fix does not qualify or redesign that global mechanism. The static release is
+updated independently of CP processes so memory-only usage history survives.
+
+A cold-JWKS regression runs the shipped SSO callback against the real Go
+verifier with a synthetic signed token and local IdP; bootstrap plus refresh
+must yield six authorized reads with one JWKS fetch. Browser replay of the
+previous deployed assets reproduces two in-flight 401s; the updated assets
+serialize the same synthetic flow without denials. Neither test claims a
+completed live human Cognito login or relaxes authorization.

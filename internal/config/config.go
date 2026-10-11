@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -351,7 +352,10 @@ type RateConfig struct {
 	// 0/0 override: without it, both rates being zero is a load error, because
 	// 0 is what an unfinished placeholder looks like and an unfinished
 	// placeholder must not bill as "free" (see validatePricing).
-	Free bool `json:"free,omitempty"`
+	Free                  bool        `json:"free,omitempty"`
+	ShortContextLimit     int64       `json:"short_context_limit,omitempty"`
+	LongContext           *RateConfig `json:"long_context,omitempty"`
+	CacheWriteUnsupported bool        `json:"cache_write_unsupported,omitempty"`
 }
 
 // PricingConfig configures cost computation: on_missing policy (allow|block)
@@ -399,12 +403,52 @@ func validatePricing(p PricingConfig) error {
 		models := p.Overrides[provider]
 		for _, model := range sortedKeys(models) {
 			rc := models[model]
+			if err := validateRate(rc); err != nil {
+				return fmt.Errorf("config: pricing.overrides[%q][%q]: %w", provider, model, err)
+			}
 			if rc.InputPerMTok == 0 && rc.OutputPerMTok == 0 && !rc.Free {
 				return fmt.Errorf("config: pricing.overrides[%q][%q]: 0 means unpriced, not free; fill in real rates or set \"free\": true", provider, model)
 			}
 		}
 	}
 	return nil
+}
+
+func validateRate(rc RateConfig) error {
+	if rc.CacheWriteUnsupported && (rc.CacheWrite5mPerMTok != 0 || rc.CacheWrite1hPerMTok != 0) {
+		return fmt.Errorf("unsupported cache writes cannot also declare a write rate")
+	}
+	values := []float64{rc.InputPerMTok, rc.OutputPerMTok, rc.CacheReadPerMTok, rc.CacheWrite5mPerMTok, rc.CacheWrite1hPerMTok}
+	if rc.CacheReadPerMTok == 0 {
+		values = append(values, rc.InputPerMTok*.1)
+	}
+	if !rc.CacheWriteUnsupported {
+		if rc.CacheWrite5mPerMTok == 0 {
+			values = append(values, rc.InputPerMTok*1.25)
+		}
+		if rc.CacheWrite1hPerMTok == 0 {
+			values = append(values, rc.InputPerMTok*2)
+		}
+	}
+	for _, n := range values {
+		if math.IsNaN(n) || math.IsInf(n, 0) || n < 0 || n >= float64(math.MaxInt64)/1_000_000 {
+			return fmt.Errorf("rates must be finite, nonnegative and fit integer microUSD")
+		}
+	}
+	if rc.LongContext == nil {
+		if rc.ShortContextLimit != 0 {
+			return fmt.Errorf("short_context_limit and long_context must be declared together")
+		}
+		return nil
+	}
+	long := rc.LongContext
+	if rc.ShortContextLimit <= 0 || rc.Free || long.Free || long.ShortContextLimit != 0 || long.LongContext != nil {
+		return fmt.Errorf("context pricing requires a positive short_context_limit and one non-free long_context rate")
+	}
+	if long.InputPerMTok == 0 && long.OutputPerMTok == 0 {
+		return fmt.Errorf("long_context is unpriced")
+	}
+	return validateRate(*long)
 }
 
 // sortedKeys returns m's keys in ascending order, for deterministic validation

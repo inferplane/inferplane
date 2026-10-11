@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "models": {
+    "qwen.qwen3-coder-next": {
+      "context_window": 256000,
+      "usable_percent": 95,
+      "compact_percent": 90
+    },
+    "global.xai.grok-4.7": {
+      "context_window": 500000,
+      "usable_percent": 85,
+      "compact_percent": 82
+    }
+  }
+}

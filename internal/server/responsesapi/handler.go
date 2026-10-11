@@ -162,9 +162,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	tracing.SetGenAIRequest(span, model)
 	estimate := max(int64(1), int64(len(raw)/4))
-	if limit := requestpolicy.ContextWindow(st, model); limit > 0 && estimate > limit {
+	if limit := requestpolicy.ContextWindow(st, model); limit > 0 && estimate > limit && requestpolicy.ContextTextEstimate("responses", raw) > limit {
 		h.denied(req, p, model, 400, "context_window_exceeded", start)
-		writeError(w, 400, "invalid_request_error", "request exceeds the configured context window")
+		writeCodedError(w, 400, "request exceeds the configured context window", "context_length_exceeded")
 		return
 	}
 	table := st.Pricing()
@@ -172,17 +172,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	for _, ct := range chain {
 		priced = append(priced, governance.PricedTarget{Provider: ct.ProviderName, Upstream: ct.Upstream})
 	}
-	if dec := governance.PricingGuard(table, priced); !dec.Allowed {
+	if dec := requestpolicy.PricingGuard(table, priced, raw); !dec.Allowed {
 		h.denied(req, p, model, dec.Status, string(dec.Code), start)
 		writeError(w, dec.Status, "insufficient_quota", dec.Reason)
 		return
 	}
+	var admission *governance.Admission
 	if h.gov != nil {
-		if dec := h.gov.PreCheck(subject(p), keyPolicy(p), estimate); !dec.Allowed {
+		dec := h.gov.PreCheck(subject(p), keyPolicy(p), estimate)
+		if !dec.Allowed {
 			h.denied(req, p, model, dec.Status, string(dec.Code), start)
 			writeError(w, dec.Status, "insufficient_quota", dec.Reason)
 			return
 		}
+		admission = dec.Admission
+		defer admission.Close()
 	}
 	stream := parsed.Stream != nil && *parsed.Stream
 	for i, ct := range chain {
@@ -194,11 +198,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		if i > 0 && h.gov != nil {
-			if dec := h.gov.PreCheck(subject(p), keyPolicy(p), estimate); !dec.Allowed {
+			dec := h.gov.PreCheck(subject(p), keyPolicy(p), estimate)
+			if !dec.Allowed {
 				h.denied(req, p, model, dec.Status, string(dec.Code), start)
 				writeError(w, dec.Status, "insufficient_quota", dec.Reason)
 				return
 			}
+			admission = dec.Admission
+			defer admission.Close()
 		}
 		headers := req.Header.Clone()
 		tracing.Inject(req.Context(), headers)
@@ -235,7 +242,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		defer finishBudget()
 		attemptReq := reservedReq.WithContext(audit.WithRoutingAttempt(reservedReq.Context(), ct.Model, ct.ProviderName, ct.DataBoundary))
 		attemptReq = requestpolicy.WithAffinityAttempt(attemptReq, h.r, result.AffinityToken, ct)
-		a := attempt{h: h, req: attemptReq, principal: p, target: ct, proxy: pr, table: table, started: start, estimate: estimate, inputBody: raw}
+		a := attempt{h: h, req: attemptReq, principal: p, target: ct, proxy: pr, table: table, started: start, admission: admission, inputBody: raw}
 		h.started(a)
 		last := i == len(chain)-1
 		retry := false
