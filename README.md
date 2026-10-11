@@ -1,7 +1,7 @@
 # inferplane
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.25-00ADD8.svg)](go.mod)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8.svg)](go.mod)
 [![Status](https://img.shields.io/badge/Status-alpha-orange.svg)](#status)
 
 [**Documentation (English)**](https://inferplane.github.io/inferplane/) ·
