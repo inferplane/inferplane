@@ -71,7 +71,7 @@ records survived. Preserve evidence and stop affected traffic during sink failur
 
 ## Collect audit records
 
-[`examples/otel-collector/audit-filelog.yaml`](../../examples/otel-collector/audit-filelog.yaml)
+[`examples/otel-collector/audit-filelog.yaml`](https://github.com/inferplane/inferplane/blob/main/examples/otel-collector/audit-filelog.yaml)
 is an OpenTelemetry Collector (contrib) configuration for a node DaemonSet. It tails
 `/var/log/pods/*/inferplane/*.log`, keeps only lines that start with
 `{"schema_version"` (mayu also prints startup lines), and exports each body

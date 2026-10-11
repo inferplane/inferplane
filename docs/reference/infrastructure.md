@@ -50,7 +50,7 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
     best-effort sink; the WAL stays on the data volume and the local analytics index
     is disabled). A node collector's `filelog` receiver tails the container log and
     exports each record body verbatim, never re-serialized, because the hash chain
-    covers exact line bytes ([example](../../examples/otel-collector/audit-filelog.yaml),
+    covers exact line bytes ([example](https://github.com/inferplane/inferplane/blob/main/examples/otel-collector/audit-filelog.yaml),
     [collection](../operations/observability.md#collect-audit-records)).
   Give the collector separate `metrics`, `traces` and audit `logs` pipelines, each with a `batch`
   processor. `/metrics` is unauthenticated by design and must stay cluster-internal

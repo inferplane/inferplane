@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: 29e28a6de13ed59c5d95121b5621c0625d4c80b6e3855c92542ca7bdb4bcaac6
+translation_source_sha256: 9b8f7f406fe12ccd3c87422abed9beb876b49eb3effe0571b7fccd4f142fccf0
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -75,7 +75,7 @@ bin/mayu report --file /path/to/instance-audit.jsonl --by team,model
 
 ## 감사 기록 수집 {#collect-audit-records}
 
-[`examples/otel-collector/audit-filelog.yaml`](../../examples/otel-collector/audit-filelog.yaml)은
+[`examples/otel-collector/audit-filelog.yaml`](https://github.com/inferplane/inferplane/blob/main/examples/otel-collector/audit-filelog.yaml)은
 노드 DaemonSet용 OpenTelemetry Collector(contrib) 설정입니다. `/var/log/pods/*/inferplane/*.log`를
 읽고, `{"schema_version"`으로 시작하는 줄만 남기며(mayu는 시작 메시지도 출력합니다), 각 본문을
 그대로 JSONL로 S3에 내보냅니다. 읽은 위치와 전송 큐는 `file_storage`에 영속됩니다.
