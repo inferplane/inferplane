@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 4d4c812ec17a123cad622b193757149d426bf01c60c38335e4d3887eb7a31f42
+translation_source_sha256: 9480cac790f1de483af7914ea86febac79d723dc52f3b64137dfddcccbcc48b5
 ---
 
 # 데이터 구현 {#data}

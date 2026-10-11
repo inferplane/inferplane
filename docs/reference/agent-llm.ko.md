@@ -1,6 +1,6 @@
 ---
 translation_source: reference/agent-llm.md
-translation_source_sha256: e52485b4ae2e179da810ff5298cde6d168d16434fd513c7031f37401addbcae2
+translation_source_sha256: 7284295643d10cafc94cbdb13b50c4143e69b248f55fdfa757839dbd978dbfc8
 ---
 
 # 에이전트·LLM 구현 {#agent-llm}

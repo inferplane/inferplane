@@ -678,10 +678,10 @@ func keyPolicyOf(p keystore.Principal) governance.KeyPolicy {
 // arg is the CONFIG provider name (pricing/metrics key), matching the request
 // metric labels. No-op when usage is nil or metrics is nil.
 func (h *MessagesHandler) observeTokens(model, provider, team string, u *schema.Usage) {
-	if _, err := pricing.FromUsage(u).TotalTokens(); err != nil {
+	if u == nil {
 		return
 	}
-	if u == nil {
+	if _, err := pricing.FromUsage(u).TotalTokens(); err != nil {
 		return
 	}
 	write5m, write1h := u.CacheWriteTiers()

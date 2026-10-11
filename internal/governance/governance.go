@@ -626,7 +626,12 @@ func (g *Governor) Settle(s Subject, kp KeyPolicy, provider, model string, u pri
 }
 
 func (g *Governor) settle(s Subject, kp KeyPolicy, provider, model string, u pricing.Usage, table *pricing.Table, admission *Admission) (costMicros int64, pricingMissing bool) {
-	defer admission.finishRates(nil)
+	ratesFinalized := false
+	defer func() {
+		if !ratesFinalized {
+			admission.finishRates(nil)
+		}
+	}()
 	actualTokens, err := u.TotalTokens()
 	if err != nil {
 		return 0, true
@@ -661,6 +666,9 @@ func (g *Governor) settle(s Subject, kp KeyPolicy, provider, model string, u pri
 		if u.Uncertain {
 			actual = max(actual, admission.estimate)
 		}
+		// Keep the deferred fallback for early returns/panics, without
+		// requiring the limiter's finalization callbacks to be idempotent.
+		ratesFinalized = true
 		admission.finishRates(&actual)
 	}
 	if table == nil {

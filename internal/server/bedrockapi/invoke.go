@@ -594,10 +594,10 @@ func estimateTokens(raw []byte) int64 {
 // observeTokens mirrors settle()'s mapping, including the cache-write TTL split
 // (ADR-030), so the metrics and the billed amount can't disagree.
 func (h *InvokeHandler) observeTokens(model, provider, team string, u *schema.Usage) {
-	if _, err := pricing.FromUsage(u).TotalTokens(); err != nil {
+	if u == nil {
 		return
 	}
-	if u == nil {
+	if _, err := pricing.FromUsage(u).TotalTokens(); err != nil {
 		return
 	}
 	write5m, write1h := u.CacheWriteTiers()
