@@ -23,7 +23,11 @@ extensions:
 receivers:
   filelog/inferplane-audit:
     # /var/log/pods/<namespace>_<pod>_<uid>/<container>/<n>.log; the chart's
-    # container is named "inferplane".
+    # container is named "inferplane". This glob matches that container name
+    # in EVERY namespace, not just this release. To scope collection, replace
+    # the first * with <namespace>_<pod-prefix>* (using your actual names), e.g.
+    # /var/log/pods/production_inferplane-*_*/inferplane/*.log.
+    # The schema_version filter below is not a namespace or identity check.
     include: [/var/log/pods/*/inferplane/*.log]
     include_file_path: true # the container parser derives k8s.* attributes from the path
     start_at: beginning

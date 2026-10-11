@@ -40,8 +40,18 @@ func TestDefaultChartAuditsToStdoutWithoutLocalGrowth(t *testing.T) {
 				t.Fatal(err)
 			}
 		case "Deployment":
-			pod := object["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
-			resources = pod["containers"].([]any)[0].(map[string]any)["resources"].(map[string]any)
+			spec, _ := object["spec"].(map[string]any)
+			template, _ := spec["template"].(map[string]any)
+			pod, _ := template["spec"].(map[string]any)
+			containers, _ := pod["containers"].([]any)
+			if len(containers) == 0 {
+				t.Fatal("chart deployment has no spec.template.spec.containers")
+			}
+			container, _ := containers[0].(map[string]any)
+			resources, _ = container["resources"].(map[string]any)
+			if len(resources) == 0 {
+				t.Fatal("chart deployment's first container has missing, empty or invalid resources")
+			}
 		}
 	}
 	if cfg == nil || resources == nil {
