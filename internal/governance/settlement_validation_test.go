@@ -38,3 +38,19 @@ func TestInvalidSettlementCannotRefundQuotaOrTPM(t *testing.T) {
 		})
 	}
 }
+
+func TestNegativeEstimateHasDistinctDenialWithoutConsumingLimits(t *testing.T) {
+	l := limiter.NewMemory()
+	g := NewGovernor(map[string]TeamPolicy{"t": {RatePerMin: 1, TokensPerMinute: 100}}, l, budget.NewMemory(), nil)
+	s := Subject{Team: "t", KeyID: "k"}
+	kp := KeyPolicy{RatePerMin: 1, TokensPerMinute: 100}
+	d := g.PreCheck(s, kp, -1)
+	if d.Allowed || d.Admission != nil || string(d.Code) != "invalid_token_estimate" {
+		t.Fatalf("negative estimate misclassified: %+v", d)
+	}
+	d = g.PreCheck(s, kp, 100)
+	if !d.Allowed {
+		t.Fatalf("negative estimate consumed admission capacity: %+v", d)
+	}
+	defer d.Admission.Close()
+}

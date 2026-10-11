@@ -27,6 +27,9 @@ const (
 	// (ADR-030). Distinct from a budget denial — nothing was exceeded; the
 	// gateway simply cannot price the call.
 	DenyPricingMissing DenyReason = "pricing_missing"
+	// DenyInvalidTokenEstimate identifies a caller precondition failure,
+	// independently of whether any configured rate limit was exhausted.
+	DenyInvalidTokenEstimate DenyReason = "invalid_token_estimate"
 )
 
 // Ptr returns d as a plain string pointer.

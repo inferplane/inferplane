@@ -70,7 +70,11 @@ estimate. These are instance-local limits; shared Postgres and durable monetary
 authority retain their separate per-attempt reservations. Invalid usage is omitted
 from settled audit usage and span token attributes; completion and cost evidence
 remain, with `pricing_missing: true` when settlement rejects the usage. Valid
-partial TTL counts remain recorded. See ADR-039.
+partial TTL counts remain recorded. Uncertain usage debits only validated observed
+tokens to daily quota, while TPM retains the admission estimate as a minimum;
+no estimated daily-quota debit is fabricated. Negative admission estimates use
+the distinct `invalid_token_estimate` audit deny code before consuming any
+limits. See ADR-039.
 
 ### 4. Code Pointers
 

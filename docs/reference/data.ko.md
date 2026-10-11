@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 1d6001885d3c50432a73673fa770b4440e0bc78b582b58f73695b015384dd340
+translation_source_sha256: 977a18b7a703c670ac7f46d292523ce5ee5747415eb56ca72b7c3010fdb1c38b
 ---
 
 # 데이터 구현 {#data}
@@ -51,6 +51,9 @@ translation_source_sha256: 1d6001885d3c50432a73673fa770b4440e0bc78b582b58f73695b
 시도별 예약은 별도로 유지합니다. 잘못된 사용량은 감사 로그의 정산 사용량과 span 토큰
 속성에서 제외합니다. 완료·비용 기록은 유지하며, 정산이 사용량을 거부하면
 `pricing_missing: true`로 표시합니다. 유효한 부분 TTL 수량은 계속 기록합니다.
+불확실한 사용량은 검증된 관측 토큰만 일일 quota에 차감하고, TPM은 승인 시 추정치를
+최솟값으로 유지합니다. 추정치로 일일 quota 차감을 만들지 않습니다. 음수 승인 추정치는
+어떤 한도도 소비하기 전에 별도의 감사 거부 코드 `invalid_token_estimate`로 거부합니다.
 ADR-039를 참고하세요.
 
 ### 4. 코드 위치 {#4-code-pointers}

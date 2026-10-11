@@ -334,7 +334,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) (deci
 		}
 	}()
 	if estimateTokens < 0 {
-		return GovDecision{Status: 429, Reason: "invalid token estimate", Code: audit.DenyTeamTokenRateLimited}
+		return GovDecision{Status: 429, Reason: "invalid token estimate", Code: audit.DenyInvalidTokenEstimate}
 	}
 	reserve := func(key string, rate int64) bool {
 		finish, allowed := g.lim.ReserveRate(key, estimateTokens, rate, rate)
