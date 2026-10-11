@@ -794,6 +794,10 @@ func usageRef(u *schema.Usage) *audit.UsageRef {
 	if u == nil {
 		return nil
 	}
+	// Audit usage represents settled quantities, never malformed observations.
+	if _, err := pricing.FromUsage(u).TotalTokens(); err != nil {
+		return nil
+	}
 	cache := u.CacheWriteAccounting()
 	return &audit.UsageRef{
 		InputTokens:                deref(u.InputTokens),

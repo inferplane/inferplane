@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 9480cac790f1de483af7914ea86febac79d723dc52f3b64137dfddcccbcc48b5
+translation_source_sha256: 1d6001885d3c50432a73673fa770b4440e0bc78b582b58f73695b015384dd340
 ---
 
 # 데이터 구현 {#data}
@@ -48,7 +48,10 @@ translation_source_sha256: 9480cac790f1de483af7914ea86febac79d723dc52f3b64137dfd
 제한합니다. `PreCheck`가 반환한 승인 핸들의 `Close`를 지연 호출하고, `Settle`은 최초 TPM
 예약을 한 번만 정산합니다. 정산 대기 기록은 정리 작업에서 보존하며 사용량이 없거나
 잘못되면 추정 차감을 유지합니다. 인스턴스 로컬 한도이며, 공유 Postgres·영속 금전 권한의
-시도별 예약은 별도로 유지합니다. ADR-039를 참고하세요.
+시도별 예약은 별도로 유지합니다. 잘못된 사용량은 감사 로그의 정산 사용량과 span 토큰
+속성에서 제외합니다. 완료·비용 기록은 유지하며, 정산이 사용량을 거부하면
+`pricing_missing: true`로 표시합니다. 유효한 부분 TTL 수량은 계속 기록합니다.
+ADR-039를 참고하세요.
 
 ### 4. 코드 위치 {#4-code-pointers}
 

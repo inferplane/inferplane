@@ -72,10 +72,7 @@ func (a attempt) finish(status int, u *schema.Usage, body []byte, partial bool, 
 	span := trace.SpanFromContext(a.req.Context())
 	if u != nil {
 		pu := pricing.FromUsage(u)
-		usage = &audit.UsageRef{
-			InputTokens: pu.Input, OutputTokens: pu.Output, CacheReadInputTokens: pu.CacheRead,
-			CacheCreationInputTokens: u.CacheWriteAccounting().Total, CacheCreation5mInputTokens: pu.CacheWrite5m, CacheCreation1hInputTokens: pu.CacheWrite1h,
-		}
+		var input, output int64
 		if a.h.gov != nil {
 			amount, missing := a.h.gov.Settle(subject(a.principal), keyPolicy(a.principal), a.target.ProviderName, a.target.Upstream, pu, a.table, a.admission)
 			cost = &audit.CostRef{AmountUSDMicros: amount, PricingMissing: missing, PricingVersion: governance.PricingVersionOf(a.table)}
@@ -85,12 +82,17 @@ func (a attempt) finish(status int, u *schema.Usage, body []byte, partial bool, 
 			tracing.SetCost(span, amount, missing)
 		}
 		if _, err := pu.TotalTokens(); err == nil {
+			input, output = pu.Input, pu.Output
+			usage = &audit.UsageRef{
+				InputTokens: pu.Input, OutputTokens: pu.Output, CacheReadInputTokens: pu.CacheRead,
+				CacheCreationInputTokens: u.CacheWriteAccounting().Total, CacheCreation5mInputTokens: pu.CacheWrite5m, CacheCreation1hInputTokens: pu.CacheWrite1h,
+			}
+			tracing.SetUsageDetail(span, pu.CacheRead, pu.CacheWrite5m, pu.CacheWrite1h)
 			for kind, n := range map[string]int64{"input": pu.Input, "output": pu.Output, "cache_read": pu.CacheRead, "cache_write_5m": pu.CacheWrite5m, "cache_write_1h": pu.CacheWrite1h} {
 				a.h.metrics.ObserveTokenUsage(kind, a.target.Model, a.target.ProviderName, a.principal.Team, n)
 			}
 		}
-		tracing.SetGenAIResponse(span, a.target.Provider.Name(), a.target.Upstream, pu.Input, pu.Output)
-		tracing.SetUsageDetail(span, pu.CacheRead, pu.CacheWrite5m, pu.CacheWrite1h)
+		tracing.SetGenAIResponse(span, a.target.Provider.Name(), a.target.Upstream, input, output)
 	}
 	if partial {
 		tracing.SetPartial(span)

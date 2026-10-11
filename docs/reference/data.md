@@ -67,7 +67,10 @@ quota/spend saturates instead of wrapping. `PreCheck` returns an admission handl
 the caller defers `Close`, and `Settle` reconciles its original TPM reservations
 once. Pending buckets survive cleanup; missing or invalid usage retains the
 estimate. These are instance-local limits; shared Postgres and durable monetary
-authority retain their separate per-attempt reservations. See ADR-039.
+authority retain their separate per-attempt reservations. Invalid usage is omitted
+from settled audit usage and span token attributes; completion and cost evidence
+remain, with `pricing_missing: true` when settlement rejects the usage. Valid
+partial TTL counts remain recorded. See ADR-039.
 
 ### 4. Code Pointers
 
