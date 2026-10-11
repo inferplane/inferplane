@@ -111,7 +111,7 @@ Default and node-local profiles retain their separate limits (`docs/roadmap.md`)
 
 ## Tech Stack
 
-- **Language:** Go 1.25 (module `github.com/inferplane/inferplane`)
+- **Language:** Go 1.26.9+ (module `github.com/inferplane/inferplane`)
 - **Build:** single static binary, `CGO_ENABLED=0` (every dependency is pure-Go)
 - **Storage:** `modernc.org/sqlite` (cgo-free SQLite) for the key store; disk WAL for audit
 - **AWS:** `aws-sdk-go-v2` (`config` + `bedrockruntime`) for the Bedrock provider
