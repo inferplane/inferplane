@@ -7,6 +7,7 @@
 package limiter
 
 import (
+	"math"
 	"sync"
 	"time"
 )
@@ -22,6 +23,9 @@ type LimiterStore interface {
 	// AllowRate token-bucket: cost tokens against ratePerMin (refill) with the
 	// given burst. Returns false when the bucket lacks `cost` tokens.
 	AllowRate(key string, cost, ratePerMin, burst int64) bool
+	// ReserveRate charges and pins a bucket until finish is called. A nil
+	// actual retains the estimate; repeated/concurrent finishes are harmless.
+	ReserveRate(key string, cost, ratePerMin, burst int64) (finish func(actual *int64), allowed bool)
 	// CheckQuota optimistic: would used+estimate exceed limit in the window?
 	CheckQuota(key string, estimate, limit int64, window time.Duration) Decision
 	// DebitQuota records actual usage in the current window.
@@ -35,9 +39,9 @@ type LimiterStore interface {
 	// never writes back to the bucket (unlike AllowRate, which always
 	// refills/debits on every call).
 	RateUsed(key string, ratePerMin, burst int64) int64
-	// AdjustRate corrects an AllowRate charge after actual usage is known
-	// (post-response true-up, e.g. TPM billed on a coarse pre-request byte
-	// estimate but settled against real token counts). delta is added to the
+	// AdjustRate is a legacy balance correction without reservation ownership.
+	// Use ReserveRate for request settlement: unpinned buckets can be swept
+	// before a later adjustment. delta is added to the
 	// bucket: positive credits back an over-charge, negative debits an
 	// under-charge. The result is capped at burst on the high side but is
 	// deliberately NOT floored at zero on the low side — a large negative
@@ -49,8 +53,9 @@ type LimiterStore interface {
 }
 
 type bucket struct {
-	tokens float64
-	last   time.Time
+	tokens  float64
+	last    time.Time
+	pending int64 // unfinished TPM reservations must survive every sweep
 	// ratePerMin/burst are remembered from the last AllowRate so the sweep can
 	// project whether this bucket has refilled to capacity WITHOUT the caller's
 	// parameters in hand. They are the enforcement inputs for this key, stable
@@ -150,7 +155,7 @@ func (m *Memory) tick(t time.Time) {
 // Caller holds mu.
 func (m *Memory) sweepReclaimable(t time.Time) {
 	for k, b := range m.buckets {
-		if b.ratePerMin <= 0 {
+		if b.ratePerMin <= 0 || b.pending > 0 {
 			continue // never enforced; nothing to project
 		}
 		tokens := b.tokens + t.Sub(b.last).Seconds()*(float64(b.ratePerMin)/60.0)
@@ -166,17 +171,27 @@ func (m *Memory) sweepReclaimable(t time.Time) {
 }
 
 func (m *Memory) AllowRate(key string, cost, ratePerMin, burst int64) bool {
+	if cost < 0 {
+		return false
+	}
 	if ratePerMin <= 0 {
 		return true // unlimited
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	_, allowed := m.allowRate(key, cost, ratePerMin, burst)
+	return allowed
+}
+
+// allowRate charges under mu; ReserveRate pins under that same lock so a
+// concurrent sweep cannot slip between admission and reservation ownership.
+func (m *Memory) allowRate(key string, cost, ratePerMin, burst int64) (*bucket, bool) {
 	t := m.now()
 	m.tick(t)
 	b := m.buckets[key]
 	if b == nil {
 		if !m.admit(t) {
-			return false
+			return nil, false
 		}
 		b = &bucket{tokens: float64(burst), last: t}
 		m.buckets[key] = b
@@ -191,12 +206,48 @@ func (m *Memory) AllowRate(key string, cost, ratePerMin, burst int64) bool {
 	b.last = t
 	if b.tokens >= float64(cost) {
 		b.tokens -= float64(cost)
-		return true
+		return b, true
 	}
-	return false
+	return b, false
+}
+
+func (m *Memory) ReserveRate(key string, cost, ratePerMin, burst int64) (func(*int64), bool) {
+	if cost < 0 {
+		return nil, false
+	}
+	if ratePerMin <= 0 {
+		return func(*int64) {}, true
+	}
+	m.mu.Lock()
+	b, ok := m.allowRate(key, cost, ratePerMin, burst)
+	if !ok {
+		m.mu.Unlock()
+		return nil, false
+	}
+	b.pending++
+	m.mu.Unlock()
+	var once sync.Once
+	return func(actual *int64) {
+		once.Do(func() {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			b.pending--
+			if actual == nil || *actual < 0 {
+				return
+			}
+			// Both operands are nonnegative int64, so their difference fits.
+			b.tokens += float64(cost - *actual)
+			if b.tokens > float64(b.burst) {
+				b.tokens = float64(b.burst)
+			}
+		})
+	}, true
 }
 
 func (m *Memory) CheckQuota(key string, estimate, limit int64, window time.Duration) Decision {
+	if estimate < 0 {
+		return Block
+	}
 	if limit <= 0 {
 		return Allow
 	}
@@ -206,20 +257,27 @@ func (m *Memory) CheckQuota(key string, estimate, limit int64, window time.Durat
 	if q == nil {
 		return Block // at capacity with a real limit to enforce: fail closed
 	}
-	if q.used+estimate > limit {
+	if q.used > limit || estimate > limit-q.used {
 		return Block
 	}
 	return Allow
 }
 
 func (m *Memory) DebitQuota(key string, actual int64, window time.Duration) {
+	if actual < 0 {
+		return
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	q := m.curWindow(key, window)
 	if q == nil {
 		return // at capacity: nothing to record against
 	}
-	q.used += actual
+	if actual > math.MaxInt64-q.used {
+		q.used = math.MaxInt64
+	} else {
+		q.used += actual
+	}
 }
 
 // QuotaUsed reports tokens used in the current window (0 if none/elapsed).
@@ -261,17 +319,15 @@ func (m *Memory) RateUsed(key string, ratePerMin, burst int64) int64 {
 	// Round rather than truncate: the sub-token refill that accrues during
 	// the microseconds between a debit and this read would otherwise always
 	// bias the reported figure down by one (e.g. 199.9998 -> 199, not 200).
+	if used >= float64(math.MaxInt64) {
+		return math.MaxInt64
+	}
 	return int64(used + 0.5)
 }
 
-// AdjustRate applies a post-hoc correction directly to a bucket's token
-// count — no refill math, deliberately: the caller (Settle) runs moments
-// after the AllowRate call it is correcting, so treating this as a pure
-// balance adjustment rather than a second time-based refill keeps the two
-// operations from double-counting elapsed time. Re-caps at burst on the high
-// side, but — unlike AllowRate's refill cap — never floors at zero: a
-// bucket driven negative by a debit stays blocked until real refill time
-// repays it, which is the point (see the interface doc).
+// AdjustRate applies a legacy balance correction without changing the refill
+// timestamp. It cannot keep a bucket alive or deduplicate a settlement;
+// request accounting must use ReserveRate's finalizer instead.
 func (m *Memory) AdjustRate(key string, delta, burst int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

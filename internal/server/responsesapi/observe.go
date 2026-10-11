@@ -66,29 +66,29 @@ func (a attempt) requestRef() audit.RequestRef {
 }
 
 func (a attempt) finish(status int, u *schema.Usage, body []byte, partial bool, ttft float64) {
+	defer a.admission.Close()
 	var usage *audit.UsageRef
 	var cost *audit.CostRef
 	span := trace.SpanFromContext(a.req.Context())
 	if u != nil {
 		write5m, write1h := u.CacheWriteTiers()
-		pu := pricing.Usage{
-			Input: number(u.InputTokens), Output: number(u.OutputTokens), CacheRead: number(u.CacheReadInputTokens),
-			CacheWrite5m: write5m, CacheWrite1h: write1h,
-		}
+		pu := pricing.FromUsage(u)
 		usage = &audit.UsageRef{
 			InputTokens: pu.Input, OutputTokens: pu.Output, CacheReadInputTokens: pu.CacheRead,
-			CacheCreationInputTokens: write5m + write1h, CacheCreation5mInputTokens: write5m, CacheCreation1hInputTokens: write1h,
+			CacheCreationInputTokens: u.CacheWriteAccounting().Total, CacheCreation5mInputTokens: write5m, CacheCreation1hInputTokens: write1h,
 		}
 		if a.h.gov != nil {
-			amount, missing := a.h.gov.Settle(subject(a.principal), keyPolicy(a.principal), a.target.ProviderName, a.target.Upstream, pu, a.table, a.estimate)
+			amount, missing := a.h.gov.Settle(subject(a.principal), keyPolicy(a.principal), a.target.ProviderName, a.target.Upstream, pu, a.table, a.admission)
 			cost = &audit.CostRef{AmountUSDMicros: amount, PricingMissing: missing, PricingVersion: governance.PricingVersionOf(a.table)}
 			if a.h.usage != nil {
 				a.h.usage.Record(a.principal.Team, requestpolicy.TelemetrySubject(a.principal), a.target.Upstream, pu, amount)
 			}
 			tracing.SetCost(span, amount, missing)
 		}
-		for kind, n := range map[string]int64{"input": pu.Input, "output": pu.Output, "cache_read": pu.CacheRead, "cache_write_5m": write5m, "cache_write_1h": write1h} {
-			a.h.metrics.ObserveTokenUsage(kind, a.target.Model, a.target.ProviderName, a.principal.Team, n)
+		if _, err := pu.TotalTokens(); err == nil {
+			for kind, n := range map[string]int64{"input": pu.Input, "output": pu.Output, "cache_read": pu.CacheRead, "cache_write_5m": write5m, "cache_write_1h": write1h} {
+				a.h.metrics.ObserveTokenUsage(kind, a.target.Model, a.target.ProviderName, a.principal.Team, n)
+			}
 		}
 		tracing.SetGenAIResponse(span, a.target.Provider.Name(), a.target.Upstream, pu.Input, pu.Output)
 		tracing.SetUsageDetail(span, pu.CacheRead, write5m, write1h)

@@ -42,7 +42,7 @@ func TestGovernorQuotaBlocks(t *testing.T) {
 
 func TestGovernorSettleComputesCost(t *testing.T) {
 	g := testGovernor()
-	cost, missing := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), 0)
+	cost, missing := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), nil)
 	// 1000*1 + 500*1 = 1500 µUSD
 	if missing || cost != 1500 {
 		t.Fatalf("settle cost=%d missing=%v", cost, missing)
@@ -58,12 +58,12 @@ func TestGovernorSettleRecordsMetrics(t *testing.T) {
 	})
 	g := NewGovernor(teams, limiter.NewMemory(), budget.NewMemory(), m)
 
-	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, tbl, 0) // 1500 µUSD → 0.0015 USD
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, tbl, nil) // 1500 µUSD → 0.0015 USD
 	if got, err := testutil.GatherAndCount(m.Registry(), "inferplane_budget_spend_usd_total"); err != nil || got == 0 {
 		t.Fatalf("budget_spend not recorded (count=%d err=%v)", got, err)
 	}
 
-	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "ghost", pricing.Usage{Input: 10}, tbl, 0) // no rate → pricing_miss
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "ghost", pricing.Usage{Input: 10}, tbl, nil) // no rate → pricing_miss
 	if got, err := testutil.GatherAndCount(m.Registry(), "inferplane_pricing_miss_total"); err != nil || got == 0 {
 		t.Fatalf("pricing_miss not recorded for unknown (provider,model) (count=%d err=%v)", got, err)
 	}
@@ -98,11 +98,13 @@ func TestGovernorSettleTruesUpTPMCredit(t *testing.T) {
 	teams := map[string]TeamPolicy{"t": {TokensPerMinute: 1000}}
 	g := NewGovernor(teams, limiter.NewMemory(), budget.NewMemory(), nil)
 	// PreCheck charges the 900-token estimate (byte/4 of a huge cached prompt).
-	if d := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 900); !d.Allowed {
+	admitted := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 900)
+	defer admitted.Admission.Close()
+	if d := admitted; !d.Allowed {
 		t.Fatalf("first: %+v", d)
 	}
 	// Settle learns the real usage was far smaller (mostly a cache hit).
-	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 10, CacheRead: 40}, testTable(), 900)
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 10, CacheRead: 40}, testTable(), admitted.Admission)
 	// Without the true-up, the bucket would still show ~900/1000 consumed and
 	// a second similarly-estimated request would block. With it, the credited
 	// bucket has room again.
@@ -118,11 +120,13 @@ func TestGovernorSettleTruesUpTPMCredit(t *testing.T) {
 func TestGovernorSettleTruesUpTPMDebit(t *testing.T) {
 	teams := map[string]TeamPolicy{"t": {TokensPerMinute: 1000}}
 	g := NewGovernor(teams, limiter.NewMemory(), budget.NewMemory(), nil)
-	if d := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 100); !d.Allowed {
+	admitted := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 100)
+	defer admitted.Admission.Close()
+	if d := admitted; !d.Allowed {
 		t.Fatalf("first: %+v", d)
 	}
 	// Actual usage turns out to be much larger than the estimate.
-	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 900, Output: 100}, testTable(), 100)
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 900, Output: 100}, testTable(), admitted.Admission)
 	// The extra 900 tokens must have been debited: 100 (PreCheck) + 900
 	// (true-up) = 1000, exhausting the 1000-token burst.
 	d := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 1)
@@ -140,7 +144,7 @@ func TestGovernorSettleDebitsQuotaByTotalTokensIncludingCache(t *testing.T) {
 	g := NewGovernor(teams, limiter.NewMemory(), budget.NewMemory(), nil)
 	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{
 		Input: 100, Output: 50, CacheRead: 10_000_000, CacheWrite5m: 200, CacheWrite1h: 300,
-	}, testTable(), 0)
+	}, testTable(), nil)
 	got := g.lim.QuotaUsed("quota:t", 24*time.Hour)
 	want := int64(100 + 50 + 10_000_000 + 200 + 300)
 	if got != want {
@@ -172,13 +176,13 @@ func TestSettleUsesPassedTable(t *testing.T) {
 	g := NewGovernor(map[string]TeamPolicy{"t": {}}, limiter.NewMemory(), budget.NewMemory(), nil)
 	cheap := pricing.New(pricing.OnMissingAllow, map[pricing.Key]pricing.Rate{{Provider: "p", Model: "m"}: {InputPerMTok: 1_000_000}})
 	dear := pricing.New(pricing.OnMissingAllow, map[pricing.Key]pricing.Rate{{Provider: "p", Model: "m"}: {InputPerMTok: 5_000_000}})
-	c1, _ := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000}, cheap, 0)
-	c2, _ := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000}, dear, 0)
+	c1, _ := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000}, cheap, nil)
+	c2, _ := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000}, dear, nil)
 	if c1 != 1000 || c2 != 5000 {
 		t.Fatalf("Settle must bill with the PASSED table: c1=%d c2=%d", c1, c2)
 	}
 	// nil table → cost 0, pricing missing (never panics).
-	if c, miss := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000}, nil, 0); c != 0 || !miss {
+	if c, miss := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000}, nil, nil); c != 0 || !miss {
 		t.Fatalf("nil table: cost=%d missing=%v, want 0,true", c, miss)
 	}
 }
@@ -230,11 +234,11 @@ func TestGovernorKeyBudgetBlocksAndDebitsIndependentlyOfTeam(t *testing.T) {
 	g := NewGovernor(nil, limiter.NewMemory(), budget.NewMemory(), nil)
 	kp := KeyPolicy{BudgetMicrosPerMonth: 1_000_000}
 	tbl := testTable()
-	g.Settle(Subject{Team: "t", KeyID: "k1"}, kp, "p", "m", pricing.Usage{Input: 900_000}, tbl, 0) // 900k µUSD spent
+	g.Settle(Subject{Team: "t", KeyID: "k1"}, kp, "p", "m", pricing.Usage{Input: 900_000}, tbl, nil) // 900k µUSD spent
 	if d := g.PreCheck(Subject{Team: "t", KeyID: "k1"}, kp, 0); !d.Allowed {
 		t.Fatalf("900k < 1M cap should still allow: %+v", d)
 	}
-	g.Settle(Subject{Team: "t", KeyID: "k1"}, kp, "p", "m", pricing.Usage{Input: 200_000}, tbl, 0) // 1.1M > cap
+	g.Settle(Subject{Team: "t", KeyID: "k1"}, kp, "p", "m", pricing.Usage{Input: 200_000}, tbl, nil) // 1.1M > cap
 	if d := g.PreCheck(Subject{Team: "t", KeyID: "k1"}, kp, 0); d.Allowed {
 		t.Fatal("key budget counter did not accumulate — should block over cap")
 	}
@@ -256,7 +260,7 @@ func TestGovernorKeyAndTeamPoliciesBothApply(t *testing.T) {
 	g := NewGovernor(teams, limiter.NewMemory(), budget.NewMemory(), nil)
 	kp := KeyPolicy{BudgetMicrosPerMonth: 100_000}
 	tbl := testTable()
-	g.Settle(Subject{Team: "t", KeyID: "k1"}, kp, "p", "m", pricing.Usage{Input: 150_000}, tbl, 0) // key: 150k > 100k cap; team: nowhere near its 10M cap
+	g.Settle(Subject{Team: "t", KeyID: "k1"}, kp, "p", "m", pricing.Usage{Input: 150_000}, tbl, nil) // key: 150k > 100k cap; team: nowhere near its 10M cap
 	if d := g.PreCheck(Subject{Team: "t", KeyID: "k1"}, kp, 0); d.Allowed {
 		t.Fatal("key's tighter budget must block even though the team policy alone would allow")
 	}
@@ -268,13 +272,13 @@ func TestGovernorCountersIndependentOfTable(t *testing.T) {
 	teams := map[string]TeamPolicy{"t": {BudgetMicrosPerMonth: 1_000_000, BudgetExceeded: "block"}}
 	g := NewGovernor(teams, limiter.NewMemory(), budget.NewMemory(), nil)
 	tbl := pricing.New(pricing.OnMissingAllow, map[pricing.Key]pricing.Rate{{Provider: "p", Model: "m"}: {InputPerMTok: 1_000_000}})
-	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, 0) // 400k µUSD
-	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, 0) // +400k = 800k
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, nil) // 400k µUSD
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, nil) // +400k = 800k
 	// 800k < 1M cap → still allowed (counter accumulated, not yet over).
 	if d := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0); !d.Allowed {
 		t.Fatalf("800k < 1M cap should still allow: %+v", d)
 	}
-	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, 0) // 1.2M > cap
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, nil) // 1.2M > cap
 	d := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 0)
 	if d.Allowed {
 		t.Fatal("budget counter did not accumulate across Settle calls (table-independent state expected)")
@@ -298,7 +302,7 @@ func TestGovernorSettleBudgetNotify(t *testing.T) {
 		gotTeam, gotSpent, gotLimit = team, spent, limit
 	})
 	tbl := pricing.New(pricing.OnMissingAllow, map[pricing.Key]pricing.Rate{{Provider: "p", Model: "m"}: {InputPerMTok: 1_000_000}})
-	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, 0) // 400k µUSD
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, nil) // 400k µUSD
 
 	if calls != 1 {
 		t.Fatalf("expected exactly one notify call, got %d", calls)
@@ -314,7 +318,7 @@ func TestGovernorSettleBudgetNotify_UnbudgetedTeamSkipped(t *testing.T) {
 	calls := 0
 	g.SetBudgetNotify(func(string, int64, int64) { calls++ })
 	tbl := testTable()
-	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, 0)
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, nil)
 	if calls != 0 {
 		t.Fatalf("unbudgeted team must not invoke the budget-notify hook, got %d calls", calls)
 	}
@@ -330,7 +334,7 @@ func TestGovernorSettleBudgetNotify_KeyBudgetExcluded(t *testing.T) {
 	g.SetBudgetNotify(func(string, int64, int64) { calls++ })
 	kp := KeyPolicy{BudgetMicrosPerMonth: 1_000_000}
 	tbl := testTable()
-	g.Settle(Subject{Team: "t", KeyID: "k1"}, kp, "p", "m", pricing.Usage{Input: 400_000}, tbl, 0)
+	g.Settle(Subject{Team: "t", KeyID: "k1"}, kp, "p", "m", pricing.Usage{Input: 400_000}, tbl, nil)
 	if calls != 0 {
 		t.Fatalf("key-budget debit must not invoke the team budget-notify hook, got %d calls", calls)
 	}
@@ -347,7 +351,7 @@ func TestGovernorSettleKeyBudgetNotify(t *testing.T) {
 	})
 	kp := KeyPolicy{BudgetMicrosPerMonth: 1_000_000}
 	tbl := testTable()
-	g.Settle(Subject{Team: "t", KeyID: "k1"}, kp, "p", "m", pricing.Usage{Input: 400_000}, tbl, 0) // 400k µUSD
+	g.Settle(Subject{Team: "t", KeyID: "k1"}, kp, "p", "m", pricing.Usage{Input: 400_000}, tbl, nil) // 400k µUSD
 
 	if calls != 1 {
 		t.Fatalf("expected exactly one key-notify call, got %d", calls)
@@ -362,7 +366,7 @@ func TestGovernorSettleKeyBudgetNotify_UnbudgetedKeySkipped(t *testing.T) {
 	calls := 0
 	g.SetKeyBudgetNotify(func(string, string, int64, int64) { calls++ })
 	tbl := testTable()
-	g.Settle(Subject{Team: "t", KeyID: "k1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, 0) // no key budget configured
+	g.Settle(Subject{Team: "t", KeyID: "k1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, nil) // no key budget configured
 	if calls != 0 {
 		t.Fatalf("unbudgeted key must not invoke the key-notify hook, got %d calls", calls)
 	}
@@ -386,7 +390,7 @@ func TestGovernorSettleBothBudgetHooksFireIndependently(t *testing.T) {
 	})
 	kp := KeyPolicy{BudgetMicrosPerMonth: 1_000_000}
 	tbl := testTable()
-	g.Settle(Subject{Team: "t", KeyID: "k1"}, kp, "p", "m", pricing.Usage{Input: 400_000}, tbl, 0) // 400k µUSD both dimensions
+	g.Settle(Subject{Team: "t", KeyID: "k1"}, kp, "p", "m", pricing.Usage{Input: 400_000}, tbl, nil) // 400k µUSD both dimensions
 
 	if teamCalls != 1 || keyCalls != 1 {
 		t.Fatalf("expected exactly one call to each hook, got team=%d key=%d", teamCalls, keyCalls)
@@ -401,7 +405,7 @@ func TestGovernorSettleSetsBudgetUtilizationGauge(t *testing.T) {
 	teams := map[string]TeamPolicy{"t": {BudgetMicrosPerMonth: 1_000_000, BudgetExceeded: "block"}}
 	g := NewGovernor(teams, limiter.NewMemory(), budget.NewMemory(), m)
 	tbl := testTable()
-	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, 0)
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 400_000}, tbl, nil)
 	if got, err := testutil.GatherAndCount(m.Registry(), "inferplane_budget_utilization_ratio"); err != nil || got == 0 {
 		t.Fatalf("budget_utilization_ratio not recorded (count=%d err=%v)", got, err)
 	}
@@ -422,7 +426,7 @@ func TestGovernorUsageOf(t *testing.T) {
 	// Settle debits "quota:"+team whenever the team has a daily token limit).
 	// The extra explicit DebitQuota below simulates a second request that
 	// only consumed quota (no billable cost), so team quota ends at 1500+2000.
-	g.Settle(Subject{Team: "t", KeyID: "ik1"}, kp, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), 0) // 1500 µUSD both team+key
+	g.Settle(Subject{Team: "t", KeyID: "ik1"}, kp, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), nil) // 1500 µUSD both team+key
 	g.lim.DebitQuota("quota:t", 2000, 24*time.Hour)
 	// F3: the key's per-minute token bucket (enforced in PreCheck) must also
 	// surface here — debit 300 of its 1000 burst via a real PreCheck call.

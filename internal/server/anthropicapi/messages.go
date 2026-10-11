@@ -327,6 +327,8 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			writeErr(w, dec.Status, govErrType(dec.Status), dec.Reason)
 			return
 		}
+		req = requestpolicy.WithAdmission(req, dec.Admission)
+		defer dec.Admission.Close()
 	}
 	// request_started: the request passed auth + allow-list + governance and
 	// resolved a target (the first in the priority chain).
@@ -482,7 +484,7 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	var cost *audit.CostRef
 	if resp.Parsed != nil {
 		usage = usageRef(resp.Parsed.Usage)
-		cost = h.settle(p, providerName, model, upstream, resp.Parsed.Usage, table, estimateTokens(pr.RawBody))
+		cost = h.settle(p, providerName, model, upstream, resp.Parsed.Usage, table, requestpolicy.AdmissionFrom(req))
 		requestpolicy.SettleBudget(req, cost, resp.Parsed.Usage, resp.StatusCode/100 == 2)
 		h.observeTokens(model, providerName, p.Team, resp.Parsed.Usage)
 	}
@@ -571,7 +573,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 			// cost — bill them (ADR-030). Before this, a stream that broke
 			// mid-flight skipped settle() entirely and everything already
 			// streamed was free, with no pricing_missing flag to show it.
-			partialCost := h.settle(p, providerName, model, upstream, lastUsage, table, estimateTokens(pr.RawBody))
+			partialCost := h.settle(p, providerName, model, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 			requestpolicy.SettleBudget(req, partialCost, lastUsage, false)
 			// …and count them, on the same usage settle() just billed. Metering
 			// only the clean path left gen_ai_client_token_usage_total below the
@@ -606,7 +608,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 			usage = usageRef(lastUsage)
 		}
 	}
-	cost := h.settle(p, providerName, model, upstream, lastUsage, table, estimateTokens(pr.RawBody))
+	cost := h.settle(p, providerName, model, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 	requestpolicy.SettleBudget(req, cost, lastUsage, streamCompleted && !streamFailed)
 	if streamCompleted && !streamFailed && lastUsage != nil {
 		requestpolicy.RecordSuccess(req)
@@ -635,19 +637,12 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 // the two tiers are resolved separately via schema.Usage.CacheWriteTiers rather
 // than collapsed into the cheaper one (ADR-030 — the collapse under-billed 1h
 // writes by ~40%).
-func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table, estimatedTokens int64) *audit.CostRef {
+func (h *MessagesHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table, admission *governance.Admission) *audit.CostRef {
 	if h.gov == nil || u == nil {
 		return nil
 	}
-	write5m, write1h := u.CacheWriteTiers()
-	pu := pricing.Usage{
-		Input:        deref(u.InputTokens),
-		Output:       deref(u.OutputTokens),
-		CacheRead:    deref(u.CacheReadInputTokens),
-		CacheWrite5m: write5m,
-		CacheWrite1h: write1h,
-	}
-	cost, missing := h.gov.Settle(subjectOf(p), keyPolicyOf(p), providerName, upstream, pu, table, estimatedTokens)
+	pu := pricing.FromUsage(u)
+	cost, missing := h.gov.Settle(subjectOf(p), keyPolicyOf(p), providerName, upstream, pu, table, admission)
 	if h.usage != nil {
 		// Attribute to the UPSTREAM model — the name pricing billed.
 		h.usage.Record(p.Team, requestpolicy.TelemetrySubject(p), upstream, pu, cost)
@@ -683,6 +678,9 @@ func keyPolicyOf(p keystore.Principal) governance.KeyPolicy {
 // arg is the CONFIG provider name (pricing/metrics key), matching the request
 // metric labels. No-op when usage is nil or metrics is nil.
 func (h *MessagesHandler) observeTokens(model, provider, team string, u *schema.Usage) {
+	if _, err := pricing.FromUsage(u).TotalTokens(); err != nil {
+		return
+	}
 	if u == nil {
 		return
 	}
@@ -852,14 +850,14 @@ func usageRef(u *schema.Usage) *audit.UsageRef {
 	if u == nil {
 		return nil
 	}
-	write5m, write1h := u.CacheWriteTiers()
+	cache := u.CacheWriteAccounting()
 	return &audit.UsageRef{
 		InputTokens:                deref(u.InputTokens),
 		OutputTokens:               deref(u.OutputTokens),
 		CacheReadInputTokens:       deref(u.CacheReadInputTokens),
-		CacheCreationInputTokens:   write5m + write1h,
-		CacheCreation5mInputTokens: write5m,
-		CacheCreation1hInputTokens: write1h,
+		CacheCreationInputTokens:   cache.Total,
+		CacheCreation5mInputTokens: cache.FiveMinutes,
+		CacheCreation1hInputTokens: cache.OneHour,
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/inferplane/inferplane/internal/governance"
 	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/pricing"
 	"github.com/inferplane/inferplane/internal/responses"
@@ -23,7 +24,7 @@ type attempt struct {
 	proxy     *providers.ProxyRequest
 	table     *pricing.Table
 	started   time.Time
-	estimate  int64
+	admission *governance.Admission
 	inputBody []byte // sanitized client wire; proxy.RawBody may be translated
 }
 

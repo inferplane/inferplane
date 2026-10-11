@@ -72,8 +72,18 @@ double-bill). All three ingress handlers now fold both `ev.Chunk.Message.Usage`
 
 ### 2. Resolve cache-write TTL tiers in one place
 
+**Follow-up (2026-10-11):** `CacheWriteAccounting` separates known total quantity
+from known TTL breakdown. A partial split must not replace a larger flat total:
+total 100 plus reported 5m 40 still counts 100 tokens for quota and pricing. Known 1h tokens retain that price; the unclassified remainder follows
+the legacy 5m estimate with `TTLKnown: false`. Flat and split are never added.
+Negative, overflowing or contradictory nonzero complete splits are invalid and
+cannot mutate accounting counters. The legacy all-zero split fallback remains.
+Unknown TTL fields cannot prove a monetary authority refund. Wire observations
+and historical audit bytes are preserved. See ADR-039's lifecycle follow-up for
+checked totals and reservation ownership.
+
 New `schema.Usage.CacheWriteTiers()` returns `(write5m, write1h)`. The TTL split
-is authoritative when present; the flat `cache_creation_input_tokens` is a
+is authoritative when complete and consistent; the flat `cache_creation_input_tokens` is a
 fallback attributed to the cheaper 5m tier. **Never summed** — a provider
 sending both would otherwise double-count every cache write.
 

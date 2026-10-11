@@ -65,6 +65,13 @@ OpenAI 스트림은 Anthropic의 시작·끝·블록 닫힘이 없어 ReadChatSS
 
 캐시 사용량이 있는 모든 경로는 티어별 정산입니다. Anthropic·Invoke는 message_start와 delta를 MergeUsage로 합치고, Converse는 CacheReadInputTokens·CacheDetails를 정규 분리에 매핑합니다. 5분·1시간 쓰기를 끝까지 별도 가격으로 처리합니다. GPT-5.6 계열의 Converse inputTokens는 2026-08-29~31 실측에서 캐시를 포함해 해당 허용 목록에만 읽기·쓰기를 빼고 0으로 제한합니다. 그렇지 않으면 컨텍스트·청구를 이중 계산합니다. 벤더 전체가 아닌 계열별 예외입니다. GPT-6 Astra는 2026-09-09 실측에서 input=2·cacheWrite=4008처럼 이미 분리해 보고하므로 목록에 넣으면 실제 입력을 0으로 만드는 오류가 됩니다.
 
+캐시 쓰기 TTL이 일부만 보고돼도 평탄한 총량을 보존합니다. 총량 100과 5m 수량 40만 있으면
+quota와 가격 계산에 100을 반영합니다. 확인된 1h 수량은 해당 요금을 유지하고 나머지는
+기존 5m 요금으로 추정합니다. `CacheWriteAccounting`은 수량과 TTL의 확인 여부를 구분하며,
+미확인 TTL은 금전 예약 반환의 근거가 아닙니다. 음수·오버플로·0이 아닌 완전한 분해와
+총량의 불일치는 카운터 변경 전에 거부합니다. 평탄한 값과 분해 값을 더하지 않으며 원문은
+변경하지 않습니다.
+
 ### 5. 모델별 Converse·Mantle 추론 인수 처리 {#5-per-model-conversemantle-inference-param-strip-rules}
 
 일부 Bedrock 모델은 CLI가 보내는 temperature·stop_sequences 등을 값과 무관하게 거부합니다. 허용 목록은 2026-08-28 등의 명시된 리전 실측을 근거로 하며 목록에 없는 모델은 모든 인수를 유지합니다. Anthropic은 InvokeModel로 가므로 이 목록에서 제외합니다.

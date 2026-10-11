@@ -121,7 +121,7 @@ func TestSettleSurfacesBudgetStoreRejections(t *testing.T) {
 	store := rejectingStore{blockingStore: blockingStore{resets: map[string]time.Time{}}, rejections: 5}
 	g := NewGovernor(map[string]TeamPolicy{"t": {}}, limiter.NewMemory(), store, m)
 
-	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "model", pricing.Usage{Input: 1}, testTable(), 0)
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "model", pricing.Usage{Input: 1}, testTable(), nil)
 
 	mfs, err := m.Registry().Gather()
 	if err != nil {
@@ -151,7 +151,7 @@ func TestSettleSurfacesBudgetStoreRejections(t *testing.T) {
 func TestSettleToleratesBudgetStoreWithoutRejectionsMethod(t *testing.T) {
 	m := metrics.New()
 	g := NewGovernor(map[string]TeamPolicy{"t": {}}, limiter.NewMemory(), budget.NewMemory(), m)
-	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "model", pricing.Usage{Input: 1}, testTable(), 0)
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "model", pricing.Usage{Input: 1}, testTable(), nil)
 }
 
 // capacityBlockingStore always reports BlockCapacity — the budget store's
@@ -347,7 +347,7 @@ func TestSettleDebitsBothBudgetWindows(t *testing.T) {
 	}, limiter.NewMemory(), budget.NewMemory(), nil)
 	g.SetBudgetTimezone(loc)
 
-	cost, missing := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), 0)
+	cost, missing := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), nil)
 	if missing || cost != 1500 {
 		t.Fatalf("settle cost=%d missing=%v, want 1500 µUSD priced", cost, missing)
 	}
@@ -382,7 +382,7 @@ func TestSettleDailyDebitDoesNotTouchMetricsOrAlerts(t *testing.T) {
 	calls := 0
 	g.SetBudgetNotify(func(team string, spentMicros, limitMicros int64) { calls++ })
 
-	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), 0)
+	g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), nil)
 	if calls != 0 {
 		t.Fatalf("budget-alert hook fired %d times for a daily-only debit, want 0", calls)
 	}

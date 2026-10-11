@@ -276,6 +276,8 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			writeErr(w, dec.Status, dec.Reason)
 			return
 		}
+		req = requestpolicy.WithAdmission(req, dec.Admission)
+		defer dec.Admission.Close()
 	}
 
 	h.audit(req.Context(), p, model, chain[0].Upstream, nil, piiMasked, traceID)
@@ -404,7 +406,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 			}
 		}
 		usage = usageRef(resp.Parsed.Usage)
-		cost = h.settle(p, providerName, model, upstream, resp.Parsed.Usage, table, estimateTokens(pr.RawBody))
+		cost = h.settle(p, providerName, model, upstream, resp.Parsed.Usage, table, requestpolicy.AdmissionFrom(req))
 		requestpolicy.SettleBudget(req, cost, resp.Parsed.Usage, resp.StatusCode/100 == 2)
 		h.observeTokens(model, providerName, p.Team, resp.Parsed.Usage)
 	}
@@ -480,7 +482,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		// cost — bill them (ADR-030). Before this, a stream that broke
 		// mid-flight skipped settle() entirely and everything already
 		// streamed was free, with no pricing_missing flag to show it.
-		partialCost := h.settle(p, providerName, model, upstream, lastUsage, table, estimateTokens(pr.RawBody))
+		partialCost := h.settle(p, providerName, model, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 		requestpolicy.SettleBudget(req, partialCost, lastUsage, false)
 		// …and count them, on the same usage settle() just billed (see
 		// anthropicapi's twin: metering only the clean path left the token
@@ -526,7 +528,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		}
 	}
 
-	cost := h.settle(p, providerName, model, upstream, lastUsage, table, estimateTokens(pr.RawBody))
+	cost := h.settle(p, providerName, model, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 	requestpolicy.SettleBudget(req, cost, lastUsage, streamCompleted && !streamFailed)
 	if streamCompleted && !streamFailed && lastUsage != nil {
 		requestpolicy.RecordSuccess(req)
@@ -546,19 +548,12 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 // settle runs the Governor's post-call settlement. Cache writes are TTL-tiered
 // via schema.Usage.CacheWriteTiers (ADR-030) — 1h writes cost 2x the input rate
 // against 5m's 1.25x, so collapsing them under-bills.
-func (h *InvokeHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table, estimatedTokens int64) *audit.CostRef {
+func (h *InvokeHandler) settle(p keystore.Principal, providerName, model, upstream string, u *schema.Usage, table *pricing.Table, admission *governance.Admission) *audit.CostRef {
 	if h.gov == nil || u == nil {
 		return nil
 	}
-	write5m, write1h := u.CacheWriteTiers()
-	pu := pricing.Usage{
-		Input:        deref(u.InputTokens),
-		Output:       deref(u.OutputTokens),
-		CacheRead:    deref(u.CacheReadInputTokens),
-		CacheWrite5m: write5m,
-		CacheWrite1h: write1h,
-	}
-	cost, missing := h.gov.Settle(subjectOf(p), keyPolicyOf(p), providerName, upstream, pu, table, estimatedTokens)
+	pu := pricing.FromUsage(u)
+	cost, missing := h.gov.Settle(subjectOf(p), keyPolicyOf(p), providerName, upstream, pu, table, admission)
 	if h.usage != nil {
 		// Attribute to the UPSTREAM model — the name pricing billed.
 		h.usage.Record(p.Team, requestpolicy.TelemetrySubject(p), upstream, pu, cost)
@@ -599,6 +594,9 @@ func estimateTokens(raw []byte) int64 {
 // observeTokens mirrors settle()'s mapping, including the cache-write TTL split
 // (ADR-030), so the metrics and the billed amount can't disagree.
 func (h *InvokeHandler) observeTokens(model, provider, team string, u *schema.Usage) {
+	if _, err := pricing.FromUsage(u).TotalTokens(); err != nil {
+		return
+	}
 	if u == nil {
 		return
 	}
@@ -749,14 +747,14 @@ func usageRef(u *schema.Usage) *audit.UsageRef {
 	if u == nil {
 		return nil
 	}
-	write5m, write1h := u.CacheWriteTiers()
+	cache := u.CacheWriteAccounting()
 	return &audit.UsageRef{
 		InputTokens:                deref(u.InputTokens),
 		OutputTokens:               deref(u.OutputTokens),
 		CacheReadInputTokens:       deref(u.CacheReadInputTokens),
-		CacheCreationInputTokens:   write5m + write1h,
-		CacheCreation5mInputTokens: write5m,
-		CacheCreation1hInputTokens: write1h,
+		CacheCreationInputTokens:   cache.Total,
+		CacheCreation5mInputTokens: cache.FiveMinutes,
+		CacheCreation1hInputTokens: cache.OneHour,
 	}
 }
 

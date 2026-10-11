@@ -109,7 +109,7 @@ func TestTeamLookup_settleDebitsSameCounterKeyPreCheckReads(t *testing.T) {
 	g.SetTeamLookup(func(team string) (TeamPolicy, bool) {
 		return TeamPolicy{BudgetMicrosPerMonth: 1000, BudgetExceeded: "block"}, true
 	})
-	cost, missing := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), 0)
+	cost, missing := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 500}, testTable(), nil)
 	if missing || cost != 1500 {
 		t.Fatalf("settle cost=%d missing=%v, want 1500/false", cost, missing)
 	}

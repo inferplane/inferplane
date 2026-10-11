@@ -61,7 +61,16 @@ reservation journal for node-local fleets. Postgres also backs `bodystore`,
   row) — but a DB record, once it exists, wins wholesale over that config
   policy, same ADR-016 precedence as every other team field.
 
+Local accounting validates each token class and the total before changing quota,
+TPM or money counters. Negative debits cannot return capacity, and accumulated
+quota/spend saturates instead of wrapping. `PreCheck` returns an admission handle;
+the caller defers `Close`, and `Settle` reconciles its original TPM reservations
+once. Pending buckets survive cleanup; missing or invalid usage retains the
+estimate. These are instance-local limits; shared Postgres and durable monetary
+authority retain their separate per-attempt reservations. See ADR-039.
+
 ### 4. Code Pointers
+
 - `internal/keystore/sqlite.go` — schema + SHA-256 lookup
 - `internal/audit/writer.go` — single-writer goroutine, pending-based WAL truncate
 - `internal/audit/verify.go` — `audit verify` chain check
