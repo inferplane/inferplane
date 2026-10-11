@@ -37,6 +37,9 @@ func (c *Collector) WindowStart() time.Time {
 // RESOLVED model — the name pricing billed — so spend is attributed to what
 // was actually served, never a requested alias.
 func (c *Collector) Record(team, user, model string, u pricing.Usage, costMicros int64) {
+	if _, err := u.TotalTokens(); err != nil || costMicros < 0 {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	key := [3]string{team, user, model}
@@ -45,12 +48,12 @@ func (c *Collector) Record(team, user, model string, u pricing.Usage, costMicros
 		e = &UsageEntry{Team: team, User: user, Model: model}
 		c.buckets[key] = e
 	}
-	e.SpentMicroUSD += costMicros
-	e.InputTokens += u.Input
-	e.OutputTokens += u.Output
-	e.CacheReadTokens += u.CacheRead
-	e.CacheWrite5mTokens += u.CacheWrite5m
-	e.CacheWrite1hTokens += u.CacheWrite1h
+	e.SpentMicroUSD = satAdd(e.SpentMicroUSD, costMicros)
+	e.InputTokens = satAdd(e.InputTokens, u.Input)
+	e.OutputTokens = satAdd(e.OutputTokens, u.Output)
+	e.CacheReadTokens = satAdd(e.CacheReadTokens, u.CacheRead)
+	e.CacheWrite5mTokens = satAdd(e.CacheWrite5mTokens, u.CacheWrite5m)
+	e.CacheWrite1hTokens = satAdd(e.CacheWrite1hTokens, u.CacheWrite1h)
 }
 
 // Drain closes the current window at now and opens the next one starting

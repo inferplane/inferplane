@@ -108,7 +108,16 @@ three counts disjoint (probed live 2026-09-09: `inputTokens: 2` next to
 `cacheWriteInputTokens: 4008`, then `cacheReadInputTokens: 4008` on the re-send) and
 is deliberately NOT listed — adding it would clamp its real input to 0.
 
+Partial cache-write TTL splits preserve a reported flat total. For example,
+100 total writes with only 40 reported as 5m still counts 100 for quota and
+pricing. Known 1h writes retain their rate; the remainder uses the legacy 5m
+estimate. `CacheWriteAccounting` keeps quantity and TTL certainty separate;
+unknown TTLs cannot prove a monetary authority refund. Negative, overflowing
+or contradictory nonzero complete splits are invalid before counter updates.
+Flat and split counts are never added together, and wire bytes stay unchanged.
+
 ### 5. Per-model Converse/Mantle inference-param strip rules
+
 Some Bedrock models 400 (`ValidationException`) on inference params Claude Code
 sends routinely (`temperature`, `stop_sequences`), value-independent — without
 stripping, every such request fails and the client silently falls back. Both

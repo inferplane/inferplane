@@ -4,6 +4,7 @@
 package budget
 
 import (
+	"math"
 	"strconv"
 	"sync"
 	"time"
@@ -173,6 +174,9 @@ func (b *Memory) Rejections() int64 {
 }
 
 func (b *Memory) Check(key string, estimateMicros, limitMicros int64, w Window) Decision {
+	if estimateMicros < 0 {
+		return Block
+	}
 	if limitMicros <= 0 {
 		return Allow // unlimited: no counter needed, so capacity cannot bite
 	}
@@ -194,17 +198,24 @@ func (b *Memory) Check(key string, estimateMicros, limitMicros int64, w Window) 
 		//     caller's warn policy can never downgrade it back to Allow.
 		return BlockCapacity
 	}
-	if bkt.spent+estimateMicros > limitMicros {
+	if bkt.spent > limitMicros || estimateMicros > limitMicros-bkt.spent {
 		return Block
 	}
 	return Allow
 }
 
 func (b *Memory) Debit(key string, actualMicros int64, w Window) {
+	if actualMicros < 0 {
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if bkt := b.cur(key, w); bkt != nil {
-		bkt.spent += actualMicros
+		if actualMicros > math.MaxInt64-bkt.spent {
+			bkt.spent = math.MaxInt64
+		} else {
+			bkt.spent += actualMicros
+		}
 	}
 }
 

@@ -33,7 +33,7 @@ func TestUserBudgetBlocksTheUserAndNotTheTeam(t *testing.T) {
 	})
 
 	// Spend 2_000 µUSD as sub-1 — past the 1_000 µUSD personal cap.
-	cost, missing := g.Settle(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 1000}, testTable(), 0)
+	cost, missing := g.Settle(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 1000}, testTable(), nil)
 	if missing || cost != 2_000 {
 		t.Fatalf("settle cost=%d missing=%v, want 2000 µUSD priced", cost, missing)
 	}
@@ -83,7 +83,7 @@ func TestUserBudgetDayAndMonthAreSeparateCounters(t *testing.T) {
 	})
 
 	// 60_000 µUSD: over the 50_000 day cap, well under the 1_000_000 month cap.
-	cost, missing := g.Settle(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 30_000, Output: 30_000}, testTable(), 0)
+	cost, missing := g.Settle(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 30_000, Output: 30_000}, testTable(), nil)
 	if missing || cost != 60_000 {
 		t.Fatalf("settle cost=%d missing=%v, want 60000 µUSD priced", cost, missing)
 	}
@@ -125,7 +125,7 @@ func TestUserBudgetWarnDoesNotDeny(t *testing.T) {
 		return UserPolicy{}, false
 	})
 
-	g.Settle(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 1000}, testTable(), 0)
+	g.Settle(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 1000}, testTable(), nil)
 
 	if dec := g.PreCheck(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, 0); !dec.Allowed {
 		t.Fatalf("warn must admit past the cap: %+v", dec)
@@ -152,7 +152,7 @@ func TestUserBudgetNilLookupIsByteIdenticalToPhase2(t *testing.T) {
 		t.Fatalf("no-user subject must be allowed too: %+v", dec)
 	}
 
-	g.Settle(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 1000}, testTable(), 0)
+	g.Settle(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 1000}, testTable(), nil)
 
 	u := g.UsageOf(Subject{Team: "t", User: "sub-1"}, KeyPolicy{})
 	if u.UserBudget != nil {
@@ -182,7 +182,7 @@ func TestUserBudgetLookupMissIsUngoverned(t *testing.T) {
 		return UserPolicy{}, false
 	})
 
-	g.Settle(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 1000}, testTable(), 0)
+	g.Settle(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 1000}, testTable(), nil)
 
 	if dec := g.PreCheck(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, 0); !dec.Allowed {
 		t.Fatalf("a lookup miss must leave the user ungoverned: %+v", dec)
@@ -211,7 +211,7 @@ func TestUsageOfReportsUserWindows(t *testing.T) {
 		return UserPolicy{}, false
 	})
 
-	cost, missing := g.Settle(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 1}, testTable(), 0)
+	cost, missing := g.Settle(Subject{Team: "t", User: "sub-1"}, KeyPolicy{}, "p", "m", pricing.Usage{Input: 1000, Output: 1}, testTable(), nil)
 	if missing || cost != 1_001 {
 		t.Fatalf("settle cost=%d missing=%v, want 1001 µUSD priced", cost, missing)
 	}

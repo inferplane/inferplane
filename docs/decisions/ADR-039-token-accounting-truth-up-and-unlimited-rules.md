@@ -52,6 +52,38 @@ real defect, not a tuning problem.
 
 ## Decision
 
+### Settlement lifecycle follow-up (2026-10-11)
+
+This follow-up supersedes the original `AdjustRate`/`estimatedTokens` API below.
+An idle-looking TPM bucket could previously be swept while its provider request
+was still running; the subsequent keyed adjustment silently lost the charge.
+Negative usage or an overflowing token sum could also refund quota and TPM before
+cost validation ran.
+
+`PreCheck` now returns an `Admission` owning the exact TPM reservations it made.
+`LimiterStore.ReserveRate` pins each bucket until its finalizer runs, including
+during capacity sweeps. `Settle` consumes the admission once, validates every
+token class and their sum before changing counters, and reconciles the captured
+buckets even if policy limits changed during the request. Repeated concurrent
+settlements on the same handle return its first result without a second debit.
+There is no request-ID deduplication map. Passing nil supports accounting-only
+callers and cannot return TPM capacity.
+
+Callers defer `Admission.Close` immediately after successful admission. Denial
+after partial admission, panic, cancellation, missing usage and invalid usage
+release the pin while retaining the estimate; uncertain token quantities cannot
+refund it. This preserves the existing conservative charge on failed requests.
+The three legacy ingresses still use one admission across pre-response retries;
+Responses admits and closes each attempt separately. Durable monetary and shared
+Postgres reservations retain their independent, per-attempt authority lifecycle.
+
+Local quota and money admission use subtraction to avoid overflow; negative
+debits are ignored and positive accumulations saturate. Usage telemetry rejects invalid token
+classes before aggregation and saturates sums. Costs remain integer microUSD
+with per-class round-half-even. The local limiter remains instance-local.
+
+### Original decision
+
 **Fix 1 — TPM true-up.** `LimiterStore` gains `AdjustRate(key string, delta,
 burst int64)`: a post-hoc balance correction, not a second refill. `Settle`
 now takes the exact estimate `PreCheck` charged (threaded through via each

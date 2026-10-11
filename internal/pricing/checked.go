@@ -11,6 +11,9 @@ var ErrInvalidCost = errors.New("pricing: negative or overflowing cost")
 // checking the result before narrowing to int64. Durable settlement must never
 // mistake a wrapped cost for proof that a reservation can be refunded.
 func (t *Table) CostUSDMicrosChecked(provider, model string, u Usage) (int64, error) {
+	if _, err := u.TotalTokens(); err != nil {
+		return 0, err
+	}
 	if t == nil {
 		return 0, ErrAuthorityBound
 	}

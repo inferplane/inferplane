@@ -187,6 +187,9 @@ func authorityUsage(u *schema.Usage, window int64) (pricing.Usage, bool, bool) {
 	if u.CacheCreation == nil {
 		return out, total == 0, false
 	}
+	if len(u.CacheCreation.Extra) != 0 {
+		return out, false, false
+	}
 	if u.CacheCreation.Ephemeral5mInputTokens == nil || u.CacheCreation.Ephemeral1hInputTokens == nil {
 		return out, false, false // an omitted TTL category cannot prove a refund
 	}

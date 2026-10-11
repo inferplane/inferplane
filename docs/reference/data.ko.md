@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 4d4c812ec17a123cad622b193757149d426bf01c60c38335e4d3887eb7a31f42
+translation_source_sha256: 977a18b7a703c670ac7f46d292523ce5ee5747415eb56ca72b7c3010fdb1c38b
 ---
 
 # 데이터 구현 {#data}
@@ -42,6 +42,19 @@ translation_source_sha256: 4d4c812ec17a123cad622b193757149d426bf01c60c38335e4d38
 - 예산 치환의 model_substituted_from에는 원래 요청 모델을 보관합니다. model_requested에는 이미 처리 모델이 들어 있습니다. 이 필드는 분석 읽기 모델에 아직 없으므로 감사 체인이 기준입니다.
 - 같은 팀의 설정과 DB 기록이 있으면 DB가 우선합니다. SetTeamLookup으로 매 요청 조회해 콘솔 변경이 재시작 없이 다음 요청에 적용됩니다.
 - AllowedRegions가 있는 팀은 해당 라벨의 공급자만 사용할 수 있고 라벨이 없으면 거부합니다. DB 팀이 없을 때만 설정에서 합성한 팀의 지역 제한을 사용하며 DB 기록이 있으면 팀 설정 전체를 대체합니다.
+
+로컬 회계는 quota·TPM·금전 카운터를 바꾸기 전에 토큰 종류별 값과 합계를 검증합니다.
+음수 차감으로 한도를 되돌릴 수 없으며, 누적 quota와 지출은 오버플로 대신 최댓값으로
+제한합니다. `PreCheck`가 반환한 승인 핸들의 `Close`를 지연 호출하고, `Settle`은 최초 TPM
+예약을 한 번만 정산합니다. 정산 대기 기록은 정리 작업에서 보존하며 사용량이 없거나
+잘못되면 추정 차감을 유지합니다. 인스턴스 로컬 한도이며, 공유 Postgres·영속 금전 권한의
+시도별 예약은 별도로 유지합니다. 잘못된 사용량은 감사 로그의 정산 사용량과 span 토큰
+속성에서 제외합니다. 완료·비용 기록은 유지하며, 정산이 사용량을 거부하면
+`pricing_missing: true`로 표시합니다. 유효한 부분 TTL 수량은 계속 기록합니다.
+불확실한 사용량은 검증된 관측 토큰만 일일 quota에 차감하고, TPM은 승인 시 추정치를
+최솟값으로 유지합니다. 추정치로 일일 quota 차감을 만들지 않습니다. 음수 승인 추정치는
+어떤 한도도 소비하기 전에 별도의 감사 거부 코드 `invalid_token_estimate`로 거부합니다.
+ADR-039를 참고하세요.
 
 ### 4. 코드 위치 {#4-code-pointers}
 

@@ -20,14 +20,16 @@ func TestDenyReasonValues(t *testing.T) {
 		DenyKeyBudgetExceeded:    "key_budget_exceeded",
 		DenyUserBudgetExceeded:   "user_budget_exceeded",
 		DenyRegionBlocked:        "region_blocked",
+		DenyPricingMissing:       "pricing_missing",
+		DenyInvalidTokenEstimate: "invalid_token_estimate",
 	}
 	for got, want := range cases {
 		if string(got) != want {
 			t.Fatalf("DenyReason %v = %q, want %q", got, string(got), want)
 		}
 	}
-	if len(cases) != 10 {
-		t.Fatalf("expected 10 taxonomy constants, test table has %d", len(cases))
+	if len(cases) != 12 {
+		t.Fatalf("expected 12 taxonomy constants, test table has %d", len(cases))
 	}
 }
 

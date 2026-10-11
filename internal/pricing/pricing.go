@@ -30,6 +30,8 @@ type Usage struct {
 	CacheRead    int64
 	CacheWrite5m int64
 	CacheWrite1h int64
+	Invalid      bool // inconsistent observations must not mutate accounting
+	Uncertain    bool // token quantities are incomplete; never refund an estimate
 }
 
 type OnMissing int
@@ -122,24 +124,8 @@ func (t *Table) HasRate(provider, model string) bool {
 // totals — never per-chunk. Lookup is exact-match first, then retried with a
 // Bedrock cross-region prefix stripped (see bedrockRegionPrefixes).
 func (t *Table) CostUSDMicros(provider, model string, u Usage) (cost int64, missing bool) {
-	r, ok := t.rates[Key{provider, model}]
-	if !ok {
-		// Exact match wins, so a per-prefix special rate stays declarable;
-		// only fall back to the region-stripped id.
-		if base := normalizeModel(model); base != "" {
-			r, ok = t.rates[Key{provider, base}]
-		}
-	}
-	if !ok {
-		return 0, true
-	}
-	total := int64(0)
-	total += mulDivRoundHalfEven(u.Input, r.InputPerMTok)
-	total += mulDivRoundHalfEven(u.Output, r.OutputPerMTok)
-	total += mulDivRoundHalfEven(u.CacheRead, r.CacheReadPerMTok)
-	total += mulDivRoundHalfEven(u.CacheWrite5m, r.CacheWrite5mPerMTok)
-	total += mulDivRoundHalfEven(u.CacheWrite1h, r.CacheWrite1hPerMTok)
-	return total, false
+	cost, err := t.CostUSDMicrosChecked(provider, model, u)
+	return cost, err != nil
 }
 
 // mulDivRoundHalfEven computes tokens * perMTok / 1_000_000 with banker's
