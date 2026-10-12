@@ -196,13 +196,19 @@ cancel·background 계약은 Mantle route에만 적용한다.
 privacy rule이 있는 team은 coverage가 incomplete로 표시되어 fail closed하지만,
 그것은 ownership 검사가 아니다.
 
-PR-10a 즉시 guard(PR-12 이전):
+PR-10a 즉시 guard(PR-12 이전, #110에서 구현):
 
-- native route의 `previous_response_id`/`conversation`과 `store`의 `false` 외 값을
-  기본으로 dispatch 전에 거부한다. 오류는 bridge의 기존 unsupported 응답과 같은 형태를 사용한다.
-- 신뢰할 수 있는 단일 사용자 등 route가 위험을 명시적으로 수용한 경우에만
-  route 설정으로 허용한다. 허용 여부는 audit에 bounded 값으로 남기고 응답 ID 원문은 남기지 않는다.
-- PR-12의 ownership binding이 검증된 profile만 이 기본 거부를 해제한다.
+- 모든 Responses 대상에서 `previous_response_id`, `conversation`, `item_reference`
+  입력 항목을 라우팅 전에 400 `stored_reference_unsupported`로 거부한다.
+  bridge는 이미 이 필드를 거부하므로 대상과 무관하게 같은 결과가 된다.
+  오류는 제출된 ID를 되돌려 보내지 않는다.
+- `store`와 `background`는 거부하지 않는다. retrieve/delete/cancel endpoint가
+  mount되어 있지 않고 위의 참조가 막혀 있으므로, 저장된 response에 gateway를
+  통해 다른 사용자가 접근할 경로가 없다. 기본값이 `store: true`인 일반 client의
+  동작을 깨지 않기 위한 결정이다.
+- route별 opt-in은 두지 않는다. 설정 field는 config·providerstore·admin
+  read/write/export 전체를 round-trip해야 하며, 안전한 기본값은 거부다.
+  PR-12의 ownership binding이 검증된 profile만 이 거부를 해제한다.
 
 추가해야 할 계약:
 
@@ -269,7 +275,7 @@ Codex bundled template에 없는 native model은 검증된 명시적 client prof
 
 | 작업 | 내용 | 첫 목표 |
 |---|---|---|
-| PR-10a Native 상태 참조 guard | native route의 `previous_response_id`/`conversation`/`store` 기본 거부와 route별 명시적 허용 | 현재의 cross-user 참조 위험 차단 |
+| PR-10a Native 상태 참조 guard | 모든 Responses 대상에서 `previous_response_id`/`conversation`/`item_reference` 라우팅 전 거부(#110) | 현재의 cross-user 참조 위험 차단 |
 | PR-11 Native endpoint 계약 | Runtime/Mantle, Chat/Responses, IAM/API-key, 모델별 base path(Mantle `/v1` 포함)와 native wire 보존, substring option 규칙의 capability 이전 | sync native coding profile |
 | PR-12 Native state lifecycle | resource ownership, inherited model, retrieve/delete/cancel, background의 durable 회계 | 검증한 state profile에 한해 확대 |
 | PR-13 Direct/proxy 비교 suite | 같은 request builder와 upstream fixture로 SDK·기능·wire·usage·지연 비교 | 사용자 관점의 qualification 증거 |
@@ -284,8 +290,8 @@ PR-11/12는 새 protocol profile, provider 확장 경계, ownership state를 도
 
 필수 비교:
 
-- [ ] privacy rule 유무와 무관하게 native route의 타인 `previous_response_id`/
-  `conversation` 참조가 dispatch 전에 거부됨(PR-10a).
+- [ ] privacy rule 유무와 무관하게 `previous_response_id`/`conversation`/
+  `item_reference` 참조가 dispatch 전에 거부됨(PR-10a).
 - [ ] Runtime/Mantle 각각 Chat/Responses 및 실제 지원 base path(Mantle `/v1`·`/openai/v1`).
 - [ ] Runtime의 non-default project 지정과 cancel/background 요청이 명시적으로 거부됨.
 - [ ] 선언된 capability 변환 외에는 native option이 삭제·rename되지 않음.
