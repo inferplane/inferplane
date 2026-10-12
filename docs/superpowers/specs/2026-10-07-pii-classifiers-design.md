@@ -4,6 +4,12 @@ Status: design approved in the 2026-10-07/11 brainstorming conversation. The
 spec was revised to a pluggable classifier-provider structure and is awaiting
 review. No implementation is authorized yet.
 
+Superseded in part: the 2026-10-11 gateway correctness plan
+([PR-08](../plans/2026-10-11-gateway-correctness-improvements.md)) changes the
+default inspection scope below from "new input only" to the full protected
+content actually retransmitted. Treat §5's input scope as the original proposal
+until a follow-up design or ADR settles it.
+
 ## Product goal
 
 The existing "PII dedicated model" path (`sensitiveData.onDetected: InternalOnly`
@@ -80,7 +86,7 @@ measured in Shadow mode. This implementation does not establish them as benefits
   - `Router.SetRequestInspector` (`internal/router/router.go:146`) replaces the
     regex inspector wholesale. It is global, has no config and has no production
     caller.
-- Go 1.25, pure-Go dependencies, `CGO_ENABLED=0`. Classifier backends (PyTorch,
+- Go 1.26.9, pure-Go dependencies, `CGO_ENABLED=0`. Classifier backends (PyTorch,
   ONNX, spaCy) run out of process.
 - ADR-043/044 and the 2026-09-09 spec (line 72) say there is no remote
   classifier and no network dependency, and that learned classifiers "require a
@@ -233,7 +239,7 @@ inspection, and only when all of these hold:
 
 Teams without privacy rules or classifiers pay no latency.
 
-**Input: new input only.** One shared extractor reuses the `context.go` walker
+**Input: new input only** (proposed; see the PR-08 note at the top). One shared extractor reuses the `context.go` walker
 and `instructionText`. It collects the user text and tool-result text after
 the last assistant turn, for anthropic, openai, responses and bedrock.
 - More than `max_input_bytes` of new input counts as Abstain for every
