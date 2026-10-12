@@ -33,3 +33,7 @@ coverage.out
 
 # playwright MCP browser-session artifacts (screenshots, console/page logs)
 .playwright-mcp/
+
+# Process core dumps (may contain secrets from process memory)
+/core
+core.[0-9]*
