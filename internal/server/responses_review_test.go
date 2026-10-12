@@ -141,3 +141,60 @@ func TestFailedNativeUsageIsSettledBeforeRetryAdmission(t *testing.T) {
 		})
 	}
 }
+
+// A native target forwards with the gateway's shared upstream credential, so a
+// stored-state reference would let any caller who learns another user's
+// response, conversation or item ID continue that user's provider-held state.
+func TestResponsesRefusesStoredStateReferencesBeforeDispatch(t *testing.T) {
+	for _, extra := range []string{
+		`"previous_response_id":"resp_other_user"`,
+		`"conversation":"conv_other_user"`,
+		`"conversation":{"id":"conv_other_user"}`,
+		`"input":[{"type":"item_reference","id":"msg_other_user"}]`,
+	} {
+		t.Run(extra, func(t *testing.T) {
+			var calls atomic.Int64
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"id":"r","object":"response","status":"completed","model":"up","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)
+			}))
+			defer up.Close()
+			f := responseProviderFixture(t, "openai_responses", up.URL)
+			body := `{"model":"premium",` + extra
+			if !strings.Contains(extra, `"input"`) {
+				body += `,"input":"hello"`
+			}
+			rec := policyDo(policyMux(f, nil, nil, nil, nil), "/v1/responses", body+`}`, true)
+			if rec.Code != 400 || calls.Load() != 0 {
+				t.Fatalf("stored reference dispatched: status=%d calls=%d body=%s", rec.Code, calls.Load(), rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), "other_user") {
+				t.Fatal("error echoed the submitted reference")
+			}
+		})
+	}
+}
+
+func TestResponsesNativeStillForwardsStatelessRequests(t *testing.T) {
+	var calls atomic.Int64
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"r","object":"response","status":"completed","model":"up","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer up.Close()
+	f := responseProviderFixture(t, "openai_responses", up.URL)
+	for _, body := range []string{
+		`{"model":"premium","input":"hello"}`,
+		`{"model":"premium","input":"hello","store":true}`,
+		`{"model":"premium","input":"hello","previous_response_id":null,"conversation":null}`,
+	} {
+		if rec := policyDo(policyMux(f, nil, nil, nil, nil), "/v1/responses", body, true); rec.Code != 200 {
+			t.Fatalf("stateless native request refused: body=%s status=%d resp=%s", body, rec.Code, rec.Body.String())
+		}
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("calls=%d", calls.Load())
+	}
+}

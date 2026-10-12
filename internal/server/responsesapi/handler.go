@@ -74,6 +74,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeError(w, 400, "invalid_request_error", "invalid Responses request")
 		return
 	}
+	// No target can honor provider-held state safely: the bridge cannot carry
+	// it, and native targets would resolve it under the shared upstream
+	// credential without per-user ownership evidence.
+	if responses.StoredReference(raw) {
+		h.denied(req, p, "_rejected", 400, "stored_reference_unsupported", start)
+		writeError(w, 400, "invalid_request_error", "stored response, conversation and item references are not supported; resend the full input")
+		return
+	}
 	model, _ := h.r.ResolveModel(parsed.Model)
 	if !h.r.Allows(p, model) {
 		h.denied(req, p, "_rejected", 403, "model_forbidden", start)
