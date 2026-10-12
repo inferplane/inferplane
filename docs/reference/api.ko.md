@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: 369072923bf98c381a62bd337dfc6d0e71f5d17cd1dd42049db5d262e8ba809f
+translation_source_sha256: 241ed72870935be3c778ecd0ef9ee988f4be8df47a706e4848b6222304f79f11
 ---
 
 # API 구현 {#api}
@@ -72,7 +72,7 @@ sensitiveData는 onDetected·onUninspectable(InternalOnly·Block), 내부 전용
 
 ADR-044는 Mask, normalModel·maxNormalInputTokens·stability, enforceTargets를 추가합니다. 엄격 티어는 100%를 지원하며 참조 소프트 예산은 두 번째 승인 리스가 아닌 계량 임계값입니다. 세션 힌트가 권한을 부여하지 않으며 매 고정·시도를 재검사합니다. [필드·Codex 설정](../adaptive-routing.md)을 참고하세요.
 
-Responses는 Bedrock Converse·InvokeModel·Mantle, Anthropic·Chat 어댑터의 이식 가능한 텍스트·도구 프로파일을 받습니다. none effort는 백엔드 추론 제어 요구가 아닙니다. strict 도구와 불투명·공급자 소유 상태는 해당 네이티브 요구를 유지합니다.
+Responses는 Bedrock Converse·InvokeModel·Mantle, Anthropic·Chat 어댑터의 이식 가능한 텍스트·도구 프로파일을 받습니다. none effort는 백엔드 추론 제어 요구가 아닙니다. strict 도구와 불투명 추론 항목은 해당 네이티브 요구를 유지합니다. 저장 상태 참조(`previous_response_id`, `conversation`, `item_reference` 입력 항목)는 모든 대상에서 라우팅 전에 400 `stored_reference_unsupported`로 거부합니다. upstream은 gateway의 공유 자격 증명으로 이를 해석하고 gateway에는 사용자별 소유권 근거가 없기 때문입니다. client는 전체 입력을 다시 보냅니다.
 
 | 모델 조회 메타데이터 | 의미 |
 | --- | --- |

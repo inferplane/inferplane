@@ -91,8 +91,12 @@ access, and every pin/attempt is revalidated. See [fields and Codex setup](../ad
 `POST /v1/responses` accepts the portable text/tool profile on declared Bedrock
 Converse, InvokeModel and Mantle bridges as well as the existing Anthropic and
 Chat Completions adapters. A neutral `reasoning.effort: "none"` does not demand
-backend effort control. Strict-tool guarantees and opaque/provider-owned state
-retain their native-target requirements.
+backend effort control. Strict-tool guarantees and opaque reasoning items
+retain their native-target requirements. Stored-state references
+(`previous_response_id`, `conversation`, `item_reference` input items) are
+refused with 400 `stored_reference_unsupported` before routing on every target:
+upstreams resolve them under the gateway's shared credential, and the gateway has
+no per-user ownership evidence. Clients resend the full input instead.
 
 The OpenAI-shaped `GET /v1/models` adds these client metadata fields:
 
