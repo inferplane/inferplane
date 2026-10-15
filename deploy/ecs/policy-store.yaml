@@ -1,0 +1,251 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private policy database and a policy CP, preserving the existing usage CP.
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  Subnets:
+    Type: List<AWS::EC2::Subnet::Id>
+  ControlPlaneSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+  CloudFrontSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+  LoadBalancerArn:
+    Type: String
+    AllowedPattern: 'arn:aws[a-z-]*:elasticloadbalancing:.*:loadbalancer/net/.*'
+  ControlPlaneTokenParameterArn:
+    Type: String
+    AllowedPattern: 'arn:aws[a-z-]*:ssm:.*:parameter/.*'
+  ClusterName:
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9_-]+'
+  TaskDefinitionArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '(^$|arn:aws[a-z-]*:ecs:.*:task-definition/.*)'
+  AssignPublicIp:
+    Type: String
+    AllowedValues: [ENABLED, DISABLED]
+    Default: DISABLED
+  EngineVersion:
+    Type: String
+    Default: '17.11'
+    AllowedPattern: '17\.[0-9]+'
+  DatabaseClass:
+    Type: String
+    Default: db.t4g.micro
+    AllowedValues: [db.t4g.micro, db.t4g.small]
+  ListenerPort:
+    Type: Number
+    Default: 8081
+    MinValue: 1024
+    MaxValue: 65535
+Conditions:
+  HasTask: !Not [!Equals [!Ref TaskDefinitionArn, '']]
+Resources:
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Policy DB access from the CP and its bootstrap task only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ControlPlaneSecurityGroup
+      SecurityGroupEgress: []
+  DatabaseSubnets:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private-address policy database
+      SubnetIds: !Ref Subnets
+  DatabaseParameters:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: TLS and SCRAM required for policy persistence
+      Family: postgres17
+      Parameters:
+        rds.force_ssl: '1'
+        password_encryption: scram-sha-256
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Engine: postgres
+      EngineVersion: !Ref EngineVersion
+      DBInstanceClass: !Ref DatabaseClass
+      DBName: inferplane
+      MasterUsername: inferplane_admin
+      ManageMasterUserPassword: true
+      DBSubnetGroupName: !Ref DatabaseSubnets
+      DBParameterGroupName: !Ref DatabaseParameters
+      VPCSecurityGroups: [!GetAtt DatabaseSecurityGroup.GroupId]
+      Port: 5432
+      StorageType: gp3
+      AllocatedStorage: '20'
+      StorageEncrypted: true
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 7
+      CopyTagsToSnapshot: true
+      DeletionProtection: true
+      AutoMinorVersionUpgrade: true
+      AllowMajorVersionUpgrade: false
+      Tags:
+        - Key: Application
+          Value: inferplane
+        - Key: Purpose
+          Value: governance-policy-store
+  AppCredentials:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Dedicated non-admin policy database user
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"inferplane_cp"}'
+        GenerateStringKey: password
+        PasswordLength: 40
+        ExcludePunctuation: true
+  PolicyDSN:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: TLS-verified policy DSN; injected only into the CP task
+      SecretString: !Sub 'postgresql://inferplane_cp:{{resolve:secretsmanager:${AppCredentials}:SecretString:password}}@${Database.Endpoint.Address}:5432/inferplane?sslmode=verify-full&sslrootcert=/etc/ssl/certs/rds-global-bundle.pem'
+  PolicyExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: CPSecrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref PolicyDSN
+              - Effect: Allow
+                Action: ssm:GetParameters
+                Resource: !Ref ControlPlaneTokenParameterArn
+  BootstrapExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: NewDatabaseBootstrapOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !GetAtt Database.MasterUserSecret.SecretArn
+                  - !Ref AppCredentials
+  PolicyOriginIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref LoadBalancerSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref ListenerPort
+      ToPort: !Ref ListenerPort
+      SourceSecurityGroupId: !Ref CloudFrontSecurityGroup
+      Description: CloudFront VPC origin to the policy CP
+  PolicyTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      TargetType: ip
+      Port: 8080
+      Protocol: TCP
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /healthz
+      TargetGroupAttributes:
+        - Key: preserve_client_ip.enabled
+          Value: 'false'
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+  PolicyListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancerArn
+      Port: !Ref ListenerPort
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref PolicyTargetGroup
+  PolicyVpcOrigin:
+    Type: AWS::CloudFront::VpcOrigin
+    DependsOn: [PolicyListener, PolicyOriginIngress]
+    Properties:
+      VpcOriginEndpointConfig:
+        Name: !Sub ${AWS::StackName}-policy
+        Arn: !Ref LoadBalancerArn
+        HTTPPort: !Ref ListenerPort
+        HTTPSPort: 443
+        OriginProtocolPolicy: http-only
+  PolicyService:
+    Type: AWS::ECS::Service
+    Condition: HasTask
+    DependsOn: PolicyListener
+    Properties:
+      Cluster: !Ref ClusterName
+      ServiceName: !Sub ${AWS::StackName}-policy
+      TaskDefinition: !Ref TaskDefinitionArn
+      DesiredCount: 1
+      LaunchType: FARGATE
+      HealthCheckGracePeriodSeconds: 60
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: !Ref AssignPublicIp
+          Subnets: !Ref Subnets
+          SecurityGroups: [!Ref ControlPlaneSecurityGroup]
+      LoadBalancers:
+        - ContainerName: inferplaned
+          ContainerPort: 8080
+          TargetGroupArn: !Ref PolicyTargetGroup
+Outputs:
+  DatabaseEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
+  DatabaseMasterSecretArn:
+    Value: !GetAtt Database.MasterUserSecret.SecretArn
+  AppCredentialsArn:
+    Value: !Ref AppCredentials
+  PolicyDSNArn:
+    Value: !Ref PolicyDSN
+  PolicyExecutionRoleArn:
+    Value: !GetAtt PolicyExecutionRole.Arn
+  BootstrapExecutionRoleArn:
+    Value: !GetAtt BootstrapExecutionRole.Arn
+  PolicyVpcOriginId:
+    Value: !GetAtt PolicyVpcOrigin.Id
+  PolicyTargetGroupArn:
+    Value: !Ref PolicyTargetGroup
+  PolicyServiceName:
+    Condition: HasTask
+    Value: !GetAtt PolicyService.Name

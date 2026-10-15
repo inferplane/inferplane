@@ -111,7 +111,10 @@ reviewed migration, not a hot reload or ad hoc database edit.
 
 New identities without a legacy binding receive an `identity-v1:<SHA-256>`
 canonical account reference. An explicitly legacy-bound person keeps the exact
-legacy `account_ref` for policy, usage and financial lookup.
+legacy `account_ref` for policy and financial lookup. Managed usage telemetry
+uses the digest-only canonical identity reference; legacy telemetry keeps its
+account subject. The CP policy-list `identity_bindings` projection correlates
+those declared references for user-cost visibility without changing any account.
 
 For the example above, `subject.user` remains **`legacy-owner-001`**. Do **not**
 replace it with that person's canonical `identity-v1:…` reference: required policy
@@ -119,6 +122,9 @@ validation rejects that alias because it would address a different account.
 The canonical reference still appears in identity audit evidence for correlation.
 Use the authorized key view's `account_ref` for accounting selectors and its
 digest-only `identity.reference` for identity evidence.
+The **Users & costs** console applies only those declared correlations and uses
+the exact financial reference for budget/token policies. Without a correlation,
+a managed reporting ID is not guessed as a legacy financial account.
 
 Key rotation and a second device retain the registered account. Historical
 account/window keys and late settlements remain unchanged. Optional attribution

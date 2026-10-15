@@ -3,17 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>inferplane — control plane</title>
+  <title>inferplane — Gateway workspace</title>
   <link rel="stylesheet" href="style.css">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
 </head>
 <body class="locked">
+  <a class="skip-link" href="#main" data-i18n="ux.skip">Skip to content</a>
 
   <!-- ============ token gate ============ -->
   <div id="lock">
     <div class="lock-card">
       <div class="wordmark"><span class="glyph">▰▰</span> inferplane</div>
-      <p class="tagline" data-i18n="lock.tagline">LLM consumption governance — control plane</p>
+      <p class="tagline" data-i18n="lock.tagline">LLM consumption governance — gateway workspace</p>
       <button id="sso-button" type="button" hidden data-i18n="lock.sso">Sign in with SSO</button>
       <div id="sso-divider" class="lock-divider" hidden><span data-i18n="lock.divider">or paste a token</span></div>
       <form id="token-form">
@@ -33,7 +34,8 @@
   <!-- ============ dashboard shell ============ -->
   <div id="shell" hidden>
     <aside id="side">
-      <div class="wordmark sm"><span class="glyph">▰▰</span> inferplane</div>
+      <div class="wordmark sm"><span class="glyph">ip</span> inferplane</div>
+      <div class="workspace-label"><strong data-i18n="ux.gateway">Gateway workspace</strong><small>mayu · data plane</small></div>
       <nav>
         <button class="nav active" data-view="overview">⌂&ensp;<span data-i18n="nav.overview">Overview</span></button>
         <button class="nav" data-view="usage">▤&ensp;<span data-i18n="nav.usage">Usage</span></button>
@@ -56,17 +58,23 @@
       </div>
     </aside>
 
-    <main id="main">
+    <main id="main" tabindex="-1">
       <header id="topbar">
-        <h1 id="view-title">Overview</h1>
+        <div><p class="microlabel" data-i18n="ux.gateway">Gateway workspace</p><h1 id="view-title" tabindex="-1">Overview</h1></div>
         <div class="top-right">
+          <button id="workspace-search" class="ghost" data-i18n="ux.search">Search workspace</button><button id="theme-toggle" class="ghost" data-i18n="ux.theme">Theme</button>
           <span class="chip mono" id="origin-chip">…</span>
-          <span class="led-row"><span id="health-led" class="led"></span><span id="health-text">checking</span></span>
+          <span class="led-row" title="Process liveness · /healthz"><span id="health-led" class="led"></span><span id="health-text">checking</span></span>
         </div>
       </header>
+      <p id="workspace-error" class="workspace-error" role="alert" hidden></p>
 
       <!-- ===== overview ===== -->
       <section id="view-overview" class="view">
+        <div class="getting-started card">
+          <div><p class="microlabel" data-i18n="ux.start">YOUR NEXT STEP</p><h2 data-i18n="ux.startTitle">Connect your team to the right models.</h2><p class="hint" data-i18n="ux.startHint">Configure an upstream, issue a scoped key, then connect your coding assistant.</p></div>
+          <div class="setup-actions"><button class="ghost" data-view="providers" data-i18n="ux.setupProvider">1 · Providers &amp; models</button><button data-view="keys" data-i18n="ux.setupKey">2 · Issue a key</button><button class="ghost" data-view="settings" data-i18n="ux.setupClient">3 · Connect a client</button></div>
+        </div>
         <div class="cards">
           <div class="card stat">
             <div class="microlabel" data-i18n="ov.reqTotal">requests · total</div>
@@ -86,7 +94,7 @@
           <div class="card stat">
             <div class="microlabel" data-i18n="ov.budgetSpend">budget spend</div>
             <div class="big" id="stat-spend">—</div>
-            <div class="sub" data-i18n="ov.budgetSub">µUSD settled this window</div>
+            <div class="sub" id="stat-spend-sub">Reported settlements · last 30 days</div>
             <div class="sparkhold" id="stat-spend-spark"></div>
           </div>
         </div>
@@ -177,17 +185,21 @@
           <div class="microlabel" data-i18n="keys.issueTitle">issue a virtual key</div>
           <p id="whoami-line" class="hint" hidden></p>
           <form id="create-form" class="row">
-            <input id="team" type="text" data-i18n-placeholder="keys.teamPlaceholder" placeholder="team (e.g. demo)" required>
-            <select id="team-select" hidden></select>
-            <input id="models" type="text" data-i18n-placeholder="keys.modelsPlaceholder" placeholder="allowed models — comma-separated, * for all" required>
-            <input id="kf-budget" type="number" step="0.01" min="0" data-i18n-placeholder="common.budgetPlaceholder" placeholder="budget USD (optional)">
-            <input id="kf-tpm" type="number" min="0" step="1" data-i18n-placeholder="common.tpmPlaceholder" placeholder="TPM (optional)">
-            <input id="kf-rpm" type="number" min="0" step="1" data-i18n-placeholder="common.rpmPlaceholder" placeholder="RPM (optional)">
-            <input id="kf-expires" type="date" data-i18n-placeholder="common.expiresPlaceholder" placeholder="expires (optional)">
-            <input id="kf-owner" type="text" data-i18n-placeholder="common.ownerPlaceholder" placeholder="owner (optional)">
+            <label class="form-field" for="team"><span data-i18n="keys.teamPlaceholder">team (e.g. demo)</span><input id="team" type="text" data-i18n-placeholder="keys.teamPlaceholder" placeholder="team (e.g. demo)" required></label>
+            <label class="form-field" for="team-select"><span data-i18n="th.team">Team</span><select id="team-select" hidden></select></label>
+            <label class="form-field" for="models"><span data-i18n="keys.modelsPlaceholder">allowed models — comma-separated, * for all</span><input id="models" type="text" data-i18n-placeholder="keys.modelsPlaceholder" placeholder="allowed models — comma-separated, * for all" required></label>
+            <label class="form-field" for="kf-budget"><span data-i18n="limits.monthlyBudget">Monthly budget (USD)</span><input id="kf-budget" type="text" inputmode="decimal" placeholder="100.000000"></label>
+            <label class="form-field" for="kf-budget-day"><span data-i18n="limits.dailyBudget">Daily budget (USD)</span><input id="kf-budget-day" type="text" inputmode="decimal" placeholder="10.000000"></label>
+            <label class="form-field" for="kf-tpm"><span data-i18n="common.tpmPlaceholder">TPM (optional)</span><input id="kf-tpm" type="number" min="0" step="1" data-i18n-placeholder="common.tpmPlaceholder" placeholder="TPM (optional)"></label>
+            <label class="form-field" for="kf-rpm"><span data-i18n="common.rpmPlaceholder">RPM (optional)</span><input id="kf-rpm" type="number" min="0" step="1" data-i18n-placeholder="common.rpmPlaceholder" placeholder="RPM (optional)"></label>
+            <label class="form-field" for="kf-expires"><span data-i18n="common.expiresPlaceholder">expires (optional)</span><input id="kf-expires" type="date" data-i18n-placeholder="common.expiresPlaceholder" placeholder="expires (optional)"></label>
+            <label id="key-attribution-kind" class="form-field" for="kf-attribution" hidden><span data-i18n="limits.attribution">Attribute this key to</span><select id="kf-attribution"><option value="owner" data-i18n="limits.legacyOwner">Legacy owner</option><option value="account_ref" data-i18n="limits.registeredAccount">Registered user account</option><option value="service_account" data-i18n="limits.serviceAccount">Service account</option></select></label>
+            <label class="form-field" for="kf-account-ref"><span data-i18n="limits.accountRef">Exact registered account reference</span><input id="kf-account-ref" autocomplete="off" hidden></label>
+            <label class="form-field" for="kf-service-account"><span data-i18n="limits.serviceId">Stable service account ID</span><input id="kf-service-account" autocomplete="off" hidden></label>
+            <label class="form-field" for="kf-owner"><span data-i18n="common.ownerPlaceholder">owner (optional)</span><input id="kf-owner" type="text" data-i18n-placeholder="common.ownerPlaceholder" placeholder="owner (optional)"></label>
             <button type="submit" data-i18n="keys.issueBtn">ISSUE KEY</button>
           </form>
-          <p id="create-form-status" class="status"></p>
+          <p id="create-form-status" class="status" role="status"></p><p class="hint" data-i18n="limits.capHint">Blank or 0 means no additional cap at this scope. Daily and monthly limits apply independently alongside stricter team/user policies. Amounts support six decimal places.</p><p id="key-attribution-hint" class="hint" hidden data-i18n="limits.identityHint">Registered account and service issuance require the verified-identity declaration and full administrator permission. Financial account references are preserved exactly; do not substitute an audit digest for a legacy-bound account.</p>
           <p class="hint" data-i18n="keys.enforceHint">Budget/TPM/RPM are enforced live on every request for this key, layered on top of the team's own limits.</p>
           <div id="plaintext-box" hidden>
             <div class="microlabel warn-label" data-i18n="keys.shownOnce">⚠ shown once — copy now, not recoverable</div>
@@ -199,7 +211,7 @@
         </div>
 
         <div class="card">
-          <div class="microlabel" data-i18n="keys.issuedTitle">issued keys</div>
+          <div class="table-heading"><h2 data-i18n="keys.issuedTitle">Issued keys</h2><label for="key-search" class="form-field"><span data-i18n="ux.filterKeys">Filter keys</span><input id="key-search" type="search" autocomplete="off" data-filter="keys"></label></div><p id="key-search-status" class="hint" role="status"></p>
           <table class="data" id="keys">
             <thead><tr><th data-i18n="th.keyId">key id</th><th data-i18n="th.team">team</th><th data-i18n="th.allowedModels">allowed models</th><th data-i18n="th.limits">limits</th><th></th></tr></thead>
             <tbody></tbody>
@@ -218,32 +230,32 @@
           <div class="card" id="team-form-card">
             <div class="microlabel" data-i18n="teams.govTitle">team governance</div>
             <form id="team-form" class="row">
-              <input id="tf-name" type="text" data-i18n-placeholder="teams.namePlaceholder" placeholder="team name" required>
-              <input id="tf-budget" type="number" step="0.01" min="0" data-i18n-placeholder="common.budgetPlaceholder" placeholder="budget USD (optional)">
-              <input id="tf-rpm" type="number" min="0" step="1" data-i18n-placeholder="common.rpmPlaceholder" placeholder="RPM (optional)">
-              <input id="tf-tpm" type="number" min="0" step="1" data-i18n-placeholder="common.tpmPlaceholder" placeholder="TPM (optional)">
-              <input id="tf-tpd" type="number" min="0" step="1" data-i18n-placeholder="teams.tpdPlaceholder" placeholder="tokens/day (optional)">
-              <select id="tf-quota-exceeded">
+              <label class="form-field" for="tf-name"><span data-i18n="teams.namePlaceholder">team name</span><input id="tf-name" type="text" data-i18n-placeholder="teams.namePlaceholder" placeholder="team name" required></label>
+              <label class="form-field" for="tf-budget"><span data-i18n="limits.monthlyBudget">Monthly budget (USD)</span><input id="tf-budget" type="text" inputmode="decimal" placeholder="100.000000"></label>
+            <label class="form-field" for="tf-budget-day"><span data-i18n="limits.dailyBudget">Daily budget (USD)</span><input id="tf-budget-day" type="text" inputmode="decimal" placeholder="10.000000"></label>
+              <label class="form-field" for="tf-rpm"><span data-i18n="common.rpmPlaceholder">RPM (optional)</span><input id="tf-rpm" type="number" min="0" step="1" data-i18n-placeholder="common.rpmPlaceholder" placeholder="RPM (optional)"></label>
+              <label class="form-field" for="tf-tpm"><span data-i18n="common.tpmPlaceholder">TPM (optional)</span><input id="tf-tpm" type="number" min="0" step="1" data-i18n-placeholder="common.tpmPlaceholder" placeholder="TPM (optional)"></label>
+              <label class="form-field" for="tf-tpd"><span data-i18n="teams.tpdPlaceholder">tokens/day (optional)</span><input id="tf-tpd" type="number" min="0" step="1" data-i18n-placeholder="teams.tpdPlaceholder" placeholder="tokens/day (optional)"></label>
+              <label class="form-field" for="tf-quota-exceeded"><span data-i18n="ux.quotaAction">When quota is exceeded</span><select id="tf-quota-exceeded">
                 <option value="" data-i18n="teams.quotaBlockDefault">quota exceeded: block (default)</option>
                 <option value="block" data-i18n="teams.quotaBlock">quota exceeded: block</option>
                 <option value="warn" data-i18n="teams.quotaWarn">quota exceeded: warn</option>
-              </select>
-              <select id="tf-budget-exceeded">
+              </select></label>
+              <label class="form-field" for="tf-budget-exceeded"><span data-i18n="ux.budgetAction">When budget is exceeded</span><select id="tf-budget-exceeded">
                 <option value="" data-i18n="teams.budgetBlockDefault">budget exceeded: block (default)</option>
                 <option value="block" data-i18n="teams.budgetBlock">budget exceeded: block</option>
                 <option value="warn" data-i18n="teams.budgetWarn">budget exceeded: warn</option>
-              </select>
-              <input id="tf-models" type="text" data-i18n-placeholder="teams.modelsPlaceholder" placeholder="default allowed models — comma-separated (optional)">
-              <input id="tf-guardrail-id" type="text" data-i18n-placeholder="common.guardrailIdPlaceholder" placeholder="guardrail ID override (optional, bedrock)">
-              <input id="tf-guardrail-version" type="text" data-i18n-placeholder="common.guardrailVersionPlaceholder" placeholder="guardrail version (optional, default DRAFT)">
-              <input id="tf-regions" type="text" data-i18n-placeholder="teams.regionsPlaceholder" placeholder="allowed regions — comma-separated (optional)">
+              </select></label>
+              <label class="form-field" for="tf-models"><span data-i18n="teams.modelsPlaceholder">default allowed models — comma-separated (optional)</span><input id="tf-models" type="text" data-i18n-placeholder="teams.modelsPlaceholder" placeholder="default allowed models — comma-separated (optional)"></label>
+              <label class="form-field" for="tf-guardrail-id"><span data-i18n="common.guardrailIdPlaceholder">guardrail ID override (optional, bedrock)</span><input id="tf-guardrail-id" type="text" data-i18n-placeholder="common.guardrailIdPlaceholder" placeholder="guardrail ID override (optional, bedrock)"></label>
+              <label class="form-field" for="tf-guardrail-version"><span data-i18n="common.guardrailVersionPlaceholder">guardrail version (optional, default DRAFT)</span><input id="tf-guardrail-version" type="text" data-i18n-placeholder="common.guardrailVersionPlaceholder" placeholder="guardrail version (optional, default DRAFT)"></label>
+              <label class="form-field" for="tf-regions"><span data-i18n="teams.regionsPlaceholder">allowed regions — comma-separated (optional)</span><input id="tf-regions" type="text" data-i18n-placeholder="teams.regionsPlaceholder" placeholder="allowed regions — comma-separated (optional)"></label>
               <button type="submit" data-i18n="teams.saveBtn">SAVE TEAM</button>
             </form>
-            <p id="team-form-status" class="status"></p>
+            <p id="team-form-status" class="status" role="status"></p><p class="hint" data-i18n="limits.capHint">Blank or 0 means no additional cap at this scope. Daily and monthly limits apply independently alongside stricter team/user policies. Amounts support six decimal places.</p>
             <p class="hint" data-i18n="teams.hint1">Rate/TPM/quota/budget limits are enforced live on every
               request for this team the moment you save — no restart.</p>
-            <p class="hint"><span data-i18n="teams.hint2pre">Counters are enforced </span><b data-i18n="teams.perInstance">per gateway instance</b><span data-i18n="teams.hint2post"> (ADR-013)
-              — with N replicas a team may consume up to N× before blocking.</span></p>
+            <p class="hint" data-i18n="limits.profileHint">Default/local counters are per gateway instance. Shared Postgres uses database admission; node-local monetary authority follows its credit and expiry contract. Confirm the deployment profile before treating a limit as fleet-wide.</p>
             <p class="hint" data-i18n="teams.guardrailHint">Guardrail override selects a DIFFERENT Bedrock Guardrail for
               this team — it cannot remove the provider's configured default
               (no per-team opt-out, D6/ADR-019).</p>
@@ -253,7 +265,7 @@
             <p class="hint" data-i18n="teams.regionsSaveWarning">Submitting this team form replaces any config-declared region policy for that team unless you include the allowed regions here.</p>
           </div>
           <div class="card">
-            <div class="microlabel" data-i18n="teams.tableTitle">teams</div>
+            <div class="table-heading"><h2 data-i18n="teams.tableTitle">Teams</h2><label for="team-search" class="form-field"><span data-i18n="ux.filterTeams">Filter teams</span><input id="team-search" type="search" autocomplete="off" data-filter="teams-table"></label></div><p id="team-search-status" class="hint" role="status"></p>
             <table class="data" id="teams-table">
               <thead><tr><th data-i18n="th.name">name</th><th data-i18n="th.source">source</th><th class="num" data-i18n="th.spend30d">spend (30d)</th><th data-i18n="th.limits">limits</th><th></th></tr></thead>
               <tbody></tbody>
@@ -261,9 +273,7 @@
           </div>
           <div class="card">
             <div class="microlabel" data-i18n="teams.usersTitle">users</div>
-            <p class="hint" data-i18n="teams.usersHint">Users are derived read-only from key owners — there is no
-              users table. Per-user spend is not available: audit events carry a team,
-              not an owner.</p>
+            <p class="hint" data-i18n="teams.usersHint">This local list is derived from key owners; there is no local user registry. Per-user spend is not available in local analytics. Open inferplaned /ui/ → Users &amp; costs for reported user spend, tokens and personal policies.</p>
             <table class="data" id="users-table">
               <thead><tr><th data-i18n="th.owner">owner</th><th data-i18n="th.teamsCol">teams</th><th class="num" data-i18n="th.keys">keys</th></tr></thead>
               <tbody></tbody>
@@ -274,6 +284,7 @@
 
       <!-- ===== providers ===== -->
       <section id="view-providers" class="view" hidden>
+        <p class="hint" id="providers-session-ro" hidden data-i18n="ux.providerReadOnly">Read-only session. A full administrator can edit this deployment's provider store.</p>
         <p class="hint" id="providers-mode-ro"><span data-i18n="prov.roPre">Upstream providers and model routing are declared in
           </span><b data-i18n="prov.configWord">config</b><span data-i18n="prov.roPost"> (policy-as-code, ADR-003) — this view is read-only.
           Secrets never appear here: only the env var / file path the gateway
@@ -285,7 +296,7 @@
           secret store. Changes apply immediately (hot-reload).</span></p>
 
         <div class="card">
-          <div class="microlabel" data-i18n="prov.tableTitle">providers</div>
+          <div class="table-heading"><h2 data-i18n="prov.tableTitle">Providers</h2><label for="provider-search" class="form-field"><span data-i18n="ux.filterProviders">Filter providers</span><input id="provider-search" type="search" autocomplete="off" data-filter="providers-table"></label></div><p id="provider-search-status" class="hint" role="status"></p>
           <table class="data" id="providers-table">
             <thead><tr><th data-i18n="th.name">name</th><th data-i18n="th.type">type</th><th data-i18n="th.endpoint">endpoint</th><th data-i18n="th.auth">auth</th><th id="prov-status-col" hidden data-i18n="th.status">status</th><th id="prov-act-col" hidden></th></tr></thead>
             <tbody><tr><td colspan="4" class="empty" data-i18n="common.connectToLoad">connect to load…</td></tr></tbody>
@@ -296,12 +307,12 @@
         <div class="card" id="provider-write" hidden>
           <div class="microlabel" data-i18n="prov.registerTitle">① register &amp; test a provider</div>
           <form id="provider-form" class="grid-form">
-            <input id="pf-name" type="text" data-i18n-placeholder="prov.namePlaceholder" placeholder="name (e.g. anthropic-prod)" required>
-            <select id="pf-type">
+            <label class="form-field" for="pf-name"><span data-i18n="prov.namePlaceholder">name (e.g. anthropic-prod)</span><input id="pf-name" type="text" data-i18n-placeholder="prov.namePlaceholder" placeholder="name (e.g. anthropic-prod)" required></label>
+            <label class="form-field" for="pf-type"><span data-i18n="th.type">Provider type</span><select id="pf-type">
               <option value="anthropic">anthropic</option>
               <option value="openai_compatible">openai_compatible</option>
               <option value="bedrock">bedrock</option>
-            </select>
+            </select></label>
             <label class="form-field" for="pf-data-boundary">
               <span data-i18n="prov.dataBoundary">Data boundary</span>
               <select id="pf-data-boundary">
@@ -310,17 +321,17 @@
                 <option value="external" data-i18n="prov.boundaryExternal">external</option>
               </select>
             </label>
-            <input id="pf-baseurl" type="text" data-i18n-placeholder="prov.baseUrlPlaceholder" placeholder="base_url (anthropic / openai_compatible)">
-            <select id="pf-refkind">
+            <label class="form-field" for="pf-baseurl"><span data-i18n="prov.baseUrlPlaceholder">base_url (anthropic / openai_compatible)</span><input id="pf-baseurl" type="text" data-i18n-placeholder="prov.baseUrlPlaceholder" placeholder="base_url (anthropic / openai_compatible)"></label>
+            <label class="form-field" for="pf-refkind"><span data-i18n="th.auth">Credential reference</span><select id="pf-refkind">
               <option value="env" data-i18n="prov.refEnv">api_key_ref · env var NAME</option>
               <option value="file" data-i18n="prov.refFile">api_key_ref · file PATH</option>
               <option value="none" data-i18n="prov.refNone">no key (bedrock / keyless)</option>
-            </select>
-            <input id="pf-refval" type="text" data-i18n-placeholder="prov.refValPlaceholder" placeholder="ref NAME or PATH — never the secret value">
-            <input id="pf-region" type="text" data-i18n-placeholder="prov.regionPlaceholder" placeholder="region label (any provider type; blank = fail-closed for restricted teams)">
-            <input id="pf-authmode" type="text" data-i18n-placeholder="prov.authModePlaceholder" placeholder="auth mode (bedrock, e.g. irsa)">
-            <input id="pf-guardrail-id" type="text" data-i18n-placeholder="common.guardrailIdPlaceholder" placeholder="guardrail ID override (optional, bedrock)">
-            <input id="pf-guardrail-version" type="text" data-i18n-placeholder="common.guardrailVersionPlaceholder" placeholder="guardrail version (optional, default DRAFT)">
+            </select></label>
+            <label class="form-field" for="pf-refval"><span data-i18n="prov.refValPlaceholder">ref NAME or PATH — never the secret value</span><input id="pf-refval" type="text" data-i18n-placeholder="prov.refValPlaceholder" placeholder="ref NAME or PATH — never the secret value"></label>
+            <label class="form-field" for="pf-region"><span data-i18n="prov.regionPlaceholder">region label (any provider type; blank = fail-closed for restricted teams)</span><input id="pf-region" type="text" data-i18n-placeholder="prov.regionPlaceholder" placeholder="region label (any provider type; blank = fail-closed for restricted teams)"></label>
+            <label class="form-field" for="pf-authmode"><span data-i18n="prov.authModePlaceholder">auth mode (bedrock, e.g. irsa)</span><input id="pf-authmode" type="text" data-i18n-placeholder="prov.authModePlaceholder" placeholder="auth mode (bedrock, e.g. irsa)"></label>
+            <label class="form-field" for="pf-guardrail-id"><span data-i18n="common.guardrailIdPlaceholder">guardrail ID override (optional, bedrock)</span><input id="pf-guardrail-id" type="text" data-i18n-placeholder="common.guardrailIdPlaceholder" placeholder="guardrail ID override (optional, bedrock)"></label>
+            <label class="form-field" for="pf-guardrail-version"><span data-i18n="common.guardrailVersionPlaceholder">guardrail version (optional, default DRAFT)</span><input id="pf-guardrail-version" type="text" data-i18n-placeholder="common.guardrailVersionPlaceholder" placeholder="guardrail version (optional, default DRAFT)"></label>
             <button type="button" id="pf-test" class="ghost" data-i18n="prov.testBtn">TEST CONNECTION</button>
             <button type="reset" id="pf-new" class="ghost" data-i18n="prov.newProvider">NEW PROVIDER</button>
             <button type="submit" data-i18n="prov.saveBtn">SAVE PROVIDER</button>
@@ -333,7 +344,7 @@
         </div>
 
         <div class="card">
-          <div class="microlabel" data-i18n="prov.routingTitle">model routing · primary → fallback</div>
+          <div class="table-heading"><h2 data-i18n="prov.routingTitle">Model routing · primary → fallback</h2><label for="model-search" class="form-field"><span data-i18n="ux.filterModels">Filter models</span><input id="model-search" type="search" autocomplete="off" data-filter="routes-table"></label></div><p id="model-search-status" class="hint" role="status"></p>
           <table class="data" id="routes-table">
             <thead><tr><th data-i18n="th.model">model</th><th data-i18n="th.route">route (provider · upstream model)</th><th id="route-act-col" hidden></th></tr></thead>
             <tbody><tr><td colspan="2" class="empty" data-i18n="common.connectToLoad">connect to load…</td></tr></tbody>
@@ -345,7 +356,7 @@
           <div class="microlabel" data-i18n="prov.addRouteTitle">② add a model route</div>
           <form id="model-form">
             <div class="row">
-              <input id="mf-name" type="text" data-i18n-placeholder="prov.modelNamePlaceholder" placeholder="model name (e.g. claude-sonnet-4-6)" required>
+              <label class="form-field" for="mf-name"><span data-i18n="prov.modelNamePlaceholder">model name (e.g. claude-sonnet-4-6)</span><input id="mf-name" type="text" data-i18n-placeholder="prov.modelNamePlaceholder" placeholder="model name (e.g. claude-sonnet-4-6)" required></label>
             </div>
             <label class="form-field" for="mf-context-window">
               <span data-i18n="prov.contextWindow">Context window · input + output tokens (blank / 0 = unknown)</span>
@@ -481,6 +492,11 @@ api key:  the same virtual key</code></pre>
     </main>
   </div>
 
+  <dialog id="workspace-dialog" aria-labelledby="workspace-title">
+    <div class="table-heading"><h2 id="workspace-title" data-i18n="ux.search">Search workspace</h2><button id="workspace-close" class="ghost" aria-label="Close">✕</button></div>
+    <label class="form-field" for="workspace-query"><span data-i18n="ux.searchHint">Find a page, key, team or model · Ctrl / ⌘ K</span><input id="workspace-query" type="search" autocomplete="off"></label>
+    <div id="workspace-results"></div><p id="workspace-status" class="hint" role="status"></p>
+  </dialog>
   <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>

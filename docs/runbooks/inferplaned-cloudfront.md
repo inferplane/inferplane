@@ -92,3 +92,21 @@ associations. If SSO origins change, review the support stack's CSP parameter to
 
 The operator UI workflow and its capability limits are described in the
 [dashboard runbook](inferplaned-dashboard.md).
+
+## Compatible chart deployment on an older control plane
+
+The newer UI first requests the authenticated bounded `/v1alpha1/usage/charts`
+rollup. If and only if that route returns 404, it uses the existing authenticated
+`/v1alpha1/usage/export` with the same applied dates and JSON format. Rollup stays
+in the signed-in user's page memory: no operating token or records are exported
+to deployment tooling or embedded in public assets. The response is limited to
+8 MiB/100,000 rows; select a shorter period if the limit is exceeded. Costs stay
+integer microUSD and the existing OIDC queue/session fences remain in effect.
+401/403 or store failures never select another route.
+
+This compatibility path permits a static-only release while retaining a
+memory-only CP's process and history. It does not add the new server endpoint,
+alter policy-write authority, configure a policy store or attest identity
+bindings. File-authoritative deployments continue to show write controls as
+unavailable. Snapshot/export to an operator's filesystem needs explicit data
+access authorization; UI publication alone is not such an authorization.

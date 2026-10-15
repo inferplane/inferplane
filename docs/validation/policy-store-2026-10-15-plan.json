@@ -1,0 +1,117 @@
+{
+  "prepared_at_utc": "2026-10-15T08:21:33.629593+00:00",
+  "status": "awaiting-explicit-infrastructure-cost-approval",
+  "deployment_performed": false,
+  "root_cause": "Existing CP has no INFERPLANED_POLICY_DSN and reports a file-authoritative policy store.",
+  "proposed_change": "Private PostgreSQL policy store plus a policy CP; preserve existing usage CP and memory history.",
+  "new_resources": {
+    "database": "RDS PostgreSQL 17, db.t4g.micro, single AZ, encrypted 20 GiB gp3, 7-day backups",
+    "policy_cp": "One ARM64 ECS Fargate task, 0.5 vCPU / 1 GiB",
+    "secrets": 3,
+    "routing": "One added listener, target group and VPC origin on the existing NLB/distribution; five exact policy/SSO paths"
+  },
+  "monthly_estimate": {
+    "region": "ap-northeast-2",
+    "source": "AWS public Price List API",
+    "hours_per_month": 730,
+    "currency": "USD",
+    "components": [
+      {
+        "name": "RDS PostgreSQL db.t4g.micro",
+        "unit_price_usd": "0.0250000000",
+        "unit": "Hrs",
+        "quantity": "730",
+        "monthly_usd": "18.25"
+      },
+      {
+        "name": "RDS gp3 20 GiB",
+        "unit_price_usd": "0.1310000000",
+        "unit": "GB-Mo",
+        "quantity": "20",
+        "monthly_usd": "2.62"
+      },
+      {
+        "name": "CP ARM 0.5 vCPU",
+        "unit_price_usd": "0.0372500000",
+        "unit": "hours",
+        "quantity": "365.0",
+        "monthly_usd": "13.60"
+      },
+      {
+        "name": "CP 1 GiB memory",
+        "unit_price_usd": "0.0040900000",
+        "unit": "hours",
+        "quantity": "730",
+        "monthly_usd": "2.99"
+      },
+      {
+        "name": "Three database secrets",
+        "unit_price_usd": "0.4000000000",
+        "unit": "Secrets",
+        "quantity": "3",
+        "monthly_usd": "1.20"
+      },
+      {
+        "name": "One CP public IPv4",
+        "unit_price_usd": "0.0050000000",
+        "unit": "Hrs",
+        "quantity": "730",
+        "monthly_usd": "3.65"
+      }
+    ],
+    "base_monthly_usd": "42.30",
+    "exclusions": [
+      "tax",
+      "data transfer and incremental NLB usage",
+      "CloudWatch logs",
+      "Secrets Manager API requests",
+      "ECR image storage",
+      "CPU credit surplus or additional backup storage"
+    ],
+    "discounts_assumed": false
+  },
+  "templates": {
+    "store": "deploy/ecs/policy-store.yaml",
+    "bootstrap": "deploy/ecs/bootstrap-policy-db.sh",
+    "routing_helper": "scripts/prepare-policy-controlplane.py"
+  },
+  "template_sha256": {
+    "deploy/ecs/policy-store.yaml": "39539bba39b376293cb81f6527cfbfa00a28cfdb5203f2bbcd4744d67a6f86b8",
+    "deploy/ecs/bootstrap-policy-db.sh": "15704d3ec674a1fa4b0549ed2bb6b9b94b25366173eb09c32426ca5da444cbf2",
+    "scripts/prepare-policy-controlplane.py": "4c16efff3ed18659de69a0439ecbbc8e2c064650e67d1930b5cefab2e783692a"
+  },
+  "checks": {
+    "deployment_unit_tests": 12,
+    "documentation_tests": 9,
+    "cfn_lint_findings": 0,
+    "cfn_guard": "PASS",
+    "store_change_set_status": "CREATE_COMPLETE",
+    "all_store_changes_add_only": true,
+    "aws_predeployment_validation": "PASS",
+    "main_template_changes": "Distribution and new origin-ID parameter only",
+    "full_go_race_tests": true,
+    "both_static_binary_builds": true,
+    "go_vet": true,
+    "gofmt_clean": true,
+    "harness_passed": 70
+  },
+  "content_quality_gate": {
+    "score": 97,
+    "threshold": 85,
+    "verdict": "PASS",
+    "ui_assets_unchanged": true,
+    "reviewer": "Codex applying installed content-review-agent role protocol; no independent peer claimed"
+  },
+  "approval_block": {
+    "source": "automatic approval review",
+    "action": "execute policy-store CloudFormation CREATE change set",
+    "reason": "Persistent, billable production DB and network resources and ongoing costs were not explicitly authorized by the reported disabled-budget issue."
+  },
+  "limits": [
+    "No resources from this proposal have been provisioned; the existing UI remains read-only for budgets.",
+    "Actual DB bootstrap, new service health and live writable policy capability remain pending deployment.",
+    "Gateways must synchronize through the reviewed CloudFront CP URL, or receive an explicit endpoint update.",
+    "No live operating token or records were fetched; no local data backup is part of this plan.",
+    "Single-AZ/single-replica demo and legacy financial-profile limits remain; attaching a policy store does not enable durable global budget authority."
+  ]
+}

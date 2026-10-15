@@ -260,12 +260,31 @@ type policyView struct {
 	UpdatedAt *time.Time                `json:"updated_at,omitempty"`
 }
 
+// Declared bindings correlate digest-only telemetry with the exact financial
+// account selector. They are startup declaration metadata, not a user registry
+// or proof of live activation. Never marshal the raw identity tuple here.
+type identityBindingView struct {
+	ReportedRef string `json:"reported_ref"`
+	AccountRef  string `json:"account_ref"`
+	Kind        string `json:"kind"`
+}
+
 func (s *Server) handlePolicyList(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
 	wire := append([]v1alpha1.GovernancePolicy(nil), s.wire...)
 	generation := s.generation
 	updated := s.updated
 	writable := s.policyStore != nil
+	var bindings []identityBindingView
+	if s.identityConfig != nil {
+		for _, binding := range s.identityConfig.Bindings {
+			bindings = append(bindings, identityBindingView{
+				ReportedRef: binding.Identity.CanonicalRef(),
+				AccountRef:  binding.AccountRef,
+				Kind:        string(binding.Identity.Kind),
+			})
+		}
+	}
 	s.mu.Unlock()
 
 	views := make([]policyView, 0, len(wire))
@@ -278,11 +297,13 @@ func (s *Server) handlePolicyList(w http.ResponseWriter, _ *http.Request) {
 		views = append(views, v)
 	}
 	body := struct {
-		Generation string       `json:"generation"`
-		Writable   bool         `json:"writable"`
-		Policies   []policyView `json:"policies"`
-	}{Generation: generation, Writable: writable, Policies: views}
+		Generation string                `json:"generation"`
+		Writable   bool                  `json:"writable"`
+		Policies   []policyView          `json:"policies"`
+		Bindings   []identityBindingView `json:"identity_bindings,omitempty"`
+	}{Generation: generation, Writable: writable, Policies: views, Bindings: bindings}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(&body)
 }
 

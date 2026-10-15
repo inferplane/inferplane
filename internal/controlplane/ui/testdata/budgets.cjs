@@ -1,6 +1,7 @@
 // Budget workflows exercise real UI handlers with synthetic API boundaries.
 const assert = require('node:assert/strict');
 const { boot } = require('./dashboard.cjs');
+process.exitCode = 1;
 
 async function ready(options) {
   const app = boot(options); await app.connect(); await app.credential();
@@ -119,4 +120,5 @@ async function create(app) {
   assert.equal(app.$('bf-policy').children.length, 0, 'disconnect retained policy choices');
   assert.equal(app.$('policy-review').textContent, '');
   console.log('Budget workflows passed: exact USD, create/add/edit/review, preservation, authorization, validation, cleanup.');
+  process.exitCode = 0;
 })().catch(e => { console.error(e); process.exitCode = 1; });

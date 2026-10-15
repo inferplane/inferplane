@@ -18,17 +18,42 @@ and fences late responses. It does not end the IdP session.
 
 | View | Evidence and actions |
 | --- | --- |
-| Overview | Reported spend, teams with usage (not registered teams), input/output/cache tokens, recent nodes, top five teams by spend, generation differences and recorded rejections |
+| Overview | Cost/user/token KPIs, UTC daily reported spend and model share, top team/user spenders, then distribution observations; advanced coverage notes are expandable |
 | Usage & costs | Filter and sort teams, select a team for model detail, inspect separate cache tiers, export finest-granularity JSON |
+| Users & costs | Reporting accounts/average, user spend and token classes, team filtering, model detail, personal budget/token actions with exact financial references |
 | Budgets | Search team/user budget rules, filter daily/monthly windows, create a budget in a new or existing policy, edit limits in USD, review and publish |
-| Data planes | Current generation, supported API versions, recent node observations, generation comparisons, last heartbeat, recorded rejection details |
-| Policies | Inspect all rules, filter by policy/subject, edit existing budget/rate/model-access fields, create or edit a whole JSON document, review before publishing, type the exact name before deleting |
+| Data planes | Current generation, supported API versions, recent node observations, filter generation differences or rejections, last heartbeat, rejection details with links to fetched policies |
+| Policies | Inspect all rules, guided access/rate/privacy/substitution creation, exact change summary and draft return, existing budget/rate/model-access edits, full JSON editing, explicit publish and name-confirmed deletion |
+
+The default budget view is a comparative table of configured subject, scope,
+window, USD limit and behavior. Row actions open the existing reviewed editor.
+Advanced per-rule cards remain under the expandable details section. No
+utilization or remaining admission balance is fabricated from reporting totals.
+Primary spend KPIs use readable cent formatting for amounts ≥$1; exact microUSD
+values remain in tooltips, detailed tables and exports. Positive sub-dollar
+spend retains six places. Token abbreviations also retain exact tooltip counts.
+Chart data comes from the separately authenticated bounded
+`/v1alpha1/usage/charts` endpoint; a missing endpoint or store failure shows
+unavailable, preserving the other views.
+
+Use **Search workspace** or **Ctrl/⌘ K** to find a page, team, policy or recent
+node in fetched data. Arrow keys select a result; Enter opens it; Esc closes
+search. Teams open their model breakdown, policies open a filtered list, and
+nodes open their recorded rejections. Search does not perform additional data
+reads until the selected action needs one. Disconnect clears the results.
+
+Overview's attention actions open the relevant inventory filter. Recorded
+rejections offer **Inspect policy** when that policy exists in the fetched set.
+Publish success offers **Inspect distribution**. Existing unpublished quick-edit
+drafts are retained; policy filtering refuses to replace them until publish or
+an explicitly confirmed refresh.
 
 Dates are **inclusive UTC calendar dates** in the UI. The browser advances To
 by one day to send the API's exclusive `until`. The initial range is month to
 date. A range is applied only after Apply range or Refresh; model detail and
 export use that applied range, not unsubmitted date inputs. Inventory and
 policies are current observations, not filtered by the usage reporting period.
+**Today**, **7 days** and **This month** apply inclusive UTC presets immediately.
 
 The JSON export includes **all teams** in the selected period; search and sort
 controls do not change its scope. It uses `/v1alpha1/usage/export` with explicit
@@ -59,11 +84,46 @@ in the browser; narrow the range for very large datasets.
 
 ## Policy write authority and review
 
+### Guided governance rules
+
+Open **Policies → Guided rule**. Choose model access, team throughput, sensitive
+input protection or budget-threshold model substitution. Select an existing
+policy to append a rule while retaining its subject and every other rule, or
+create a named policy with a team and/or declared user account reference.
+Rule names must be unique. Default/local supports team-only throughput. User
+rate scopes require shared Postgres and explicit profile acknowledgment.
+**Token limit** guides daily/monthly total quotas, also shared-only and always
+FailClosed. The checkbox does not enable or attest the profile; data-plane
+validation remains binding.
+
+Privacy guides use `FailClosed` and block uninspectable input. Choose Block for
+detected input, or InternalOnly with explicit internal model names. This covers
+finite local detection signals, not universal detection of secrets or personal
+data. Each internal target still needs configured routing, pricing and an
+internal boundary on the data plane.
+
+Substitution needs a numeric budget in the same policy. Set its reference,
+threshold, requested model and substitute. Legacy substitution supports 1–99%;
+**Require the substitute on every attempt** supports 1–100%. Requiring the
+substitute can refuse requests when targets conflict or are unusable. Legacy
+substitution serves the original in those cases. Verify the target's actual
+price, access and routing; the control plane has no model catalog authority.
+Independent hard caps remain binding. A second optional threshold maps the same
+requested name to a different target; targets are not recursively chained.
+Use the JSON editor for more than two tiers or multiple requested-model maps,
+context routing, verified masking or advanced fields.
+
+**Review rule** shows exact field differences and the complete proposed JSON.
+**Edit draft** returns without losing the inputs; **Publish policy** explicitly
+sends the PUT. The same summary applies to budget, quick-field and JSON changes.
+Deletion retains its exact-name confirmation. Server validation, authentication
+and generation observation remain authoritative.
+
 ### Setting a budget
 
-Open **Budgets → New budget**. Choose **Create a new policy**, enter its name
-and a team and/or user, then enter a budget name, calendar day/month window and
-USD limit. For verified users, enter their declared financial account reference;
+Open **Budgets & limits → New budget**. Internal names are generated and may be
+changed. Choose a team and/or user, calendar day/month window and USD limit.
+For verified users, use their declared financial account reference;
 the console does not derive an identity from an email or audit digest. Selecting
 an existing policy adds a rule without changing that policy's subject. Rule
 names must be unique within the selected policy. To set both daily and monthly
@@ -75,6 +135,21 @@ precision. Decimal text is converted with integer arithmetic: `$12.345` becomes
 and values that would overflow internal microUSD are rejected before review.
 New budgets default to a hard cap with `FailClosed`. Unchecking hard cap creates
 a soft threshold; editing an existing soft budget retains its failure policy.
+
+**Users & costs → Set budget** prefills an exact declared financial reference.
+An unmapped managed reporting ID requires `account_ref` from the authorized key
+view; the digest is not guessed as an account. A personal action cannot silently
+become a team-only policy or another declared user's policy. All-team reporting
+combines spend; default/local personal counters remain per team and gateway,
+while shared user-only limits can cover teams together.
+
+The average excludes empty attribution and includes service identities. Only
+declared correlations group old and managed reporting aliases; model detail
+queries disjoint IDs. Exact account bytes, including significant whitespace,
+are retained. The authenticated policy list optionally supplies
+`identity_bindings` with reported/account refs and kind, omitting raw identity
+tuples with no-store caching. This is declaration metadata, not a user registry
+or live activation proof.
 
 **Review budget** shows the complete resulting policy; **Publish policy** sends
 the existing policy PUT and reloads the list. **Edit budget** preserves all other
@@ -123,7 +198,8 @@ no credential is persisted. Only the three short-lived PKCE session values from
 ADR-037 survive the SSO redirect. Requests are same-origin, refuse redirects and
 omit ambient cookies. Rendering uses DOM text, not API-derived HTML. Strict
 `default-src 'self'` CSP is unchanged, including no inline scripts/styles or
-remote fonts. Theme choice is page-local. No Go API, auth, readiness, policy,
+remote fonts. Theme choice is page-local. The policy-list projection adds optional
+declared account correlations. No auth, readiness, policy-schema,
 lease, money-authority, count-token or routing contract is changed.
 
 Source: `internal/controlplane/ui/static/{index.html,style.css,app.js}`.
@@ -137,13 +213,17 @@ not contact an installed service or AWS:
 go test ./internal/controlplane/ui ./internal/controlplane -race
 node internal/controlplane/ui/testdata/dashboard.cjs
 node internal/controlplane/ui/testdata/budgets.cjs
+node internal/controlplane/ui/testdata/workspace.cjs
+node internal/controlplane/ui/testdata/user_limits.cjs
 python3 internal/controlplane/ui/testdata/browser_qa.py --screenshots /tmp/inferplane-cp-dashboard-qa
 ```
 
 The browser check requires already installed Playwright and Chromium. It checks
-login, token wiping, exact spend, navigation, filtering, export, policy CRUD and
-review, rejection text safety, CSP, degraded history, themes, mobile width and
-disconnect. Go tests do not require a browser or npm installation.
+login, token wiping, exact spend, keyboard search, attention-to-policy navigation,
+guided substitution, review/back/publish, filtering, export, CRUD, rejection text
+safety, CSP, degraded history, themes, mobile views/guides and disconnect.
+Go tests also strictly decode and validate documents emitted by the shipped
+guided-rule handlers. They require no browser or npm installation.
 
 ## SSO request scheduling
 
@@ -160,7 +240,8 @@ not a redesign of the global verifier. Never share an ID token for diagnosis.
 
 `TestSSOBootstrapWithColdRealVerifier` drives the shipped SSO callback and reads
 through real Go signature/JWKS/group checks with a slow, local fake IdP. It
-verifies that bootstrap and refresh produce six 200 reads without concurrent
+verifies that bootstrap and refresh produce ten 200 reads, including user
+groupings and charts, without concurrent
 signature checks. Node regressions also cover wrong state/nonce, real 401
 refusal, no auth retry, PKCE cleanup and disconnecting queued requests. These
 are hermetic tests, not evidence of a completed live Cognito human login.

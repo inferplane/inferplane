@@ -1,0 +1,32 @@
+let databases = Resources.*[ Type == 'AWS::RDS::DBInstance' ]
+rule database_private_encrypted_retained when %databases !empty {
+  %databases {
+    DeletionPolicy == 'Retain'
+    UpdateReplacePolicy == 'Retain'
+    Properties {
+      PubliclyAccessible == false
+      StorageEncrypted == true
+      DeletionProtection == true
+      BackupRetentionPeriod >= 7
+      ManageMasterUserPassword == true
+    }
+  }
+}
+let credentials = Resources.*[ Type == 'AWS::SecretsManager::Secret' ]
+rule secret_retention when %credentials !empty {
+  %credentials {
+    DeletionPolicy == 'Retain'
+    UpdateReplacePolicy == 'Retain'
+  }
+}
+rule database_network_and_tls {
+  Resources.DatabaseSecurityGroup.Properties.SecurityGroupIngress[*] {
+    IpProtocol == 'tcp'
+    FromPort == 5432
+    ToPort == 5432
+    CidrIp !exists
+    CidrIpv6 !exists
+    SourceSecurityGroupId exists
+  }
+  Resources.DatabaseParameters.Properties.Parameters.'rds.force_ssl' == '1'
+}

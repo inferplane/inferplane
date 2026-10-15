@@ -13,7 +13,7 @@ class Element {
   setAttribute(k, v) { this.attributes[k] = String(v); }
   removeAttribute(k) { delete this.attributes[k]; }
   addEventListener(k, fn) { (this.listeners[k] ||= []).push(fn); }
-  async fire(k) { for (const fn of this.listeners[k] || []) await fn({ preventDefault() {}, target: this }); await flush(); }
+  async fire(k, event = {}) { for (const fn of this.listeners[k] || []) await fn({ preventDefault() {}, target: this, ...event }); await flush(); }
   querySelectorAll(selector) { return this.children.flatMap(c => [ ...(matches(c, selector) ? [c] : []), ...c.querySelectorAll(selector) ]); }
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
   showModal() { this.open = true; }
@@ -35,7 +35,7 @@ const doc = { apiVersion: 'inferplane.dev/v1alpha1', kind: 'GovernancePolicy', m
   { name: 'daily', failurePolicy: 'FailClosed', budget: { period: 'CalendarDay', limitMilliUSD: 20000, hardCap: true, lease: { grantMilliUSD: 20, renewInterval: '10s' }, adminContact: '#ops' } },
   { name: 'monthly', failurePolicy: 'FailClosed', budget: { period: 'CalendarMonth', limitMilliUSD: 300000, hardCap: false } },
   { name: 'rate', failurePolicy: 'FailClosed', rate: { rpm: 100, tpm: 100000 } },
-  { name: 'privacy', failurePolicy: 'FailClosed', sensitiveData: { action: 'Block', detect: ['email'] } },
+  { name: 'privacy', failurePolicy: 'FailClosed', sensitiveData: { onDetected: 'Block', onUninspectable: 'Block' } },
 ] } };
 const rows = [{ key: 'engineering', spent_micro_usd: 1496085, input_tokens: 2, output_tokens: 5, cache_read_tokens: 0, cache_write_5m_tokens: 271999, cache_write_1h_tokens: 0 }];
 function boot(options = {}) {
@@ -43,19 +43,20 @@ function boot(options = {}) {
   for (const m of html.matchAll(/<([\w-]+)[^>]*\bid="([^"]+)"[^>]*>/g)) {
     const e = new Element(m[1]); e.hidden = /\bhidden\b/.test(m[0]); e.disabled = /\bdisabled\b/.test(m[0]); elements.set(m[2], e);
   }
-  for (const id of ['teams', 'models', 'fleet-table']) elements.get(id).append(new Element('tbody'));
+  for (const id of ['teams', 'models', 'fleet-table', 'users-table', 'user-models', 'budget-table']) elements.get(id).append(new Element('tbody'));
   const $ = id => { assert(elements.has(id), 'unknown DOM id ' + id); return elements.get(id); };
   const calls = [], writes = [];
   const pkce = new Map([['ip_sso_verifier', 'fixture-verifier'], ['ip_sso_state', 'fixture-state'], ['ip_sso_nonce', 'fixture-nonce']]);
   const idToken = options.idToken || ['fixture-header', Buffer.from(JSON.stringify({ nonce: 'fixture-nonce', token_use: 'id' })).toString('base64url'), 'fixture-signature'].join('.');
   let jwtInFlight = 0, maxJWTInFlight = 0, jwtDenied = 0;
   let usage = options.usage || { total_micro_usd: 1496085, rows, degraded: false };
+  let userUsage = options.users || { total_micro_usd: 1496085, rows: [{ ...rows[0], key: 'developer-a' }], degraded: false };
   let policy = { generation: 'g2', writable: options.writable !== false, policies: [{ name: 'engineering', policy: structuredClone(doc) }] };
   let fail = options.fail || {};
   let custom = options.custom;
   const resp = (status, body) => ({ status, ok: status >= 200 && status < 300, text: async () => typeof body === 'string' ? body : JSON.stringify(body), json: async () => body });
   const context = vm.createContext({
-    document: { getElementById: $, createElement: tag => new Element(tag), documentElement: new Element('html'), body: new Element('body') },
+    document: Object.assign(new Element('document'), { getElementById: $, createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag), documentElement: new Element('html'), body: new Element('body') }),
     URLSearchParams, URL, Date, BigInt, Intl, AbortController, structuredClone, Blob, atob, btoa, TextEncoder, TextDecoder,
     matchMedia: () => ({ matches: false }), confirm: () => true,
     location: { search: options.sso ? '?code=fixture-code&state=' + (options.callbackState || 'fixture-state') : '', origin: 'http://localhost', pathname: '/ui/' },
@@ -89,7 +90,9 @@ function boot(options = {}) {
       }
       const pathname = url.split('?')[0];
       if (fail[pathname]) return resp(fail[pathname], { error: 'unavailable' });
-      if (pathname === '/v1alpha1/usage') return resp(200, usage);
+      if (pathname === '/v1alpha1/usage') return resp(200, new URLSearchParams(url.split('?')[1]).get('group_by') === 'user' ? userUsage : usage);
+      if (pathname === '/v1alpha1/usage/charts') return resp(200, options.charts || { total_micro_usd: 1496085, days: [{ day: new Date().toISOString().slice(0, 10), spent_micro_usd: 1496085 }], models: [{ key: 'model-a', spent_micro_usd: 1496085 }], model_count: 1, other_micro_usd: 0 });
+      if (pathname === '/v1alpha1/usage/export') return resp(200, options.exportRows || []);
       if (pathname === '/v1alpha1/policies') return resp(200, policy);
       if (pathname === '/v1alpha1/dataplanes') return resp(200, { generation: 'g2', apiVersions: ['inferplane.dev/v1alpha1'], dataplanes: {
         'node-a': { generation: 'g2', apiVersions: ['inferplane.dev/v1alpha1'], lastSeen: new Date().toISOString() },
@@ -99,12 +102,14 @@ function boot(options = {}) {
     }, console,
   });
   vm.runInContext(source, context);
-  return { $, calls, writes, pkce, jwtState: () => ({ maxJWTInFlight, jwtDenied }), setUsage: v => usage = v, setFailure: v => fail = v, setCustom: v => custom = v, policy,
+  return { $, document: context.document, calls, writes, pkce, jwtState: () => ({ maxJWTInFlight, jwtDenied }), setUsage: v => usage = v, setUsers: v => userUsage = v, setFailure: v => fail = v, setCustom: v => custom = v, policy,
     connect: async () => { $('token').value = 'read-secret'; await $('connect-form').fire('submit'); },
     credential: async () => { $('write-token').value = 'write-secret'; await $('write-token-form').fire('submit'); } };
 }
 module.exports = { boot, flush };
-if (require.main === module) (async () => {
+if (require.main === module) {
+process.exitCode = 1; // unresolved promises must not exit as a successful suite
+(async () => {
   // The deployed CP's JWKS miss limiter refuses concurrent signature checks.
   // Exercise the actual callback/code exchange, not just a pasted read token.
   let sso = boot({ sso: true, rejectConcurrentJWT: true });
@@ -123,7 +128,7 @@ if (require.main === module) (async () => {
   await new Promise(resolve => setTimeout(resolve, 100)); await flush();
   assert.equal(deniedSSO.$('workspace-content').hidden, true);
   assert.equal(deniedSSO.$('auth-section').hidden, false);
-  assert.equal(deniedSSO.calls.filter(c => c.url.startsWith('/v1alpha1/usage?')).length, 1, 'SSO silently retried unauthorized');
+  for (const group of ['team', 'user']) assert.equal(deniedSSO.calls.filter(c => c.url.startsWith('/v1alpha1/usage?') && c.url.includes('group_by=' + group)).length, 1, 'SSO silently retried the unauthorized ' + group + ' query');
   for (const options of [{ callbackState: 'wrong-state' }, { idToken: 'fixture-header.' + Buffer.from('{"nonce":"wrong-nonce"}').toString('base64url') + '.fixture-signature' }]) {
     const rejectedCallback = boot({ sso: true, ...options });
     await flush();
@@ -148,8 +153,8 @@ if (require.main === module) (async () => {
   let app = boot(); await app.connect();
   assert.equal(app.$('workspace-content').hidden, false, 'valid connection did not open workspace');
   assert.equal(app.$('token').value, '', 'read token remained in input');
-  assert.equal(app.$('stat-spend').textContent, '$1.496085', 'microUSD display lost precision');
-  assert.equal(app.$('stat-tokens').textContent, '272,006', 'cache or output was double counted');
+  assert.equal(app.$('stat-spend').title, '$1.496085', 'microUSD display lost precision');
+  assert.equal(app.$('stat-tokens').title, '272,006', 'cache or output was double counted');
   assert.equal(app.$('stat-nodes').textContent, '2');
   for (const c of app.calls.filter(c => c.url.startsWith('/v1alpha1/'))) {
     assert.equal(c.init.redirect, 'error', 'a bearer may follow redirects');
@@ -188,7 +193,7 @@ if (require.main === module) (async () => {
   assert.equal(app.$('auth-section').hidden, false);
 
   app = boot({ usage: '{"total_micro_usd":9007199254740993,"rows":[],"degraded":true}' }); await app.connect();
-  assert.equal(app.$('stat-spend').textContent, '$9,007,199,254.740993', 'int64 JSON was rounded through JS Number');
+  assert.equal(app.$('stat-spend').title, '$9,007,199,254.740993', 'int64 JSON was rounded through JS Number');
   assert.equal(app.$('degraded-banner').hidden, false);
   app.$('since').value = '2026-10-07'; app.$('until').value = '2026-10-07';
   await app.$('apply-range').fire('click');
@@ -208,7 +213,7 @@ if (require.main === module) (async () => {
   // A deferred reply from an old session must not repopulate a disconnected page.
   app = boot(); await app.connect();
   let release;
-  app.setCustom((url, init, resp) => url.startsWith('/v1alpha1/usage?') ? new Promise(r => { release = () => r(resp(200, { total_micro_usd: 999999999, rows })); }) : null);
+  app.setCustom((url, init, resp) => url.startsWith('/v1alpha1/usage?') && url.includes('group_by=team') ? new Promise(r => { release = () => r(resp(200, { total_micro_usd: 999999999, rows })); }) : null);
   const pending = app.$('refresh').fire('click'); await flush();
   await app.$('disconnect').fire('click'); release(); await pending;
   assert.equal(app.$('stat-spend').textContent, '—', 'late response repopulated disconnected page');
@@ -285,4 +290,6 @@ if (require.main === module) (async () => {
   await app.$('dialog-confirm').fire('click');
   assert.match(app.$('dialog-error').textContent, /integer JSON numbers/);
   console.log('control-plane dashboard behavioral checks passed');
+  process.exitCode = 0;
 })().catch(e => { console.error(e); process.exitCode = 1; });
+}

@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: 8a7a112de4d82c60a913b4a10d5f62fa07aa565cb91a0840cf0f8c0c7b7e51bc
+translation_source_sha256: a2e967a28ba04e1a48e30ee97e35b07be92360b02b203a2b3ea4021c60253158
 ---
 
 # API 구현 {#api}
@@ -35,8 +35,10 @@ Messages·Chat Completions·Responses·Bedrock 수신과 상태·메트릭·키 
 | 메트릭 | `internal/server/metricsapi.go` | 비인증 Prometheus /metrics |
 | OpenAI 변환 | `internal/openai/convert.go` | 정규 요청·응답·청크 상호 변환 |
 | CP 사용량 | `internal/controlplane/usage.go` | POST /v1alpha1/usage: 검증 오류 400, 과대 413, 저장소 장애 503, 저장 후 ack·FIFO 재시도. GET은 team/user/model·group_by·정수 비용, 메모리 대체 시 degraded. export는 since/until 필수 CSV·JSON 스트리밍, 쓰기별 기한으로 30초 WriteTimeout 대응 |
+| CP 차트 | `internal/controlplane/usage_charts.go` | 인증된 GET /v1alpha1/usage/charts (ADR-051). since·배타적 until 필수, 양수 ≤366일. 정수 total_micro_usd, UTC days[{day,spent_micro_usd}], 상위 8 models[{key,spent_micro_usd}], other_micro_usd·model_count. 보관된 텔레메트리만 집계하며 사용자·팀 ID나 승인 크레딧은 없음. 잘못된 기간 400, 커서·저장소 실패 503이며 부분 차트 성공으로 바꾸지 않음. 성공 no-store |
 | CP 중개 | `controlplane/broker.go` | POST /v1alpha1/credentials, dataplane·provider=bedrock 요청 1 MiB. 임시 키·토큰·만료와 no-store 응답. ARN 있을 때만 등록. 전용 상수 시간 토큰, JWT는 미검증 403. 3600초 STS, 정제한 최대 64자 ID를 세션명·SourceIdentity·태그에 사용. SourceIdentity 거부 시 태그로 1회 재시도. 빈 ID·다른 공급자 400, STS·불완전 결과는 고정 502 |
 | CP 정책 | `controlplane/policies.go` | GET /v1alpha1/policies: 하트비트·콘솔 OIDC, writable 포함. DSN 없으면 쓰기 405. PUT·DELETE는 전용 POLICY_WRITE_TOKEN 또는 콘솔 OIDC, 하트비트 쓰기는 403. 쓰기 토큰 없으면 모든 정적 bearer 쓰기 거부. actor/op/name/content-sha256 로그 |
+| CP 계정 연결 | `internal/controlplane/policies.go` | 같은 인증된 정책 목록에 선언의 `identity_bindings: [{reported_ref, account_ref, kind}]`를 선택적으로 추가(ADR-050). 바인딩이 없으면 생략하며 issuer·subject·IdP 그룹 원문은 반환하지 않음. `Cache-Control: no-store`. 정확한 재무 선택자를 위한 승인된 선언 메타데이터이며 사용자 레지스트리·신원 증명·회계 계정 변경이 아님 |
 | CP 내보내기 | `controlplane/export.go` | GET /v1alpha1/config/export, 비밀 없는 다중 GovernancePolicy YAML·로더 왕복. 가져오기 기능과 구분 |
 | CP 콘솔 | `internal/controlplane/ui/` | /ui/ [운영 대시보드](../runbooks/inferplaned-dashboard.md): 개요·정밀 사용량과 내보내기·최근 데이터 플레인 generation과 거절·검토 후 정책 CRUD(기존 서버 쓰기 권한). 데이터 없는 공개 셸, 분리된 읽기·쓰기 자격 증명은 JS 메모리만, self CSP와 API 불가·degraded 표시. 로그인 origin 환경 변수로 Code+PKCE |
 | CP 인증 설정 | `controlplane/authconfig.go` | GET /ui/auth/config의 비밀 없는 sso·issuer·client_id. issuer·client_id 있을 때만 등록, 아니면 404 |

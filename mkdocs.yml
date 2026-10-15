@@ -159,6 +159,7 @@ nav:
   - Operations:
       - Control-plane dashboard: runbooks/inferplaned-dashboard.md
       - Dashboard on CloudFront: runbooks/inferplaned-cloudfront.md
+      - Persisted budget settings on ECS: runbooks/inferplaned-policy-store.md
       - Deploy with containers: operations/deployment.md
       - Monitor & troubleshoot: operations/observability.md
       - Upgrade & recover: operations/recovery.md

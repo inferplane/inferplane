@@ -1,6 +1,6 @@
 ---
 translation_source: runbooks/inferplaned-cloudfront.md
-translation_source_sha256: 68db4d33730a9255ac263eb684242471e2e30417b6b2e743ef8bf94eaedba502
+translation_source_sha256: a2100eefce4c0b43f96c6ae75f9a68a2c8886da48c002854b118490c17ce5d53
 ---
 
 # CloudFront로 control plane 대시보드 배포 {#deploy-the-control-plane-dashboard-through-cloudfront}
@@ -88,3 +88,17 @@ CloudFormation change set으로 검토·실행하고 같은 UI 경로를 무효�
 SSO origin이 바뀌면 지원 스택의 CSP 파라미터도 함께 검토하세요.
 
 화면 사용법과 지원 범위는 [대시보드 운영 문서](inferplaned-dashboard.md)를 참고하세요.
+
+## 구형 control plane의 차트 호환 배포 {#compatible-chart-deployment-on-an-older-control-plane}
+
+새 UI는 인증된 `/v1alpha1/usage/charts`를 먼저 조회합니다. 이 경로가 404일 때만
+같은 적용 날짜와 JSON 형식으로 기존 인증된 `/v1alpha1/usage/export`를 사용합니다.
+로그인한 사용자 페이지의 메모리에서만 집계하며 운영 토큰·기록을 배포 도구나 공개
+정적 자산에 넣지 않습니다. 8 MiB·100,000행 제한을 넘으면 기간을 줄여야 합니다.
+정수 microUSD, OIDC 요청 큐·세션 차단은 유지합니다. 401·403·저장소 장애에는
+다른 경로로 재시도하지 않습니다.
+
+메모리 CP의 프로세스·이력을 유지한 정적 배포가 가능하며 새 서버 엔드포인트 추가,
+쓰기 권한 변경, 정책 저장소 설정이나 신원 바인딩 증명을 뜻하지 않습니다.
+파일 기준 배포의 쓰기 제어는 계속 사용 불가입니다. 운영 파일시스템으로 백업·
+내보내기는 별도 데이터 접근 승인이 필요하며 UI 게시 자체가 그런 승인은 아닙니다.

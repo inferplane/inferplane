@@ -1,6 +1,6 @@
 ---
 translation_source: runbooks/inferplaned-dashboard.md
-translation_source_sha256: 0cb9896d7ec95ca06a34c8365d569f8d8fbe7d4fa09dbea0c81f4778e7a25075
+translation_source_sha256: facb8d111c4843aa4a4750a7d4953a849cbe45ab6a1cd3428aa1c9ee2b012516
 ---
 
 # Control plane 운영 대시보드 {#control-plane-operations-dashboard}
@@ -24,15 +24,37 @@ GovernancePolicy 문서를 관리하고 사용량·하트비트 관측을 읽습
 | --- | --- |
 | Overview | 보고된 지출, 사용량이 있는 팀(등록 팀 수 아님), 입력·출력·캐시 토큰, 최근 노드, 지출 상위 5개 팀, generation 차이와 기록된 거절 |
 | Usage & costs | 팀 검색·정렬, 팀별 모델 상세, 분리된 캐시 클래스, 가장 세밀한 JSON 내보내기 |
+| Users & costs | 보고 계정 수·평균, 사용자별 지출·토큰, 팀 필터, 모델 상세, 정확한 재무 참조를 사용하는 개인 예산·토큰 설정 |
 | Budgets | 팀·사용자 예산 검색, 일간·월간 필터, 새 정책 또는 기존 정책에 예산 추가, USD 한도 편집, 검토 후 게시 |
 | Data planes | 현재 generation, 지원 API 버전, 최근 노드 관측, generation 비교, 마지막 하트비트, 기록된 정책 거절 상세 |
 | Policies | 모든 규칙 조회, 정책·subject 검색, 기존 예산·rate·모델 접근 필드 편집, 전체 JSON 문서 생성·편집, 게시 전 검토, 정확한 이름 입력 후 삭제 |
+
+개요는 비용·사용자·토큰 KPI → UTC 일별 지출·모델 분포 → 팀·사용자 지출 순위 →
+배포 관측 순서입니다. 상세 근거는 접힌 영역에 둡니다. 기본 예산 화면은 대상·
+범위·기간·USD 한도·동작을 비교하는 표이며 행에서 검토 편집기를 엽니다.
+고급 규칙 카드는 상세 영역에 남습니다. 보고 지출로 남은 승인 크레딧을 꾸미지
+않습니다. $1 이상 KPI는 센트로 읽기 쉽게 표시하고 정확한 microUSD는 툴팁·상세
+표·내보내기에 보존합니다. 양수 $1 미만은 소수점 6자리를 유지하며 토큰도 정확한
+툴팁 값을 보존합니다. 인증된 /v1alpha1/usage/charts의 기간 제한 집계를 사용하고,
+API 부재·저장소 장애는 다른 화면을 유지하며 조회 불가로 표시합니다.
+
+**Search workspace** 또는 **Ctrl/⌘ K**로 페이지, 조회된 팀·정책·최근 노드를
+검색합니다. 방향키로 선택하고 Enter로 열며 Esc로 닫습니다. 팀은 모델별
+사용량, 정책은 검색된 정책 목록, 노드는 기록된 거절 상세를 엽니다. 선택한
+작업에 필요할 때만 추가 데이터를 읽으며 Disconnect는 결과를 지웁니다.
+
+Overview의 경고에서 해당 조건으로 필터링한 인벤토리로 이동합니다.
+기록된 거절의 정책이 조회된 목록에 있으면 **Inspect policy**로 연결합니다.
+게시 후에는 **Inspect distribution**으로 배포 결과를 살펴봅니다. 미게시
+빠른 편집 초안이 있으면 게시하거나 갱신을 명시적으로 확인할 때까지 정책
+필터로 초안을 대체하지 않습니다.
 
 화면의 날짜는 **양 끝을 포함하는 UTC 달력 날짜**입니다. 브라우저는 To에 하루를
 더해 API의 배타적 `until`로 전달합니다. 초기 범위는 이달 1일부터 오늘까지입니다.
 Apply range 또는 Refresh 후에만 새 범위를 적용합니다. 모델 상세와 내보내기는
 미제출 날짜 입력이 아니라 적용된 범위를 사용합니다. 인벤토리와 정책은 현재
 관측이며 사용량 기간으로 필터링되지 않습니다.
+**Today**, **7 days**, **This month**는 양 끝을 포함한 UTC 기간을 즉시 적용합니다.
 
 JSON 내보내기는 선택한 기간의 **모든 팀**을 포함합니다. 검색·정렬은 내보내기
 범위를 바꾸지 않습니다. 화면의 집계 표가 아니라 명시적 날짜 경계를 사용하는
@@ -61,10 +83,41 @@ JSON 내보내기는 선택한 기간의 **모든 팀**을 포함합니다. 검�
 
 ## 정책 쓰기 권한과 검토 {#policy-write-authority-and-review}
 
+### 가이드로 거버넌스 규칙 만들기 {#guided-governance-rules}
+
+**Policies → Guided rule**에서 모델 접근, 팀 처리량, 민감 입력 보호, 예산
+임계점에 따른 모델 대체를 선택합니다. 기존 정책을 선택하면 subject와 다른
+규칙을 보존하면서 규칙을 추가합니다. 새 정책에는 정책 이름, 팀 또는 선언된
+사용자 계정 참조를 입력합니다. 규칙 이름은 중복할 수 없습니다. 처리량 가이드는
+기본·로컬에서는 팀 규칙을 지원합니다. 사용자 rate에는 shared Postgres와
+명시적인 프로파일 확인이 필요합니다. **Token limit**은 일간·월간 총량을
+설정하며 shared 전용·FailClosed입니다. 체크박스가 프로파일을 켜거나
+증명하지 않으며 실제 데이터 플레인의 검증이 적용됩니다.
+
+민감 입력 보호는 `FailClosed`이며 검사할 수 없는 입력을 차단합니다. 탐지된
+입력도 차단하거나 명시적인 내부 모델 목록으로 제한합니다. 유한한 로컬 탐지
+신호를 사용하므로 모든 비밀·개인정보 탐지를 주장하지 않습니다. 각 내부 모델의
+라우팅·가격·internal 경계는 데이터 플레인에 설정되어야 합니다.
+
+모델 대체에는 같은 정책의 숫자 예산이 필요합니다. 예산 참조, 임계점, 요청 모델,
+대체 모델을 입력합니다. 기존 대체는 1–99%, **Require the substitute on every
+attempt**는 1–100%를 지원합니다. 대상을 강제하면 대상 충돌·사용 불가 시 요청을
+거부할 수 있습니다. 기존 대체는 이 경우 원래 모델을 제공합니다. 실제 가격·
+접근·라우팅을 확인해야 하며 CP가 모델 카탈로그의 권한을 갖지는 않습니다.
+독립적인 hard cap은 계속 적용됩니다. 두 번째 임계점은 동일한 원 요청을 다른
+대상으로 매핑하며 재귀적 체인이 아닙니다. 2개를 넘는 단계·여러 원 모델,
+컨텍스트 라우팅, 검증된 마스킹,
+고급 필드는 JSON 편집기를 사용합니다.
+
+**Review rule**은 정확한 필드 차이와 전체 JSON을 보여줍니다. **Edit draft**는
+입력을 보존하여 폼으로 돌아가고, **Publish policy**로 명시적인 PUT을 보냅니다.
+예산·빠른 필드·JSON 편집에도 같은 요약을 적용합니다. 삭제의 이름 확인은 유지하며
+서버 검증·인증과 실제 노드 generation 관측이 최종 근거입니다.
+
 ### 예산 설정 {#setting-a-budget}
 
-**Budgets → New budget**에서 **Create a new policy**를 선택하고 정책 이름과
-팀 또는 사용자를 입력합니다. 이어 예산 이름, 일간·월간 윈도우, USD 한도를
+**Budgets & limits → New budget**에서 내부 이름이 자동 생성되며 변경할 수
+있습니다. 팀 또는 사용자, 일간·월간 윈도우, USD 한도를
 설정합니다. 검증된 사용자는 선언된 재무 계정 참조를 사용합니다. 콘솔이 이메일이나
 감사 digest로 신원을 추론하지 않습니다. 기존 정책을 선택하면 그 정책의 subject를
 바꾸지 않고 규칙을 추가합니다. 예산 이름은 해당 정책의 다른 규칙 이름과 달라야
@@ -76,6 +129,19 @@ JSON 내보내기는 선택한 기간의 **모든 팀**을 포함합니다. 검�
 0·음수·지수 표기·초과 소수 자릿수·내부 microUSD 범위를 넘는 값은 검토 전에
 거절합니다. 새 예산의 기본값은 hard cap과 `FailClosed`입니다. hard cap을 해제하면
 soft threshold를 생성하며, 기존 soft 예산을 편집할 때는 failurePolicy를 보존합니다.
+
+**Users & costs → Set budget**은 선언된 정확한 재무 참조를 채웁니다.
+연결되지 않은 managed 보고 ID는 승인된 키 조회의 `account_ref`를 입력해야
+하며 digest를 계정으로 추측하지 않습니다. 개인 작업을 팀 전용 정책이나 다른
+선언 계정의 정책으로 조용히 바꾸지 않습니다. 전체 팀 지출은 합산이지만
+기본·로컬 개인 카운터는 팀·게이트웨이별이며 shared 사용자 전용 한도는
+팀을 함께 다룰 수 있습니다.
+
+평균은 빈 귀속을 제외하고 서비스 신원을 포함합니다. 선언된 연결만 과거·현재
+보고 alias를 묶으며 모델 상세는 서로 다른 ID를 개별 조회합니다. 공백을 포함한
+정확한 재무 참조를 보존합니다. 인증된 정책 목록의 선택적 `identity_bindings`는
+보고·계정 참조와 kind만 포함하고 신원 tuple 원문을 생략하며 no-store입니다.
+사용자 레지스트리나 실행 중 활성화를 증명하는 데이터가 아닙니다.
 
 **Review budget**에서 변경된 전체 정책을 확인하고 **Publish policy**로 기존
 정책 PUT API에 저장한 뒤 목록을 다시 읽습니다. **Edit budget**은 다른 규칙,
@@ -120,7 +186,8 @@ DELETE가 필요합니다. **서버측 revision 잠금은 없습니다**. 동시
 origin으로 보내며 리다이렉트를 거부하고 브라우저 쿠키를 보내지 않습니다. API
 값은 HTML이 아니라 DOM 텍스트로 렌더링합니다. `default-src 'self'` CSP와
 인라인 스크립트·스타일·외부 폰트 금지는 유지합니다. 테마 선택도 페이지 안에서만
-유효합니다. Go API·인증·readiness·정책·리스·금융 권한·토큰 카운트·라우팅 계약은
+유효합니다. 정책 조회에 선택적 계정 연결 메타데이터를 추가합니다.
+인증·readiness·정책 스키마·리스·금융 권한·토큰 카운트·라우팅 계약은
 변경하지 않습니다.
 
 소스는 `internal/controlplane/ui/static/{index.html,style.css,app.js}`입니다.
@@ -133,6 +200,8 @@ origin으로 보내며 리다이렉트를 거부하고 브라우저 쿠키를 �
 go test ./internal/controlplane/ui ./internal/controlplane -race
 node internal/controlplane/ui/testdata/dashboard.cjs
 node internal/controlplane/ui/testdata/budgets.cjs
+node internal/controlplane/ui/testdata/workspace.cjs
+node internal/controlplane/ui/testdata/user_limits.cjs
 python3 internal/controlplane/ui/testdata/browser_qa.py --screenshots /tmp/inferplane-cp-dashboard-qa
 ```
 
@@ -140,6 +209,9 @@ python3 internal/controlplane/ui/testdata/browser_qa.py --screenshots /tmp/infer
 지우기·정확한 지출·탐색·검색·내보내기·정책 CRUD와 검토·거절 텍스트 안전성·CSP·
 degraded 이력·테마·모바일 너비·Disconnect를 확인합니다. Go 테스트는 브라우저나
 npm 설치가 필요하지 않습니다.
+키보드 검색, 경고에서 정책까지 연결되는 흐름, 모델 대체 가이드, 검토 후 초안으로
+돌아가기, 게시 후 배포 관측, 모바일 가이드도 검증합니다. Go 테스트는 실제
+가이드 핸들러가 생성한 문서를 엄격하게 디코딩하고 정책 의미를 검사합니다.
 
 ## SSO 요청 순서 {#sso-request-scheduling}
 
@@ -154,6 +226,6 @@ npm 설치가 필요하지 않습니다.
 
 `TestSSOBootstrapWithColdRealVerifier`는 느린 로컬 가짜 IdP와 실제 Go 서명·JWKS·
 그룹 검증을 통해 배포되는 SSO 콜백·조회 코드를 실행합니다. 초기 조회와 갱신의
-6개 읽기가 동시 서명 검증 없이 모두 200인지 확인합니다. Node 회귀는 잘못된
+사용자 집계와 차트를 포함한 10개 읽기가 동시 서명 검증 없이 모두 200인지 확인합니다. Node 회귀는 잘못된
 state·nonce, 실제 401 거절, 인증 재시도 없음, PKCE 정리와 대기 요청 중 연결 해제를
 검증합니다. 격리된 테스트이며 실제 Cognito 사람 로그인을 완료했다는 증거는 아닙니다.
