@@ -28,12 +28,23 @@ import (
 // seed-call counter, so seeding-once and the commit-then-memory invariant
 // are testable without a database.
 type fakeStore struct {
-	mu        sync.Mutex
-	docs      map[string]policystore.Doc
-	seeded    bool
-	seedCalls int
-	putErr    error
-	listErr   error
+	mu           sync.Mutex
+	docs         map[string]policystore.Doc
+	seeded       bool
+	seedCalls    int
+	putErr       error
+	listErr      error
+	replaceErr   error
+	replaceCalls int
+	// Concurrency hooks (Task 2's writeMu test). Each fires BEFORE f.mu is
+	// taken, so the fake's own mutex can never stand in for the server's
+	// writer serialization.
+	replaceEntered chan struct{} // signaled (non-blocking; give it capacity 1) when Replace is entered
+	replaceGate    chan struct{} // Replace waits for it to close when non-nil
+	putStarted     chan struct{} // non-blocking signal when Put is entered
+	// Post-commit fault injection (Task 2):
+	listErrAfterReplace  error // installed as listErr once a Replace succeeds
+	replaceCommitThenErr error // Replace commits the new set, then returns this (lost-ack)
 }
 
 func newFakeStore() *fakeStore {
@@ -55,6 +66,12 @@ func (f *fakeStore) List(context.Context) ([]policystore.Doc, error) {
 }
 
 func (f *fakeStore) Put(_ context.Context, name string, docYAML []byte) error {
+	if f.putStarted != nil {
+		select {
+		case f.putStarted <- struct{}{}:
+		default:
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.putErr != nil {
@@ -92,6 +109,34 @@ func (f *fakeStore) Seed(_ context.Context, docs []policystore.Doc) (bool, error
 	}
 	f.seeded = true
 	return true, nil
+}
+
+func (f *fakeStore) Replace(_ context.Context, docs []policystore.Doc) error {
+	if f.replaceEntered != nil {
+		select {
+		case f.replaceEntered <- struct{}{}:
+		default:
+		}
+	}
+	if f.replaceGate != nil {
+		<-f.replaceGate
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.replaceCalls++
+	if f.replaceErr != nil {
+		return f.replaceErr
+	}
+	next := make(map[string]policystore.Doc, len(docs))
+	for _, d := range docs {
+		next[d.Name] = policystore.Doc{Name: d.Name, YAML: append([]byte(nil), d.YAML...), UpdatedAt: time.Now()}
+	}
+	f.docs = next
+	f.seeded = true
+	if f.listErrAfterReplace != nil {
+		f.listErr = f.listErrAfterReplace
+	}
+	return f.replaceCommitThenErr
 }
 
 var _ policystore.Store = (*fakeStore)(nil)

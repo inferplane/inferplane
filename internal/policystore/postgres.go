@@ -12,8 +12,23 @@ import (
 )
 
 // policySchemaLockKey is a Postgres advisory-lock key distinct from
-// analytics' (847001), bodystore's (847002) and telemetry's (847003).
+// analytics' (847001), bodystore's (847002), telemetry's (847003) and
+// authority's (847005, plus 847007 in authority/pgstore/shared.go).
 const policySchemaLockKey int64 = 847004
+
+// policyReplaceLockKey serializes concurrent Replace transactions so two
+// imports never interleave rows. 847006 is unused elsewhere (grep 8470).
+const policyReplaceLockKey int64 = 847006
+
+// pgWriteTimeout bounds a whole-set Replace. The controlplane holds its
+// writer mutex across the call, so an unbounded stall would freeze every
+// policy PUT/DELETE/import.
+const pgWriteTimeout = 30 * time.Second
+
+// policyListSQL orders by BYTE order (COLLATE "C"), never the server locale:
+// policy.GenerationOf is order-sensitive, and the controlplane's generation
+// must equal both a Go-sorted import preview and authority/pgstore's read.
+const policyListSQL = `SELECT name, doc_yaml, updated_at FROM policies ORDER BY name COLLATE "C"`
 
 // pgReadTimeout bounds every read so a stalled DB cannot pin an HTTP handler.
 const pgReadTimeout = 5 * time.Second
@@ -95,7 +110,7 @@ func (p *PostgresStore) List(ctx context.Context) ([]Doc, error) {
 	if err := p.ensureSchema(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := p.db.Query(ctx, `SELECT name, doc_yaml, updated_at FROM policies ORDER BY name`)
+	rows, err := p.db.Query(ctx, policyListSQL)
 	if err != nil {
 		return nil, fmt.Errorf("policystore: list policies: %w", err)
 	}
@@ -209,6 +224,43 @@ func (p *PostgresStore) Seed(ctx context.Context, docs []Doc) (bool, error) {
 		return false, fmt.Errorf("policystore: seed commit: %w", err)
 	}
 	return true, nil
+}
+
+// Replace swaps the whole stored set in one transaction (see Store.Replace),
+// bounded by pgWriteTimeout from entry (schema check included).
+func (p *PostgresStore) Replace(ctx context.Context, docs []Doc) error {
+	ctx, cancel := context.WithTimeout(ctx, pgWriteTimeout)
+	defer cancel()
+	if err := p.ensureSchema(ctx); err != nil {
+		return err
+	}
+	tx, err := p.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("policystore: replace begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, policyReplaceLockKey); err != nil {
+		return fmt.Errorf("policystore: replace lock: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM policies`); err != nil {
+		return fmt.Errorf("policystore: replace clear: %w", err)
+	}
+	for _, d := range docs {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO policies (name, doc_yaml, updated_at) VALUES ($1, $2, now())`,
+			d.Name, string(d.YAML)); err != nil {
+			return fmt.Errorf("policystore: replace policy %q: %w", d.Name, err)
+		}
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO policy_meta (key, value) VALUES ($1, '1') ON CONFLICT (key) DO UPDATE SET value = '1'`,
+		seededKey); err != nil {
+		return fmt.Errorf("policystore: replace mark seeded: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("policystore: replace commit: %w", err)
+	}
+	return nil
 }
 
 var _ Store = (*PostgresStore)(nil)
