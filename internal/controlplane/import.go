@@ -28,19 +28,28 @@ var ErrImportConflict = errors.New("policies changed since preview")
 // happens the caller must not read it as "nothing changed". Surfaces as 500.
 var ErrImportNotApplied = errors.New("policies were committed to the store but could not be applied in memory")
 
-// Size contract. The FLEET bound is semantic: a data plane decodes a sync
-// response of at most 8 MiB of JSON (internal/proxy/sync.go: 8<<20), so an
-// import whose parsed set exceeds importMaxSetJSONBytes as JSON is refused —
-// it could never be distributed. The TRANSPORT bound is only a memory cap:
+// Size contract. A data plane decodes at most 8 MiB of sync JSON. Durable
+// authority sends the policy set twice, plus budgets, grants, acks, leases
+// and active tiers. Conservatively estimate the WHOLE response as
+// 2*len(setJSON) + rules*1024 + 512 KiB, counting every rule kind. The per-rule
+// allowance is about 2.4x the measured 434-byte envelope per budget rule; the
+// fixed allowance covers other envelope fields. Refuse imports whose estimate
+// exceeds importMaxSyncBytes. Single-document PUTs can already accumulate a
+// set past this bound (a pre-existing gap this import check does not close).
+// The TRANSPORT bound is only a memory cap:
 // block YAML adds per-line indentation that JSON lacks (policy nesting is
 // schema-fixed, so the overhead is bounded; a multiline-string fixture
 // measured ~4.9x, and newline-per-byte strings at maximum depth stay under
 // ~7x), so 64 MiB of YAML admits the export of every set within the fleet
 // bound. policyMaxBodyBytes (1 MiB) stays the per-document PUT bound.
-const importMaxBodyBytes = 64 << 20
+const (
+	importMaxBodyBytes         = 64 << 20
+	importEnvelopeBytesPerRule = 1024
+	importEnvelopeFixedBytes   = 512 << 10
+)
 
-// importMaxSetJSONBytes is a var only so tests can lower it.
-var importMaxSetJSONBytes = 8 << 20
+// importMaxSyncBytes is a var only so tests can lower it.
+var importMaxSyncBytes = 8 << 20
 
 // errStoreList marks a store READ failure inside ReloadFromStore, as opposed
 // to the store holding rows the loader rejects. Import reconciliation treats
@@ -85,30 +94,19 @@ type ImportResult struct {
 // policy.FromV1Alpha1, and names/duplicates/identity subjects are checked
 // here, which is every way applyWire can reject a set.
 //
-// Both preview and apply hold writeMu and first reconcile memory with the
-// store, so the previewed current_generation and the apply precondition are
-// judged against what the store actually holds — never against memory left
-// stale by a committed-but-unreloaded PUT/DELETE or an unacknowledged commit.
+// Bundle preparation runs before writeMu. Both preview and apply then hold
+// writeMu while reconciling memory with the store and checking the generation,
+// so a committed-but-unreloaded PUT/DELETE cannot leave the precondition stale.
+// If stored rows are rejected, the diff uses those rows while current_generation
+// remains the last distributed generation.
 func (s *Server) ApplyImport(ctx context.Context, body []byte, opts ImportOptions) (*ImportResult, error) {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
 	s.mu.Lock()
 	store := s.policyStore
+	identityConfig := s.identityConfig // startup-immutable
 	s.mu.Unlock()
 	if store == nil {
 		return nil, ErrNoPolicyStore
 	}
-	if err := s.ReloadFromStore(ctx); err != nil && errors.Is(err, errStoreList) {
-		return nil, fmt.Errorf("controlplane: reconcile before import: %w", err)
-	}
-	// (A rejected stored set — out-of-band DB edit — falls through: memory
-	// still holds the last set actually distributed, and the restore is
-	// precisely the tool to overwrite those rows.)
-	s.mu.Lock()
-	identityConfig := s.identityConfig
-	currentGen := s.generation
-	current := append([]v1alpha1.GovernancePolicy(nil), s.wire...)
-	s.mu.Unlock()
 
 	docs, err := policy.ParseWireDocs(body)
 	if err != nil {
@@ -144,16 +142,68 @@ func (s *Server) ApplyImport(ctx context.Context, body []byte, opts ImportOption
 		rows = append(rows, policystore.Doc{Name: docs[i].Metadata.Name, YAML: raw})
 		incoming[docs[i].Metadata.Name] = raw
 	}
-	existing := make(map[string][]byte, len(current))
-	for i := range current {
-		raw, err := yaml.Marshal(&current[i])
+
+	// Predict the installed generation from the SAME bytes ReloadFromStore
+	// will parse, so preview and apply can never disagree.
+	var reparsed []v1alpha1.GovernancePolicy
+	rules := 0
+	for _, row := range rows {
+		d, err := policy.ParseWireDocs(row.YAML)
 		if err != nil {
-			return nil, fmt.Errorf("controlplane: render current policy %q: %w", current[i].Metadata.Name, err)
+			return nil, fmt.Errorf("%w: canonical policy %q: %w", ErrPolicyValidation, row.Name, err)
 		}
-		existing[current[i].Metadata.Name] = raw
+		for i := range d {
+			rules += len(d[i].Spec.Rules)
+		}
+		reparsed = append(reparsed, d...)
+	}
+	resultGen := policy.GenerationOf(reparsed)
+	setJSON, err := json.Marshal(reparsed)
+	if err != nil {
+		return nil, fmt.Errorf("%w: could not encode the policy set: %w", ErrPolicyValidation, err)
+	}
+	estimate := 2*len(setJSON) + rules*importEnvelopeBytesPerRule + importEnvelopeFixedBytes
+	if estimate > importMaxSyncBytes {
+		return nil, fmt.Errorf("%w: estimated sync size %d bytes exceeds the %d-byte import limit for the 8 MiB data-plane decode bound", ErrPolicyValidation, estimate, importMaxSyncBytes)
 	}
 
-	res := &ImportResult{DryRun: opts.DryRun, CurrentGeneration: currentGen}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	var storedRows []policystore.Doc
+	rejectedStoreSet := false
+	if err := s.ReloadFromStore(ctx); err != nil {
+		if errors.Is(err, errStoreList) {
+			return nil, fmt.Errorf("controlplane: reconcile before import: %w", err)
+		}
+		// A restore must be able to overwrite rejected stored rows. Diff
+		// against their raw bytes so removals are counted and audited.
+		storedRows, err = store.List(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("controlplane: list rejected stored policies before import: %w", err)
+		}
+		rejectedStoreSet = true
+	}
+	s.mu.Lock()
+	currentGen := s.generation
+	current := append([]v1alpha1.GovernancePolicy(nil), s.wire...)
+	s.mu.Unlock()
+
+	existing := make(map[string][]byte, len(current))
+	if rejectedStoreSet {
+		for _, row := range storedRows {
+			existing[row.Name] = row.YAML
+		}
+	} else {
+		for i := range current {
+			raw, err := yaml.Marshal(&current[i])
+			if err != nil {
+				return nil, fmt.Errorf("controlplane: render current policy %q: %w", current[i].Metadata.Name, err)
+			}
+			existing[current[i].Metadata.Name] = raw
+		}
+	}
+
+	res := &ImportResult{DryRun: opts.DryRun, CurrentGeneration: currentGen, ResultGeneration: resultGen}
 	for _, row := range rows {
 		prev, ok := existing[row.Name]
 		switch {
@@ -177,21 +227,6 @@ func (s *Server) ApplyImport(ctx context.Context, body []byte, opts ImportOption
 	sort.Slice(res.Changes, func(i, j int) bool { return res.Changes[i].Name < res.Changes[j].Name })
 	if res.Changes == nil {
 		res.Changes = []ImportChange{}
-	}
-
-	// Predict the installed generation from the SAME bytes ReloadFromStore
-	// will parse, so preview and apply can never disagree.
-	var reparsed []v1alpha1.GovernancePolicy
-	for _, row := range rows {
-		d, err := policy.ParseWireDocs(row.YAML)
-		if err != nil {
-			return nil, fmt.Errorf("%w: canonical policy %q: %w", ErrPolicyValidation, row.Name, err)
-		}
-		reparsed = append(reparsed, d...)
-	}
-	res.ResultGeneration = policy.GenerationOf(reparsed)
-	if setJSON, err := json.Marshal(reparsed); err != nil || len(setJSON) > importMaxSetJSONBytes {
-		return nil, fmt.Errorf("%w: the policy set exceeds the %d-byte JSON bound a data plane can receive", ErrPolicyValidation, importMaxSetJSONBytes)
 	}
 
 	if opts.DryRun {

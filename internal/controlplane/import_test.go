@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/inferplane/inferplane/internal/identity"
+	"github.com/inferplane/inferplane/internal/policy"
+	"github.com/inferplane/inferplane/internal/policystore"
 )
 
 const importDocB = `apiVersion: inferplane.dev/v1alpha1
@@ -471,6 +473,47 @@ func TestImportReconcilesStaleMemoryBeforePrecondition(t *testing.T) {
 	}
 }
 
+func TestImportDiffUsesStoredRowsWhenStoreSetIsRejected(t *testing.T) {
+	s, ts, fs := importServer(t)
+	gen := currentGeneration(s)
+	fs.mu.Lock()
+	fs.docs["broken"] = policystore.Doc{Name: "broken", YAML: []byte("not: [valid")}
+	fs.mu.Unlock()
+	var mu sync.Mutex
+	var got []MutationEntry
+	s.SetMutationLog(func(e MutationEntry) { mu.Lock(); got = append(got, e); mu.Unlock() })
+
+	resp, b := postImport(t, ts, "w", "?dry_run=true", importDocB)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("dry run %d: %s", resp.StatusCode, b)
+	}
+	preview := decodeImport(t, b)
+	want := []ImportChange{{Name: "broken", Action: "removed"}, {Name: "team-a", Action: "removed"}, {Name: "team-b", Action: "added"}}
+	if preview.CurrentGeneration != gen || preview.Summary != (ImportSummary{Added: 1, Removed: 2}) {
+		t.Fatalf("rejected store preview %+v, want current generation %s and two removals", preview, gen)
+	}
+	if len(preview.Changes) != len(want) {
+		t.Fatalf("changes %+v, want %+v", preview.Changes, want)
+	}
+	for i := range want {
+		if preview.Changes[i] != want[i] {
+			t.Fatalf("changes %+v, want %+v", preview.Changes, want)
+		}
+	}
+	resp, b = postImport(t, ts, "w", "?expected_generation="+gen, importDocB)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("apply %d: %s", resp.StatusCode, b)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, e := range got {
+		if e.Op == "delete" && e.Name == "broken" {
+			return
+		}
+	}
+	t.Fatalf("mutation entries %+v lack delete broken", got)
+}
+
 // A lost commit acknowledgement is resolved by reading back: the store holds
 // exactly the predicted set, so the restore reports success and is audited.
 func TestImportLostCommitAckIsConfirmedByReadBack(t *testing.T) {
@@ -495,16 +538,41 @@ func TestImportLostCommitAckIsConfirmedByReadBack(t *testing.T) {
 	}
 }
 
-// The fleet bound is semantic: a set whose JSON a data plane cannot decode
-// is refused even when the YAML bundle fits the transport cap.
+// The fleet bound covers the full sync response, even when the YAML bundle
+// fits the transport cap.
 func TestImportRefusesUndistributableSet(t *testing.T) {
 	_, ts, fs := importServer(t)
-	prev := importMaxSetJSONBytes
-	importMaxSetJSONBytes = 256
-	t.Cleanup(func() { importMaxSetJSONBytes = prev })
+	prev := importMaxSyncBytes
+	importMaxSyncBytes = 256
+	t.Cleanup(func() { importMaxSyncBytes = prev })
 	resp, b := postImport(t, ts, "w", "?dry_run=true", cpPolicyYAML+"---\n"+importDocB)
-	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(b), "JSON bound") {
-		t.Fatalf("oversized set: %d %s, want 400 naming the JSON bound", resp.StatusCode, b)
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(b), "sync") {
+		t.Fatalf("oversized set: %d %s, want 400 naming the sync bound", resp.StatusCode, b)
+	}
+	if fs.replaceCalls != 0 {
+		t.Fatal("undistributable set reached the store")
+	}
+}
+
+func TestImportSizeEstimateCountsRules(t *testing.T) {
+	_, ts, fs := importServer(t)
+	// Three rules, including two non-budget rules: every kind contributes
+	// to the conservative estimate.
+	bundle := cpPolicyYAML + "---\n" + importDocB
+	docs, err := policy.ParseWireDocs([]byte(bundle))
+	if err != nil {
+		t.Fatal(err)
+	}
+	setJSON, err := json.Marshal(docs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := importMaxSyncBytes
+	importMaxSyncBytes = 2*len(setJSON) + importEnvelopeFixedBytes + 2*importEnvelopeBytesPerRule
+	t.Cleanup(func() { importMaxSyncBytes = prev })
+	resp, b := postImport(t, ts, "w", "?dry_run=true", bundle)
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(b), "sync") {
+		t.Fatalf("per-rule estimate: %d %s, want 400 naming the sync bound", resp.StatusCode, b)
 	}
 	if fs.replaceCalls != 0 {
 		t.Fatal("undistributable set reached the store")

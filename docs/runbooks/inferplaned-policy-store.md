@@ -85,6 +85,11 @@ configuration, and an import never restores them. Restoring a balance would
 rewrite central authority. For the database itself, keep relying on the
 RDS/pg_dump backups described above.
 
+Run imports only when a single policy CP task is serving, never during a rollout.
+`deploy/ecs/policy-store.yaml` uses `MaximumPercent: 200`, so two inferplaned tasks
+can overlap during deployment. `writeMu` is process-local, the same pre-existing
+concurrency gap as PUT/DELETE; a DB-level compare-and-swap is a recorded follow-up.
+
 Back up with the read token (for example, from cron):
 
 ```bash
@@ -105,8 +110,9 @@ curl -fsS -X POST -H "Authorization: Bearer $INFERPLANED_POLICY_WRITE_TOKEN" \
 
 Import REPLACES the whole set. Every document missing from the file is
 deleted. A `409` means policies changed after the preview; re-run the preview.
-An empty file needs `allow_empty=true`. Files are capped at 64 MiB, and a set
-larger than the 8 MiB JSON a data plane can receive is refused with `400`. A `500`
+An empty file needs `allow_empty=true`. Files are capped at 64 MiB; the estimated
+full sync response (`2 × set JSON bytes + total rules × 1024 + 512 KiB`) must fit
+the 8 MiB data-plane decode bound, or import returns `400`. A `500`
 saying "committed but not applied" means the store holds the new set; re-run a
 dry run to confirm what is distributed. The console offers the same flow under
 Policies → Export YAML / Import (restore).

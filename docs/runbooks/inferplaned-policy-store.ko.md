@@ -81,6 +81,8 @@ cfn-lint --regions ap-northeast-2 -t deploy/ecs/policy-store.yaml
 
 policy store에는 GovernancePolicy 문서만 저장됩니다. 정책 내보내기에는 예산 authority 잔액, 사용량 텔레메트리, identity 설정이 포함되지 않으며, 가져오기도 이것들을 복원하지 않습니다. 잔액을 복원하면 중앙 authority를 다시 쓰는 셈이 되기 때문입니다. 데이터베이스 자체는 위에서 설명한 RDS/pg_dump 백업을 계속 사용하세요.
 
+가져오기는 정책 CP 태스크 하나만 서비스 중일 때 실행하고, 롤아웃 중에는 실행하지 마세요. `deploy/ecs/policy-store.yaml`은 `MaximumPercent: 200`을 사용하므로 배포 중 inferplaned 태스크 두 개가 겹칠 수 있습니다. `writeMu`는 프로세스 로컬이어서 PUT/DELETE와 같은 기존 동시성 공백이 있습니다. DB 수준 compare-and-swap은 후속 작업으로 기록되어 있습니다.
+
 읽기 토큰으로 백업합니다(예: cron).
 
 ```bash
@@ -98,6 +100,6 @@ curl -fsS -X POST -H "Authorization: Bearer $INFERPLANED_POLICY_WRITE_TOKEN" \
   --data-binary @policies.yaml "$CP/v1alpha1/config/import?expected_generation=$GEN"
 ```
 
-가져오기는 정책 세트 전체를 교체합니다. 파일에 없는 문서는 삭제됩니다. `409`가 나오면 미리보기 이후 정책이 바뀐 것이니 미리보기를 다시 실행하세요. 빈 파일은 `allow_empty=true`가 필요합니다. 파일은 최대 64 MiB이며, 데이터 플레인이 받을 수 있는 8 MiB JSON보다 큰 세트는 `400`으로 거부됩니다. "committed but not applied" `500`이 나오면 store에는 이미 새 세트가 반영된 것이니, 미리보기를 다시 실행해 실제로 배포 중인 세트를 확인하세요. 콘솔의 Policies → Export YAML / Import (restore)에서도 같은 흐름을 제공합니다.
+가져오기는 정책 세트 전체를 교체합니다. 파일에 없는 문서는 삭제됩니다. `409`가 나오면 미리보기 이후 정책이 바뀐 것이니 미리보기를 다시 실행하세요. 빈 파일은 `allow_empty=true`가 필요합니다. 파일은 최대 64 MiB이며, 전체 sync 응답의 추정 크기(`세트 JSON 바이트 × 2 + 전체 규칙 수 × 1024 + 512 KiB`)가 데이터 플레인 디코딩 한도인 8 MiB를 초과하면 `400`으로 거부됩니다. "committed but not applied" `500`이 나오면 store에는 이미 새 세트가 반영된 것이니, 미리보기를 다시 실행해 실제로 배포 중인 세트를 확인하세요. 콘솔의 Policies → Export YAML / Import (restore)에서도 같은 흐름을 제공합니다.
 
 이 변경 이전에 준비한 배포에서는 `/v1alpha1/config/*` 요청이 여전히 기존 CP origin으로 갑니다. `prepare-policy-controlplane.py`는 이미 policy origin이 있으면 실행을 거부하므로, `/v1alpha1/config/*` behavior(policy-cp origin, `forward-auth` origin request policy)를 검토를 거쳐 수동으로 추가하세요. 그다음 policy/SSO/config 경로 6개를 무효화합니다.

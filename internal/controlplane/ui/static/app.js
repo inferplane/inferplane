@@ -1492,6 +1492,9 @@
       if (sid !== session || !canWrite()) return; // the read outlived its session
       const preview = await request("/v1alpha1/config/import?dry_run=true", { method: "POST", raw: bundle, write: true });
       if (sid !== session) return;
+      if (pendingChange !== null || $("policy-dialog").open) {
+        setError("Another policy change is in progress. Finish or cancel it, then import again."); return;
+      }
       openImport(bundle, preview);
     } catch (e) { if (sid === session) setError(e.message); } // write refusals keep the read session, like PUT/DELETE
   });

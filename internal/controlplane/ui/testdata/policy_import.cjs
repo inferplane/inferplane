@@ -38,7 +38,15 @@ function importRoutes(state) {
   // Export downloads the server YAML verbatim.
   state = { imports: [] };
   app = boot({ custom: importRoutes(state) }); await app.connect(); await app.credential(); await app.$('nav-policies').fire('click');
-  await app.$('export-policies').fire('click');
+  const createObjectURL = URL.createObjectURL;
+  let blob;
+  try {
+    URL.createObjectURL = value => { blob = value; return createObjectURL(value); };
+    await app.$('export-policies').fire('click');
+    assert(blob, 'export did not create a Blob');
+    assert.equal(await blob.text(), bundle, 'export Blob changed the server YAML');
+    assert.equal(blob.type, 'application/yaml');
+  } finally { URL.createObjectURL = createObjectURL; }
   assert.equal(state.exported, 1);
   const exportCall = app.calls.find(c => c.url === '/v1alpha1/config/export');
   assert.equal(exportCall.init.headers.Authorization, 'Bearer read-secret', 'export must use the read credential');
@@ -69,6 +77,33 @@ function importRoutes(state) {
   assert.equal(apply.get('allow_empty'), null);
   assert.equal(app.$('policy-dialog').open, false, 'dialog stayed open after restore');
   assert.match(app.$('notice').textContent, /restored/i);
+
+  // A late preview must preserve an open JSON editor and its pending change.
+  state = { imports: [] };
+  let finishPreview, previewStarted;
+  const started = new Promise(r => { previewStarted = r; });
+  app = boot({ custom: async (url, init, resp) => {
+    if (url === '/v1alpha1/config/import?dry_run=true') {
+      state.imports.push({ url, init });
+      previewStarted();
+      return new Promise(r => { finishPreview = () => r(resp(200, preview)); });
+    }
+    return importRoutes(state)(url, init, resp);
+  } });
+  await app.connect(); await app.credential(); await app.$('nav-policies').fire('click');
+  await app.$('new-policy').fire('click');
+  assert.equal(app.$('policy-dialog').open, true);
+  const editorTitle = app.$('dialog-title').textContent, editorConfirm = app.$('dialog-confirm').textContent;
+  app.$('import-file').files = [file(bundle)];
+  const latePreview = app.$('import-file').fire('change');
+  await started; finishPreview(); await latePreview;
+  assert.equal(app.$('dialog-title').textContent, editorTitle, 'late preview replaced the JSON editor');
+  assert.notEqual(app.$('dialog-title').textContent, 'Restore · preview');
+  assert.equal(app.$('dialog-confirm').textContent, editorConfirm, 'late preview changed editor confirmation');
+  assert.equal(app.$('error').textContent, 'Another policy change is in progress. Finish or cancel it, then import again.');
+  await app.$('dialog-confirm').fire('click');
+  assert.equal(app.$('dialog-confirm').textContent, 'Publish policy', 'late preview replaced the pending editor change');
+  assert.equal(state.imports.length, 1, 'editor confirmation applied an import');
 
   // 409: dialog stays open with a re-preview instruction.
   state = { imports: [], conflict: true };

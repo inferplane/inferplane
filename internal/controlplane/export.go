@@ -40,7 +40,9 @@ func (s *Server) handleConfigExport(w http.ResponseWriter, _ *http.Request) {
 		buf.Write(raw)
 	}
 	short := gen
-	if len(short) > 12 {
+	if short == "" {
+		short = "empty"
+	} else if len(short) > 12 {
 		short = short[:12]
 	}
 	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
