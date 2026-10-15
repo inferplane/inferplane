@@ -8,6 +8,7 @@ from pathlib import Path
 PATHS = (
     "/v1alpha1/policies",
     "/v1alpha1/policies/*",
+    "/v1alpha1/config/*",
     "/v1alpha1/sync",
     "/v1alpha1/dataplanes",
     "/ui/auth/config",

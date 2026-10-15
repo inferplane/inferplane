@@ -51,7 +51,13 @@ type Server struct {
 	token          string // shared bearer token; "" = no auth (loopback-only deployments)
 	authOpts       authOptions
 
-	mu         sync.Mutex
+	mu sync.Mutex
+	// writeMu serializes every policy-store writer (ApplyWrite, ApplyDelete,
+	// ApplyImport) across its whole commit-then-reload sequence, so an
+	// import's expected_generation check and its commit see no interleaved
+	// write. Separate from mu so heartbeats never wait on a DB round trip.
+	// Lock order: writeMu before mu, never the reverse.
+	writeMu    sync.Mutex
 	wire       []v1alpha1.GovernancePolicy
 	generation string
 	interval   int                     // heartbeat cadence handed to data planes, seconds
@@ -363,6 +369,7 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1alpha1/dataplanes", authn(s.token, s.authOpts, s.handleDataplanes))
 	s.mountExport(mux)   // GET /v1alpha1/config/export (export.go)
 	s.mountPolicies(mux) // GET/PUT/DELETE /v1alpha1/policies (policies.go)
+	s.mountImport(mux)   // POST /v1alpha1/config/import (import.go)
 }
 
 // handleSync is the single data-plane heartbeat (ADR-034).

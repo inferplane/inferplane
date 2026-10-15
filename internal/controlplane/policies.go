@@ -31,9 +31,9 @@ import (
 // it; the hash is enough to correlate against the store's own copy).
 type MutationEntry struct {
 	Actor       string // ActorFromContext's value; "unspecified" when the request carried none
-	Op          string // "put" | "delete"
-	Name        string // the policy document name
-	ContentHash string // sha256 of the submitted body, "put" only; "" on delete
+	Op          string // "put" | "delete" | "import" (one per restore, after its per-document entries)
+	Name        string // the policy document name; "" for "import"
+	ContentHash string // sha256: of the submitted body for ApplyWrite "put"; of the canonical re-marshal for an import's "put"; of the raw bundle for "import"; "" on delete
 	TS          time.Time
 }
 
@@ -144,7 +144,7 @@ func (s *Server) ReloadFromStore(ctx context.Context) error {
 	}
 	rows, err := store.List(ctx)
 	if err != nil {
-		return fmt.Errorf("controlplane: list stored policies: %w", err)
+		return fmt.Errorf("controlplane: %w: %w", errStoreList, err)
 	}
 	wire := make([]v1alpha1.GovernancePolicy, 0, len(rows))
 	updated := make(map[string]time.Time, len(rows))
@@ -182,6 +182,8 @@ func (s *Server) ReloadFromStore(ctx context.Context) error {
 // as it was, and there is no window where memory enforces a rule the store
 // does not hold.
 func (s *Server) ApplyWrite(ctx context.Context, name string, body []byte) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	s.mu.Lock()
 	store := s.policyStore
 	identityConfig := s.identityConfig
@@ -216,6 +218,8 @@ func (s *Server) ApplyWrite(ctx context.Context, name string, body []byte) error
 
 // ApplyDelete removes one document and hot-applies the reduced set.
 func (s *Server) ApplyDelete(ctx context.Context, name string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	s.mu.Lock()
 	store := s.policyStore
 	s.mu.Unlock()

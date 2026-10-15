@@ -15,9 +15,8 @@ import (
 // inferplaned's --policies at it." Secret-free by construction: policies
 // carry budget/rate/modelAccess rules and secret REFS only, never values.
 //
-// The import endpoint is deliberately reserved (spec D5): until a
-// UI-editable policy store exists, import == placing these files in
-// --policies.
+// Its inverse is POST /v1alpha1/config/import (import.go): a replace-mode,
+// dry-run-first restore of exactly this format into the policy store.
 func (s *Server) mountExport(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1alpha1/config/export", authn(s.token, s.authOpts, s.handleConfigExport))
 }
@@ -25,6 +24,7 @@ func (s *Server) mountExport(mux *http.ServeMux) {
 func (s *Server) handleConfigExport(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
 	wire := s.wire
+	gen := s.generation
 	s.mu.Unlock()
 
 	var buf bytes.Buffer
@@ -39,6 +39,11 @@ func (s *Server) handleConfigExport(w http.ResponseWriter, _ *http.Request) {
 		}
 		buf.Write(raw)
 	}
+	short := gen
+	if len(short) > 12 {
+		short = short[:12]
+	}
 	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="inferplane-policies-`+short+`.yaml"`)
 	_, _ = w.Write(buf.Bytes())
 }

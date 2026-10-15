@@ -60,7 +60,7 @@ DB, Fargate, secret, 네트워크의 상시 요금이 추가됩니다. 현재 �
    기다립니다.
 5. Main stack 경로 변경안을 준비합니다. 생성된 VPC origin ID를 `PolicyVpcOriginId`로
    전달하고 기존 모든 파라미터를 유지합니다. Distribution만 교체 없이 변경되는지
-   확인한 뒤 실행·전파를 기다립니다. 정책·SSO 경로 5개를 invalidate합니다.
+   확인한 뒤 실행·전파를 기다립니다. 정책·SSO·config 경로 6개를 invalidate합니다.
 6. 공개 경로·인증 거부, 기존 사용량 서비스 유지, 새 서비스 readiness, SSO 설정,
    테스트 응답을 사용하는 브라우저의 쓰기 버튼을 확인합니다.
    실제 사람의 SSO 완료나 운영 정책 변경은 별도로 보고해야 합니다.
@@ -76,3 +76,28 @@ cfn-lint --regions ap-northeast-2 -t deploy/ecs/policy-store.yaml
 첫 쓰기 전에는 유지한 기존 경로로 rollback할 수 있습니다. DB 정책 수정이
 시작된 뒤에는 authoritative DSN과 문서를 유지해야 합니다.
 이미지 파일로 돌아가면 설정한 제한을 완화하거나 잃을 수 있습니다.
+
+## 정책 백업과 복원
+
+policy store에는 GovernancePolicy 문서만 저장됩니다. 정책 내보내기에는 예산 authority 잔액, 사용량 텔레메트리, identity 설정이 포함되지 않으며, 가져오기도 이것들을 복원하지 않습니다. 잔액을 복원하면 중앙 authority를 다시 쓰는 셈이 되기 때문입니다. 데이터베이스 자체는 위에서 설명한 RDS/pg_dump 백업을 계속 사용하세요.
+
+읽기 토큰으로 백업합니다(예: cron).
+
+```bash
+curl -fsS -H "Authorization: Bearer $INFERPLANED_TOKEN" \
+  "$CP/v1alpha1/config/export" -o "policies-$(date -u +%Y%m%dT%H%M%SZ).yaml"
+```
+
+복원할 때는 먼저 미리보기를 실행하고, 미리보기에서 받은 generation으로 적용합니다. 정책 쓰기 토큰을 사용합니다.
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $INFERPLANED_POLICY_WRITE_TOKEN" \
+  --data-binary @policies.yaml "$CP/v1alpha1/config/import?dry_run=true" | tee preview.json
+GEN=$(jq -r .current_generation preview.json)
+curl -fsS -X POST -H "Authorization: Bearer $INFERPLANED_POLICY_WRITE_TOKEN" \
+  --data-binary @policies.yaml "$CP/v1alpha1/config/import?expected_generation=$GEN"
+```
+
+가져오기는 정책 세트 전체를 교체합니다. 파일에 없는 문서는 삭제됩니다. `409`가 나오면 미리보기 이후 정책이 바뀐 것이니 미리보기를 다시 실행하세요. 빈 파일은 `allow_empty=true`가 필요합니다. 파일은 최대 64 MiB이며, 데이터 플레인이 받을 수 있는 8 MiB JSON보다 큰 세트는 `400`으로 거부됩니다. "committed but not applied" `500`이 나오면 store에는 이미 새 세트가 반영된 것이니, 미리보기를 다시 실행해 실제로 배포 중인 세트를 확인하세요. 콘솔의 Policies → Export YAML / Import (restore)에서도 같은 흐름을 제공합니다.
+
+이 변경 이전에 준비한 배포에서는 `/v1alpha1/config/*` 요청이 여전히 기존 CP origin으로 갑니다. `prepare-policy-controlplane.py`는 이미 policy origin이 있으면 실행을 거부하므로, `/v1alpha1/config/*` behavior(policy-cp origin, `forward-auth` origin request policy)를 검토를 거쳐 수동으로 추가하세요. 그다음 policy/SSO/config 경로 6개를 무효화합니다.
