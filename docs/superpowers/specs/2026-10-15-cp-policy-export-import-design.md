@@ -58,7 +58,7 @@ so the browser download gets a stable name. Auth stays `authn` (read).
   - `expected_generation=<gen>` is required when `dry_run` is not true. A
     missing value is a 400. A value that differs from the current generation is
     a 409.
-  - `allow_empty=true` is required to apply a bundle with zero documents.
+  - `allow_empty=true` is required to APPLY a bundle with zero documents. A dry run of an empty bundle is allowed and previews every document as `removed`.
 - **Response (200, both dry-run and apply):**
 
 ```json
@@ -89,7 +89,7 @@ distributed.
 | 405 | No policy store attached |
 | 409 | `expected_generation` mismatch; the response carries `current_generation` |
 | 413 | Body over 1 MiB |
-| 500 | Store failure; the store and the in-memory set are left unchanged |
+| 503 | Store failure (`writePolicyError` default, fixed body `policy store unavailable`); the store and the in-memory set are left unchanged |
 
 Writes reuse `writeJSONError` / `writePolicyError`.
 
@@ -100,12 +100,12 @@ Writes reuse `writeJSONError` / `writePolicyError`.
 2. `policy.ParseWireDocs(body)`. Then require `metadata.name` on every
    document, reject duplicate names, and run
    `policy.ValidateIdentitySubjects(docs, identityConfig)`.
-3. Run a **validation-only pass of `applyWire`'s conversion**: the
-   `policy.FromV1Alpha1` and budget-tier reference checks it performs today.
-   This means splitting `applyWire` (`internal/controlplane/controlplane.go:195`)
-   into a pure `buildWire(wire) (state, error)` and the locked install, so
-   import can validate without mutating. `applyWire` keeps its behavior by
-   calling `buildWire` and then installing.
+3. There is no separate validation pass. `ParseWireDocs` already runs every
+   document through `policy.FromV1Alpha1` (`internal/policy/load.go:35`), which
+   covers the schema and budget-tier references. With step 2's name, duplicate
+   and identity checks, that is every way `applyWire` can reject a set. So
+   `applyWire` is NOT refactored, and the post-commit `ReloadFromStore` cannot
+   reject what was validated here.
 4. Canonicalize each document with `yaml.Marshal` (sigs.k8s.io/yaml, as
    `export.go` and `AttachPolicyStore` do), giving one stored row per document.
    Compute the diff by name against canonicalized current `s.wire`, and compute
@@ -210,20 +210,19 @@ Go tests use `-race`.
   - The dry-run `result_generation` equals the post-apply generation.
   - Every validation failure leaves the store untouched and the generation
     unchanged: parse error, missing name, duplicate name, identity-subject
-    violation, a bad budget-tier ref caught by `buildWire`.
+    violation, and a bad budget-tier ref (rejected by `ParseWireDocs`).
   - A missing `expected_generation` gives 400, a stale one gives 409, and the
     store stays untouched.
   - An empty bundle gives 400 without `allow_empty` and empties the set with
     it.
   - No store gives 405. Over 1 MiB gives 413.
-  - The heartbeat token is rejected with 401, and the write token is accepted.
+  - The heartbeat token is rejected with 403 (`authnWrite`), and the write token is accepted.
   - Mutation entries are emitted for changed documents and the import only.
-  - A store `Replace` error leaves memory unchanged, with a 500.
+  - A store `Replace` error leaves memory unchanged, with a 503.
 - `internal/policystore/postgres_test.go` (existing Postgres test harness):
   - `Replace` swaps the set and sets the seed marker.
   - Injecting a failing insert rolls back the transaction so the prior rows
     survive.
-- `applyWire` refactor: the existing controlplane tests must pass unchanged.
 - Console: `internal/controlplane/ui/testdata/policy_import.cjs` in the
   existing cjs harness style covers:
   - the buttons' visibility versus `writable`/`canWrite`;
@@ -242,6 +241,6 @@ Go tests use `-race`.
 - `docs/runbooks/inferplaned-policy-store.md` + `.ko.md`: add a backup/restore
   section with a cron/curl export example, a dry-run-then-apply restore example,
   and the out-of-scope warning about the ledger and usage.
-- `internal/controlplane` and `internal/policystore` module `CLAUDE.md` files:
-  document `Replace` and the validate-before-commit import ordering.
+- `internal/CLAUDE.md` (`policystore/` and `controlplane/` entries): document
+  `Replace` and the validate-before-commit import ordering.
 - `AGENTS.md`: regenerate only if root `CLAUDE.md` changes (not expected).
