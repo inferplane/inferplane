@@ -157,3 +157,14 @@ func TestUserGuidesRespectDataPlaneProfiles(t *testing.T) {
 		t.Fatal("missing create/edit/int64 token-quota cases")
 	}
 }
+
+func TestPolicyImportWorkflow(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("policy import checks need Node (stdlib only)")
+	}
+	out, err := exec.Command(node, "testdata/policy_import.cjs").CombinedOutput()
+	if err != nil {
+		t.Fatalf("policy import regression: %v\n%s", err, out)
+	}
+}

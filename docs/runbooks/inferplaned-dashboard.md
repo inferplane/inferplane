@@ -23,7 +23,7 @@ and fences late responses. It does not end the IdP session.
 | Users & costs | Reporting accounts/average, user spend and token classes, team filtering, model detail, personal budget/token actions with exact financial references |
 | Budgets | Search team/user budget rules, filter daily/monthly windows, create a budget in a new or existing policy, edit limits in USD, review and publish |
 | Data planes | Current generation, supported API versions, recent node observations, filter generation differences or rejections, last heartbeat, rejection details with links to fetched policies |
-| Policies | Inspect all rules, guided access/rate/privacy/substitution creation, exact change summary and draft return, existing budget/rate/model-access edits, full JSON editing, explicit publish and name-confirmed deletion |
+| Policies | Inspect all rules, guided access/rate/privacy/substitution creation, exact change summary and draft return, existing budget/rate/model-access edits, full JSON editing, explicit publish and name-confirmed deletion, Export YAML download and Import (restore): dry-run diff first, then a replace-mode apply pinned to the previewed generation (64 MiB file cap; budget ledger and usage are not restored) |
 
 The default budget view is a comparative table of configured subject, scope,
 window, USD limit and behavior. Row actions open the existing reviewed editor.
