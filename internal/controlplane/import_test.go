@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -700,6 +701,19 @@ func worstCaseSyncFixture(t *testing.T) []v1alpha1.GovernancePolicy {
 	return []v1alpha1.GovernancePolicy{doc}
 }
 
+func syncArrayElementBytes[T any](t *testing.T, elements []T) int {
+	t.Helper()
+	total := 0
+	for _, element := range elements {
+		raw, err := json.Marshal(element)
+		if err != nil {
+			t.Fatal(err)
+		}
+		total += len(raw) + 1
+	}
+	return total
+}
+
 func TestWorstCaseSyncBoundsRealHeartbeat(t *testing.T) {
 	docs := worstCaseSyncFixture(t)
 	raw, err := yaml.Marshal(docs[0])
@@ -715,7 +729,7 @@ func TestWorstCaseSyncBoundsRealHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Hold the clock within one window so the latch check cannot race midnight.
-	now := time.Now()
+	now := time.Date(2026, 10, 15, 12, 0, 0, 123456789, time.UTC)
 	s.now = func() time.Time { return now }
 	mux := http.NewServeMux()
 	s.Mount(mux)
@@ -770,19 +784,36 @@ func TestWorstCaseSyncBoundsRealHeartbeat(t *testing.T) {
 		real.ActiveTiers[0].ThresholdPercent != 80 || len(real.ActiveTiers[0].Substitute) != 3 {
 		t.Fatalf("calibration must include policies, leases and the latched tier: %+v", real)
 	}
-	bound, err := worstCaseSyncBytes(docs, now)
+	size, exceeded, err := worstCaseSyncSize(docs, now, importMaxSyncBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("memory heartbeat: measured=%d bytes, worst-case sync=%d bytes", len(body), bound)
-	if len(body) > bound {
-		t.Fatalf("real heartbeat %d bytes exceeds worst-case sync %d bytes", len(body), bound)
+	if exceeded {
+		t.Fatalf("calibration fixture exceeded sync bound: %+v", size)
+	}
+	for _, component := range []struct {
+		name            string
+		measured, bound int
+	}{
+		{"Policies", syncArrayElementBytes(t, real.Policies), size.Policies},
+		{"Leases", syncArrayElementBytes(t, real.Leases), size.Leases},
+		{"ActiveTiers", syncArrayElementBytes(t, real.ActiveTiers), size.ActiveTiers},
+	} {
+		t.Logf("memory %s: measured=%d bytes, bound=%d bytes", component.name, component.measured, component.bound)
+		if component.measured > component.bound {
+			t.Errorf("%s %d bytes exceeds component bound %d bytes", component.name, component.measured, component.bound)
+		}
+	}
+	fixed := size.Total - size.RequestDriven
+	t.Logf("memory heartbeat: measured=%d bytes, fixed bound=%d bytes, total=%d bytes", len(body), fixed, size.Total)
+	if len(body) > fixed {
+		t.Fatalf("real heartbeat %d bytes exceeds fixed sync bound %d bytes", len(body), fixed)
 	}
 }
 
 func TestWorstCaseSyncCoversAuthorityEnvelope(t *testing.T) {
 	docs := worstCaseSyncFixture(t)
-	now := time.Now()
+	now := time.Date(2026, 10, 15, 12, 0, 0, 123456789, time.UTC)
 	budgets, err := policy.AuthorityBudgets(docs, now)
 	if err != nil {
 		t.Fatal(err)
@@ -790,33 +821,135 @@ func TestWorstCaseSyncCoversAuthorityEnvelope(t *testing.T) {
 	if len(budgets) != 2 {
 		t.Fatalf("calibration must include two authority budgets, got %d", len(budgets))
 	}
+	size, exceeded, err := worstCaseSyncSize(docs, now, importMaxSyncBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exceeded {
+		t.Fatalf("calibration fixture exceeded sync bound: %+v", size)
+	}
 	generation := policy.GenerationOf(docs)
+	fingerprint := "identity-config-v1:" + strings.Repeat("f", 64)
 	env := policy.SyncResponse{
-		Policies: docs, Generation: generation, SyncIntervalSeconds: 10,
+		IdentityFingerprint: fingerprint,
+		Policies:            docs, Generation: generation, SyncIntervalSeconds: 10,
 		Authority: &policy.AuthorityResponse{
-			AuthorityID: strings.Repeat("f", 64),
-			Protocol:    policy.AuthorityProtocol, ServerTime: now, Budgets: budgets,
+			IdentityFingerprint: fingerprint,
+			AuthorityID:         strings.Repeat("f", 64),
+			Protocol:            policy.AuthorityProtocol, ServerTime: now, Budgets: budgets,
 			Generation: generation, Policies: docs,
 		},
 	}
-	for i := 0; i < 1024; i++ {
-		b := budgets[i%len(budgets)]
-		env.Authority.Grants = append(env.Authority.Grants, policy.AuthorityGrant{
-			ID: fmt.Sprintf("%064x", i), RequestID: fmt.Sprintf("%064x", i+1024),
-			Key: b.Key, Revision: b.Revision, WindowID: b.WindowID,
-			Amount: math.MaxInt64, ExpiresAt: now,
-		})
+	for _, component := range []struct {
+		name            string
+		measured, bound int
+	}{
+		{"AuthorityPolicies", syncArrayElementBytes(t, env.Authority.Policies), size.AuthorityPolicies},
+		{"Budgets", syncArrayElementBytes(t, env.Authority.Budgets), size.Budgets},
+	} {
+		t.Logf("authority %s: measured=%d bytes, bound=%d bytes", component.name, component.measured, component.bound)
+		if component.measured > component.bound {
+			t.Errorf("%s %d bytes exceeds component bound %d bytes", component.name, component.measured, component.bound)
+		}
 	}
 	raw, err := json.Marshal(env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bound, err := worstCaseSyncBytes(docs, now)
+	fixed := size.Total - size.RequestDriven
+	t.Logf("authority envelope: measured=%d bytes, fixed bound=%d bytes, total=%d bytes", len(raw), fixed, size.Total)
+	if len(raw) > fixed {
+		t.Fatalf("authority envelope %d bytes exceeds fixed sync bound %d bytes", len(raw), fixed)
+	}
+	var grants []policy.AuthorityGrant
+	var denials []policy.AuthorityDenial
+	var acks []policy.AuthorityAck
+	for i := 0; i < 1024; i++ {
+		b := budgets[i%len(budgets)]
+		grants = append(grants, policy.AuthorityGrant{
+			ID: fmt.Sprintf("%064x", i), RequestID: fmt.Sprintf("%064x", i+1024),
+			Key: b.Key, Revision: b.Revision, WindowID: b.WindowID,
+			Amount: math.MaxInt64, ExpiresAt: now,
+		})
+		denials = append(denials, policy.AuthorityDenial{
+			RequestID: fmt.Sprintf("%064x", i+1024), Key: b.Key, Reason: "closed_grant",
+		})
+		acks = append(acks, policy.AuthorityAck{
+			Instance: fmt.Sprintf("%064x", i+2048), ID: fmt.Sprintf("%064x", i),
+			Sequence: math.MaxInt64,
+		})
+	}
+	for _, batch := range []struct {
+		name  string
+		items any
+	}{
+		{"grants", grants},
+		{"denials", denials},
+		{"acks", acks},
+	} {
+		t.Run(batch.name, func(t *testing.T) {
+			raw, err := json.Marshal(batch.items)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("1024 %s: measured=%d bytes, request-driven bound=%d bytes", batch.name, len(raw), size.RequestDriven)
+			if len(raw) > size.RequestDriven {
+				t.Fatalf("%s batch %d bytes exceeds request-driven bound %d bytes", batch.name, len(raw), size.RequestDriven)
+			}
+		})
+	}
+}
+
+func TestWorstCaseSyncEarlyExit(t *testing.T) {
+	doc := v1alpha1.GovernancePolicy{
+		TypeMeta: v1alpha1.TypeMeta{APIVersion: v1alpha1.APIVersion, Kind: v1alpha1.KindGovernancePolicy},
+		Metadata: v1alpha1.ObjectMeta{Name: "early-exit"},
+		Spec: v1alpha1.GovernancePolicySpec{
+			Subject: v1alpha1.Subject{Team: strings.Repeat("<", 1<<20)},
+		},
+	}
+	for i := 0; i < 256; i++ {
+		doc.Spec.Rules = append(doc.Spec.Rules, v1alpha1.Rule{
+			Name: fmt.Sprintf("cap-%03d", i), FailurePolicy: v1alpha1.FailClosed,
+			Budget: &v1alpha1.BudgetRule{
+				LimitMilliUSD: 100, HardCap: true,
+				Lease: v1alpha1.LeaseSpec{GrantMilliUSD: 10, RenewInterval: "5s"},
+			},
+		})
+	}
+	if _, err := policy.FromV1Alpha1(&doc); err != nil {
+		t.Fatalf("early-exit fixture must be valid: %v", err)
+	}
+	now := time.Now()
+	docs := []v1alpha1.GovernancePolicy{doc}
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	size, exceeded, err := worstCaseSyncSize(docs, now, importMaxSyncBytes)
+	runtime.ReadMemStats(&after)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("authority envelope: measured=%d bytes, worst-case sync=%d bytes (1024 grants)", len(raw), bound)
-	if len(raw) > bound {
-		t.Fatalf("authority envelope %d bytes exceeds worst-case sync %d bytes", len(raw), bound)
+	if !exceeded || size.Total <= importMaxSyncBytes {
+		t.Fatalf("oversized repeated identifiers must exceed sync bound: %+v, exceeded=%v", size, exceeded)
+	}
+	if size.Leases != 0 || size.ActiveTiers != 0 || size.Budgets != 0 || size.RequestDriven != 0 {
+		t.Fatalf("measurement continued past the repeated policy early exit: %+v", size)
+	}
+	allocated := after.TotalAlloc - before.TotalAlloc
+	t.Logf("early exit: measured=%d bytes, TotalAlloc=%d bytes (limit=%d bytes)", size.Total, allocated, 256<<20)
+	if allocated >= 256<<20 {
+		t.Fatalf("early-exit TotalAlloc=%d bytes, want < %d bytes", allocated, 256<<20)
+	}
+}
+
+func TestWorstCaseTimestampMarshals(t *testing.T) {
+	raw, err := json.Marshal(worstCaseSyncTimestamp())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `"9999-12-31T23:59:59.999999999-23:59"`
+	if string(raw) != want || len(raw) != 35+2 {
+		t.Fatalf("maximum timestamp = %s (%d bytes), want %s (37 bytes)", raw, len(raw), want)
 	}
 }

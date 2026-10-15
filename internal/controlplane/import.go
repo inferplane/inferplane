@@ -31,13 +31,17 @@ var ErrImportConflict = errors.New("policies changed since preview")
 var ErrImportNotApplied = errors.New("policies were committed to the store but could not be applied in memory")
 
 // Size contract. A data plane decodes at most 8 MiB of sync JSON. Durable
-// authority sends the policy set twice. Measure a synthetic superset of both
-// sync modes, including repeated identifiers, budgets, leases and the largest
-// active-tier maps, with JSON escaping included. Request-driven authority
+// authority sends the policy set twice. Measure a superset of both sync modes
+// componentwise, including repeated identifiers, budgets, leases and the largest
+// active-tier maps, with JSON escaping included; stop as soon as the bound is
+// exceeded instead of allocating the repeated envelope. Request-driven authority
 // items are bounded by the 1024 requests+reports+meters cap in
 // internal/authority/pgstore/accounts.go; echoed request strings are covered
-// by handleSync's 1 MiB request-body cap. Refuse imports whose measured envelope
-// plus these allowances exceeds importMaxSyncBytes. Single-document PUTs can
+// by handleSync's 1 MiB request-body cap, assuming ASCII-safe/hex authority request
+// identifiers as sent by internal/authority/local nonces. Escaping-heavy identifiers
+// can exceed only the sending data plane's own decode bound; restricting their
+// charset in pgstore validation is a recorded follow-up. Refuse imports whose
+// components plus these allowances exceed importMaxSyncBytes. Single-document PUTs can
 // already accumulate a set past this bound (a pre-existing gap this import
 // check does not close).
 // The TRANSPORT bound is only a memory cap:
@@ -158,12 +162,12 @@ func (s *Server) ApplyImport(ctx context.Context, body []byte, opts ImportOption
 		reparsed = append(reparsed, d...)
 	}
 	resultGen := policy.GenerationOf(reparsed)
-	syncBytes, err := worstCaseSyncBytes(reparsed, time.Now())
+	syncSize, exceeded, err := worstCaseSyncSize(reparsed, time.Now(), importMaxSyncBytes)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrPolicyValidation, err)
 	}
-	if syncBytes > importMaxSyncBytes {
-		return nil, fmt.Errorf("%w: worst-case sync response %d bytes exceeds the %d-byte data-plane decode bound", ErrPolicyValidation, syncBytes, importMaxSyncBytes)
+	if exceeded {
+		return nil, fmt.Errorf("%w: worst-case sync response at least %d bytes exceeds the %d-byte data-plane decode bound", ErrPolicyValidation, syncSize.Total, importMaxSyncBytes)
 	}
 
 	s.writeMu.Lock()
@@ -303,41 +307,100 @@ func (s *Server) ApplyImport(ctx context.Context, body []byte, opts ImportOption
 	return res, nil
 }
 
-// worstCaseSyncBytes measures a superset of the memory and durable-authority
-// responses for docs, plus the bounded request-driven authority payload.
-func worstCaseSyncBytes(docs []v1alpha1.GovernancePolicy, now time.Time) (int, error) {
+type syncSizeBreakdown struct {
+	Scalars, Policies, AuthorityPolicies, Leases, ActiveTiers, Budgets, RequestDriven, Total int
+}
+
+// worstCaseSyncTimestamp uses the longest JSON-valid RFC3339Nano representation,
+// including a numeric offset: memory-mode clocks need not use UTC.
+func worstCaseSyncTimestamp() time.Time {
+	return time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.FixedZone("", -(23*3600+59*60)))
+}
+
+// worstCaseSyncSize measures one element at a time, stopping before deriving
+// authority budgets if the earlier components already exceed the decode bound.
+// Each array element includes one comma, conservatively covering the first
+// element too and the newline added by the heartbeat's JSON encoder.
+func worstCaseSyncSize(docs []v1alpha1.GovernancePolicy, now time.Time, limit int) (syncSizeBreakdown, bool, error) {
+	var size syncSizeBreakdown
+	var total int64
+	add := func(component *int, n int64) (bool, error) {
+		if n < 0 || n > math.MaxInt64-total || n > int64(math.MaxInt)-total {
+			return false, fmt.Errorf("controlplane: worst-case sync size overflows integer range")
+		}
+		total += n
+		*component += int(n)
+		size.Total = int(total)
+		return total > int64(limit), nil
+	}
+	measure := func(component *int, name string, element any) (bool, error) {
+		raw, err := json.Marshal(element)
+		if err != nil {
+			return false, fmt.Errorf("controlplane: encode %s: %w", name, err)
+		}
+		return add(component, int64(len(raw))+1)
+	}
 	maxDigest := strings.Repeat("f", 64)
+	maxIdentityFingerprint := "identity-config-v1:" + maxDigest
+	maxTimestamp := worstCaseSyncTimestamp()
 	env := policy.SyncResponse{
-		IdentityFingerprint:      maxDigest,
+		IdentityFingerprint:      maxIdentityFingerprint,
 		IdentityPoliciesComplete: true,
 		Generation:               maxDigest,
-		Policies:                 docs,
+		Policies:                 []v1alpha1.GovernancePolicy{},
+		Leases:                   []policy.LeaseGrant{},
+		ActiveTiers:              []policy.ActiveTier{},
 		SyncIntervalSeconds:      math.MaxInt32,
 		Authority: &policy.AuthorityResponse{
 			AuthorityID:         maxDigest,
 			Protocol:            policy.AuthorityProtocol,
-			ServerTime:          now,
+			ServerTime:          maxTimestamp,
 			Generation:          maxDigest,
-			Policies:            docs,
-			IdentityFingerprint: maxDigest,
+			Policies:            []v1alpha1.GovernancePolicy{},
+			Budgets:             []policy.AuthorityBudget{},
+			IdentityFingerprint: maxIdentityFingerprint,
 		},
+	}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return size, false, fmt.Errorf("controlplane: encode worst-case sync skeleton: %w", err)
+	}
+	// Non-nil empty slices preserve [] for non-omitempty fields. The other
+	// arrays are still omitted by encoding/json; charge their keys/brackets
+	// explicitly, including all four possible request-driven array headers.
+	omittedArrays := len(`,"policies":[],"leases":[],"activeTiers":[]`) +
+		len(`,"grants":[],"reportAcks":[],"meterAcks":[],"denied":[]`)
+	if exceeded, err := add(&size.Scalars, int64(len(raw))+int64(omittedArrays)); exceeded || err != nil {
+		return size, exceeded, err
+	}
+	for i := range docs {
+		if exceeded, err := measure(&size.Policies, "policy", &docs[i]); exceeded || err != nil {
+			return size, exceeded, err
+		}
+	}
+	// Durable authority repeats the exact policy array; reuse its measurement.
+	if exceeded, err := add(&size.AuthorityPolicies, int64(size.Policies)); exceeded || err != nil {
+		return size, exceeded, err
 	}
 	for i := range docs {
 		p, err := policy.FromV1Alpha1(&docs[i])
 		if err != nil {
-			return 0, fmt.Errorf("controlplane: measure policy %q: %w", docs[i].Metadata.Name, err)
+			return size, false, fmt.Errorf("controlplane: measure policy %q: %w", docs[i].Metadata.Name, err)
 		}
 		for _, r := range p.Rules {
 			if r.Budget != nil && !r.Budget.Unlimited {
 				// Count routing-only and user-scoped budgets too, even though
 				// memory mode does not grant leases for them.
-				env.Leases = append(env.Leases, policy.LeaseGrant{
+				lease := policy.LeaseGrant{
 					Policy: p.Name, Rule: r.Name, Team: p.Subject.Team,
 					AllowanceMicroUSD: math.MaxInt64,
-					ExpiresAt:         now.AddDate(100, 0, 0),
-					HardCap:           true,
+					ExpiresAt:         maxTimestamp,
+					HardCap:           false, // "false" is longer than "true".
 					Period:            r.Budget.Period,
-				})
+				}
+				if exceeded, err := measure(&size.Leases, "lease", lease); exceeded || err != nil {
+					return size, exceeded, err
+				}
 			}
 			if r.Routing == nil || r.Routing.BudgetTiers == nil {
 				continue
@@ -348,70 +411,63 @@ func worstCaseSyncBytes(docs []v1alpha1.GovernancePolicy, now time.Time) (int, e
 			for _, tier := range bt.Tiers {
 				raw, err := json.Marshal(tier.Substitute)
 				if err != nil {
-					return 0, fmt.Errorf("controlplane: encode tier substitute: %w", err)
+					return size, false, fmt.Errorf("controlplane: encode tier substitute: %w", err)
 				}
 				if len(raw) > largestBytes {
 					largest, largestBytes = tier, len(raw)
 				}
 			}
-			env.ActiveTiers = append(env.ActiveTiers, policy.ActiveTier{
+			active := policy.ActiveTier{
 				Policy: p.Name, Rule: r.Name, BudgetRef: bt.BudgetRef,
 				Team: p.Subject.Team, User: p.Subject.User,
 				ThresholdPercent: largest.ThresholdPercent, Substitute: largest.Substitute,
 				EnforceTargets: bt.EnforceTargets,
-			})
+			}
+			if exceeded, err := measure(&size.ActiveTiers, "active tier", active); exceeded || err != nil {
+				return size, exceeded, err
+			}
 		}
 	}
 	// Authority mode itself refuses a set whose budgets cannot be derived;
 	// that must not prevent a valid memory-mode import.
 	if budgets, err := policy.AuthorityBudgets(docs, now); err == nil {
-		env.Authority.Budgets = budgets
-	}
-	raw, err := json.Marshal(env)
-	if err != nil {
-		return 0, fmt.Errorf("controlplane: encode worst-case sync response: %w", err)
+		for _, budget := range budgets {
+			if exceeded, err := measure(&size.Budgets, "authority budget", budget); exceeded || err != nil {
+				return size, exceeded, err
+			}
+		}
 	}
 
-	ack, err := json.Marshal(policy.AuthorityAck{
-		Instance: maxDigest, ID: maxDigest, Sequence: math.MaxInt64,
-	})
-	if err != nil {
-		return 0, fmt.Errorf("controlplane: encode authority ack: %w", err)
-	}
-	maxItem := len(ack)
-	if len(env.Authority.Budgets) != 0 {
-		var largest policy.AuthorityBudget
-		largestBytes := 0
-		for _, b := range env.Authority.Budgets {
-			identifiers, err := json.Marshal([]string{b.Key, b.Revision, b.WindowID})
-			if err != nil {
-				return 0, fmt.Errorf("controlplane: encode authority budget identifiers: %w", err)
-			}
-			if len(identifiers) > largestBytes {
-				largest, largestBytes = b, len(identifiers)
-			}
-		}
-		grant, err := json.Marshal(policy.AuthorityGrant{
-			ID: maxDigest, Key: largest.Key, Revision: largest.Revision, WindowID: largest.WindowID,
-			Amount: math.MaxInt64, ExpiresAt: now,
-		})
+	// Budget keys, revisions and window IDs are SHA-256 hex digests. Request-
+	// echoed strings are charged to syncRequestEchoBytes; include a full local
+	// request nonce in grants as well because requestID is not omitempty.
+	maxItem := 0
+	for _, item := range []any{
+		policy.AuthorityGrant{
+			ID: maxDigest, RequestID: maxDigest,
+			Key: maxDigest, Revision: maxDigest, WindowID: maxDigest,
+			Amount: math.MaxInt64, ExpiresAt: maxTimestamp,
+		},
+		policy.AuthorityDenial{
+			RequestID: maxDigest, Key: maxDigest, Reason: strings.Repeat("x", 512),
+		},
+		policy.AuthorityAck{
+			Instance: maxDigest, ID: maxDigest, Sequence: math.MaxInt64,
+		},
+	} {
+		raw, err := json.Marshal(item)
 		if err != nil {
-			return 0, fmt.Errorf("controlplane: encode authority grant: %w", err)
+			return size, false, fmt.Errorf("controlplane: encode authority item: %w", err)
 		}
-		denial, err := json.Marshal(policy.AuthorityDenial{
-			Key: largest.Key, Reason: strings.Repeat("x", 512),
-		})
-		if err != nil {
-			return 0, fmt.Errorf("controlplane: encode authority denial: %w", err)
-		}
-		maxItem = max(maxItem, len(grant), len(denial))
+		maxItem = max(maxItem, len(raw)+1)
 	}
 	const (
 		authorityItemCap     = 1024
 		syncRequestEchoBytes = 1 << 20
 	)
-	requestDriven := authorityItemCap*maxItem + syncRequestEchoBytes
-	return len(raw) + requestDriven, nil
+	requestDriven := int64(authorityItemCap)*int64(maxItem) + syncRequestEchoBytes
+	exceeded, err := add(&size.RequestDriven, requestDriven)
+	return size, exceeded, err
 }
 
 // mountImport registers POST /v1alpha1/config/import behind the policy

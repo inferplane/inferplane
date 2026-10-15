@@ -110,9 +110,14 @@ curl -fsS -X POST -H "Authorization: Bearer $INFERPLANED_POLICY_WRITE_TOKEN" \
 
 Import REPLACES the whole set. Every document missing from the file is
 deleted. A `409` means policies changed after the preview; re-run the preview.
-An empty file needs `allow_empty=true`. The YAML transport cap is 64 MiB; the measured
-worst-case sync response for the set (both sync modes, request-driven authority
-items included) must fit the 8 MiB data-plane decode bound, or import returns `400`. A `500`
+An empty file needs `allow_empty=true`. The YAML transport cap is 64 MiB; the
+worst-case sync size for the set is measured componentwise, stopping as soon as
+it exceeds the 8 MiB data-plane decode bound (import returns `400`). Both sync
+modes and request-driven authority items are included. The request-driven
+allowance assumes ASCII-safe/hex authority request identifiers, as real
+data-plane clients generate local nonces. Escaping-heavy identifiers can exceed
+only the sending data plane’s own decode bound. Restricting authority request
+identifier charset in pgstore validation is a recorded follow-up. A `500`
 saying "committed but not applied" means the store holds the new set; re-run a
 dry run to confirm what is distributed. The console offers the same flow under
 Policies → Export YAML / Import (restore).
