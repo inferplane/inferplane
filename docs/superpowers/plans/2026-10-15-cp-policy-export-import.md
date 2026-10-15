@@ -13,13 +13,20 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-15-cp-policy-export-import-design.md`
 
+## Execution Order
+
+Tasks 1 and 3 have disjoint file sets, so they run as one parallel wave. Task 3 tests only against a mocked HTTP contract. Task 2 depends on Task 1's `Replace` and test hooks, so it runs LAST, and its Step 10 full-repository verification therefore follows every source change.
+
 ## Global Constraints
 
 - Every source change is `gofmt`-clean and `go vet`-clean. Errors are wrapped with `%w`.
 - Commits are DCO signed off (`git commit -s`). The harness host is the only committer.
 - Do not echo store/pgx error text to HTTP callers. A store failure maps to `503` with the fixed body `policy store unavailable`. Use the existing `writePolicyError`.
 - `ErrPolicyValidation` messages ARE echoed (policies carry no secret values).
-- The import bundle body is bounded by `importMaxBodyBytes` (8 MiB, `8 << 20`, the data-plane sync decode bound). The per-document PUT bound `policyMaxBodyBytes` (1 MiB) is unchanged.
+- Import size contract:
+  - Raw YAML is capped by `importMaxBodyBytes` (64 MiB).
+  - The parsed set's JSON must fit `importMaxSetJSONBytes` (8 MiB, the data-plane sync decode bound).
+  - The per-document PUT bound `policyMaxBodyBytes` (1 MiB) is unchanged.
 - Import auth is `authnWrite`. The heartbeat token is refused with `403`.
 - Scope is GovernancePolicy documents only. Never touch authority ledger, usage telemetry or identity configuration.
 - Console UI strings are English. The CP console has no i18n layer.
@@ -265,9 +272,12 @@ In `internal/controlplane/policies_test.go`, add these fields to `type fakeStore
 	// Concurrency hooks (Task 2's writeMu test). Each fires BEFORE f.mu is
 	// taken, so the fake's own mutex can never stand in for the server's
 	// writer serialization.
-	replaceEntered chan struct{} // signaled (blocking) when Replace is entered
+	replaceEntered chan struct{} // signaled (non-blocking; give it capacity 1) when Replace is entered
 	replaceGate    chan struct{} // Replace waits for it to close when non-nil
 	putStarted     chan struct{} // non-blocking signal when Put is entered
+	// Post-commit fault injection (Task 2):
+	listErrAfterReplace  error // installed as listErr once a Replace succeeds
+	replaceCommitThenErr error // Replace commits the new set, then returns this (lost-ack)
 ```
 
 At the very top of `fakeStore.Put`, before `f.mu.Lock()`, add:
@@ -286,7 +296,10 @@ Add the method after `fakeStore.Seed`:
 ```go
 func (f *fakeStore) Replace(_ context.Context, docs []policystore.Doc) error {
 	if f.replaceEntered != nil {
-		f.replaceEntered <- struct{}{}
+		select {
+		case f.replaceEntered <- struct{}{}:
+		default:
+		}
 	}
 	if f.replaceGate != nil {
 		<-f.replaceGate
@@ -303,7 +316,10 @@ func (f *fakeStore) Replace(_ context.Context, docs []policystore.Doc) error {
 	}
 	f.docs = next
 	f.seeded = true
-	return nil
+	if f.listErrAfterReplace != nil {
+		f.listErr = f.listErrAfterReplace
+	}
+	return f.replaceCommitThenErr
 }
 ```
 
@@ -319,8 +335,12 @@ Postgres tests skip without a DSN. Run them against a throwaway local container:
 
 ```bash
 mkdir -p /tmp/claude-1001
-docker run -d --rm --name ip-pg-test -e POSTGRES_PASSWORD=test -p 55432:5432 postgres:17-alpine
+# Debian image on purpose: glibc en_US.utf8 collation orders "teama" < "team-b",
+# so TestListIsByteOrderedNotCollationOrdered genuinely fails without COLLATE "C".
+# (musl/alpine collation is already byte order and would make it vacuous.)
+docker run -d --rm --name ip-pg-test -e POSTGRES_PASSWORD=test -p 55432:5432 postgres:17
 until docker exec ip-pg-test pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+docker exec ip-pg-test psql -U postgres -tAc "SELECT datcollate FROM pg_database WHERE datname='postgres'"   # expect en_US.utf8
 INFERPLANE_TEST_PG_DSN='postgres://postgres:test@127.0.0.1:55432/postgres?sslmode=disable' go test ./internal/policystore/ ./internal/authority/... -race -v > /tmp/claude-1001/pgtest.log 2>&1; echo rc=$?
 grep -E "^(=== RUN|--- (PASS|FAIL|SKIP)|ok|FAIL)" /tmp/claude-1001/pgtest.log
 docker stop ip-pg-test
@@ -360,7 +380,8 @@ git commit -s -m "feat(policystore): atomic Replace and byte-order listing for p
   - `POST /v1alpha1/config/import?dry_run=true|expected_generation=<g>[&allow_empty=true]`
   - The 200 JSON body is `{"dry_run":bool,"current_generation":string,"result_generation":string,"changes":[{"name":string,"action":"added"|"changed"|"removed"|"unchanged"}],"summary":{"added":int,"changed":int,"removed":int,"unchanged":int}}`.
   - A 409 JSON body is `{"error":"policies changed since preview","current_generation":string}`, with `Cache-Control: no-store`.
-  - The body bound is `importMaxBodyBytes = 8 << 20` (8 MiB, the data plane's sync-response decode bound at `internal/proxy/sync.go:377`). Task 3's console pre-check uses the same number, `8388608`.
+  - Size contract: `importMaxBodyBytes = 64 << 20` is the raw YAML transport cap. `importMaxSetJSONBytes = 8 << 20` caps the parsed set's JSON encoding at the data plane's sync decode bound (`internal/proxy/sync.go:377`); a larger set is a 400. Task 3's console pre-check uses `67108864`.
+  - Both preview and apply hold `writeMu` and reconcile with the store first. A store read failure is a 503.
   - `GET /v1alpha1/config/export` adds `Content-Disposition: attachment; filename="inferplane-policies-<first 12 of generation>.yaml"`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -701,6 +722,13 @@ func TestImportRecordsMutations(t *testing.T) {
 func TestImportSerializesWithApplyWrite(t *testing.T) {
 	s, ts, fs := importServer(t)
 	gen := currentGeneration(s)
+	// Gate first, then its release cleanup: cleanups run LIFO, so the parked
+	// handler is always released before newTestServerWrite's ts.Close (which
+	// would otherwise wait forever on it). release is idempotent; never close
+	// the gate any other way.
+	gate := make(chan struct{})
+	release := sync.OnceFunc(func() { close(gate) })
+	t.Cleanup(release)
 
 	// Sequential: a PUT that lands first moves the generation, so an import
 	// previewed against the old one is refused rather than overwriting it.
@@ -716,8 +744,8 @@ func TestImportSerializesWithApplyWrite(t *testing.T) {
 	// check). A concurrent ApplyWrite must not reach the store until the
 	// import finishes — this fails if writeMu is removed, because the fake's
 	// hooks fire before its own mutex.
-	fs.replaceEntered = make(chan struct{})
-	fs.replaceGate = make(chan struct{})
+	fs.replaceEntered = make(chan struct{}, 1)
+	fs.replaceGate = gate
 	fs.putStarted = make(chan struct{}, 1)
 	type result struct {
 		status int
@@ -732,20 +760,40 @@ func TestImportSerializesWithApplyWrite(t *testing.T) {
 		}
 		importDone <- result{status: resp.StatusCode}
 	}()
-	<-fs.replaceEntered
+	select {
+	case <-fs.replaceEntered:
+	case r := <-importDone:
+		release()
+		t.Fatalf("import finished before reaching Replace: status %d err %v", r.status, r.err)
+	case <-time.After(5 * time.Second):
+		release()
+		t.Fatal("import never reached Replace")
+	}
 	writeDone := make(chan error, 1)
 	go func() { writeDone <- s.ApplyWrite(context.Background(), "team-a", []byte(cpPolicyYAML)) }()
 	select {
 	case <-fs.putStarted:
+		release()
 		t.Fatal("ApplyWrite reached the store while an import was mid-commit (writeMu missing)")
 	case <-time.After(200 * time.Millisecond):
 	}
-	close(fs.replaceGate)
-	if r := <-importDone; r.err != nil || r.status != http.StatusOK {
+	release()
+	var r result
+	select {
+	case r = <-importDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("parked import never completed")
+	}
+	if r.err != nil || r.status != http.StatusOK {
 		t.Fatalf("parked import: status %d err %v, want 200", r.status, r.err)
 	}
-	if err := <-writeDone; err != nil {
-		t.Fatalf("serialized ApplyWrite: %v", err)
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("serialized ApplyWrite: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ApplyWrite never completed after the import released writeMu")
 	}
 	// The later writer (ApplyWrite) wins: team-a is back, team-b from the
 	// import survives, and memory matches the store.
@@ -769,9 +817,12 @@ func TestImportInstallsCommittedSetWithoutReread(t *testing.T) {
 	s, ts, fs := importServer(t)
 	gen := currentGeneration(s)
 	resp, b := postImport(t, ts, "w", "?dry_run=true", importDocB)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("dry run %d: %s", resp.StatusCode, b)
+	}
 	preview := decodeImport(t, b)
 	fs.mu.Lock()
-	fs.listErr = errors.New("db unreachable after commit")
+	fs.listErrAfterReplace = errors.New("db unreachable after commit") // the pre-apply reconcile still succeeds
 	fs.mu.Unlock()
 	resp, b = postImport(t, ts, "w", "?expected_generation="+gen, importDocB)
 	if resp.StatusCode != http.StatusOK {
@@ -779,6 +830,75 @@ func TestImportInstallsCommittedSetWithoutReread(t *testing.T) {
 	}
 	if got := currentGeneration(s); got != preview.ResultGeneration {
 		t.Fatalf("installed generation %s, want previewed %s", got, preview.ResultGeneration)
+	}
+}
+
+// A PUT that committed but failed to reload leaves memory stale; the import
+// reconciles with the store first, so a preview taken before that PUT is
+// refused instead of silently overwriting it.
+func TestImportReconcilesStaleMemoryBeforePrecondition(t *testing.T) {
+	s, ts, fs := importServer(t)
+	gen := currentGeneration(s)
+	fs.mu.Lock()
+	fs.listErr = errors.New("transient read failure")
+	fs.mu.Unlock()
+	edited := strings.Replace(cpPolicyYAML, "limitMilliUSD: 100 ", "limitMilliUSD: 300 ", 1)
+	if err := s.ApplyWrite(context.Background(), "team-a", []byte(edited)); err == nil {
+		t.Fatal("ApplyWrite with failing reload unexpectedly succeeded")
+	}
+	if currentGeneration(s) != gen {
+		t.Fatal("precondition for this test: memory should still be stale")
+	}
+	// While the store is unreadable, import refuses (503) rather than judge
+	// against stale memory.
+	if resp, _ := postImport(t, ts, "w", "?expected_generation="+gen, importDocB); resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("import with unreadable store: %d, want 503", resp.StatusCode)
+	}
+	fs.mu.Lock()
+	fs.listErr = nil
+	fs.mu.Unlock()
+	if resp, _ := postImport(t, ts, "w", "?expected_generation="+gen, importDocB); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("import against the pre-PUT generation: %d, want 409", resp.StatusCode)
+	}
+}
+
+// A lost commit acknowledgement is resolved by reading back: the store holds
+// exactly the predicted set, so the restore reports success and is audited.
+func TestImportLostCommitAckIsConfirmedByReadBack(t *testing.T) {
+	s, ts, fs := importServer(t)
+	var mu sync.Mutex
+	var ops []string
+	s.SetMutationLog(func(e MutationEntry) { mu.Lock(); ops = append(ops, e.Op); mu.Unlock() })
+	fs.mu.Lock()
+	fs.replaceCommitThenErr = errors.New("connection reset during COMMIT")
+	fs.mu.Unlock()
+	resp, b := postImport(t, ts, "w", "?expected_generation="+currentGeneration(s), importDocB)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("lost-ack import: %d: %s", resp.StatusCode, b)
+	}
+	if got := decodeImport(t, b).ResultGeneration; got != currentGeneration(s) {
+		t.Fatalf("reported %s, installed %s", got, currentGeneration(s))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(ops, ",") != "delete,put,import" {
+		t.Fatalf("committed restore audit %v, want delete(team-a),put(team-b),import", ops)
+	}
+}
+
+// The fleet bound is semantic: a set whose JSON a data plane cannot decode
+// is refused even when the YAML bundle fits the transport cap.
+func TestImportRefusesUndistributableSet(t *testing.T) {
+	_, ts, fs := importServer(t)
+	prev := importMaxSetJSONBytes
+	importMaxSetJSONBytes = 256
+	t.Cleanup(func() { importMaxSetJSONBytes = prev })
+	resp, b := postImport(t, ts, "w", "?dry_run=true", cpPolicyYAML+"---\n"+importDocB)
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(b), "JSON bound") {
+		t.Fatalf("oversized set: %d %s, want 400 naming the JSON bound", resp.StatusCode, b)
+	}
+	if fs.replaceCalls != 0 {
+		t.Fatal("undistributable set reached the store")
 	}
 }
 ```
@@ -847,12 +967,25 @@ var ErrImportConflict = errors.New("policies changed since preview")
 // happens the caller must not read it as "nothing changed". Surfaces as 500.
 var ErrImportNotApplied = errors.New("policies were committed to the store but could not be applied in memory")
 
-// importMaxBodyBytes bounds a restore bundle. It is the data plane's own
-// sync-response decode bound (internal/proxy/sync.go: 8<<20): a policy set
-// larger than this cannot be distributed anyway, so every set the fleet can
-// enforce can also be restored. policyMaxBodyBytes (1 MiB) stays the
-// per-document PUT bound.
-const importMaxBodyBytes = 8 << 20
+// Size contract. The FLEET bound is semantic: a data plane decodes a sync
+// response of at most 8 MiB of JSON (internal/proxy/sync.go: 8<<20), so an
+// import whose parsed set exceeds importMaxSetJSONBytes as JSON is refused —
+// it could never be distributed. The TRANSPORT bound is only a memory cap:
+// block YAML adds per-line indentation that JSON lacks (policy nesting is
+// schema-fixed, so the overhead is bounded; a multiline-string fixture
+// measured ~4.9x, and newline-per-byte strings at maximum depth stay under
+// ~7x), so 64 MiB of YAML admits the export of every set within the fleet
+// bound. policyMaxBodyBytes (1 MiB) stays the per-document PUT bound.
+const importMaxBodyBytes = 64 << 20
+
+// importMaxSetJSONBytes is a var only so tests can lower it.
+var importMaxSetJSONBytes = 8 << 20
+
+// errStoreList marks a store READ failure inside ReloadFromStore, as opposed
+// to the store holding rows the loader rejects. Import reconciliation treats
+// only the former as "store unavailable": a restore must still be able to
+// overwrite rejected rows.
+var errStoreList = errors.New("list stored policies")
 
 // ImportOptions are the POST /v1alpha1/config/import query parameters.
 type ImportOptions struct {
@@ -889,22 +1022,32 @@ type ImportResult struct {
 // restore, not merge. Unlike ApplyWrite, the whole bundle is validated
 // BEFORE the store is touched: ParseWireDocs runs every document through
 // policy.FromV1Alpha1, and names/duplicates/identity subjects are checked
-// here, which is every way applyWire can reject a set. So the post-commit
-// ReloadFromStore cannot refuse what was committed.
+// here, which is every way applyWire can reject a set.
+//
+// Both preview and apply hold writeMu and first reconcile memory with the
+// store, so the previewed current_generation and the apply precondition are
+// judged against what the store actually holds — never against memory left
+// stale by a committed-but-unreloaded PUT/DELETE or an unacknowledged commit.
 func (s *Server) ApplyImport(ctx context.Context, body []byte, opts ImportOptions) (*ImportResult, error) {
-	if !opts.DryRun {
-		s.writeMu.Lock()
-		defer s.writeMu.Unlock()
-	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	s.mu.Lock()
 	store := s.policyStore
-	identityConfig := s.identityConfig
-	currentGen := s.generation
-	current := append([]v1alpha1.GovernancePolicy(nil), s.wire...)
 	s.mu.Unlock()
 	if store == nil {
 		return nil, ErrNoPolicyStore
 	}
+	if err := s.ReloadFromStore(ctx); err != nil && errors.Is(err, errStoreList) {
+		return nil, fmt.Errorf("controlplane: reconcile before import: %w", err)
+	}
+	// (A rejected stored set — out-of-band DB edit — falls through: memory
+	// still holds the last set actually distributed, and the restore is
+	// precisely the tool to overwrite those rows.)
+	s.mu.Lock()
+	identityConfig := s.identityConfig
+	currentGen := s.generation
+	current := append([]v1alpha1.GovernancePolicy(nil), s.wire...)
+	s.mu.Unlock()
 
 	docs, err := policy.ParseWireDocs(body)
 	if err != nil {
@@ -986,6 +1129,9 @@ func (s *Server) ApplyImport(ctx context.Context, body []byte, opts ImportOption
 		reparsed = append(reparsed, d...)
 	}
 	res.ResultGeneration = policy.GenerationOf(reparsed)
+	if setJSON, err := json.Marshal(reparsed); err != nil || len(setJSON) > importMaxSetJSONBytes {
+		return nil, fmt.Errorf("%w: the policy set exceeds the %d-byte JSON bound a data plane can receive", ErrPolicyValidation, importMaxSetJSONBytes)
+	}
 
 	if opts.DryRun {
 		return res, nil
@@ -999,17 +1145,42 @@ func (s *Server) ApplyImport(ctx context.Context, body []byte, opts ImportOption
 	if opts.ExpectedGeneration != currentGen {
 		return nil, ErrImportConflict
 	}
+	audit := func() {
+		for _, c := range res.Changes {
+			switch c.Action {
+			case "added", "changed":
+				s.recordMutation(ctx, "put", c.Name, incoming[c.Name])
+			case "removed":
+				s.recordMutation(ctx, "delete", c.Name, nil)
+			}
+		}
+		s.recordMutation(ctx, "import", "", append([]byte{}, body...)) // never nil: an empty bundle still hashes
+	}
 	if err := store.Replace(ctx, rows); err != nil {
+		// The outcome may be indeterminate (a commit whose acknowledgement
+		// was lost). Read back on a detached, bounded ctx: if the store now
+		// holds exactly the predicted set, the restore DID commit.
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if rerr := s.ReloadFromStore(rctx); rerr == nil {
+			s.mu.Lock()
+			committed := s.generation == res.ResultGeneration
+			s.mu.Unlock()
+			if committed {
+				audit()
+				return res, nil
+			}
+		}
 		return nil, fmt.Errorf("controlplane: import policies: %w", err)
 	}
-	// Install the validated, reparsed snapshot directly — the exact set
+	// Committed: audit first (a committed restore is never unaudited), then
+	// install the validated, reparsed snapshot directly — the exact set
 	// ReloadFromStore would produce (store.List is byte-ordered, rows are
 	// byte-sorted) — so a post-commit DB read failure or a canceled request
-	// can never leave memory, and therefore every later expected_generation
-	// check, on the replaced set.
+	// cannot leave memory on the replaced set.
+	audit()
 	committedAt := time.Now()
 	if err := s.applyWire(reparsed, nil); err != nil {
-		// Best effort: converge from the store on a detached, bounded ctx.
 		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		if rerr := s.ReloadFromStore(rctx); rerr != nil {
@@ -1025,15 +1196,6 @@ func (s *Server) ApplyImport(ctx context.Context, body []byte, opts ImportOption
 	s.updated = updated
 	res.ResultGeneration = s.generation
 	s.mu.Unlock()
-	for _, c := range res.Changes {
-		switch c.Action {
-		case "added", "changed":
-			s.recordMutation(ctx, "put", c.Name, incoming[c.Name])
-		case "removed":
-			s.recordMutation(ctx, "delete", c.Name, nil)
-		}
-	}
-	s.recordMutation(ctx, "import", "", body)
 	return res, nil
 }
 
@@ -1087,7 +1249,16 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-`applyWire` takes `s.mu` itself; `ApplyImport` holds only `writeMu` at that point, and the lock order stays `writeMu` → `mu`.
+`applyWire` and `ReloadFromStore` take `s.mu` themselves. `ApplyImport` holds only `writeMu` when it calls them, so the lock order stays `writeMu` → `mu`.
+
+In `internal/controlplane/policies.go` `ReloadFromStore`, wrap the `store.List` error with the new sentinel. Go 1.20+ supports multiple `%w`:
+
+```go
+	rows, err := store.List(ctx)
+	if err != nil {
+		return fmt.Errorf("controlplane: %w: %w", errStoreList, err)
+	}
+```
 
 In `internal/controlplane/policies.go`, update the `MutationEntry` field comments:
 
@@ -1139,13 +1310,13 @@ In `internal/controlplane/export.go`:
 In `docs/reference/api.md`, replace the "CP config export" row (currently ending "…import reserved until a policy store exists |") with:
 
 ```markdown
-| CP config export / import | `internal/controlplane/export.go`, `import.go` | **inferplaned**: `GET /v1alpha1/config/export` — the distributed policy set as multi-doc GovernancePolicy YAML (round-trips through the policy loader; secret-free; `Content-Disposition` attachment). `POST /v1alpha1/config/import` — replace-mode restore of that format into the policy store: `dry_run=true` returns the per-document diff (`added`/`changed`/`removed`/`unchanged`) and `result_generation`; apply requires `expected_generation` (409 on mismatch) and `allow_empty=true` for an empty bundle; whole bundle validated before one `policystore.Replace` transaction; `authnWrite` (heartbeat token 403); 405 without a store; 8 MiB bundle bound (the data-plane sync decode bound). Policies only — never ledger, usage or identity config |
+| CP config export / import | `internal/controlplane/export.go`, `import.go` | **inferplaned**: `GET /v1alpha1/config/export` — the distributed policy set as multi-doc GovernancePolicy YAML (round-trips through the policy loader; secret-free; `Content-Disposition` attachment). `POST /v1alpha1/config/import` — replace-mode restore of that format into the policy store: `dry_run=true` returns the per-document diff (`added`/`changed`/`removed`/`unchanged`) and `result_generation`; apply requires `expected_generation` (409 on mismatch) and `allow_empty=true` for an empty bundle; whole bundle validated before one `policystore.Replace` transaction; `authnWrite` (heartbeat token 403); 405 without a store; 64 MiB YAML transport cap, and the parsed set must fit the 8 MiB JSON sync bound a data plane can decode (larger set ⇒ 400). Policies only — never ledger, usage or identity config |
 ```
 
 In `docs/reference/api.ko.md`, replace the "CP 내보내기" row with:
 
 ```markdown
-| CP 내보내기/가져오기 | `controlplane/export.go`, `import.go` | GET /v1alpha1/config/export(비밀 없는 다중 GovernancePolicy YAML, 첨부 파일로 다운로드), POST /v1alpha1/config/import(Replace 방식 복원). dry_run=true로 문서별 diff와 result_generation을 미리 확인하고, 적용 시 expected_generation이 필수(불일치 시 409). 빈 번들은 allow_empty=true가 필요합니다. 번들 전체를 검증한 뒤 트랜잭션 한 번으로 반영하고, authnWrite 권한이 필요합니다(heartbeat 토큰은 403). store가 없으면 405이며, 번들 크기는 최대 8 MiB입니다(데이터 플레인 sync 디코딩 한도와 동일). 정책만 다루며 원장·사용량·identity 설정은 대상이 아닙니다 |
+| CP 내보내기/가져오기 | `controlplane/export.go`, `import.go` | GET /v1alpha1/config/export(비밀 없는 다중 GovernancePolicy YAML, 첨부 파일로 다운로드), POST /v1alpha1/config/import(Replace 방식 복원). dry_run=true로 문서별 diff와 result_generation을 미리 확인하고, 적용 시 expected_generation이 필수(불일치 시 409). 빈 번들은 allow_empty=true가 필요합니다. 번들 전체를 검증한 뒤 트랜잭션 한 번으로 반영하고, authnWrite 권한이 필요합니다(heartbeat 토큰은 403). store가 없으면 405입니다. YAML 전송 한도는 64 MiB이고, 파싱된 세트는 데이터 플레인이 디코딩할 수 있는 8 MiB JSON sync 한도 안에 들어야 합니다(초과 시 400). 정책만 다루며 원장·사용량·identity 설정은 대상이 아닙니다 |
 ```
 
 - [ ] **Step 7: Add the backup/restore runbook section**
@@ -1181,7 +1352,8 @@ curl -fsS -X POST -H "Authorization: Bearer $INFERPLANED_POLICY_WRITE_TOKEN" \
 
 Import REPLACES the whole set. Every document missing from the file is
 deleted. A `409` means policies changed after the preview; re-run the preview.
-An empty file needs `allow_empty=true`. Bundles are limited to 8 MiB. A `500`
+An empty file needs `allow_empty=true`. Files are capped at 64 MiB, and a set
+larger than the 8 MiB JSON a data plane can receive is refused with `400`. A `500`
 saying "committed but not applied" means the store holds the new set; re-run a
 dry run to confirm what is distributed. The console offers the same flow under
 Policies → Export YAML / Import (restore).
@@ -1217,7 +1389,7 @@ curl -fsS -X POST -H "Authorization: Bearer $INFERPLANED_POLICY_WRITE_TOKEN" \
   --data-binary @policies.yaml "$CP/v1alpha1/config/import?expected_generation=$GEN"
 ```
 
-가져오기는 정책 세트 전체를 교체합니다. 파일에 없는 문서는 삭제됩니다. `409`가 나오면 미리보기 이후 정책이 바뀐 것이니 미리보기를 다시 실행하세요. 빈 파일은 `allow_empty=true`가 필요하고, 번들은 최대 8 MiB입니다. "committed but not applied" `500`이 나오면 store에는 이미 새 세트가 반영된 것이니, 미리보기를 다시 실행해 실제로 배포 중인 세트를 확인하세요. 콘솔의 Policies → Export YAML / Import (restore)에서도 같은 흐름을 제공합니다.
+가져오기는 정책 세트 전체를 교체합니다. 파일에 없는 문서는 삭제됩니다. `409`가 나오면 미리보기 이후 정책이 바뀐 것이니 미리보기를 다시 실행하세요. 빈 파일은 `allow_empty=true`가 필요합니다. 파일은 최대 64 MiB이며, 데이터 플레인이 받을 수 있는 8 MiB JSON보다 큰 세트는 `400`으로 거부됩니다. "committed but not applied" `500`이 나오면 store에는 이미 새 세트가 반영된 것이니, 미리보기를 다시 실행해 실제로 배포 중인 세트를 확인하세요. 콘솔의 Policies → Export YAML / Import (restore)에서도 같은 흐름을 제공합니다.
 
 이 변경 이전에 준비한 배포에서는 `/v1alpha1/config/*` 요청이 여전히 기존 CP origin으로 갑니다. `prepare-policy-controlplane.py`는 이미 policy origin이 있으면 실행을 거부하므로, `/v1alpha1/config/*` behavior(policy-cp origin, `forward-auth` origin request policy)를 검토를 거쳐 수동으로 추가하세요. 그다음 policy/SSO/config 경로 6개를 무효화합니다.
 ````
@@ -1243,14 +1415,14 @@ In `tests/deployment/test_policy_store.py` `test_preserves_all_unrelated_resourc
         self.assertIn("/v1alpha1/config/*", helper.PATHS)
 ```
 
-In both runbooks, change "Invalidate the five policy/SSO paths." to "Invalidate the six policy/SSO/config paths.", and make the matching change in the `.ko.md` sentence.
+In `docs/runbooks/inferplaned-policy-store.md:63`, change "Invalidate the five policy/SSO paths." to "Invalidate the six policy/SSO/config paths.". In `docs/runbooks/inferplaned-policy-store.ko.md:63`, change `정책·SSO 경로 5개를 invalidate합니다.` to `정책·SSO·config 경로 6개를 invalidate합니다.`.
 
 - [ ] **Step 9: Update module notes**
 
 Append to the `controlplane/` bullet in `internal/CLAUDE.md`:
 
 ```markdown
- `import.go` (`POST /v1alpha1/config/import`) is replace-mode backup restore: it validates the WHOLE bundle before any store write (the reverse of `ApplyWrite`'s commit-then-reload), diffs canonical re-marshals by name, requires `expected_generation` checked under `writeMu` — the mutex every store writer (`ApplyWrite`/`ApplyDelete`/`ApplyImport`) holds across commit+install; lock order `writeMu` before `mu` — and installs the validated snapshot via `applyWire` after commit (no DB re-read). Bundle bound 8 MiB = the data-plane sync decode bound.
+ `import.go` (`POST /v1alpha1/config/import`) is replace-mode backup restore: it validates the WHOLE bundle before any store write (the reverse of `ApplyWrite`'s commit-then-reload), reconciles with the store first (preview and apply), diffs canonical re-marshals by name, requires `expected_generation` checked under `writeMu` — the mutex every store writer (`ApplyWrite`/`ApplyDelete`/`ApplyImport`) holds across commit+install; lock order `writeMu` before `mu` — and installs the validated snapshot via `applyWire` after commit (no DB re-read). Size contract: 64 MiB YAML transport cap; the parsed set's JSON must fit the 8 MiB data-plane sync decode bound. A Replace error is read back (lost-ack ⇒ confirmed commit).
 ```
 
 - [ ] **Step 10: Run the tests and full repository verification**
@@ -1288,6 +1460,8 @@ git commit -s -m "feat(controlplane): dry-run-first replace import for policy ba
 - Modify: `internal/controlplane/ui/static/app.js`
 - Test: `internal/controlplane/ui/testdata/policy_import.cjs`
 - Modify: `internal/controlplane/ui/dashboard_test.go`
+- Modify: `docs/runbooks/inferplaned-dashboard.md`
+- Modify: `docs/runbooks/inferplaned-dashboard.ko.md`
 
 **Interfaces:**
 - Consumes: the HTTP contract produced by Task 2 (mocked in the test via `boot({ custom })`). From `testdata/dashboard.cjs` it uses `boot(options)` returning `{ $, calls, writes, policy, setCustom, connect(), credential() }`, plus `flush`. `options.custom(url, init, resp)` intercepts any request first.
@@ -1328,6 +1502,7 @@ function importRoutes(state) {
   assert.equal(app.$('export-policies').disabled, false, 'export needs only read access');
   assert.equal(app.$('import-policies').disabled, true, 'read token enabled import');
   await app.$('import-policies').fire('click');
+  app.$('import-file').files = [file(bundle)]; await app.$('import-file').fire('change');
   assert.equal(state.imports.length, 0, 'import handler bypassed read-only controls');
 
   // File-authoritative deployment: import button hidden entirely.
@@ -1388,17 +1563,30 @@ function importRoutes(state) {
   // Oversized file never leaves the browser.
   state = { imports: [] };
   app = boot({ custom: importRoutes(state) }); await app.connect(); await app.credential(); await app.$('nav-policies').fire('click');
-  app.$('import-file').files = [{ size: (8 << 20) + 1, text: async () => 'x' }]; await app.$('import-file').fire('change');
+  app.$('import-file').files = [{ size: (64 << 20) + 1, text: async () => 'x' }]; await app.$('import-file').fire('change');
   assert.equal(state.imports.length, 0, 'oversized bundle was uploaded');
-  assert.match(app.$('error').textContent, /8 MiB/);
+  assert.match(app.$('error').textContent, /64 MiB/);
 
-  // A revoked write credential during preview locks the session like every other write path.
+  // A refused WRITE credential keeps the read session (dashboard.cjs write-403 contract).
   state = { imports: [] };
   app = boot({ custom: async (url, init, resp) => url.startsWith('/v1alpha1/config/import') ? resp(403, { error: 'forbidden' }) : importRoutes(state)(url, init, resp) });
   await app.connect(); await app.credential(); await app.$('nav-policies').fire('click');
   app.$('import-file').files = [file(bundle)]; await app.$('import-file').fire('change');
   assert.equal(app.$('policy-dialog').open, false, 'preview dialog opened after 403');
+  assert.equal(app.$('workspace-content').hidden, false, 'a write refusal discarded the read session');
   assert.match(app.$('error').textContent, /write refused/i);
+
+  // A file read that resolves after disconnect never uploads with the next session.
+  state = { imports: [] };
+  app = boot({ custom: importRoutes(state) }); await app.connect(); await app.credential(); await app.$('nav-policies').fire('click');
+  let finishRead; app.$('import-file').files = [{ size: 10, text: () => new Promise(r => { finishRead = () => r(bundle); }) }];
+  const pending = app.$('import-file').fire('change');
+  await app.$('disconnect').fire('click');
+  assert.equal(app.$('import-policies').disabled, true, 'import stayed enabled after disconnect');
+  assert.equal(app.$('export-policies').disabled, true, 'export stayed enabled after disconnect');
+  await app.connect(); await app.credential();
+  finishRead(); await pending;
+  assert.equal(state.imports.length, 0, 'a stale-session bundle was uploaded with the new credential');
 
   process.exitCode = 0;
 })().catch(e => { console.error(e); process.exitCode = 1; });
@@ -1500,11 +1688,7 @@ In the `$("dialog-confirm")` click handler, insert this block directly before th
           message("notice", "Policies restored: " + s.added + " added, " + s.changed + " changed, " + s.removed + " removed. Check data-plane generation coverage after the next heartbeat. ");
           const inspect = el("button", "Inspect distribution →", "text-button"); inspect.addEventListener("click", () => inspectFleet()); $("notice").append(inspect);
         }
-      } catch (e) {
-        if (change.session !== session) return;
-        if (e.status === 401 || e.status === 403) lock();
-        message("dialog-error", e.status === 409 ? "Policies changed since preview; re-run preview." : e.message);
-      }
+      } catch (e) { if (change.session === session) message("dialog-error", e.status === 409 ? "Policies changed since preview; re-run preview." : e.message); }
       finally { if (change.session === session) $("dialog-confirm").disabled = $("dialog-cancel").disabled = $("dialog-close").disabled = $("dialog-back").disabled = false; }
       return;
     }
@@ -1514,6 +1698,7 @@ After the existing `$("export-usage").addEventListener(...)` block, add:
 
 ```js
   $("export-policies").addEventListener("click", async () => {
+    if (!connected) return;
     const sid = session; $("export-policies").disabled = true; setError("");
     try {
       const yaml = await request("/v1alpha1/config/export", { text: true });
@@ -1532,15 +1717,26 @@ After the existing `$("export-usage").addEventListener(...)` block, add:
   $("import-file").addEventListener("change", async () => {
     const file = $("import-file").files?.[0]; if (!file || !canWrite()) return;
     const sid = session; setError("");
-    if (file.size > 8388608) { setError("Import file exceeds 8 MiB."); return; }
+    if (file.size > 67108864) { setError("Import file exceeds 64 MiB."); return; }
     try {
       const bundle = await file.text();
+      if (sid !== session || !canWrite()) return; // the read outlived its session
       const preview = await request("/v1alpha1/config/import?dry_run=true", { method: "POST", raw: bundle, write: true });
       if (sid !== session) return;
       openImport(bundle, preview);
-    } catch (e) { if (sid === session) { if (e.status === 401 || e.status === 403) lock(); setError(e.message); } }
+    } catch (e) { if (sid === session) setError(e.message); } // write refusals keep the read session, like PUT/DELETE
   });
 ```
+
+In `clearData()` (`app.js:192`), add next to the other control resets:
+
+```js
+    $("export-policies").disabled = $("import-policies").disabled = true;
+```
+
+Also update the Policies row of the console runbooks (same-commit docs rule).
+- In `docs/runbooks/inferplaned-dashboard.md:26`, append to the row's capability list: `, Export YAML download and Import (restore): dry-run diff first, then a replace-mode apply pinned to the previewed generation (64 MiB file cap; budget ledger and usage are not restored)`.
+- In `docs/runbooks/inferplaned-dashboard.ko.md:30`, append: `, YAML 내보내기와 가져오기(복원): dry-run diff를 먼저 보여 주고, 미리보기 generation으로 고정해 Replace 방식으로 적용합니다(파일 최대 64 MiB, 예산 원장·사용량은 복원하지 않음)`.
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
@@ -1550,6 +1746,6 @@ Expected: `rc=0`. `TestPolicyImportWorkflow` passes, and every existing cjs suit
 - [ ] **Step 7: Commit**
 
 ```bash
-git add internal/controlplane/ui/static/index.html internal/controlplane/ui/static/app.js internal/controlplane/ui/testdata/policy_import.cjs internal/controlplane/ui/dashboard_test.go
+git add internal/controlplane/ui/static/index.html internal/controlplane/ui/static/app.js internal/controlplane/ui/testdata/policy_import.cjs internal/controlplane/ui/dashboard_test.go docs/runbooks/inferplaned-dashboard.md docs/runbooks/inferplaned-dashboard.ko.md
 git commit -s -m "feat(cp-console): policy export download and dry-run-first import restore"
 ```
