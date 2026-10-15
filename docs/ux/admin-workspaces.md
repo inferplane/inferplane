@@ -1,48 +1,34 @@
-# 관리자 UX 구성과 검증
+# Admin workspace design and validation
 
-컨트롤 플레인과 게이트웨이의 관리 화면을 하나의 시각 체계로 정리하고,
-조회에서 조치까지 이어지는 운영 흐름을 구성한다. LiteLLM 공식 문서의
-키 발급·지출 조회·모델 추가를 기본 작업으로 삼고, inferplane의 정책 배포와
-예산 기반 모델 대체를 별도의 운영 흐름으로 완성한다.
+The control-plane and gateway consoles share a visual system and connect inspection to operational actions. Key issuance, spend inspection and model registration follow the basic tasks described in LiteLLM's documentation. Policy distribution and budget-driven model substitution have their own inferplane workflows.
 
-## 화면과 작업
+## Views and tasks
 
-| 작업 | 진입점과 완료 동작 | 검증 근거 |
+| Task | Entry point and completion | Validation |
 | --- | --- | --- |
-| 코딩 도구 연결 | mayu 개요의 모델 등록 → 키 발급 → 클라이언트 설정 | 게이트웨이 브라우저 QA, 기존 등록·라우팅 테스트 |
-| 가상 키 찾기·발급 | 키 목록 검색, 팀·모델·예산 입력, 1회 표시 | 브라우저 발급 및 검색 검증, 금액 폼 테스트 |
-| 모델·프로바이더 수정 | 목록 검색 → 수정 → 저장; 기존 메타데이터 보존 | 실제 PUT/라우팅 Go 테스트, Node·브라우저 테스트 |
-| 지출 확인 | 정산 분석 데이터와 명시적인 UTC 기간; 조회 불가 구분 | 안전 범위 밖 int64·소액·분석 장애 검증 |
-| 운영 이상 조사 | CP Needs attention → 조건별 노드 → 거절 상세 → 관련 정책 | 실제 이벤트 핸들러 및 브라우저 연결 흐름 |
-| 지출 한도 설정 | 일간·월간 예산 폼 → 변경 요약 → 게시 | 예산 Node 테스트 및 브라우저 QA |
-| 모델 대체 정책 설정 | Guided rule → 같은 정책의 예산 → 임계점·원본·대상 선택 | 생성 문서의 Go 정책 검증 및 실제 브라우저 게시 |
-| 접근·처리량·민감 입력 보호 | 목적별 폼 → 전체 문서 검토 → 게시 | Node 반례 및 Go 엄격 디코딩·의미 검증 |
-| 게시 결과 조사 | 성공 메시지의 Inspect distribution → 노드 관측 확인 | 브라우저 QA |
-| 탐색 | Ctrl/⌘ K, 페이지·조회된 데이터 검색, 키보드 선택, Esc 닫기 | 양쪽 화면의 브라우저 QA |
-| 화면 적응 | 시스템 글꼴, 라이트·다크, 좁은 화면에서 표만 스크롤 | 390/768/1440px 전 화면 확인 |
+| Connect a coding tool | mayu overview → model registration → key issuance → client setup | Gateway browser QA and registration/routing tests |
+| Find or issue a virtual key | Search keys; enter team, model and budget; show plaintext once | Browser issuance/search and monetary-form tests |
+| Edit models and providers | Search → edit → save, preserving existing metadata | PUT/routing Go tests, Node and browser tests |
+| Inspect spend | Settlement analytics with an explicit UTC range; distinguish unavailable data | Unsafe int64, small amounts and analytics-outage cases |
+| Investigate operational issues | CP Needs attention → filtered nodes → rejection detail → related policy | Event-handler and browser navigation tests |
+| Set a spend limit | Daily/monthly budget form → change summary → publish | Budget Node tests and browser QA |
+| Set model substitution | Guided rule → budget in the same policy → threshold/source/target | Go policy validation and browser publication |
+| Configure access, throughput and sensitive-input protection | Task-specific form → complete document review → publish | Node adversarial cases and strict Go decoding/validation |
+| Inspect publication | Success message's Inspect distribution → node observations | Browser QA |
+| Navigate | Ctrl/⌘ K, search pages and fetched records, keyboard selection, Esc | Browser QA for both consoles |
+| Adapt the layout | System fonts, light/dark themes and scrolling tables on narrow screens | All views at 390/768/1440px |
 
-컨트롤 플레인은 `/ui/`, 게이트웨이는 `/admin/ui/`에 있다. CP의 검색은
-조회된 팀별 사용량·정책·최근 노드만 다룬다. 게이트웨이 검색은 조회된
-키·팀·프로바이더·모델만 다루며, 새 키의 평문과 클라이언트 설정 예시는
-검색 대상에 넣지 않는다. 두 검색 모두 서버에 별도 검색 요청을 보내지 않는다.
+The control-plane console is at `/ui/`; the gateway console is at `/admin/ui/`. CP search covers fetched team usage, policies and recent nodes. Gateway search covers fetched keys, teams, providers and models. Newly issued plaintext keys and client configuration examples are excluded from search. Neither search sends a separate query to the server.
 
-## 설계 기준
+## Design principles
 
-기존 메뉴를 기억하지 않아도 검색으로 작업에 접근한다. 빈 화면에서는 다음
-단계가 보이며, 운영 경고에서는 관련 근거로 이동한다. 정책 변경은 수정한
-필드와 전체 문서를 함께 검토하고 초안으로 돌아갈 수 있다. 게시 후에는
-다음 하트비트의 배포 결과를 확인한다.
+Search exposes tasks without requiring users to remember menus. Empty states show a next action; operational warnings link to evidence. Policy edits show changed fields alongside the complete document and allow returning to the draft. After publication, operators inspect observations from the next heartbeat.
 
-예산과 정산 지출은 정수 단위를 유지한다. 설정 한도와 남은 승인 크레딧은
-다른 개념이므로 텔레메트리로 크레딧을 추정하지 않는다. 원래 모델로 돌아갈 수
-있는 대체와 대상을 강제하여 요청을 거부할 수 있는 대체의 차이를 설명한다.
-민감 입력 보호도 탐지·검사 범위와 불투명 입력 차단을 구분한다.
+Budgets and settled spend retain integer units. A configured limit and remaining admission credit are different quantities; telemetry cannot establish available credit. The UI explains the difference between substitutions that may return to the original model and strict targets that can refuse a request. Sensitive-input controls distinguish finite detection, inspection coverage and opaque-input refusal.
 
-한도·키·정책 권한은 기존 서버가 결정한다. 이 화면은 미구현 조직 역할이나
-사용자 풀을 구현한 것으로 표시하지 않는다. generation 일치나 `/healthz`는
-fleet HA 또는 추론 승인 readiness의 증거가 아니다.
+Existing servers determine limit, key and policy authority. The UI does not claim unimplemented organization roles or user pools. Matching generations and `/healthz` are not proof of fleet HA or inference-admission readiness.
 
-## 재현
+## Reproduce
 
 ```bash
 go test ./internal/controlplane/ui ./internal/server/adminui ./internal/server/configapi -race
@@ -52,12 +38,6 @@ python3 internal/controlplane/ui/testdata/browser_qa.py --screenshots /tmp/infer
 python3 internal/server/adminui/testdata/browser_qa.py --screenshots /tmp/inferplane-gateway-ux
 ```
 
-브라우저 검증은 설치된 Playwright·Chromium이 필요하다. 합성 데이터와 로컬
-가짜 API만 사용한다. 운영 서비스·실제 키·AWS·실제 IdP를 호출하지 않는다.
-전체 저장소의 빌드·레이스 테스트·vet·포맷·harness 검사도 AGENTS.md에 따라
-실행한다.
+Browser QA requires installed Playwright and Chromium. It uses synthetic data and local fake APIs, without production services, real keys, AWS or a real IdP. Run repository builds, race tests, vet, formatting and harness checks as required by AGENTS.md.
 
-LiteLLM보다 빠른 작업 완료나 낮은 오류율을 수치로 주장하려면 동일한 작업,
-참가자 조건과 데이터로 사용자 평가가 추가로 필요하다. 현재 검증은 위의 작업을
-완료하는 UX의 구현·동작·화면 품질을 증명하며, 경쟁 제품 전체 기능의 동등성이나
-실측 우위를 주장하지 않는다.
+Claims of faster completion or fewer errors than LiteLLM require a user study with the same tasks, participant conditions and data. Current validation establishes the listed workflows' implementation, behavior and visual quality; it does not establish complete feature parity or measured competitive superiority.
