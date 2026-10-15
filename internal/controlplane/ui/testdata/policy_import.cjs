@@ -66,6 +66,7 @@ function importRoutes(state) {
   assert.equal(app.$('policy-dialog').open, true);
   assert.match(app.$('policy-review').textContent, /1 added · 0 changed · 1 removed · 0 unchanged/);
   assert.match(app.$('policy-review').textContent, /removed\s+engineering/);
+  assert.doesNotMatch(app.$('policy-review').textContent, /Note: the policy store/);
   assert.match(app.$('dialog-confirm').textContent, /delete 1 policy/i, 'removal count not surfaced on confirm');
 
   // Confirm applies with the previewed generation.
@@ -77,6 +78,12 @@ function importRoutes(state) {
   assert.equal(apply.get('allow_empty'), null);
   assert.equal(app.$('policy-dialog').open, false, 'dialog stayed open after restore');
   assert.match(app.$('notice').textContent, /restored/i);
+
+  // Rejected stored rows: explain the diff and the last distributed generation.
+  state = { imports: [], preview: { ...preview, store_rejected: true } };
+  app = boot({ custom: importRoutes(state) }); await app.connect(); await app.credential(); await app.$('nav-policies').fire('click');
+  app.$('import-file').files = [file(bundle)]; await app.$('import-file').fire('change');
+  assert.equal(app.$('policy-review').textContent.split('\n')[0], 'Note: the policy store holds documents the loader rejects; this diff is against the stored rows, and Current generation is the last distributed set.');
 
   // A late preview must preserve an open JSON editor and its pending change.
   state = { imports: [] };

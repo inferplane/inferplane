@@ -85,6 +85,10 @@ type ImportResult struct {
 	ResultGeneration  string         `json:"result_generation"`
 	Changes           []ImportChange `json:"changes"`
 	Summary           ImportSummary  `json:"summary"`
+	// StoreRejected reports that the store held rows the loader rejects.
+	// CurrentGeneration describes the last distributed set, and the diff is
+	// against the stored rows.
+	StoreRejected bool `json:"store_rejected,omitempty"`
 }
 
 // ApplyImport makes body (multi-document GovernancePolicy YAML, the exact
@@ -176,7 +180,7 @@ func (s *Server) ApplyImport(ctx context.Context, body []byte, opts ImportOption
 			return nil, fmt.Errorf("controlplane: reconcile before import: %w", err)
 		}
 		// A restore must be able to overwrite rejected stored rows. Diff
-		// against their raw bytes so removals are counted and audited.
+		// against stored rows so removals are counted and audited.
 		storedRows, err = store.List(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("controlplane: list rejected stored policies before import: %w", err)
@@ -192,6 +196,15 @@ func (s *Server) ApplyImport(ctx context.Context, body []byte, opts ImportOption
 	if rejectedStoreSet {
 		for _, row := range storedRows {
 			existing[row.Name] = row.YAML
+			docs, err := policy.ParseWireDocs(row.YAML)
+			if err != nil || len(docs) != 1 || docs[0].Metadata.Name != row.Name {
+				continue
+			}
+			raw, err := yaml.Marshal(&docs[0])
+			if err != nil {
+				return nil, fmt.Errorf("controlplane: render stored policy %q: %w", row.Name, err)
+			}
+			existing[row.Name] = raw
 		}
 	} else {
 		for i := range current {
@@ -203,7 +216,7 @@ func (s *Server) ApplyImport(ctx context.Context, body []byte, opts ImportOption
 		}
 	}
 
-	res := &ImportResult{DryRun: opts.DryRun, CurrentGeneration: currentGen, ResultGeneration: resultGen}
+	res := &ImportResult{DryRun: opts.DryRun, CurrentGeneration: currentGen, ResultGeneration: resultGen, StoreRejected: rejectedStoreSet}
 	for _, row := range rows {
 		prev, ok := existing[row.Name]
 		switch {

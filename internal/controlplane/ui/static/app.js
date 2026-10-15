@@ -1305,6 +1305,7 @@
     pendingChange = { mode: "import", bundle, preview, empty, session, wasDirty: dirty };
     dialogBase("Restore · preview", "Importing REPLACES the complete policy set with this file. Documents absent from the file are deleted. Budget ledger balances and usage history are not restored.");
     $("policy-review").textContent = [
+      ...(preview.store_rejected ? ["Note: the policy store holds documents the loader rejects; this diff is against the stored rows, and Current generation is the last distributed set."] : []),
       "Summary: " + s.added + " added · " + s.changed + " changed · " + s.removed + " removed · " + s.unchanged + " unchanged",
       "Current generation: " + preview.current_generation,
       "Result generation:  " + preview.result_generation, "",

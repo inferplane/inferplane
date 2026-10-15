@@ -110,6 +110,9 @@ func TestImportRoundTripIsNoop(t *testing.T) {
 	if !r.DryRun || r.CurrentGeneration != gen || r.ResultGeneration != gen {
 		t.Fatalf("round trip result %+v, want dry_run and both generations %s", r, gen)
 	}
+	if r.StoreRejected || strings.Contains(string(b), `"store_rejected"`) {
+		t.Fatalf("round trip unexpectedly reported rejected stored rows: %s", b)
+	}
 	if r.Summary != (ImportSummary{Unchanged: 1}) || len(r.Changes) != 1 || r.Changes[0] != (ImportChange{Name: "team-a", Action: "unchanged"}) {
 		t.Fatalf("round trip diff %+v", r)
 	}
@@ -512,6 +515,60 @@ func TestImportDiffUsesStoredRowsWhenStoreSetIsRejected(t *testing.T) {
 		}
 	}
 	t.Fatalf("mutation entries %+v lack delete broken", got)
+}
+
+func TestImportRejectedStoreBranchCanonicalizesValidRows(t *testing.T) {
+	s, ts, fs := importServer(t)
+	gen := currentGeneration(s)
+	// Same semantics as cpPolicyYAML, stored as JSON with reordered keys.
+	reformatted := `{"kind":"GovernancePolicy","apiVersion":"inferplane.dev/v1alpha1","metadata":{"name":"team-a"},"spec":{"subject":{"team":"alpha"},"rules":[{"name":"cap","failurePolicy":"FailClosed","budget":{"hardCap":true,"limitMilliUSD":100,"lease":{"renewInterval":"5s","grantMilliUSD":10}}},{"name":"models","failurePolicy":"FailOpen","modelAccess":{"allow":["claude-haiku-4-5"]}}]}}`
+	fs.mu.Lock()
+	fs.docs["team-a"] = policystore.Doc{Name: "team-a", YAML: []byte(reformatted)}
+	fs.docs["broken"] = policystore.Doc{Name: "broken", YAML: []byte("not: [valid")}
+	fs.mu.Unlock()
+	var mu sync.Mutex
+	var got []MutationEntry
+	s.SetMutationLog(func(e MutationEntry) { mu.Lock(); got = append(got, e); mu.Unlock() })
+
+	resp, b := postImport(t, ts, "w", "?dry_run=true", cpPolicyYAML)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("dry run %d: %s", resp.StatusCode, b)
+	}
+	preview := decodeImport(t, b)
+	want := []ImportChange{{Name: "broken", Action: "removed"}, {Name: "team-a", Action: "unchanged"}}
+	if !preview.StoreRejected || preview.CurrentGeneration != gen || preview.ResultGeneration != gen || preview.Summary != (ImportSummary{Removed: 1, Unchanged: 1}) {
+		t.Fatalf("rejected store preview %+v, want generation %s, one removal and one unchanged", preview, gen)
+	}
+	if len(preview.Changes) != len(want) {
+		t.Fatalf("changes %+v, want %+v", preview.Changes, want)
+	}
+	for i := range want {
+		if preview.Changes[i] != want[i] {
+			t.Fatalf("changes %+v, want %+v", preview.Changes, want)
+		}
+	}
+	if fs.replaceCalls != 0 {
+		t.Fatal("dry run wrote to the store")
+	}
+	mu.Lock()
+	mutations := len(got)
+	mu.Unlock()
+	if mutations != 0 {
+		t.Fatal("dry run recorded mutations")
+	}
+
+	resp, b = postImport(t, ts, "w", "?expected_generation="+preview.CurrentGeneration, cpPolicyYAML)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("apply %d: %s", resp.StatusCode, b)
+	}
+	if applied := decodeImport(t, b); !applied.StoreRejected || applied.Summary != preview.Summary {
+		t.Fatalf("applied result %+v, want rejected store and preview summary %+v", applied, preview.Summary)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 || got[0].Op != "delete" || got[0].Name != "broken" || got[1].Op != "import" || got[1].Name != "" {
+		t.Fatalf("mutation entries %+v, want delete broken + import only", got)
+	}
 }
 
 // A lost commit acknowledgement is resolved by reading back: the store holds
