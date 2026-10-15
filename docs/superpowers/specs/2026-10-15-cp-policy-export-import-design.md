@@ -52,7 +52,10 @@ so the browser download gets a stable name. Auth stays `authn` (read).
   through the group mapping. The heartbeat token is never accepted
   (`policies.go:248-249`).
 - **Body:** multi-document GovernancePolicy YAML (YAML or JSON), bounded by
-  `policyMaxBodyBytes` (1 MiB). An oversized body is a 413.
+  `importMaxBodyBytes` (8 MiB). That is the data plane's sync-response decode
+  bound (`internal/proxy/sync.go:377`), so any set the fleet can receive can
+  also be restored. The 1 MiB `policyMaxBodyBytes` remains the per-document PUT
+  bound. An oversized body is a 413.
 - **Query:**
   - `dry_run=true` validates and diffs only. It never writes.
   - `expected_generation=<gen>` is required when `dry_run` is not true. A
@@ -88,7 +91,8 @@ distributed.
 | 401/403 | Auth (`authnWrite`) |
 | 405 | No policy store attached |
 | 409 | `expected_generation` mismatch; the response carries `current_generation` |
-| 413 | Body over 1 MiB |
+| 413 | Body over 8 MiB |
+| 500 | Store committed but the in-memory install refused the set (`ErrImportNotApplied`; unreachable for a validated bundle). The store holds the NEW set; the response says so and recommends a dry run |
 | 503 | Store failure (`writePolicyError` default, fixed body `policy store unavailable`); the store and the in-memory set are left unchanged |
 
 Writes reuse `writeJSONError` / `writePolicyError`.
@@ -115,14 +119,24 @@ Writes reuse `writeJSONError` / `writePolicyError`.
    For a non-dry-run request, `ApplyImport` acquires `s.writeMu` (see Store)
    before step 1 and holds it through step 7. The diff, the check and the commit
    therefore all describe the same set.
-7. `store.Replace(ctx, docs)`, then `recordMutation` for each put/delete plus
-   one `op=import` entry, then `ReloadFromStore(ctx)`. The order is "commit,
-   then memory", the same as `ApplyWrite`. Because validation already ran,
-   reload cannot reject the committed set.
+7. Call `store.Replace(ctx, docs)`. Then install the already-validated
+   reparsed snapshot directly with `applyWire(reparsed, nil)`, setting
+   `s.updated` to the commit time. There is NO post-commit DB re-read: a
+   failing `List` or a canceled request cannot leave memory on the replaced set
+   while the store holds the new one. If the install were ever refused, the
+   response is 500 `ErrImportNotApplied` (never the "unchanged" 503), and a
+   best-effort `ReloadFromStore` runs on a detached 10s context. Then
+   `recordMutation` runs for each put/delete, plus one `op=import` entry. The
+   order is still "commit, then memory".
 
-Generation consistency: `ReloadFromStore` lists rows ordered by name, and
-`GenerationOf` is order-sensitive. Step 4 sorts by name for the same reason,
-so the dry-run `result_generation` equals the generation installed after apply.
+Generation consistency: `GenerationOf` is order-sensitive. Step 4 sorts by Go
+byte order, and `PostgresStore.List` and authority `readPolicies` both order by
+`name COLLATE "C"` (byte order) instead of the server locale. The preview
+`result_generation`, the installed generation, a later `ReloadFromStore`, and
+the authority's generation check (`internal/authority/pgstore/shared_constraints.go:84`)
+therefore all agree. Switching the SQL ordering may change the generation once
+on upgrade, when names sort differently under the old locale; data planes just
+re-pull the set.
 
 ## Store (`internal/policystore`)
 
@@ -135,15 +149,16 @@ Add one interface method:
 Replace(ctx context.Context, docs []Doc) error
 ```
 
-`PostgresStore.Replace` runs `BEGIN` and then takes
-`SELECT pg_advisory_xact_lock($1)` with a package constant. This is the
+`PostgresStore.Replace` is bounded by a 30s `pgWriteTimeout` from entry. It runs
+`BEGIN` and then takes `SELECT pg_advisory_xact_lock(847006)` (847005 belongs to
+authority/pgstore). This is the
 `internal/keystore/postgres_schema.go:69` precedent. It then deletes all rows
 from `policies`, inserts each doc with `updated_at = now()`, upserts the seed
 marker, and commits. Any error rolls back. The package stays a leaf because it
 never parses YAML.
 
 Generation precondition under concurrency: a new `s.writeMu` (a `sync.Mutex`
-separate from `s.mu`) is held across the whole store-write-and-reload sequence
+separate from `s.mu`; lock order `writeMu` before `mu`) is held across the whole store-write-and-install sequence
 by `ApplyWrite`, `ApplyDelete` and `ApplyImport`. That makes the step-6
 generation check and the step-7 commit/reload atomic against single-document
 PUT/DELETE as well as against another import. `s.mu` keeps its existing short
@@ -157,10 +172,12 @@ Every `policystore.Store` test double gains `Replace`.
 ## Audit
 
 Every import emits one `MutationEntry` per document actually added, changed or
-removed (`op=put`/`op=delete`, with `content_sha256` for puts). It also emits
-one entry with `op=import`, `name=""`, and `content_sha256` of the raw
-submitted bundle. Unchanged documents emit no entry. The default `logMutation`
-sink needs no format change.
+removed (`op=put`/`op=delete`). An import `put` carries the `content_sha256`
+of the CANONICAL re-marshal that was stored, while an `ApplyWrite` put hashes
+the submitted body verbatim. The import also emits one entry with
+`op=import`, `name=""`, and the `content_sha256` of the raw submitted bundle.
+Unchanged documents emit no entry. The `MutationEntry` field comments document
+these meanings. The default `logMutation` sink needs no format change.
 
 ## Console (`internal/controlplane/ui/static`)
 
@@ -169,12 +186,15 @@ The Policies view gets two buttons.
 - **Export YAML** is always visible when connected. It fetches
   `/v1alpha1/config/export` with the session's read auth and saves the result
   as a Blob download.
-- **Import (restore)** is visible only when `canWrite()` (`app.js:172`).
+- **Import (restore)** is hidden when the deployment has no writable store
+  (`policies.writable == false`), and disabled unless `canWrite()` (`app.js:172`).
+  Preview and apply errors with 401/403 `lock()` the session, as every other
+  write path does. The browser rejects files over 8 MiB before uploading.
   1. A file picker accepts `.yaml`, `.yml` or `.json`, read client-side.
-  2. A `dry_run=true` POST runs, and the existing policy dialog renders a diff
-     table (name + action), the summary counts and both generations. Removed
-     documents are highlighted. When `removed > 0`, the confirm button text
-     states the removal count.
+  2. A `dry_run=true` POST runs, and the existing policy dialog renders a
+     plain-text diff listing (action + name), the summary counts and both
+     generations. When `removed > 0`, the confirm button text states the removal
+     count ("Restore and delete N policies").
   3. On confirm, the console POSTs with `expected_generation=current_generation`
      from the dry-run response. An empty bundle shows an extra warning and
      sends `allow_empty=true`.
@@ -215,10 +235,14 @@ Go tests use `-race`.
     store stays untouched.
   - An empty bundle gives 400 without `allow_empty` and empties the set with
     it.
-  - No store gives 405. Over 1 MiB gives 413.
+  - No store gives 405. Over 8 MiB gives 413.
   - The heartbeat token is rejected with 403 (`authnWrite`), and the write token is accepted.
   - Mutation entries are emitted for changed documents and the import only.
   - A store `Replace` error leaves memory unchanged, with a 503.
+  - A `List` failure after the commit still installs the previewed generation
+    (no re-read).
+  - An import parked inside `Replace` blocks a concurrent `ApplyWrite` from
+    reaching the store, which proves `writeMu`.
 - `internal/policystore/postgres_test.go` (existing Postgres test harness):
   - `Replace` swaps the set and sets the seed marker.
   - Injecting a failing insert rolls back the transaction so the prior rows
@@ -242,5 +266,10 @@ Go tests use `-race`.
   section with a cron/curl export example, a dry-run-then-apply restore example,
   and the out-of-scope warning about the ledger and usage.
 - `internal/CLAUDE.md` (`policystore/` and `controlplane/` entries): document
-  `Replace` and the validate-before-commit import ordering.
+  `Replace`, the byte-order listing, and the validate-before-commit import
+  ordering.
+- `scripts/prepare-policy-controlplane.py` + `tests/deployment/test_policy_store.py`:
+  route `/v1alpha1/config/*` to the policy CP origin in the split deployment.
+  The runbook covers the manual edit for distributions that were already
+  prepared.
 - `AGENTS.md`: regenerate only if root `CLAUDE.md` changes (not expected).
