@@ -52,3 +52,24 @@ func TestContradictoryCacheSplitCannotBecomePriced(t *testing.T) {
 		}
 	}
 }
+
+func TestPartialCacheQuantitySelectsLongPrice(t *testing.T) {
+	var u schema.Usage
+	if err := json.Unmarshal([]byte(`{"input_tokens":271950,"output_tokens":0,"cache_creation_input_tokens":100,"cache_creation":{"ephemeral_5m_input_tokens":40}}`), &u); err != nil {
+		t.Fatal(err)
+	}
+	p := FromUsage(&u)
+	if total, err := p.TotalTokens(); err != nil || total != 272050 {
+		t.Fatalf("total=%d err=%v", total, err)
+	}
+	table := contextTable()
+	if tier := table.ContextTier("p", "global.openai.gpt-6.1-sol", p); tier != "long" {
+		t.Fatalf("tier=%s", tier)
+	}
+	if cost, err := table.CostUSDMicrosChecked("p", "global.openai.gpt-6.1-sol", p); err != nil || cost != 1088300 {
+		t.Fatalf("estimated cost=%d err=%v", cost, err)
+	}
+	if u.CacheWriteAccounting().TTLKnown {
+		t.Fatal("estimated 5m remainder became proven TTL")
+	}
+}

@@ -1,0 +1,89 @@
+{
+  "server": {
+    "listen": ":8080",
+    "admin_listen": ":9090",
+    "drain_grace": "10s",
+    "admin_auth": {
+      "token_refs": [
+        {
+          "env": "INFERPLANE_ADMIN_TOKEN"
+        }
+      ]
+    }
+  },
+  "key_store": {
+    "type": "sqlite",
+    "path": "/var/lib/inferplane/keys.db"
+  },
+  "audit": {
+    "failure_mode": "buffer_then_block",
+    "buffer": {
+      "path": "/var/lib/inferplane/audit.wal"
+    },
+    "sinks": [
+      {
+        "type": "stdout"
+      },
+      {
+        "type": "file",
+        "path": "/var/lib/inferplane/audit.jsonl"
+      }
+    ]
+  },
+  "providers": {
+    "bedrock-responses-east": {
+      "type": "bedrock_responses",
+      "base_url": "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
+    }
+  },
+  "models": {
+    "openai.gpt-6.1-sol": {
+      "context_window": 1000000,
+      "capabilities": [
+        "tools",
+        "reasoning"
+      ],
+      "targets": [
+        {
+          "provider": "bedrock-responses-east",
+          "model": "openai.gpt-6.1-sol"
+        }
+      ]
+    }
+  },
+  "teams": {
+    "demo": {
+      "allowed_models": [
+        "openai.gpt-6.1-sol"
+      ],
+      "rate_limit": {
+        "requests_per_minute": 120
+      }
+    }
+  },
+  "pricing": {
+    "on_missing": "block",
+    "version": "aws-gpt-standard-2026-10-02",
+    "overrides": {
+      "bedrock-responses-east": {
+        "openai.gpt-6.1-sol": {
+          "input_per_mtok": 2.2,
+          "output_per_mtok": 11.0,
+          "cache_read_per_mtok": 0.11,
+          "cache_write_5m_per_mtok": 2.75,
+          "cache_write_1h_per_mtok": 2.75,
+          "short_context_limit": 272000,
+          "long_context": {
+            "input_per_mtok": 4.4,
+            "output_per_mtok": 16.5,
+            "cache_read_per_mtok": 0.22,
+            "cache_write_5m_per_mtok": 5.5,
+            "cache_write_1h_per_mtok": 5.5
+          }
+        }
+      }
+    }
+  },
+  "_comment_pricing": "AWS Standard commercial Mantle pricing checked 2026-10-02. Entire response uses long_context above 272000 total input tokens including cache read/write. Rates already include the regional premium. No search-operation fees, taxes or private discounts.",
+  "_comment_gpt": "Native Mantle Responses with default IAM credentials. The context bound is an operator declaration, not client acceptance or proof of the exact backend maximum. See docs/reference/context-window-validation.md."
+}

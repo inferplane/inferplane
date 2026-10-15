@@ -6,6 +6,7 @@ import json
 import os
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -121,7 +122,57 @@ def bundled_models():
         raise LauncherError("cannot read native model metadata from installed Codex") from None
 
 
-def build_catalog(entries):
+def load_context_profiles(path):
+    """Read explicit operator profiles; they never replace gateway bounds."""
+    if not path:
+        return {}
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError()
+            result[key] = value
+        return result
+
+    try:
+        with open(path, "rb") as file:
+            raw = file.read(256 * 1024 + 1)
+        if len(raw) > 256 * 1024:
+            raise ValueError()
+        payload = json.loads(raw, object_pairs_hook=unique_object)
+        if (not isinstance(payload, dict) or set(payload) != {"schema_version", "models"}
+                or type(payload["schema_version"]) is not int or payload["schema_version"] != 1
+                or not isinstance(payload["models"], dict)):
+            raise ValueError()
+        for name, profile in payload["models"].items():
+            if (not MODEL_ID.fullmatch(name) or not isinstance(profile, dict)
+                    or set(profile) != {"context_window", "usable_percent", "compact_percent"}
+                    or any(type(value) is not int for value in profile.values())
+                    or not 0 < profile["context_window"] <= (2 ** 63 - 1) // 100
+                    or not 0 < profile["compact_percent"] < profile["usable_percent"] <= 100):
+                raise ValueError()
+        return payload["models"]
+    except (OSError, ValueError, TypeError, RecursionError):
+        raise LauncherError("cannot read valid per-model context profiles") from None
+
+
+def apply_context_profiles(catalog, entries, profiles):
+    by_id = {entry["id"]: entry for entry in entries}
+    for model in catalog["models"]:
+        profile = profiles.get(model["slug"])
+        if profile is None:
+            continue
+        entry = by_id[model["slug"]]
+        if (not any(entry.get(key) is not None for key in ("context_window", "max_model_len"))
+                or profile["context_window"] != model["max_context_window"]):
+            raise LauncherError("context profile does not match the gateway's declared bound; requalify it")
+        model["effective_context_window_percent"] = profile["usable_percent"]
+        model["auto_compact_token_limit"] = max(1, model["context_window"] * profile["compact_percent"] // 100)
+    return catalog
+
+
+def build_catalog(entries, *, web_search=False, context_profiles=None):
     models = []
     seen = set()
     native_models = None
@@ -172,10 +223,21 @@ def build_catalog(entries):
                 "max_context_window": bound,
                 "auto_compact_token_limit": max(1, bound * 8 // 10),
             })
+            if web_search:
+                # Mantle supports text search, not OpenAI's image-search
+                # extensions inherited from the bundled GPT templates.
+                native["web_search_tool_type"] = "text"
+                # Codex 0.157's Lite path omits hosted web_search even when
+                # enabled. Full Responses carries it in the tools array.
+                native["use_responses_lite"] = False
             models.append(native)
             continue
         if template is not None:
             raise LauncherError("bridged route must not advertise a native codex_model")
+        if web_search:
+            # Search is a session-wide Codex setting. Do not offer a model
+            # switch into a bridge that cannot carry hosted tools/history.
+            continue
         # Portable text/tool defaults: neither model names nor owning providers
         # attest support for native reasoning, images, hosted tools or state.
         models.append({
@@ -214,7 +276,7 @@ def build_catalog(entries):
             "availability_nux": None,
             "upgrade": None,
         })
-    return {"models": models}
+    return apply_context_profiles({"models": models}, entries, context_profiles or {})
 
 
 def config_string(value):
@@ -253,6 +315,8 @@ def selected_model(args):
         flag = arg.split("=", 1)[0]
         if flag in {"--oss", "--local-provider", "--remote", "--remote-auth-token-env"}:
             raise LauncherError("direct or remote provider flags cannot be used with this launcher")
+        if flag == "--search":
+            raise LauncherError("--search requests live search; use INFERPLANE_CODEX_WEB_SEARCH=cached with a native model instead")
         kind = None
         value = None
         if arg in values:
@@ -281,7 +345,7 @@ def selected_model(args):
     return config_string(config_model) if config_model is not None else DEFAULT_MODEL
 
 
-def codex_args(args, model, catalog_path, *, bridge):
+def codex_args(args, model, catalog_path, *, bridge, web_search="disabled"):
     provider = (
         'model_providers.inferplane={name="inferplane (local)",base_url='
         + json.dumps(BASE_URL)
@@ -293,7 +357,7 @@ def codex_args(args, model, catalog_path, *, bridge):
         'model_provider="inferplane"',
         "model=" + json.dumps(model),
         "model_catalog_json=" + json.dumps(catalog_path),
-        'web_search="disabled"',
+        "web_search=" + json.dumps(web_search),
         provider,
     ):
         overrides.extend(["-c", config])
@@ -304,6 +368,51 @@ def codex_args(args, model, catalog_path, *, bridge):
     split = args.index("--") if "--" in args else len(args)
     # exec/resume have their own -c list; root overrides can otherwise be lost.
     return args[:split] + overrides + args[split:]
+
+
+def codex_command(args):
+    """Wrap only interactive sessions; never invoke a shell or parse its rc files."""
+    mode = os.environ.get("INFERPLANE_CODEX_HUD", "auto")
+    language = os.environ.get("INFERPLANE_CODEX_HUD_LANGUAGE", "ko")
+    if mode not in ("auto", "off"):
+        raise LauncherError("INFERPLANE_CODEX_HUD must be auto or off")
+    if language not in ("ko", "en"):
+        raise LauncherError("INFERPLANE_CODEX_HUD_LANGUAGE must be ko or en")
+    direct = ["codex", *args]
+    if mode == "off" or not sys.stdin.isatty() or not sys.stdout.isatty():
+        return direct
+    commands = {
+        "agents", "exec", "e", "review", "login", "logout", "mcp", "plugin",
+        "mcp-server", "app-server", "remote-control", "completion", "update",
+        "doctor", "sandbox", "debug", "apply", "a", "queue", "archive",
+        "delete", "migrate-rollouts", "unarchive", "cloud", "exec-server",
+        "features", "help",
+    }
+    values = {
+        "-c", "--config", "-m", "--model", "-p", "--profile", "-s", "--sandbox",
+        "-a", "--ask-for-approval", "-C", "--cd", "-i", "--image", "--add-dir",
+        "--enable", "--disable", "--config-file", "--thread-source",
+    }
+    positional = False
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            break
+        if arg in ("-h", "--help", "-V", "--version"):
+            return direct
+        if arg in values:
+            index += 2
+            continue
+        if not arg.startswith("-") and not positional:
+            if arg in commands:
+                return direct
+            positional = True
+        index += 1
+    hud = shutil.which("codex-hud")
+    if hud is None:
+        return direct
+    return [hud, "start", "--language", language, "--", *args]
 
 
 def run_codex(args):
@@ -327,7 +436,7 @@ def run_codex(args):
             previous[sig] = signal.signal(sig, forward)
         # Inherit all three streams; reading stdin here would consume prompts
         # or break interactive terminal input.
-        child = subprocess.Popen(["codex", *args], env=codex_environment())
+        child = subprocess.Popen(codex_command(args), env=codex_environment())
         status = child.wait()
         return status if status >= 0 else 128 - status
     except OSError:
@@ -340,13 +449,19 @@ def run_codex(args):
 def main(args=None):
     args = list(sys.argv[1:] if args is None else args)
     try:
+        search = os.environ.get("INFERPLANE_CODEX_WEB_SEARCH", "disabled")
+        if search not in ("disabled", "cached"):
+            raise LauncherError("INFERPLANE_CODEX_WEB_SEARCH must be disabled or cached")
         key = os.environ.get("INFERPLANE_API_KEY", "")
         if not key or any(ord(c) <= 32 or ord(c) >= 127 for c in key):
             raise LauncherError("set INFERPLANE_API_KEY to a gateway virtual key before launching")
         model = selected_model(args)
         entries = gateway_models(key)
-        catalog = build_catalog(entries)
+        profiles = load_context_profiles(os.environ.get("INFERPLANE_CODEX_CONTEXT_PROFILES", ""))
+        catalog = build_catalog(entries, web_search=search == "cached", context_profiles=profiles)
         if model not in {entry["slug"] for entry in catalog["models"]}:
+            if search == "cached":
+                raise LauncherError("web search requires an accessible, mapped native Responses model; select one explicitly")
             raise LauncherError(
                 "selected model is unavailable to Codex "
                 "(absent, unsupported, lacking declared tools, or unmapped native model)"
@@ -358,7 +473,7 @@ def main(args=None):
             fd, path = tempfile.mkstemp(suffix=".json", dir=directory)
             with os.fdopen(fd, "w", encoding="utf-8") as file:
                 json.dump(catalog, file, ensure_ascii=True)
-            return run_codex(codex_args(args, model, path, bridge=bridge))
+            return run_codex(codex_args(args, model, path, bridge=bridge, web_search=search))
     except LauncherError as exc:
         print("inferplane-codex: " + str(exc), file=sys.stderr)
         return 1

@@ -72,6 +72,9 @@ type UsageRef struct {
 
 	CacheCreation5mInputTokens int64 `json:"cache_creation_5m_input_tokens,omitempty"`
 	CacheCreation1hInputTokens int64 `json:"cache_creation_1h_input_tokens,omitempty"`
+	// Nil means an older producer supplied no completeness evidence. Never
+	// interpret absence as known-zero usage or a measured cache TTL.
+	Evidence *UsageEvidence `json:"evidence,omitempty"`
 }
 
 type LatencyRef struct {
@@ -81,12 +84,13 @@ type LatencyRef struct {
 
 // CostRef is the settled per-request cost in integer µUSD (filled by the M5
 // governance Settle path). PricingMissing marks an on_missing=allow request
-// whose (provider,model) rate was absent (cost reported 0); PricingVersion
+// whose rate/token class or cost calculation was unavailable (cost reported 0); PricingVersion
 // records the rate table version used.
 type CostRef struct {
 	AmountUSDMicros int64  `json:"amount_usd_micros"`
 	PricingMissing  bool   `json:"pricing_missing"`
 	PricingVersion  string `json:"pricing_version,omitempty"`
+	ContextTier     string `json:"context_tier,omitempty"`
 }
 
 // Record is one audit entry. Field order here defines the canonical JSON used

@@ -170,9 +170,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	tracing.SetGenAIRequest(span, model)
 	estimate := max(int64(1), int64(len(raw)/4))
-	if limit := requestpolicy.ContextWindow(st, model); limit > 0 && estimate > limit {
+	if limit := requestpolicy.ContextWindow(st, model); limit > 0 && estimate > limit && requestpolicy.ContextTextEstimate("responses", raw) > limit {
 		h.denied(req, p, model, 400, "context_window_exceeded", start)
-		writeError(w, 400, "invalid_request_error", "request exceeds the configured context window")
+		writeCodedError(w, 400, "request exceeds the configured context window", "context_length_exceeded")
 		return
 	}
 	table := st.Pricing()
@@ -180,7 +180,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	for _, ct := range chain {
 		priced = append(priced, governance.PricedTarget{Provider: ct.ProviderName, Upstream: ct.Upstream})
 	}
-	if dec := governance.PricingGuard(table, priced); !dec.Allowed {
+	if dec := requestpolicy.PricingGuard(table, priced, raw); !dec.Allowed {
 		h.denied(req, p, model, dec.Status, string(dec.Code), start)
 		writeError(w, dec.Status, "insufficient_quota", dec.Reason)
 		return

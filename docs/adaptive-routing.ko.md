@@ -1,6 +1,6 @@
 ---
 translation_source: adaptive-routing.md
-translation_source_sha256: 4aab86d568087848ef70870e04fe1cef82332367d805ea940383ae160911ac90
+translation_source_sha256: ae94c3275ef04db25d20b0de4c3aad031de667be2008657893324a70469e61c9
 ---
 
 # 적응형 라우팅과 Codex {#adaptive-routing-and-codex}
@@ -110,6 +110,52 @@ mayu가 자체 표준 AWS 자격 증명 체인으로 `bedrock` 서비스 요청�
 위 사용자 지정 공급자에 `model = "openai.gpt-6-astra"`와 실제 로컬 포트를 사용하세요. 별도로 지원 검색 경로를 구성하지 않았다면 `supports_websockets = false`, `web_search = "disabled"`를 유지합니다. Codex의 `amazon-bedrock` 공급자는 AWS에 직접 연결합니다. 게이트웨이 인증·라우팅·회계를 사용하려면 `inferplane`을 선택하세요.
 
 `GET /v1/models`는 `capabilities`와 `responses_mode`(`native`, `bridge`, `unsupported`)를 제공합니다. 네이티브 항목의 `codex_model`은 공개 이름에서 유도해 설치된 메타데이터와 매칭하며 비공개 업스트림 배포 이름을 공개하지 않습니다. 네이티브·브리지가 섞인 체인은 이식 가능한 브리지 계약을 표시합니다. 메타데이터는 설정된 기능이며 요청 시 정책·공급자 검사가 최종 기준입니다.
+
+### 선택적 Mantle Web Search {#opt-in-mantle-web-search}
+
+검증된 네이티브 `bedrock_responses` 경로에서 텍스트 전용 AWS 인덱스·캐시 검색을
+launcher에 명시적으로 활성화할 수 있습니다.
+
+```bash
+INFERPLANE_CODEX_WEB_SEARCH=cached scripts/inferplane-codex -m openai.gpt-6-astra
+# Or a separately configured native GPT-5.6 route:
+INFERPLANE_CODEX_WEB_SEARCH=cached scripts/inferplane-codex -m openai.gpt-5.6-sol
+```
+
+`INFERPLANE_API_KEY`에는 기존처럼 gateway 가상 키를 제공합니다. 기본은 `disabled`이며
+`disabled`와 `cached`만 허용합니다. 검색 세션은 네이티브 전용 모델 목록과
+`web_search_tool_type: text`, 전체 Responses를 사용합니다. Codex 0.157의 Lite 경로는
+호스팅 검색을 생략하므로 Responses Lite는 사용하지 않습니다. 상속된
+`web_search="live"`를 `cached`로 덮어쓰며 클라이언트는 `external_web_access:false`를
+보냅니다. Mantle에 OpenAI 이미지 검색 확장을 선언하지 않습니다. 이식 가능한 모델
+전환에는 이 opt-in 없이 다시 시작하세요. CLI `--search`는 live 검색을 요청하므로
+launcher가 거부합니다.
+
+`global.*` Runtime profile 대신 `openai.gpt-5.6-sol` 같은 Mantle 모델 ID를 사용하세요.
+일반 `bedrock` 공급자의 `api: mantle`은 Chat/Messages를 선택하며 네이티브 Responses나
+호스팅 검색을 활성화하지 않습니다. 리전별 공급자를 유지하세요. GPT-5.6 Sol과
+GPT-6 Sol/Luna는 `https://bedrock-mantle.us-east-1.api.aws/openai`를 사용할 수 있고,
+GPT-6 Astra는 `us-west-2`가 필요합니다. GPT-5.6 Terra/Luna도 `us-west-2`에서
+제공됩니다. 하나의 리전이 모든 모델을 지원한다고 가정하지 말고 각 모델 카드를
+확인하세요. 모델 이름이나 네이티브 전송만으로 업스트림 도구 지원을 증명하지 않습니다.
+모델·리전을 검증하고 gateway IAM identity에 `bedrock-websearch:InvokeSearch`와
+`bedrock-websearch:InvokeFetch`를 부여하세요. 이 모드는
+`bedrock-websearch:ExternalWebAccess`를 요구하거나 부여하지 않습니다.
+
+mayu는 기존 신원·개인정보·가드레일 거부·토큰 회계 gate를 유지하며 검색 결과, 인용,
+SSE를 보존합니다. **별도 AWS Web Search 작업 요금은 토큰 기반 비용 계량이나 hard cap에
+포함되지 않습니다.** 별도로 관리하세요. 정적 가격 override에는 short/long-context
+추론 구간의 명시적인 정책도 필요하며 모든 업스트림 구간 요금을 자동 재현하지 않습니다.
+
+참고:
+
+- [AWS Web Search](https://docs.aws.amazon.com/bedrock/latest/userguide/web-search.html)
+- [AWS Web Search IAM](https://docs.aws.amazon.com/bedrock/latest/userguide/security-web-search.html)
+- [GPT-5.6 Sol 리전](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-sol.html)
+- [GPT-6 Sol 리전](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-sol.html)
+- [GPT-6 Luna 리전](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-luna.html)
+- [OpenAI Web Search](https://developers.openai.com/api/docs/guides/tools-web-search)
+- [Codex 설정](https://developers.openai.com/codex/config-reference)
 
 이식 가능한 클라이언트는 상속된 네이티브 추론 선호를 해제하려고 `reasoning: {"effort": "none"}`을 보낼 수 있습니다. 백엔드 추론 강도 제어를 요구하지 않으며 브리지는 텍스트·도구 결과를 전달하고 생성 동작은 공급자가 정합니다. 명시적 추론 요구와 암호화 이력에는 호환 네이티브 목적지가 필요합니다.
 

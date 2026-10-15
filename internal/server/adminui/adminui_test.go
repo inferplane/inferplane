@@ -339,9 +339,8 @@ func TestAdminUI_teamsRecordsWired(t *testing.T) {
 	if !strings.Contains(js, "refreshTeamsView") {
 		t.Error("app.js missing refreshTeamsView()")
 	}
-	if !strings.Contains(js, `if (name === "teams") refreshTeamsView();`) {
-		t.Error("showView does not call refreshTeamsView() for the teams section")
-	}
+	// TestViewReadBehavior executes navigation and observes the actual team
+	// and user reads; dispatch syntax is not an API contract.
 	// write affordances are gated on the client-side whoamiIsAdmin hint (the
 	// server enforces via requireAdmin regardless — this is UX, not the gate).
 	if !strings.Contains(js, "whoamiIsAdmin") {
@@ -391,9 +390,7 @@ func TestAdminUI_bodyLoggingWired(t *testing.T) {
 	if !strings.Contains(js, "refreshLogsView") {
 		t.Error("app.js missing refreshLogsView()")
 	}
-	if !strings.Contains(js, `if (name === "logs") refreshLogsView();`) {
-		t.Error("showView does not call refreshLogsView() for the logs section")
-	}
+	// TestViewReadBehavior executes log navigation and observes its API read.
 }
 
 func TestAdminUI_budgetAlertsWired(t *testing.T) {

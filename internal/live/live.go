@@ -500,6 +500,16 @@ func pricingFromConfig(cfg *config.Config) *pricing.Table {
 	for provider, models := range cfg.Pricing.Overrides {
 		overrides[provider] = map[string]pricing.ConfigRate{}
 		for model, rc := range models {
+			var long *pricing.ConfigRate
+			if rc.LongContext != nil {
+				lr := rc.LongContext
+				long = &pricing.ConfigRate{InputPerMTok: lr.InputPerMTok, OutputPerMTok: lr.OutputPerMTok,
+					CacheReadPerMTok: lr.CacheReadPerMTok, CacheWrite5mPerMTok: lr.CacheWrite5mPerMTok,
+					CacheWrite1hPerMTok: lr.CacheWrite1hPerMTok, Free: lr.Free, ShortContextLimit: lr.ShortContextLimit, CacheWriteUnsupported: lr.CacheWriteUnsupported}
+				if lr.LongContext != nil {
+					long.LongContext = &pricing.ConfigRate{}
+				} // preserve invalid nesting for fail-closed validation
+			}
 			overrides[provider][model] = pricing.ConfigRate{
 				InputPerMTok:        rc.InputPerMTok,
 				OutputPerMTok:       rc.OutputPerMTok,
@@ -509,7 +519,10 @@ func pricingFromConfig(cfg *config.Config) *pricing.Table {
 				// Free must ride along or every free:true override silently
 				// becomes an Unpriced() row here — the exact inversion of the
 				// bug this field exists to fix.
-				Free: rc.Free,
+				Free:                  rc.Free,
+				ShortContextLimit:     rc.ShortContextLimit,
+				LongContext:           long,
+				CacheWriteUnsupported: rc.CacheWriteUnsupported,
 			}
 		}
 	}

@@ -14,6 +14,50 @@ const $ = (id) => document.getElementById(id);
 
 const DISABLED = Symbol("capability-disabled");
 
+// Preserve int64 financial values before native JSON parsing can round them.
+function parseExactJSON(raw) {
+  const tokens = raw.match(/"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null|[{}\[\]:,]/g) || [];
+  // Validate the entire original grammar too (reject unmatched garbage).
+  JSON.parse(raw);
+  let at = 0;
+  const take = expected => { if (tokens[at++] !== expected) throw Error("Invalid JSON response"); };
+  function value() {
+    const t = tokens[at++];
+    if (t === "{") {
+      const obj = Object.create(null);
+      if (tokens[at] !== "}") while (true) {
+        const key = JSON.parse(tokens[at++]); take(":"); obj[key] = value();
+        if (tokens[at] !== ",") break; at++;
+      }
+      take("}"); return obj;
+    }
+    if (t === "[") {
+      const arr = [];
+      if (tokens[at] !== "]") while (true) { arr.push(value()); if (tokens[at] !== ",") break; at++; }
+      take("]"); return arr;
+    }
+    if (/^-?\d+$/.test(t)) {
+      const n = BigInt(t);
+      return n > BigInt(Number.MAX_SAFE_INTEGER) || n < BigInt(Number.MIN_SAFE_INTEGER) ? n : Number(t);
+    }
+    if (/^-?\d/.test(t)) return Number(t); // Observational ratios may be fractional; money remains integer.
+    return JSON.parse(t);
+  }
+  return value();
+}
+function exactJSON(value, indent = 0) {
+  function encode(v, depth) {
+    if (typeof v === "bigint") return v.toString();
+    if (v === null || typeof v !== "object") return JSON.stringify(v);
+    const array = Array.isArray(v);
+    const entries = array ? v : Object.keys(v).filter(k => v[k] !== undefined);
+    const parts = entries.map(k => array ? encode(k, depth + 1) : JSON.stringify(k) + (indent ? ": " : ":") + encode(v[k], depth + 1));
+    const [left, right] = array ? ["[", "]"] : ["{", "}"];
+    return left + (parts.length ? (indent ? "\n" + " ".repeat((depth + 1) * indent) : "") + parts.join(indent ? ",\n" + " ".repeat((depth + 1) * indent) : ",") + (indent ? "\n" + " ".repeat(depth * indent) : "") : "") + right;
+  }
+  return encode(value, 0);
+}
+
 async function api(method, path, body, optional) {
   const resp = await fetch(path, {
     method,
@@ -21,7 +65,8 @@ async function api(method, path, body, optional) {
       "Authorization": "Bearer " + adminToken,
       ...(body ? { "Content-Type": "application/json" } : {}),
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: body ? exactJSON(body) : undefined,
+    cache: "no-store", credentials: "omit", redirect: "error",
   });
   if (resp.status === 401) throw new Error("unauthorized — check the admin token");
   // Opt-in only: an optional/capability endpoint that is absent → disabled,
@@ -34,7 +79,7 @@ async function api(method, path, body, optional) {
     try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch { /* keep generic */ }
     throw new Error(msg);
   }
-  return resp.status === 204 ? null : resp.json();
+  return resp.status === 204 ? null : parseExactJSON(await resp.text());
 }
 
 /* ---------- views ---------- */
@@ -51,19 +96,25 @@ const VIEWS = {
 };
 
 let activeView = "overview"; // tracked so a language switch can re-render the current view
+let viewGeneration = 0;
 
 function showView(name) {
+  if (!Object.hasOwn(VIEWS, name)) return;
+  const generation = ++viewGeneration;
   activeView = name;
   for (const v of Object.keys(VIEWS)) $("view-" + v).hidden = v !== name;
-  document.querySelectorAll("button.nav").forEach((b) =>
-    b.classList.toggle("active", b.dataset.view === name));
+  document.querySelectorAll("button.nav").forEach((b) => {
+    b.classList.toggle("active", b.dataset.view === name);
+    if (b.dataset.view === name) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+  });
   $("view-title").textContent = msg(VIEWS[name]);
-  if (name === "overview") refreshOverview();
-  if (name === "usage") refreshUsageView();
-  if (name === "logs") refreshLogsView();
-  if (name === "teams") refreshTeamsView();
-  if (name === "providers") refreshProviders();
-  if (name === "governance") refreshGovernance();
+  $("workspace-error").hidden = true; $("workspace-error").textContent = "";
+  const refreshers = { overview: refreshOverview, usage: refreshUsageView, logs: refreshLogsView,
+    teams: refreshTeamsView, providers: refreshProviders, governance: refreshGovernance };
+  if (refreshers[name]) refreshers[name]().catch(err => {
+    if (generation !== viewGeneration) return;
+    $("workspace-error").hidden = false; $("workspace-error").textContent = msg("common.failedToLoad") + ": " + String(err.message || err);
+  });
 }
 
 // Language switcher (ADR-027): not persisted (ADR-001 data-free posture) — a
@@ -77,6 +128,7 @@ $("lang-select").addEventListener("change", (e) => {
   pollHealth();
   renderUsage(lastIssuedKey || null); // settings snippets aren't part of showView's refresh set
   showView(activeView);
+  applyRecordFilters();
 });
 
 document.querySelectorAll("[data-view]").forEach((b) =>
@@ -112,12 +164,43 @@ function capOn(key) {
 
 /* ---------- usage analytics (real data when the index is on) ---------- */
 
-const usd = (micros) => "$" + (Number(micros) / 1e6).toFixed(4);
+function moneyInteger(value) {
+  if (typeof value === "number" && !Number.isSafeInteger(value) || !/^-?\d+$/.test(String(value))) throw Error(msg("err.moneyInvalid"));
+  return BigInt(value);
+}
+function moneyDecimal(micros) {
+  const n = moneyInteger(micros), s = (n < 0n ? -n : n).toString().padStart(7, "0");
+  return (n < 0n ? "-" : "") + s.slice(0, -6) + "." + s.slice(-6);
+}
+function usd(micros) {
+  const [whole, fraction] = moneyDecimal(micros).split(".");
+  return (whole.startsWith("-") ? "-$" : "$") + whole.replace("-", "").replace(/\B(?=(\d{3})+(?!\d))/g, ",") + "." + fraction;
+}
+function budgetMicros(text) {
+  const match = /^(\d+)(?:\.(\d{1,6}))?$/.exec(text.trim());
+  if (!match) throw Error(msg("err.budgetPrecision"));
+  const value = BigInt(match[1]) * 1000000n + BigInt((match[2] || "").padEnd(6, "0"));
+  if (value > 1000000000000000n) throw Error(msg("err.budgetTooLarge"));
+  return Number(value); // bounded exact integer, no floating-point cost math
+}
+function wholeCount(text) {
+  if (!/^\d+$/.test(text)) throw Error(msg("limits.invalidCount"));
+  const value = BigInt(text);
+  if (value > 9223372036854775807n) throw Error(msg("limits.invalidCount"));
+  return value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value;
+}
+function analyticsRange() {
+  const end = new Date(), start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - 29);
+  return { since: start.toISOString().slice(0, 10), until: end.toISOString().slice(0, 10) };
+}
+function analyticsSummaryPath() { return "/admin/analytics/summary?" + new URLSearchParams(analyticsRange()); }
 
 async function refreshUsageView() {
   const content = $("usage-content");
   if (!capOn("analytics_index")) { content.hidden = true; return; }
-  const s = await api("GET", "/admin/analytics/summary", null, true); // optional
+  content.hidden = true; // old totals are not a fresh response after a failure
+  const s = await api("GET", analyticsSummaryPath(), null, true); // inclusive UTC days, including today
   if (!s || s === DISABLED) { content.hidden = true; return; }
   content.hidden = false;
 
@@ -150,13 +233,16 @@ function renderSparkline(container, values) {
   container.replaceChildren();
   if (values.length <= 1) return; // one point has no line to draw
   const w = 160, h = 36, pad = 2;
-  const max = Math.max(...values, 1); // avoid divide-by-zero on all-zero data
+  const amounts = values.map(moneyInteger);
+  const max = amounts.reduce((a, b) => a > b ? a : b, 1n);
   const step = values.length > 1 ? (w - pad * 2) / (values.length - 1) : 0;
-  const d = values
-    .map((v, i) => (i === 0 ? "M" : "L") + (pad + i * step) + "," + (h - pad - (v / max) * (h - pad * 2)))
+  // Only the bounded pixel ratio crosses to Number. Settled money stays integer.
+  const d = amounts
+    .map((v, i) => (i === 0 ? "M" : "L") + (pad + i * step) + "," + (h - pad - Number((v < 0n ? 0n : v) * 32000n / max) / 1000))
     .join(" ");
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("role", "img"); svg.setAttribute("aria-label", msg("ux.spendTrend"));
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
   path.setAttribute("d", d);
   path.setAttribute("fill", "none");
@@ -183,7 +269,6 @@ async function pollHealth() {
 function parseMetrics(text) {
   // inferplane_requests_total{ingress="anthropic",model="m",provider="p",status="2xx",team="t"} 3
   const rows = [];
-  let spendMicros = 0;
   for (const line of text.split("\n")) {
     if (line.startsWith("inferplane_requests_total{")) {
       const m = line.match(/\{(.*)\}\s+([0-9.e+]+)\s*$/);
@@ -194,23 +279,32 @@ function parseMetrics(text) {
         labels[k] = v;
       }
       rows.push({ ...labels, count: Number(m[2]) });
-    } else if (line.startsWith("inferplane_budget_spend_usd_micros")) {
-      const m = line.match(/\s([0-9.e+]+)\s*$/);
-      if (m) spendMicros += Number(m[1]);
     }
   }
-  return { rows, spendMicros };
+  return { rows };
 }
 
 async function refreshOverview() {
-  // spend trend (real data when the analytics index is on; else no sparkline)
+  // The metrics USD counter is approximate and process-cumulative. Show
+  // settled analytics for its explicit reporting period, or unavailable.
+  $("stat-spend").textContent = "—"; $("stat-spend-spark").replaceChildren();
+  $("stat-spend-sub").textContent = msg("ux.spendUnavailable");
   if (capOn("analytics_index")) {
     try {
-      const ts = await api("GET", "/admin/analytics/timeseries?days=30", null, true);
-      if (ts && ts !== DISABLED) {
-        renderSparkline($("stat-spend-spark"), ts.slice().reverse().map((p) => p.cost_micros));
+      const summary = await api("GET", analyticsSummaryPath(), null, true);
+      if (summary && summary !== DISABLED && summary.totals) {
+        $("stat-spend").textContent = usd(summary.totals.cost_micros);
+        const range = analyticsRange();
+        $("stat-spend-sub").textContent = msg("ux.spendPeriod") + " · " + range.since + " → " + range.until + " UTC";
       }
-    } catch { /* sparkline is best-effort; don't abort the rest of the overview */ }
+    } catch { /* unavailable is distinct from zero settled spend */ }
+    try {
+      const series = await api("GET", "/admin/analytics/timeseries?days=30", null, true);
+      if (Array.isArray(series)) {
+        const range = analyticsRange();
+        renderSparkline($("stat-spend-spark"), series.filter(p => p.day >= range.since && p.day <= range.until).sort((a, b) => a.day.localeCompare(b.day)).map(p => p.cost_micros));
+      }
+    } catch { /* trend is independent; no points are fabricated */ }
   }
 
   // keys (authoritative, via admin API)
@@ -238,13 +332,12 @@ async function refreshOverview() {
   // traffic (best-effort, /metrics is unauthenticated on this plane)
   try {
     const text = await (await fetch("/metrics")).text();
-    const { rows, spendMicros } = parseMetrics(text);
+    const { rows } = parseMetrics(text);
     const total = rows.reduce((n, r) => n + r.count, 0);
     $("stat-requests").textContent = String(total);
     const teams = new Set(rows.map((r) => r.team));
     $("stat-teams").textContent = String(teams.size);
     $("stat-teams-sub").textContent = teams.size ? [...teams].slice(0, 4).join(", ") : msg("ov.acrossTraffic");
-    $("stat-spend").textContent = spendMicros ? spendMicros.toLocaleString() : "0";
     const tbody = $("traffic-table").querySelector("tbody");
     tbody.textContent = "";
     if (!rows.length) {
@@ -303,10 +396,11 @@ async function refreshProviders() {
   } catch {
     return; // keep last state; auth errors surface on the lock screen
   }
-  const writable = !!view.writable;
+  const storeWritable = !!view.writable, writable = storeWritable && whoamiIsAdmin;
   // Toggle write affordances (CSP-safe: the `hidden` DOM property, no inline style).
-  $("providers-mode-ro").hidden = writable;
-  $("providers-mode-rw").hidden = !writable;
+  $("providers-mode-ro").hidden = storeWritable;
+  $("providers-mode-rw").hidden = !storeWritable || !whoamiIsAdmin;
+  $("providers-session-ro").hidden = !storeWritable || whoamiIsAdmin;
   $("provider-write").hidden = !writable;
   $("model-write").hidden = !writable;
   lastProviders = view.providers || [];
@@ -356,6 +450,7 @@ async function refreshProviders() {
       rbody.appendChild(tr);
     }
   }
+  applyRecordFilters();
 }
 
 // providerActions builds the edit/delete cell for a provider row (writable only).
@@ -459,7 +554,7 @@ function applyProviderTypeFields() {
 // fillProviderForm prefills from the complete secret-free export. The summary
 // row supplies only the name; auth refs/profile are never reconstructed from text.
 function fillProviderForm(p, original) {
-  providerEdit = { name: p.name, body: JSON.parse(JSON.stringify(original)) };
+  providerEdit = { name: p.name, body: structuredClone(original) };
   // Prefill from the same complete snapshot that will be replaced.
   p = { name: p.name, ...original };
   $("pf-name").value = p.name;
@@ -549,7 +644,7 @@ function providerFormBody() {
   const name = $("pf-name").value.trim();
   const type = $("pf-type").value;
   const body = providerEdit && providerEdit.name === name && providerEdit.body.type === type
-    ? JSON.parse(JSON.stringify(providerEdit.body)) : {};
+    ? structuredClone(providerEdit.body) : {};
   body.type = type;
   body.data_boundary = $("pf-data-boundary").value;
   // Delete form-owned optional fields before rebuilding them so blank really
@@ -690,7 +785,7 @@ applyProviderTypeFields();
 $("export-btn").addEventListener("click", async () => {
   try {
     const out = await api("GET", "/admin/config/export");
-    $("export-out").textContent = JSON.stringify(out, null, 2);
+    $("export-out").textContent = exactJSON(out, 2);
   } catch (err) {
     $("export-out").textContent = String(err.message || err);
   }
@@ -702,11 +797,13 @@ $("export-btn").addEventListener("click", async () => {
 // fields as one compact string — avoids five mostly-empty table columns.
 function keyLimitsSummary(k) {
   const parts = [];
-  if (k.budget_usd_micros) parts.push("$" + (k.budget_usd_micros / 1e6).toFixed(2));
+  if (k.budget_usd_micros) parts.push(usd(k.budget_usd_micros) + " / month");
+  if (k.budget_usd_micros_per_day) parts.push(usd(k.budget_usd_micros_per_day) + " / day");
   if (k.tpm) parts.push(k.tpm + " tpm");
   if (k.rpm) parts.push(k.rpm + " rpm");
   if (k.expires_at) parts.push("exp " + k.expires_at.slice(0, 10));
-  if (k.owner) parts.push(k.owner);
+  if (k.account_ref) parts.push("account_ref: " + k.account_ref);
+  else if (k.owner) parts.push(k.owner);
   return parts.length ? parts.join(" · ") : "—";
 }
 
@@ -731,6 +828,8 @@ async function refreshKeys() {
     tr.appendChild(cell);
     tbody.appendChild(tr);
   }
+  if (!(out.data || []).length) tbody.appendChild(emptyRow(5, msg("common.noneYet")));
+  applyRecordFilters();
 }
 
 // loadWhoami fetches the caller's resolved identity (ADR-010) and adapts the
@@ -745,6 +844,10 @@ async function loadWhoami() {
     return; // identity is advisory; the form still works (server enforces)
   }
   whoamiIsAdmin = !!me.is_admin;
+  if (!whoamiIsAdmin) {
+    $("kf-attribution").value = "owner"; $("kf-account-ref").value = $("kf-service-account").value = "";
+  }
+  updateKeyAttribution();
   const line = $("whoami-line");
   const input = $("team"), sel = $("team-select");
   const teams = me.teams || [];
@@ -785,6 +888,15 @@ function currentTeam() {
   const sel = $("team-select");
   return sel.hidden ? $("team").value.trim() : sel.value;
 }
+function updateKeyAttribution() {
+  const mode = $("kf-attribution").value || "owner";
+  $("key-attribution-kind").hidden = !whoamiIsAdmin;
+  $("kf-owner").hidden = !whoamiIsAdmin || mode !== "owner";
+  $("kf-account-ref").hidden = !whoamiIsAdmin || mode !== "account_ref";
+  $("kf-service-account").hidden = !whoamiIsAdmin || mode !== "service_account";
+  $("key-attribution-hint").hidden = !whoamiIsAdmin || mode === "owner";
+}
+$("kf-attribution").addEventListener("change", updateKeyAttribution);
 
 $("create-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -797,26 +909,29 @@ $("create-form").addEventListener("submit", async (e) => {
     const body = { team: team, allowed_models: models };
     const budget = $("kf-budget").value;
     if (budget) {
-      // JS Number is a 53-bit-mantissa float; above ~$9B (Number.MAX_SAFE_INTEGER
-      // / 1e6) budget*1e6 silently loses precision before it ever reaches the
-      // server's integer-microUSD path. No real key needs a nine-figure budget.
-      if (Number(budget) > 1e9) throw new Error(msg("err.budgetTooLarge"));
-      body.budget_usd_micros = Math.round(Number(budget) * 1e6);
+      body.budget_usd_micros = budgetMicros(budget);
     }
-    // parseInt (not Number): TPM/RPM are integers server-side (int64) — a float
-    // like "1000.5" would otherwise fail JSON decode with a misleading error.
-    if ($("kf-tpm").value) body.tpm = parseInt($("kf-tpm").value, 10);
-    if ($("kf-rpm").value) body.rpm = parseInt($("kf-rpm").value, 10);
+    if ($("kf-budget-day").value) body.budget_usd_micros_per_day = budgetMicros($("kf-budget-day").value);
+    if ($("kf-tpm").value) body.tpm = wholeCount($("kf-tpm").value);
+    if ($("kf-rpm").value) body.rpm = wholeCount($("kf-rpm").value);
     // End-of-day UTC, not midnight — a UTC-negative operator picking "today"
     // would otherwise see the key expire hours before their own day ends.
     if ($("kf-expires").value) body.expires_at = $("kf-expires").value + "T23:59:59Z";
-    if ($("kf-owner").value) {
+    const attribution = $("kf-attribution").value || "owner";
+    if (!["owner", "account_ref", "service_account"].includes(attribution)) throw Error(msg("limits.identityRequired"));
+    if (attribution !== "owner") {
+      if (!whoamiIsAdmin) throw Error(msg("limits.adminRequired"));
+      const value = $(attribution === "account_ref" ? "kf-account-ref" : "kf-service-account").value;
+      if (!value) throw Error(msg("limits.identityRequired"));
+      body[attribution] = value; // exact financial reference; never guess from a digest
+    } else if ($("kf-owner").value) {
       const owner = $("kf-owner").value.trim();
       if (owner.length > 256) throw new Error(msg("err.ownerTooLong"));
       body.owner = owner;
     }
     const out = await api("POST", "/admin/keys", body);
-    ["kf-budget", "kf-tpm", "kf-rpm", "kf-expires", "kf-owner"].forEach((id) => { $(id).value = ""; });
+    ["kf-budget", "kf-budget-day", "kf-tpm", "kf-rpm", "kf-expires", "kf-owner", "kf-account-ref", "kf-service-account"].forEach((id) => { $(id).value = ""; });
+    $("kf-attribution").value = "owner"; updateKeyAttribution();
     // Plaintext is rendered once, kept only in the DOM/page until reload.
     lastIssuedKey = out.plaintext;
     $("plaintext").textContent = out.plaintext;
@@ -840,7 +955,8 @@ $("copy").addEventListener("click", async () => {
 // avoids five mostly-empty table columns.
 function teamLimitsSummary(t) {
   const parts = [];
-  if (t.budget_usd_micros) parts.push("$" + (t.budget_usd_micros / 1e6).toFixed(2) + " (" + (t.budget_on_exceeded || "block") + ")");
+  if (t.budget_usd_micros) parts.push(usd(t.budget_usd_micros) + " / month (" + (t.budget_on_exceeded || "block") + ")");
+  if (t.budget_usd_micros_per_day) parts.push(usd(t.budget_usd_micros_per_day) + " / day (" + (t.budget_on_exceeded || "block") + ")");
   if (t.rpm) parts.push(t.rpm + " rpm");
   if (t.tpm) parts.push(t.tpm + " tpm");
   if (t.tokens_per_day) parts.push(t.tokens_per_day + " tok/day (" + (t.quota_on_exceeded || "block") + ")");
@@ -851,7 +967,8 @@ function teamLimitsSummary(t) {
 
 function fillTeamForm(t) {
   $("tf-name").value = t.name;
-  $("tf-budget").value = t.budget_usd_micros ? String(t.budget_usd_micros / 1e6) : "";
+  $("tf-budget").value = t.budget_usd_micros ? moneyDecimal(t.budget_usd_micros) : "";
+  $("tf-budget-day").value = t.budget_usd_micros_per_day ? moneyDecimal(t.budget_usd_micros_per_day) : "";
   $("tf-rpm").value = t.rpm || "";
   $("tf-tpm").value = t.tpm || "";
   $("tf-tpd").value = t.tokens_per_day || "";
@@ -873,10 +990,10 @@ async function refreshTeamsView() {
   content.hidden = false;
   $("team-form-card").hidden = !whoamiIsAdmin;
 
-  let spendByTeam = {};
+  let spendByTeam = Object.create(null);
   if (capOn("analytics_index")) {
     try {
-      const s = await api("GET", "/admin/analytics/summary", null, true);
+      const s = await api("GET", analyticsSummaryPath(), null, true);
       if (s && s !== DISABLED) {
         for (const r of s.by_team || []) spendByTeam[r.team] = r.cost_micros;
       }
@@ -929,6 +1046,7 @@ async function refreshTeamsView() {
       ubody.appendChild(tr);
     }
   }
+  applyRecordFilters();
 }
 
 $("team-form").addEventListener("submit", async (e) => {
@@ -941,13 +1059,12 @@ $("team-form").addEventListener("submit", async (e) => {
     const body = {};
     const budget = $("tf-budget").value;
     if (budget) {
-      // Same 53-bit-float precision guard as the key-issuance form.
-      if (Number(budget) > 1e9) throw new Error(msg("err.budgetTooLarge"));
-      body.budget_usd_micros = Math.round(Number(budget) * 1e6);
+      body.budget_usd_micros = budgetMicros(budget);
     }
-    if ($("tf-rpm").value) body.rpm = parseInt($("tf-rpm").value, 10);
-    if ($("tf-tpm").value) body.tpm = parseInt($("tf-tpm").value, 10);
-    if ($("tf-tpd").value) body.tokens_per_day = parseInt($("tf-tpd").value, 10);
+    if ($("tf-budget-day").value) body.budget_usd_micros_per_day = budgetMicros($("tf-budget-day").value);
+    if ($("tf-rpm").value) body.rpm = wholeCount($("tf-rpm").value);
+    if ($("tf-tpm").value) body.tpm = wholeCount($("tf-tpm").value);
+    if ($("tf-tpd").value) body.tokens_per_day = wholeCount($("tf-tpd").value);
     if ($("tf-quota-exceeded").value) body.quota_on_exceeded = $("tf-quota-exceeded").value;
     if ($("tf-budget-exceeded").value) body.budget_on_exceeded = $("tf-budget-exceeded").value;
     const models = $("tf-models").value.split(",").map((s) => s.trim()).filter(Boolean);
@@ -1236,13 +1353,13 @@ function renderBodyDrawer(box, ref, body) {
   box.appendChild(meta);
 
   const req = document.createElement("pre");
-  req.textContent = msg("body.requestLabel") + JSON.stringify(body.request, null, 2);
+  req.textContent = msg("body.requestLabel") + exactJSON(body.request, 2);
   box.appendChild(req);
 
   const resp = document.createElement("pre");
   resp.textContent = msg("body.responseLabel") + (body.response == null
     ? msg("body.notCapturedStreaming")
-    : JSON.stringify(body.response, null, 2));
+    : exactJSON(body.response, 2));
   box.appendChild(resp);
 
   const del = document.createElement("button");
@@ -1490,6 +1607,92 @@ $("disconnect").addEventListener("click", () => {
   adminToken = "";
   lastIssuedKey = "";
   location.reload(); // wipes all page state, returns to the lock screen
+});
+
+/* ---------- workspace navigation and fetched-record search ---------- */
+const recordFilters = [
+  ["key-search", "keys", "keys"], ["team-search", "teams-table", "teams"],
+  ["provider-search", "providers-table", "providers"], ["model-search", "routes-table", "providers"],
+];
+function applyRecordFilters() {
+  for (const [id, table] of recordFilters) {
+    const term = $(id).value.trim().toLowerCase();
+    const rows = document.querySelectorAll("#" + table + " tbody tr");
+    let total = 0, visible = 0;
+    for (const row of rows) {
+      if (row.querySelector("td.empty")) continue;
+      total++;
+      row.hidden = !row.textContent.toLowerCase().includes(term);
+      if (!row.hidden) visible++;
+    }
+    $(id + "-status").textContent = msg("ux.visible") + ": " + visible + " / " + total;
+  }
+}
+for (const [id] of recordFilters) $(id).addEventListener("input", applyRecordFilters);
+
+function closeWorkspaceSearch() {
+  $("workspace-dialog").close(); $("workspace-query").value = "";
+  $("workspace-results").textContent = ""; $("workspace-status").textContent = "";
+}
+function renderWorkspaceSearch() {
+  if (!adminToken) return;
+  const term = $("workspace-query").value.trim().toLowerCase(), results = [];
+  for (const name of Object.keys(VIEWS)) results.push({ label: msg(VIEWS[name]), type: msg("ux.gateway"), view: name });
+  for (const [filter, table, view] of recordFilters) {
+    for (const row of document.querySelectorAll("#" + table + " tbody tr")) {
+      if (row.querySelector("td.empty")) continue;
+      const label = row.querySelector("td")?.textContent;
+      if (label) results.push({ label, search: row.textContent, type: msg(VIEWS[view]), view, filter });
+    }
+  }
+  const matches = results.filter(r => (r.label + " " + r.type + " " + (r.search || "")).toLowerCase().includes(term)).slice(0, 30);
+  const box = $("workspace-results"); box.textContent = "";
+  for (const [index, result] of matches.entries()) {
+    const button = document.createElement("button"); button.className = "workspace-result";
+    const label = document.createElement("span"), type = document.createElement("small");
+    label.textContent = result.label; type.textContent = result.type; button.append(label, type);
+    button.addEventListener("click", () => {
+      closeWorkspaceSearch(); showView(result.view);
+      if (result.filter) { $(result.filter).value = result.label; applyRecordFilters(); $(result.filter).focus(); }
+      else $("view-title").focus();
+    });
+    button.addEventListener("keydown", e => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const buttons = box.querySelectorAll("button"); buttons[(index + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+      }
+    });
+    box.appendChild(button);
+  }
+  $("workspace-status").textContent = matches.length ? msg("ux.visible") + ": " + matches.length : msg("ux.noResults");
+}
+function openWorkspaceSearch() {
+  if (!adminToken) return;
+  $("workspace-query").value = ""; renderWorkspaceSearch();
+  $("workspace-dialog").showModal(); $("workspace-query").focus();
+}
+$("workspace-search").addEventListener("click", openWorkspaceSearch);
+$("workspace-close").addEventListener("click", closeWorkspaceSearch);
+$("workspace-dialog").addEventListener("cancel", closeWorkspaceSearch);
+$("workspace-query").addEventListener("input", renderWorkspaceSearch);
+$("workspace-query").addEventListener("keydown", e => {
+  if (e.key === "Escape") { e.preventDefault(); closeWorkspaceSearch(); return; }
+  const first = $("workspace-results").querySelector("button");
+  if (first && e.key === "Enter") { e.preventDefault(); first.click(); }
+  if (first && e.key === "ArrowDown") { e.preventDefault(); first.focus(); }
+});
+document.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k" && adminToken) { e.preventDefault(); openWorkspaceSearch(); }
+});
+$("theme-toggle").addEventListener("click", () => {
+  const root = document.documentElement, dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+});
+// Tables keep their native semantics; only the wrapper scrolls on narrow screens.
+document.querySelectorAll("table.data").forEach(table => {
+  const scroll = document.createElement("div"); scroll.className = "table-scroll";
+  scroll.tabIndex = 0; scroll.setAttribute("role", "region"); scroll.setAttribute("aria-label", table.id);
+  table.parentNode.insertBefore(scroll, table); scroll.appendChild(table);
 });
 
 initSSO();

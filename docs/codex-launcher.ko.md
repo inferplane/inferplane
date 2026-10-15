@@ -1,6 +1,6 @@
 ---
 translation_source: codex-launcher.md
-translation_source_sha256: 5f54a1dbe32fdf307b5a4266409bda74ad5c40cf83bc6d9ca72159360adb2927
+translation_source_sha256: e1709b854beb1da58cdd6e97d78b229df55a506f4aed16dbf5ca178b6b154b2f
 ---
 
 # 모델별 Codex 실행 도구 {#model-aware-codex-launcher}
@@ -46,6 +46,10 @@ inferplane 공급자는 로컬 `/v1`, Responses wire API, `env_key="INFERPLANE_A
 실행 도구의 상한 적용을 위해 사용자 설정을 지울 필요는 없습니다. 별도 직접 Codex 정리와 관련해서 설치된 0.154.0의 Astra 기본 메타데이터는 context_window=272000, max_context_window=872000, 사용 가능 95%입니다. 게이트웨이 별칭은 이 값 대신 자체 선언을 사용합니다. 과거 전역 설정을 지우는 일은 별도 연동 작업이며 이 도구가 ~/.codex/config.toml을 수정하지 않습니다.
 
 한도가 둘 다 없으면 경고하고 **16,384 토큰**을 사용합니다. 실제 용량 보장이 아니라 보수적 운영 대체값이며 더 작은 모델에는 정확한 메타데이터가 필요합니다. 이식 가능한 항목은 20% 여유와 80% 압축 기준을, 네이티브는 내장 여유와 80% 압축 기준을 사용합니다. Codex가 더 제한하거나 호출자의 압축 설정을 적용할 수 있습니다. 잘못된 상한·중복·형식은 거부합니다.
+
+운영자는 `INFERPLANE_CODEX_CONTEXT_PROFILES=/path/to/profiles.json`으로 모델별 사용 범위와 압축 시점을 조정할 수 있습니다. [예제 프로필](../examples/codex/context-profiles.json)은 [2026-10-02 합성 입력 실호출 검증](reference/context-window-validation.ko.md)을 바탕으로 Qwen의 사용 범위를 95%, Grok 4.7을 85%로 넓힙니다. 없는 모델은 기존 기본값을 유지합니다. 각 항목의 `context_window`는 게이트웨이 선언과 정확히 같아야 하고 `compact_percent`는 `usable_percent`보다 작아야 합니다. 선언값이 바뀌면 재검증 전까지 오래된 프로필을 거부하며, 한도가 없는 모델의 16,384 대체값은 검증된 한도로 취급하지 않습니다. 클라이언트 동작만 조정하며 게이트웨이 한도·권한·예산 정책은 바꾸지 않습니다. 파일은 신뢰된 운영자 입력이며 원격 증명이나 백엔드 용량의 자동 측정값이 아닙니다.
+
+실호출 검사 도구는 명시적으로 실행해야 하며 비용 한도 안에서 게이트웨이를 통해 요청합니다. 실제 사용량을 기록하고 사용량이 불명확한 실패는 예약액을 유지합니다. 일반 HTTP 400·쿼터 거절·본문 크기 거절을 컨텍스트 한도 증거로 간주하지 않습니다. 합성 텍스트 성공은 해당 요청 형태의 하한을 증명할 뿐 최대값·도구 이력 품질·다른 리전의 가용성을 증명하지 않습니다.
 
 카탈로그는 시작 시 스냅샷이므로 새 모델·메타데이터에는 재실행이 필요합니다. 요청 시 권한·라우팅은 게이트웨이가 책임집니다. 선택기에 보인다는 사실이 Responses·도구 호환 증명은 아닙니다. 네이티브→브리지 전환 후 불투명 이력이 거부되면 새 세션을 시작하세요.
 
@@ -178,3 +182,31 @@ icodex() (
 ```
 
 이 문서 작업 자체는 .bashrc 수정, 실행 도구 설치, mayu.env 접근을 수행하지 않습니다.
+
+## HUD 연동
+
+stdin/stdout이 터미널인 대화형 실행에서는 PATH의 `codex-hud`를 찾아
+`codex-hud start --language ko --` 뒤에 생성된 Codex 인수를 전달합니다.
+Python subprocess가 셸의 `codex()` 함수를 건너뛰는 문제를 해결합니다.
+인증 환경과 임시 카탈로그 수명은 유지하며 셸 코드를 평가하지 않습니다.
+`exec`, review, app-server, 관리 명령과 파이프 실행은 Codex를 직접 실행합니다.
+HUD가 없을 때도 직접 실행합니다.
+
+`INFERPLANE_CODEX_HUD=off`로 끄거나 `INFERPLANE_CODEX_HUD_LANGUAGE=en`으로
+영어를 선택할 수 있습니다(기본 ko). 프로젝트별 셸 HUD override는 읽지 않습니다.
+클립보드 동작은 HUD와 터미널 설정에 따라 달라질 수 있습니다.
+
+## 긴 세션의 upstream 오류
+
+`upstream stream failed`만으로 컨텍스트 초과를 확정할 수 없습니다.
+네이티브 Responses의 HTTP 오류는 정확히 일치하는 허용 코드
+`context_length_exceeded`, `invalid_encrypted_content`만 보존합니다.
+스트리밍 시작 전 오류와 비스트리밍 응답에 적용하며 기존 감사 outcome.error에도
+기록합니다. 오류 본문은 64 KiB까지만 해석하고 원문 메시지·param·알 수 없는
+코드는 노출하지 않습니다. 정책이나 이력을 바꾸거나 재시도·사용량을 만들지 않습니다.
+이미 전송이 시작된 SSE의 실패 처리는 변경하지 않습니다.
+
+동일 모델·리전·이력·클라이언트 설정으로 비교해야 합니다. 누적 토큰은 현재
+컨텍스트 사용량이 아닙니다. 조기 압축은 임시 회피책일 수 있지만 실제 모델 한도를
+입증하지 않습니다. 과거에 버린 오류 본문은 복구할 수 없으므로 운영 원인 확정에는
+수정 런타임에서의 재현이 필요합니다.

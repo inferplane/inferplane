@@ -152,12 +152,13 @@ func bedrockSyncTargets(cfg *config.Config) []syncTarget {
 	for _, mc := range cfg.Models {
 		for _, t := range mc.Targets {
 			pc, ok := cfg.Providers[t.Provider]
-			// Only type "bedrock" is priced from the AWS Price List.
+			// Track native Responses too, so unsupported catalog matching is
+			// reported rather than silently omitted from a mixed topology.
 			// `anthropic` and `openai_compatible` are excluded entirely: a
 			// self-hosted or resold deployment's per-token rate is
 			// deployment-specific, which is precisely ADR-030 §5's rationale
 			// for the `allow` posture. No opt-in flag for them.
-			if !ok || pc.Type != "bedrock" {
+			if !ok || (pc.Type != "bedrock" && pc.Type != "bedrock_responses") {
 				continue
 			}
 			// An empty region is NOT a silent skip — it surfaces as an
@@ -195,6 +196,8 @@ type priceListDoc struct {
 			PriceDimensions map[string]struct {
 				Unit         string            `json:"unit"`
 				PricePerUnit map[string]string `json:"pricePerUnit"`
+				BeginRange   json.RawMessage   `json:"beginRange"`
+				EndRange     json.RawMessage   `json:"endRange"`
 			} `json:"priceDimensions"`
 		} `json:"OnDemand"`
 	} `json:"terms"`
@@ -290,6 +293,15 @@ func priceCandidateFrom(doc string) (priceCandidate, bool) {
 			return priceCandidate{}, false
 		}
 		for _, dim := range offer.PriceDimensions {
+			// Even one dimension can describe only part of a range. Do not
+			// turn a bounded SKU into a whole-request flat price. Historical
+			// documents without either range field retain their flat shape.
+			if len(dim.BeginRange) != 0 || len(dim.EndRange) != 0 {
+				var begin, end string
+				if json.Unmarshal(dim.BeginRange, &begin) != nil || json.Unmarshal(dim.EndRange, &end) != nil || begin != "0" || end != "Inf" {
+					return priceCandidate{}, false
+				}
+			}
 			mult, ok := syncUnitMultipliers[normalizeID(dim.Unit)]
 			if !ok {
 				return priceCandidate{}, false
@@ -483,11 +495,20 @@ func runPricingSyncCtx(ctx context.Context, stdout, stderr io.Writer, cfg *confi
 	if len(targets) == 0 {
 		// Not 0: exiting 0 having produced nothing is indistinguishable from
 		// success.
-		fmt.Fprintln(stderr, `pricing sync: no providers of type "bedrock" in this config; nothing to sync`)
+		fmt.Fprintln(stderr, `pricing sync: no routes of type "bedrock" or "bedrock_responses" in this config; nothing to sync`)
 		return 2
 	}
+	type unresolvedTarget struct {
+		t      syncTarget
+		reason string
+	}
+	var unresolved []unresolvedTarget
 	byRegion := map[string][]syncTarget{}
 	for _, t := range targets {
+		if reason := syncProtectedReason(cfg, t); reason != "" {
+			unresolved = append(unresolved, unresolvedTarget{t, reason})
+			continue
+		}
 		byRegion[t.Region] = append(byRegion[t.Region], t)
 	}
 	regions := make([]string, 0, len(byRegion))
@@ -495,11 +516,6 @@ func runPricingSyncCtx(ctx context.Context, stdout, stderr io.Writer, cfg *confi
 		regions = append(regions, r)
 	}
 	sort.Strings(regions)
-	type unresolvedTarget struct {
-		t      syncTarget
-		reason string
-	}
-	var unresolved []unresolvedTarget
 	frag := syncFragment{Pricing: syncOverrides{Overrides: map[string]map[string]syncRate{}}}
 	resolved := 0
 	for _, region := range regions {
@@ -564,8 +580,28 @@ func runPricingSyncCtx(ctx context.Context, stdout, stderr io.Writer, cfg *confi
 		for _, u := range unresolved {
 			fmt.Fprintf(stderr, "pricing sync: UNRESOLVED %s/%s (region %s): %s\n", u.t.Provider, u.t.Model, u.t.Region, u.reason)
 		}
-		fmt.Fprintln(stderr, "no Price List SKU was found for the route(s) above — fill their rates in by hand from the AWS Bedrock pricing page; this tool will never emit a placeholder or a 0 rate (0 means unpriced, not free)")
+		fmt.Fprintln(stderr, "no safe replacement price for the route(s) above — preserve existing overrides and review the AWS model card's context, cache, region and service-tier prices; this tool never emits a placeholder or a 0 rate (0 means unpriced, not free)")
 		return 1
 	}
 	return 0
+}
+
+func syncProtectedReason(cfg *config.Config, t syncTarget) string {
+	if cfg.Providers[t.Provider].Type == "bedrock_responses" {
+		return "bedrock_responses catalog matching is unsupported; configure exact Mantle model-card prices"
+	}
+	rc, exact := cfg.Pricing.Overrides[t.Provider][t.Model]
+	if !exact {
+		rc = cfg.Pricing.Overrides[t.Provider][pricing.BaseModelID(t.Model)]
+	}
+	if rc.ShortContextLimit != 0 || rc.LongContext != nil {
+		return "context-tiered pricing must be preserved; review the model card instead of flattening it to one rate"
+	}
+	if rc.CacheReadPerMTok != 0 || rc.CacheWrite5mPerMTok != 0 || rc.CacheWrite1hPerMTok != 0 || rc.CacheWriteUnsupported {
+		return "explicit cache pricing must be preserved; input/output-only sync cannot replace it"
+	}
+	if rc.Free {
+		return "explicit free pricing must be preserved"
+	}
+	return ""
 }

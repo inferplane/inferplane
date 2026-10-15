@@ -42,6 +42,7 @@ func (s *UsageServer) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1alpha1/usage", authn(s.token, s.authOpts, s.handleIngest))
 	mux.HandleFunc("GET /v1alpha1/usage", authn(s.token, s.authOpts, s.handleQuery))
 	mux.HandleFunc("GET /v1alpha1/usage/export", authn(s.token, s.authOpts, s.handleExport))
+	mux.HandleFunc("GET /v1alpha1/usage/charts", authn(s.token, s.authOpts, s.handleCharts))
 }
 
 func (s *UsageServer) handleIngest(w http.ResponseWriter, r *http.Request) {

@@ -88,21 +88,39 @@ Cost is integer µUSD, never float. The rate key is **`(config provider name, UP
 `models.<name>.targets[].model`, *not* the canonical ingress name. Getting this wrong is the single most common
 way to end up billing 0.
 
+Optional `short_context_limit` plus `long_context` selects a whole-response
+rate using **uncached input + cache reads + 5m writes + 1h writes**. Equality
+uses the short rate; strictly greater uses long for every token class, including
+output. It is per attempt, not a session total or marginal overage. Both fields
+must be present together; negative, nonfinite, overflowing, nested or unpriced
+long rates refuse. Authority reservations use each class's maximum across both
+tiers, including when a long rate decreases. `cost.context_tier` is append-only
+and omitted for legacy flat records. See the [verified GPT price snapshot](../../examples/pricing/bedrock-gpt-standard-2026-10-02.json)
+and [pricing guide](pricing.md).
+
+Published Standard tier prices do not cover client-selected Priority/Flex/
+Ultrafast: context-priced generation requests refuse those explicit service
+tiers before billing. `cache_write_unsupported: true` prevents deriving a
+published-looking write rate where a model card has no write price; unexpected
+write usage stays unpriced, never silently free. `pricing sync` refuses to
+flatten an already-declared context price. Region-prefix fallback is a legacy
+convenience, not price parity; use exact profile keys for regional premiums.
+
 | Rule | Detail |
 |---|---|
 | Key | `(provider, upstream)`; exact match wins |
-| Bedrock cross-region | ONE leading `global.` / `us.` / `eu.` / `apac.` / `us-gov.` is stripped on a miss — same model, no published price differential. Declare a prefixed key only for a genuinely different rate. |
+| Bedrock cross-region | ONE leading `global.` / `us.` / `eu.` / `apac.` / `us-gov.` is stripped on a miss. This legacy convenience does not imply price parity; regional premiums require exact profile keys. |
 | Model versions | **Never** collapsed. Each version needs its own rate even when prices coincide today. |
 | Provider | Never collapsed. Configure and verify rates per provider/account; do not assume either price parity or a markup. |
-| Cache rates | Derived from input: read **0.1x**, 5m write **1.25x**, 1h write **2.0x**. Declare `input_per_mtok` + `output_per_mtok` and the three follow. An explicit value wins; `0` means derive. |
+| Cache rates | Legacy defaults derive read **0.1x**, 5m write **1.25x**, 1h write **2.0x**. Declare published model-specific cache rates where defaults do not apply. Explicit values win; `0` means derive unless writes are explicitly unsupported. |
 | `on_missing` | `block` → refuse to boot on an unpriced route AND deny at runtime (402 `pricing_missing`). `allow` (default) → log loudly, bill 0. An unrecognized value is a load error. |
 | `version` | Free-form label landing in every audit record's `cost.pricing_version`. Set it so a disputed invoice can be pinned to its rates. |
 | `free` | A `0/0` override needs an explicit `"free": true` — the ONLY way to declare a genuinely zero-cost model. That opt-in is what makes cost 0 + `missing=false` a deliberate statement instead of an accident. |
 | `0/0` | `input_per_mtok: 0` + `output_per_mtok: 0` without `free` is a LOAD ERROR — 0 means unpriced, not free. A single-sided zero is allowed. Enforced twice: at load, and again at table build, because `BuildState` is also reached by the UI-write overlay and by hot reload, which never see the file loader. |
-| `pricing sync` | `mayu pricing sync --config <p> [--out <f>]` generates `pricing.overrides` for the config's **bedrock** routes from the AWS Price List Query API. Offline, operator-run, never on the request path. Needs IAM `pricing:GetProducts`. Exits 1 naming any route it could not resolve — it never emits a placeholder. `openai_compatible` routes are skipped by design. |
+| `pricing sync` | `mayu pricing sync --config <p> [--out <f>]` generates `pricing.overrides` for the config's **bedrock** routes from the AWS Price List Query API. Offline, operator-run, never on the request path. Needs IAM `pricing:GetProducts`. Exits 1 naming any route it could not resolve — it never emits a placeholder. `bedrock_responses` routes are reported unresolved; `openai_compatible` routes are skipped by design. Richer cache/context/free overrides are protected. See [sync limits](pricing.md#sync-limits). |
 
-Adding a newly released model is therefore: read its two published figures, add
-`input_per_mtok` + `output_per_mtok`. With `on_missing: "block"` a forgotten rate
+Adding a newly released model requires its published input/output/cache figures
+and any request-context tiers, not just two token rates. With `on_missing: "block"` a forgotten rate
 fails the boot and names the route, so it cannot reach production silently.
 For a Bedrock route, `mayu pricing sync` fetches those two figures from the AWS
 Price List Query API — except Claude-on-Bedrock, which has no current Price List

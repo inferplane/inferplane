@@ -1,0 +1,46 @@
+const assert = require('node:assert/strict');
+const { boot } = require('./dashboard.cjs');
+process.exitCode = 1;
+(async () => {
+  let app = boot(); await app.connect(); await app.credential();
+  assert.equal(app.$('spend-trend').querySelectorAll('svg').length, 1);
+  assert.equal(app.$('model-share').querySelectorAll('svg').length, 1);
+  assert.equal(app.$('budget-table').querySelectorAll('.budget-table-edit').length, 2);
+  await app.$('budget-table').querySelector('.budget-table-edit').fire('click');
+  assert.equal(app.$('bf-limit').value, '20.000');
+  assert.equal(app.writes.length, 0);
+  await app.$('dialog-cancel').fire('click');
+  await app.$('disconnect').fire('click');
+  assert.equal(app.$('stat-spend').title, '');
+  assert.equal(app.$('stat-user-average').title, '');
+  assert.equal(app.$('budget-table').textContent, '');
+  assert.equal(app.$('model-share').textContent, '');
+  app = boot({ fail: { '/v1alpha1/usage/charts': 503 } }); await app.connect();
+  assert.equal(app.$('workspace-content').hidden, false);
+  assert.match(app.$('spend-trend').textContent, /unavailable/i);
+  assert.equal(app.$('spend-trend').querySelectorAll('svg').length, 0);
+  assert.equal(app.calls.filter(c => c.url.startsWith('/v1alpha1/usage/export')).length, 0, 'store failure was retried via export');
+  app = boot({ fail: { '/v1alpha1/usage/charts': 404 }, exportRows: [
+    { window_start: new Date().toISOString(), model: 'legacy-model', spent_micro_usd: 1496085 },
+  ] });
+  await app.connect();
+  assert.equal(app.$('spend-trend').querySelectorAll('svg').length, 1, 'older CP export could not render the compatible dashboard');
+  assert.match(app.$('model-share').textContent, /legacy-model/);
+  const exportCall = app.calls.find(c => c.url.startsWith('/v1alpha1/usage/export'));
+  assert(exportCall && exportCall.init.headers.Authorization === 'Bearer read-secret');
+  assert(exportCall.url.includes('since=') && exportCall.url.includes('until='));
+  app = boot({ fail: { '/v1alpha1/usage/charts': 404 }, exportRows: [{ window_start: 'bad', model: 'bad', spent_micro_usd: 1 }] });
+  await app.connect();
+  assert.equal(app.$('spend-trend').querySelectorAll('svg').length, 0);
+  app = boot({ fail: { '/v1alpha1/usage/charts': 401 } }); await app.connect();
+  assert.equal(app.$('workspace-content').hidden, true);
+  assert.equal(app.calls.filter(c => c.url.startsWith('/v1alpha1/usage/export')).length, 0, 'unauthorized request selected an alternate path');
+  app = boot({ charts: { total_micro_usd: 5, days: [], models: [{ key: 'bad', spent_micro_usd: 99 }], other_micro_usd: 0, model_count: 1 } });
+  await app.connect();
+  assert.match(app.$('model-share').textContent, /reconciled/);
+  assert.equal(app.$('model-share').querySelectorAll('svg').length, 0);
+  app = boot({ usage: '{"total_micro_usd":5,"rows":[]}' }); await app.connect();
+  assert.equal(app.$('stat-spend').textContent, '$0.000005', 'compact display erased real sub-dollar spend');
+  console.log('Cost-first layout checks passed: real charts, comparative budget edits, no partial/fake charts, exact small costs and tooltip cleanup.');
+  process.exitCode = 0;
+})().catch(error => { console.error(error); process.exitCode = 1; });

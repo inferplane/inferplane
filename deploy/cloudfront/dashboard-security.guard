@@ -1,0 +1,22 @@
+let buckets = Resources.*[ Type == 'AWS::S3::Bucket' ]
+let controls = Resources.*[ Type == 'AWS::CloudFront::OriginAccessControl' ]
+rule private_versioned_assets when %buckets !empty {
+  %buckets {
+    DeletionPolicy == 'Retain'
+    UpdateReplacePolicy == 'Retain'
+    Properties.PublicAccessBlockConfiguration.BlockPublicAcls == true
+    Properties.PublicAccessBlockConfiguration.BlockPublicPolicy == true
+    Properties.PublicAccessBlockConfiguration.IgnorePublicAcls == true
+    Properties.PublicAccessBlockConfiguration.RestrictPublicBuckets == true
+    Properties.BucketEncryption.ServerSideEncryptionConfiguration[*].ServerSideEncryptionByDefault.SSEAlgorithm == 'AES256'
+    Properties.VersioningConfiguration.Status == 'Enabled'
+    Properties.OwnershipControls.Rules[*].ObjectOwnership == 'BucketOwnerEnforced'
+  }
+}
+rule signed_private_origin when %controls !empty {
+  %controls.Properties.OriginAccessControlConfig {
+    OriginAccessControlOriginType == 's3'
+    SigningBehavior == 'always'
+    SigningProtocol == 'sigv4'
+  }
+}

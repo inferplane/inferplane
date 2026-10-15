@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: 241ed72870935be3c778ecd0ef9ee988f4be8df47a706e4848b6222304f79f11
+translation_source_sha256: d964c31c7f99eae791ff4b705e395780ec613732f1e0494a3af8aa0b8d2f51e3
 ---
 
 # API 구현 {#api}
@@ -35,14 +35,30 @@ Messages·Chat Completions·Responses·Bedrock 수신과 상태·메트릭·키 
 | 메트릭 | `internal/server/metricsapi.go` | 비인증 Prometheus /metrics |
 | OpenAI 변환 | `internal/openai/convert.go` | 정규 요청·응답·청크 상호 변환 |
 | CP 사용량 | `internal/controlplane/usage.go` | POST /v1alpha1/usage: 검증 오류 400, 과대 413, 저장소 장애 503, 저장 후 ack·FIFO 재시도. GET은 team/user/model·group_by·정수 비용, 메모리 대체 시 degraded. export는 since/until 필수 CSV·JSON 스트리밍, 쓰기별 기한으로 30초 WriteTimeout 대응 |
+| CP 차트 | `internal/controlplane/usage_charts.go` | 인증된 GET /v1alpha1/usage/charts (ADR-051). since·배타적 until 필수, 양수 ≤366일. 정수 total_micro_usd, UTC days[{day,spent_micro_usd}], 상위 8 models[{key,spent_micro_usd}], other_micro_usd·model_count. 보관된 텔레메트리만 집계하며 사용자·팀 ID나 승인 크레딧은 없음. 잘못된 기간 400, 커서·저장소 실패 503이며 부분 차트 성공으로 바꾸지 않음. 성공 no-store |
 | CP 중개 | `controlplane/broker.go` | POST /v1alpha1/credentials, dataplane·provider=bedrock 요청 1 MiB. 임시 키·토큰·만료와 no-store 응답. ARN 있을 때만 등록. 전용 상수 시간 토큰, JWT는 미검증 403. 3600초 STS, 정제한 최대 64자 ID를 세션명·SourceIdentity·태그에 사용. SourceIdentity 거부 시 태그로 1회 재시도. 빈 ID·다른 공급자 400, STS·불완전 결과는 고정 502 |
 | CP 정책 | `controlplane/policies.go` | GET /v1alpha1/policies: 하트비트·콘솔 OIDC, writable 포함. DSN 없으면 쓰기 405. PUT·DELETE는 전용 POLICY_WRITE_TOKEN 또는 콘솔 OIDC, 하트비트 쓰기는 403. 쓰기 토큰 없으면 모든 정적 bearer 쓰기 거부. actor/op/name/content-sha256 로그 |
+| CP 계정 연결 | `internal/controlplane/policies.go` | 같은 인증된 정책 목록에 선언의 `identity_bindings: [{reported_ref, account_ref, kind}]`를 선택적으로 추가(ADR-050). 바인딩이 없으면 생략하며 issuer·subject·IdP 그룹 원문은 반환하지 않음. `Cache-Control: no-store`. 정확한 재무 선택자를 위한 승인된 선언 메타데이터이며 사용자 레지스트리·신원 증명·회계 계정 변경이 아님 |
 | CP 내보내기 | `controlplane/export.go` | GET /v1alpha1/config/export, 비밀 없는 다중 GovernancePolicy YAML·로더 왕복. 가져오기 기능과 구분 |
-| CP 콘솔 | `internal/controlplane/ui/` | /ui/ 사용량 읽기 콘솔, 데이터 없는 셸, 토큰 메모리, self CSP·degraded 배너. 로그인 origin 환경 변수로 Code+PKCE |
+| CP 콘솔 | `internal/controlplane/ui/` | /ui/ [운영 대시보드](../runbooks/inferplaned-dashboard.md): 개요·정밀 사용량과 내보내기·최근 데이터 플레인 generation과 거절·검토 후 정책 CRUD(기존 서버 쓰기 권한). 데이터 없는 공개 셸, 분리된 읽기·쓰기 자격 증명은 JS 메모리만, self CSP와 API 불가·degraded 표시. 로그인 origin 환경 변수로 Code+PKCE |
 | CP 인증 설정 | `controlplane/authconfig.go` | GET /ui/auth/config의 비밀 없는 sso·issuer·client_id. issuer·client_id 있을 때만 등록, 아니면 404 |
 | CLI 로그인 | `internal/server/authapi/` | 데이터 영역의 선택적 config·발급·자기 폐기. 콘솔과 별도 OIDC client_id·검증기, 만료·owner는 서버 결정, 주체별 발급 제한. 폐기는 일반 KeyAuth |
 
 ### 3. 주요 결정 {#3-key-decisions}
+
+Messages·Chat Completions·Bedrock Invoke의 컨텍스트 사전 검사 실패는 각 수신
+프로토콜의 오류 형식 안에 `prompt is too long: N tokens > M maximum` 문구를
+넣어 HTTP 400으로 반환합니다. Claude Code는 이 문구를 일반 모델 폴백 대신
+압축 복구 대상으로 인식하고 초과량을 추출합니다. `N`은 업스트림 토크나이저의
+실측값이 아닌 거친 텍스트 추정치입니다. 원문 바이트/4가 선언 한도를 넘으면,
+Responses를 포함한 생성 사전 검사에서 알려진 콘텐츠 위치의 유효한 인라인 이미지
+base64를 제외하고 다시 검사합니다. 이미지 토큰과 전체 컨텍스트의 검증은
+업스트림이 담당하며, 제외했다고 이미지가 한도 안에 들어간다는 뜻은 아닙니다.
+텍스트·도구 스키마와 인자·알 수 없는 미디어·불투명 상태는 계속 계산합니다.
+count 엔드포인트, TPM·쿼터 추정, 금전 예약, 개인정보 검사, 자동·엄격 타깃의
+보수적인 용량 검사는 바꾸지 않습니다. 클라이언트 표시 윈도우와 게이트웨이 선언은
+독립적입니다. 남은 입력이 한도에 들어가지 않으면 압축은 계속 실패할 수 있으며,
+모델 한도를 더 크게 가정하면 안 됩니다.
 
 count_tokens는 별칭도 정규화하며 항상 200입니다. 같은 프로토콜이면 원문 전달, 다르면 정규 변환을 적용합니다. 별칭은 RBAC·라우팅·감사·메트릭 전에 정규 이름으로 바꿉니다. Anthropic 원문 경로는 최상위 model만 바꾸고 중첩 cache_control과 HTML 이스케이프 상태를 보존합니다. 오류는 수신 형식이며 허용된 가용 모델 목록을 표시합니다.
 
@@ -90,3 +106,14 @@ DURABLE_BUDGETS=true이면 POST /v1alpha1/sync가 authority.protocol=escrow-v1�
 ### 공유 게이트웨이 · ADR-046 {#shared-gateway-profile-adr-046}
 
 key_store.type과 governance_store.type을 postgres로 설정하면 키 공유·원자적 자원 승인을 활성화합니다. 하트비트의 권한 네임스페이스를 검증하고 로컬 권한은 요청하지 않습니다. 사용자 요청률·일/월 tokenQuota는 이 프로파일이 필요합니다. 사용량은 enforcement_mode=shared와 주체별 shared_limits를 반환합니다. 키 CLI는 --config를 받고 가져오기는 원래 신원·폐기 이력을 보존합니다. [공유 거버넌스](../shared-governance.md)를 참고하세요.
+
+## Responses 업스트림 오류 코드
+
+네이티브 Responses HTTP 실패는 업스트림 상태와 정확히 일치하는 허용 코드
+`context_length_exceeded`, `invalid_encrypted_content`만 보존합니다.
+`error.code` 및 기존 감사 `outcome.error`에 기록하고 원문 메시지·param·알 수 없는
+코드는 숨깁니다. 오류 해석은 64 KiB로 제한하며 복구 코드만을 이유로 재시도하지
+않습니다. SSE 전송 시작 전과 비스트리밍 HTTP 실패에 적용하며 이미 전송 중인
+스트림의 중단 처리는 바뀌지 않습니다.
+
+Responses의 컨텍스트 사전 검사 거부도 HTTP 400과 `error.code="context_length_exceeded"`를 반환합니다. 기존 검사 기준과 인증 순서는 유지합니다.

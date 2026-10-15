@@ -1,0 +1,118 @@
+{
+  "verified_at_utc": "2026-10-15T07:51:26.217360+00:00",
+  "deployment": "Compatible CloudFront static dashboard",
+  "host": "https://inferplane.atomai.click",
+  "release": "releases/44aac75919c786d4d36af654",
+  "deployment_mode": "static-compatible-existing-cp",
+  "static_sha256": {
+    "index.html": "ffd152c1cfe0975c0015654e65530ea88d9d17ee14863f05e700d28741181afa",
+    "app.js": "bd4fc26b4bd83fd42d67e395dce599e4cc7a85c277dd0be04266dc735b0dae0a",
+    "style.css": "a8456c61c040458c1961c4b83e28b04beac84fff0ffc78141164a545fc77f99d"
+  },
+  "cp_task_unchanged": true,
+  "distribution_status": "Deployed",
+  "stack_status": "UPDATE_COMPLETE",
+  "assets": {
+    "/ui/": {
+      "status": 200,
+      "sha256": "ffd152c1cfe0975c0015654e65530ea88d9d17ee14863f05e700d28741181afa",
+      "no_store": true,
+      "csp_preserved": true,
+      "security_headers": true
+    },
+    "/ui/index.html": {
+      "status": 200,
+      "sha256": "ffd152c1cfe0975c0015654e65530ea88d9d17ee14863f05e700d28741181afa",
+      "no_store": true,
+      "csp_preserved": true,
+      "security_headers": true
+    },
+    "/ui/app.js": {
+      "status": 200,
+      "sha256": "bd4fc26b4bd83fd42d67e395dce599e4cc7a85c277dd0be04266dc735b0dae0a",
+      "no_store": true,
+      "csp_preserved": true,
+      "security_headers": true
+    },
+    "/ui/style.css": {
+      "status": 200,
+      "sha256": "a8456c61c040458c1961c4b83e28b04beac84fff0ffc78141164a545fc77f99d",
+      "no_store": true,
+      "csp_preserved": true,
+      "security_headers": true
+    }
+  },
+  "root_redirect": {
+    "status": 302,
+    "location": "/ui/"
+  },
+  "protected_unauthenticated": {
+    "/v1alpha1/usage": 401,
+    "/v1alpha1/policies": 401,
+    "/v1alpha1/dataplanes": 401,
+    "/v1alpha1/usage/export?format=json": 401
+  },
+  "legacy_chart_route_status": 404,
+  "sso_public_config_available": true,
+  "s3_anonymous": 403,
+  "preserved": {
+    "only_static_origin_prefix_changed": true,
+    "cp_service_revision_and_deployment_unchanged": true,
+    "cp_restart_requested": false,
+    "cognito_configuration_unchanged": true,
+    "api_auth_unchanged": true
+  },
+  "browser_replay": {
+    "deployed_assets": true,
+    "all_protected_apis_and_tokens_synthetic": true,
+    "synthetic_credentials_sent_to_live_backend": false,
+    "actual_human_login_tested": false,
+    "legacy_chart_404_export_compatibility": true,
+    "all_views_desktop_and_mobile_390": true,
+    "readonly_controls_disabled": true,
+    "disconnect_clears_data": true,
+    "persistent_token_storage": false,
+    "no_csp_or_js_errors": true
+  },
+  "invalidation_status": "Completed",
+  "previous_release": "releases/2cafdb1ae2073e2358d71ac2",
+  "changed_existing_resources": [
+    {
+      "logical_id": "Distribution",
+      "replacement": false
+    }
+  ],
+  "quality_review": {
+    "protocol": "content-review-agent",
+    "score": 97,
+    "critical_findings": 0,
+    "warnings": 2,
+    "threshold": 85,
+    "reviewer": "Codex applying the installed role protocol",
+    "independent_peer_review": false,
+    "verdict": "PASS"
+  },
+  "tests": {
+    "both_static_binary_builds": true,
+    "full_go_race_tests": true,
+    "go_vet": true,
+    "gofmt_clean": true,
+    "harness_passed": 70,
+    "harness_failed": 0,
+    "browser_qa": true,
+    "legacy_cp_image_with_synthetic_data": true,
+    "chart_fallback_adversarial_cases": true,
+    "cfn_lint_findings": 0,
+    "cfn_guard": "PASS",
+    "cloudformation_predeployment_validation": "PASS",
+    "docs_tests_passed": 9
+  },
+  "limits": [
+    "Only control-plane dashboard static assets were deployed. Embedded gateway assets and the control-plane server binary were not upgraded.",
+    "The existing CP remains file-authoritative and read-only for policy edits; this release does not provision a writable policy store.",
+    "The legacy CP has no chart API. The UI uses its authenticated JSON usage export only on a chart-route 404, within the signed-in user browser and an 8 MiB/100,000-row bound.",
+    "Live operating records and production bearer credentials were not fetched by deployment tooling. Browser replay uses only synthetic protected API responses.",
+    "Real human SSO completion and live policy writes were not tested.",
+    "The existing memory-retention limits and profile-specific governance guarantees are unchanged."
+  ]
+}

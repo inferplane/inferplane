@@ -1,13 +1,15 @@
-// Package ui serves inferplaned's minimal read-only usage console. Same
+// Package ui serves inferplaned's embedded governance operations console. Same
 // posture as mayu's adminui (ADR-001/002): the static assets are data-free —
 // no spend, no team names, no token — and therefore safe to serve
 // unauthenticated; every data fetch the page performs goes through the
-// bearer-gated /v1alpha1/usage API with either a token the operator enters
+// bearer-gated usage, dataplane, and policy APIs with a token the operator enters
 // once (JS memory only) or an OIDC console-SSO login (ADR-037, ported from
 // mayu's adminui — sessionStorage holds only the three short-lived PKCE
 // keys, never localStorage/cookies, id_token stays memory-only). This
 // resolves the "UI behind bearer" paradox the P2 gate raised: the shell is
 // public, the data is not.
+// Policy mutations separately select a dedicated write token or console OIDC
+// credential; a writable store never grants the heartbeat token write authority.
 package ui
 
 import (

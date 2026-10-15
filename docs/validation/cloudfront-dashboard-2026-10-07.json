@@ -1,0 +1,101 @@
+{
+  "verified_at_utc": "2026-10-07T10:53:45.056716+00:00",
+  "deployment": "CloudFront-only static dashboard",
+  "domain": "inferplane.atomai.click",
+  "distribution_id": "E1LNBYHUOFZJWY",
+  "support_stack": "inferplane-dashboard-assets",
+  "existing_stack": "inferplane-demo",
+  "changed_existing_resources": [
+    {
+      "logical_id": "Distribution",
+      "action": "Modify",
+      "replacement": false
+    }
+  ],
+  "stack_status": "UPDATE_COMPLETE",
+  "distribution_status": "Deployed",
+  "distribution_drift_status": "IN_SYNC",
+  "invalidation_status": "Completed",
+  "live": {
+    "host": "https://inferplane.atomai.click",
+    "release": "releases/5f8a9a9349c5dcec9c3acfb4",
+    "assets": {
+      "/ui/": {
+        "status": 200,
+        "sha256": "aaa9e234c49b742bc71c101a4db014de78f6e4b931e785ef30971100d292c639",
+        "no_store": true,
+        "csp_preserved": true
+      },
+      "/ui/index.html": {
+        "status": 200,
+        "sha256": "aaa9e234c49b742bc71c101a4db014de78f6e4b931e785ef30971100d292c639",
+        "no_store": true,
+        "csp_preserved": true
+      },
+      "/ui/app.js": {
+        "status": 200,
+        "sha256": "021256eeddddd7ae4b58e4e917c2391efbeaaff4d74ba7e336618ccd3c21b104",
+        "no_store": true,
+        "csp_preserved": true
+      },
+      "/ui/style.css": {
+        "status": 200,
+        "sha256": "a7706a0ab23ce9d3189d27265a4280105d6b0646cc8c99dae6ef1113d58faf9a",
+        "no_store": true,
+        "csp_preserved": true
+      }
+    },
+    "protected_unauthenticated": {
+      "/v1alpha1/usage": 401,
+      "/v1alpha1/policies": 401,
+      "/v1alpha1/dataplanes": 401
+    },
+    "authenticated_reads": {
+      "/v1alpha1/usage": 200,
+      "/v1alpha1/policies": 200,
+      "/v1alpha1/dataplanes": 200
+    },
+    "browser": {
+      "actual_aws_apis": true,
+      "read_login": true,
+      "write_controls_disabled_in_read_session": true,
+      "all_views": true,
+      "mobile_390_all_views": true,
+      "disconnect_clears_data": true,
+      "sso_authorization_redirect": true,
+      "no_csp_or_js_errors": true
+    },
+    "root_redirect": {
+      "status": 302,
+      "location": "/ui/"
+    },
+    "s3_anonymous": 403,
+    "sso_config_available": true,
+    "server_policy_store_writable": false
+  },
+  "preserved": {
+    "original_vpc_origins_unchanged": true,
+    "domain_tls_waf_unchanged": true,
+    "api_auth_forwarding_unchanged": true,
+    "existing_admin_behaviors_unchanged": true,
+    "cp_service_and_running_tasks_unchanged": true,
+    "cp_task_definition_revision": 31,
+    "cp_running_count": 1,
+    "distribution_status": "Deployed"
+  },
+  "limitations": [
+    "Human SSO completion was not tested; authorization redirect was verified.",
+    "No live policy mutation was performed. Existing CP is file-authoritative (writable=false).",
+    "Only static assets were deployed; CP image and API implementation were not upgraded."
+  ],
+  "checks": {
+    "cfn_lint": true,
+    "cfn_guard": true,
+    "deployment_unit_tests": 5,
+    "static_binary_builds": true,
+    "go_race": true,
+    "go_vet": true,
+    "harness_checks_passed": 69,
+    "documentation_unit_tests": 9
+  }
+}

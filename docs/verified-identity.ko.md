@@ -1,6 +1,6 @@
 ---
 translation_source: verified-identity.md
-translation_source_sha256: 8696ef5c609cf2dfb7ca941d23f6a924bda0c410d972fda0fe678b6e0875f1b7
+translation_source_sha256: 5c213dcc68602c98f83131f421c67bff3b868d6bc0e298c5c60b7a6a861fae53
 ---
 
 # 검증된 신원과 안정적인 계정 참조 {#verified-identity-and-stable-account-references}
@@ -55,9 +55,10 @@ translation_source_sha256: 8696ef5c609cf2dfb7ca941d23f6a924bda0c410d972fda0fe678
 
 ## 감사 별칭이 아닌 계정 참조 사용 {#use-the-account-reference-not-an-audit-alias}
 
-legacy 바인딩이 없는 새 신원은 `identity-v1:<SHA-256>` 정규 회계 참조를 받습니다. legacy 바인딩된 사람은 정책·사용량·회계 조회에 기존 `account_ref`를 그대로 유지합니다.
+legacy 바인딩이 없는 새 신원은 `identity-v1:<SHA-256>` 정규 회계 참조를 받습니다. legacy 바인딩된 사람은 정책·회계 조회에 기존 `account_ref`를 그대로 유지합니다. managed 사용량 텔레메트리는 다이제스트 기반 정규 신원 참조를, 기존 텔레메트리는 account subject를 사용합니다. CP 정책 목록의 `identity_bindings`는 선언된 참조를 사용자 비용 조회에서 연결하며 회계 계정을 변경하지 않습니다.
 
 위 예제의 `subject.user`는 **`legacy-owner-001`**입니다. 정규 `identity-v1:…` 참조로 **교체하지 마세요**. 다른 계정을 가리키므로 필수 정책 검증이 거부합니다. 정규 참조는 상관 분석을 위한 신원 감사 증거에는 남습니다. 권한 있는 키 조회의 `account_ref`를 회계 선택자에 사용하고, 다이제스트 전용 `identity.reference`는 신원 증거에 사용하세요.
+**Users & costs**는 이 선언된 연결만 사용하며 예산·토큰 정책에는 정확한 재무 참조를 채웁니다. 연결이 없는 managed 보고 ID를 legacy 회계 계정으로 추측하지 않습니다.
 
 키 교체와 두 번째 기기도 등록 계정을 유지합니다. 과거 계정·윈도 키와 지연 정산도 유지합니다. 선택적 귀속이 몰래 새 회계 참조를 대체하지 않습니다.
 

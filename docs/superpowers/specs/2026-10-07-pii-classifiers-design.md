@@ -91,7 +91,7 @@ measured in Shadow mode. This implementation does not establish them as benefits
 - ADR-043/044 and the 2026-09-09 spec (line 72) say there is no remote
   classifier and no network dependency, and that learned classifiers "require a
   separate design". This document is that design. It needs a new ADR, proposed
-  as ADR-049, which is written only when requested.
+  with its number assigned when implementation is requested.
 
 ## Design
 
@@ -508,4 +508,4 @@ These notes are operator guidance and are not implemented by inferplane:
 - The "PII dedicated model" row in `docs/adaptive-routing.md`.
 - The matching `internal/` module `CLAUDE.md` files.
 - The Helm chart README.
-- ADR-049, proposed separately.
+- A classifier-integration ADR, proposed separately when implementation is requested.

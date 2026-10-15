@@ -1,14 +1,11 @@
 // Package pricing computes per-request cost in integer micro-USD (µUSD) from a
 // (provider, model)-keyed rate table. Money is NEVER float (design §5.3) — all
 // rates are µUSD-per-million-tokens (int64) and the per-request cost is a
-// single round-half-even division. cache write is TTL-tiered (5m vs 1h) and
+// round-half-even division per token class. cache write is TTL-tiered (5m vs 1h) and
 // cache read is billed separately.
 package pricing
 
-import (
-	"math/big"
-	"strings"
-)
+import "strings"
 
 type Key struct {
 	Provider string
@@ -22,6 +19,11 @@ type Rate struct {
 	CacheReadPerMTok    int64
 	CacheWrite5mPerMTok int64
 	CacheWrite1hPerMTok int64
+	// LongContext prices the entire response when total disjoint input/cache
+	// tokens exceed ShortContextLimit. Both fields must be declared together.
+	ShortContextLimit     int64
+	LongContext           *Rate
+	CacheWriteUnsupported bool
 }
 
 type Usage struct {
@@ -55,22 +57,28 @@ func New(onMissing OnMissing, rates map[Key]Rate) *Table {
 // audit record's cost.pricing_version. New() keeps the historical "bundled"
 // default so tests and the zero-config path are unchanged.
 func NewVersioned(onMissing OnMissing, rates map[Key]Rate, version string) *Table {
-	if rates == nil {
-		rates = map[Key]Rate{}
+	owned := make(map[Key]Rate, len(rates))
+	for key, rate := range rates {
+		if rate.LongContext != nil {
+			long := *rate.LongContext
+			rate.LongContext = &long
+		}
+		owned[key] = rate
 	}
 	if version == "" {
 		version = "unversioned"
 	}
-	return &Table{onMissing: onMissing, rates: rates, Version: version}
+	return &Table{onMissing: onMissing, rates: owned, Version: version}
 }
 
 func (t *Table) OnMissing() OnMissing { return t.onMissing }
 
 // bedrockRegionPrefixes are Bedrock cross-region inference-profile prefixes.
 // `global.anthropic.claude-opus-5` and `us.anthropic.claude-opus-5` are the
-// same model reached through different routing, and AWS publishes no
-// cross-region price differential — so one rate row must cover all of them
-// rather than each prefix needing its own (ADR-030). Without this, a config
+// same model reached through different routing. Prefix fallback is a legacy
+// operator convenience, not a claim of price parity; model cards may charge
+// regional premiums, so those routes need exact profile-specific rows.
+// The legacy fallback fixes ADR-030's original case, where a config
 // that priced `anthropic.claude-opus-5` billed every `global.`-prefixed
 // request at zero.
 //
@@ -108,14 +116,73 @@ func BaseModelID(model string) string {
 // behind boot-time validation and `mayu pricing check`, so neither can
 // drift from what actually gets billed.
 func (t *Table) HasRate(provider, model string) bool {
-	if _, ok := t.rates[Key{provider, model}]; ok {
-		return true
+	_, ok := t.lookup(provider, model)
+	return ok
+}
+
+func (t *Table) lookup(provider, model string) (Rate, bool) {
+	if t == nil {
+		return Rate{}, false
 	}
-	if base := normalizeModel(model); base != "" {
-		_, ok := t.rates[Key{provider, base}]
-		return ok
+	r, ok := t.rates[Key{provider, model}]
+	if !ok {
+		if base := normalizeModel(model); base != "" {
+			r, ok = t.rates[Key{provider, base}]
+		}
+	}
+	return r, ok && r.valid()
+}
+
+func (r Rate) valid() bool {
+	if r.CacheWriteUnsupported && (r.CacheWrite5mPerMTok != 0 || r.CacheWrite1hPerMTok != 0) {
+		return false
+	}
+	for _, n := range []int64{r.InputPerMTok, r.OutputPerMTok, r.CacheReadPerMTok, r.CacheWrite5mPerMTok, r.CacheWrite1hPerMTok} {
+		if n < 0 {
+			return false
+		}
+	}
+	if r.LongContext == nil {
+		return r.ShortContextLimit == 0
+	}
+	long := r.LongContext
+	return r.ShortContextLimit > 0 && long.LongContext == nil && long.ShortContextLimit == 0 && long.valid()
+}
+
+// isLong compares without summing int64 counts, so a huge cache-heavy request
+// cannot wrap back into the cheaper tier. Output/reasoning never triggers it.
+func (r Rate) isLong(u Usage) bool {
+	if r.LongContext == nil {
+		return false
+	}
+	remaining := r.ShortContextLimit
+	for _, n := range []int64{u.Input, u.CacheRead, u.CacheWrite5m, u.CacheWrite1h} {
+		if n > remaining {
+			return true
+		}
+		remaining -= n
 	}
 	return false
+}
+
+// ContextTier is bounded audit evidence. Flat/missing tables have no tier.
+func (t *Table) ContextTier(provider, model string, u Usage) string {
+	if u.Invalid || u.Uncertain {
+		return ""
+	}
+	for _, n := range []int64{u.Input, u.Output, u.CacheRead, u.CacheWrite5m, u.CacheWrite1h} {
+		if n < 0 {
+			return ""
+		}
+	}
+	r, ok := t.lookup(provider, model)
+	if !ok || r.LongContext == nil {
+		return ""
+	}
+	if r.isLong(u) {
+		return "long"
+	}
+	return "short"
 }
 
 // CostUSDMicros returns the request cost in µUSD and whether the (provider,
@@ -126,24 +193,4 @@ func (t *Table) HasRate(provider, model string) bool {
 func (t *Table) CostUSDMicros(provider, model string, u Usage) (cost int64, missing bool) {
 	cost, err := t.CostUSDMicrosChecked(provider, model, u)
 	return cost, err != nil
-}
-
-// mulDivRoundHalfEven computes tokens * perMTok / 1_000_000 with banker's
-// rounding, using math/big to avoid int64 overflow on large token counts.
-func mulDivRoundHalfEven(tokens, perMTok int64) int64 {
-	if tokens == 0 || perMTok == 0 {
-		return 0
-	}
-	num := new(big.Int).Mul(big.NewInt(tokens), big.NewInt(perMTok))
-	denom := big.NewInt(1_000_000)
-	q := new(big.Int)
-	rem := new(big.Int)
-	q.QuoRem(num, denom, rem)
-	// round half to even
-	twice := new(big.Int).Mul(rem, big.NewInt(2))
-	cmp := twice.CmpAbs(denom)
-	if cmp > 0 || (cmp == 0 && q.Bit(0) == 1) {
-		q.Add(q, big.NewInt(1))
-	}
-	return q.Int64()
 }

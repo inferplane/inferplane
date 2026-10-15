@@ -16,14 +16,18 @@ func (t *Table) AuthorityBound(provider, model string, inputLimit, outputLimit i
 	if t == nil || inputLimit <= 0 || outputLimit <= 0 {
 		return 0, ErrAuthorityBound
 	}
-	r, ok := t.rates[Key{provider, model}]
-	if !ok {
-		if base := normalizeModel(model); base != "" {
-			r, ok = t.rates[Key{provider, base}]
-		}
-	}
+	r, ok := t.lookup(provider, model)
 	if !ok {
 		return 0, ErrAuthorityBound
+	}
+	// Each class is independently bounded: long input may be cheaper while
+	// long output is dearer. Never pick a single tier as the reservation rate.
+	if long := r.LongContext; long != nil {
+		r.InputPerMTok = max(r.InputPerMTok, long.InputPerMTok)
+		r.OutputPerMTok = max(r.OutputPerMTok, long.OutputPerMTok)
+		r.CacheReadPerMTok = max(r.CacheReadPerMTok, long.CacheReadPerMTok)
+		r.CacheWrite5mPerMTok = max(r.CacheWrite5mPerMTok, long.CacheWrite5mPerMTok)
+		r.CacheWrite1hPerMTok = max(r.CacheWrite1hPerMTok, long.CacheWrite1hPerMTok)
 	}
 	total := new(big.Int)
 	denominator := big.NewInt(1000000)

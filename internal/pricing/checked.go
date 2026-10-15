@@ -17,12 +17,15 @@ func (t *Table) CostUSDMicrosChecked(provider, model string, u Usage) (int64, er
 	if t == nil {
 		return 0, ErrAuthorityBound
 	}
-	r, ok := t.rates[Key{provider, model}]
-	if !ok {
-		r, ok = t.rates[Key{provider, normalizeModel(model)}]
-	}
+	r, ok := t.lookup(provider, model)
 	if !ok {
 		return 0, ErrAuthorityBound
+	}
+	if r.isLong(u) {
+		r = *r.LongContext
+	}
+	if r.CacheWriteUnsupported && (u.CacheWrite5m != 0 || u.CacheWrite1h != 0) {
+		return 0, ErrInvalidCost
 	}
 	total := new(big.Int)
 	denom := big.NewInt(1_000_000)

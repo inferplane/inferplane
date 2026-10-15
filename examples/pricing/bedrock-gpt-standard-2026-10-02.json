@@ -1,0 +1,280 @@
+{
+  "schema_version": 1,
+  "as_of": "2026-10-02",
+  "currency": "USD",
+  "unit": "per_million_tokens",
+  "service_tier": "standard",
+  "pricing_version": "aws-gpt-standard-2026-10-02",
+  "notes": [
+    "Commercial regions only; regional/geo prices already include the 10 percent premium.",
+    "Context tier applies to the full response above 272000 inclusive input tokens; cache classes are disjoint for billing.",
+    "5m/1h fields carry the one published cache-write price, not a claim that those TTLs are supported.",
+    "GPT-5.4/5.5 publish no cache-write price; positive cache-write usage is unpriced rather than guessed.",
+    "No Priority/Flex/Ultrafast, discounts, taxes or hosted-tool operation fees."
+  ],
+  "models": {
+    "openai.gpt-5.4": {
+      "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-54.html",
+      "regional": {
+        "input_per_mtok": 2.75,
+        "output_per_mtok": 16.5,
+        "cache_read_per_mtok": 0.275,
+        "cache_write_unsupported": true,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 5.5,
+          "output_per_mtok": 24.75,
+          "cache_read_per_mtok": 0.55,
+          "cache_write_unsupported": true
+        }
+      }
+    },
+    "openai.gpt-5.5": {
+      "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-55.html",
+      "regional": {
+        "input_per_mtok": 5.5,
+        "output_per_mtok": 33.0,
+        "cache_read_per_mtok": 0.55,
+        "cache_write_unsupported": true,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 11.0,
+          "output_per_mtok": 49.5,
+          "cache_read_per_mtok": 1.1,
+          "cache_write_unsupported": true
+        }
+      }
+    },
+    "openai.gpt-5.6-sol": {
+      "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-sol.html",
+      "regional": {
+        "input_per_mtok": 4.4,
+        "output_per_mtok": 22.0,
+        "cache_read_per_mtok": 0.44,
+        "cache_write_5m_per_mtok": 5.5,
+        "cache_write_1h_per_mtok": 5.5,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 8.8,
+          "output_per_mtok": 33.0,
+          "cache_read_per_mtok": 0.88,
+          "cache_write_5m_per_mtok": 11.0,
+          "cache_write_1h_per_mtok": 11.0
+        }
+      },
+      "global": {
+        "input_per_mtok": 4.0,
+        "output_per_mtok": 20.0,
+        "cache_read_per_mtok": 0.4,
+        "cache_write_5m_per_mtok": 5.0,
+        "cache_write_1h_per_mtok": 5.0,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 8.0,
+          "output_per_mtok": 30.0,
+          "cache_read_per_mtok": 0.8,
+          "cache_write_5m_per_mtok": 10.0,
+          "cache_write_1h_per_mtok": 10.0
+        }
+      }
+    },
+    "openai.gpt-5.6-terra": {
+      "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-terra.html",
+      "regional": {
+        "input_per_mtok": 2.2,
+        "output_per_mtok": 13.2,
+        "cache_read_per_mtok": 0.22,
+        "cache_write_5m_per_mtok": 2.75,
+        "cache_write_1h_per_mtok": 2.75,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 4.4,
+          "output_per_mtok": 19.8,
+          "cache_read_per_mtok": 0.44,
+          "cache_write_5m_per_mtok": 5.5,
+          "cache_write_1h_per_mtok": 5.5
+        }
+      },
+      "global": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 12.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_5m_per_mtok": 2.5,
+        "cache_write_1h_per_mtok": 2.5,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 4.0,
+          "output_per_mtok": 18.0,
+          "cache_read_per_mtok": 0.4,
+          "cache_write_5m_per_mtok": 5.0,
+          "cache_write_1h_per_mtok": 5.0
+        }
+      }
+    },
+    "openai.gpt-5.6-luna": {
+      "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-luna.html",
+      "regional": {
+        "input_per_mtok": 0.22,
+        "output_per_mtok": 1.32,
+        "cache_read_per_mtok": 0.022,
+        "cache_write_5m_per_mtok": 0.275,
+        "cache_write_1h_per_mtok": 0.275,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 0.44,
+          "output_per_mtok": 1.98,
+          "cache_read_per_mtok": 0.044,
+          "cache_write_5m_per_mtok": 0.55,
+          "cache_write_1h_per_mtok": 0.55
+        }
+      },
+      "global": {
+        "input_per_mtok": 0.2,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.02,
+        "cache_write_5m_per_mtok": 0.25,
+        "cache_write_1h_per_mtok": 0.25,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 0.4,
+          "output_per_mtok": 1.8,
+          "cache_read_per_mtok": 0.04,
+          "cache_write_5m_per_mtok": 0.5,
+          "cache_write_1h_per_mtok": 0.5
+        }
+      }
+    },
+    "openai.gpt-6-astra": {
+      "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-astra.html",
+      "regional": {
+        "input_per_mtok": 11.0,
+        "output_per_mtok": 55.0,
+        "cache_read_per_mtok": 1.1,
+        "cache_write_5m_per_mtok": 13.75,
+        "cache_write_1h_per_mtok": 13.75,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 22.0,
+          "output_per_mtok": 82.5,
+          "cache_read_per_mtok": 2.2,
+          "cache_write_5m_per_mtok": 27.5,
+          "cache_write_1h_per_mtok": 27.5
+        }
+      },
+      "global": {
+        "input_per_mtok": 10.0,
+        "output_per_mtok": 50.0,
+        "cache_read_per_mtok": 1.0,
+        "cache_write_5m_per_mtok": 12.5,
+        "cache_write_1h_per_mtok": 12.5,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 20.0,
+          "output_per_mtok": 75.0,
+          "cache_read_per_mtok": 2.0,
+          "cache_write_5m_per_mtok": 25.0,
+          "cache_write_1h_per_mtok": 25.0
+        }
+      }
+    },
+    "openai.gpt-6-sol": {
+      "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-sol.html",
+      "regional": {
+        "input_per_mtok": 2.2,
+        "output_per_mtok": 11.0,
+        "cache_read_per_mtok": 0.22,
+        "cache_write_5m_per_mtok": 2.75,
+        "cache_write_1h_per_mtok": 2.75,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 4.4,
+          "output_per_mtok": 16.5,
+          "cache_read_per_mtok": 0.44,
+          "cache_write_5m_per_mtok": 5.5,
+          "cache_write_1h_per_mtok": 5.5
+        }
+      },
+      "global": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_5m_per_mtok": 2.5,
+        "cache_write_1h_per_mtok": 2.5,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 4.0,
+          "output_per_mtok": 15.0,
+          "cache_read_per_mtok": 0.4,
+          "cache_write_5m_per_mtok": 5.0,
+          "cache_write_1h_per_mtok": 5.0
+        }
+      }
+    },
+    "openai.gpt-6-luna": {
+      "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-luna.html",
+      "regional": {
+        "input_per_mtok": 0.11,
+        "output_per_mtok": 0.55,
+        "cache_read_per_mtok": 0.011,
+        "cache_write_5m_per_mtok": 0.1375,
+        "cache_write_1h_per_mtok": 0.1375,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 0.22,
+          "output_per_mtok": 0.825,
+          "cache_read_per_mtok": 0.022,
+          "cache_write_5m_per_mtok": 0.275,
+          "cache_write_1h_per_mtok": 0.275
+        }
+      },
+      "global": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.5,
+        "cache_read_per_mtok": 0.01,
+        "cache_write_5m_per_mtok": 0.125,
+        "cache_write_1h_per_mtok": 0.125,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 0.2,
+          "output_per_mtok": 0.75,
+          "cache_read_per_mtok": 0.02,
+          "cache_write_5m_per_mtok": 0.25,
+          "cache_write_1h_per_mtok": 0.25
+        }
+      }
+    },
+    "openai.gpt-6.1-sol": {
+      "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-1-sol.html",
+      "regional": {
+        "input_per_mtok": 2.2,
+        "output_per_mtok": 11.0,
+        "cache_read_per_mtok": 0.11,
+        "cache_write_5m_per_mtok": 2.75,
+        "cache_write_1h_per_mtok": 2.75,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 4.4,
+          "output_per_mtok": 16.5,
+          "cache_read_per_mtok": 0.22,
+          "cache_write_5m_per_mtok": 5.5,
+          "cache_write_1h_per_mtok": 5.5
+        }
+      },
+      "global": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_5m_per_mtok": 2.5,
+        "cache_write_1h_per_mtok": 2.5,
+        "short_context_limit": 272000,
+        "long_context": {
+          "input_per_mtok": 4.0,
+          "output_per_mtok": 15.0,
+          "cache_read_per_mtok": 0.2,
+          "cache_write_5m_per_mtok": 5.0,
+          "cache_write_1h_per_mtok": 5.0
+        }
+      }
+    }
+  }
+}

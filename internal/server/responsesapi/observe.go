@@ -72,33 +72,32 @@ func (a attempt) finish(status int, u *schema.Usage, body []byte, partial bool, 
 	span := trace.SpanFromContext(a.req.Context())
 	if u != nil {
 		pu := pricing.FromUsage(u)
-		var input, output int64
-		if a.h.gov != nil {
-			amount, missing := a.h.gov.Settle(subject(a.principal), keyPolicy(a.principal), a.target.ProviderName, a.target.Upstream, pu, a.table, a.admission)
-			cost = &audit.CostRef{AmountUSDMicros: amount, PricingMissing: missing, PricingVersion: governance.PricingVersionOf(a.table)}
-			if a.h.usage != nil {
-				a.h.usage.Record(a.principal.Team, requestpolicy.TelemetrySubject(a.principal), a.target.Upstream, pu, amount)
-			}
-			tracing.SetCost(span, amount, missing)
-		}
+		var input, output, cacheRead, write5m, write1h int64
 		if _, err := pu.TotalTokens(); err == nil {
 			input, output = pu.Input, pu.Output
-			usage = &audit.UsageRef{
-				InputTokens: pu.Input, OutputTokens: pu.Output, CacheReadInputTokens: pu.CacheRead,
-				CacheCreationInputTokens: u.CacheWriteAccounting().Total, CacheCreation5mInputTokens: pu.CacheWrite5m, CacheCreation1hInputTokens: pu.CacheWrite1h,
-			}
-			tracing.SetUsageDetail(span, pu.CacheRead, pu.CacheWrite5m, pu.CacheWrite1h)
-			for kind, n := range map[string]int64{"input": pu.Input, "output": pu.Output, "cache_read": pu.CacheRead, "cache_write_5m": pu.CacheWrite5m, "cache_write_1h": pu.CacheWrite1h} {
+			cacheRead, write5m, write1h = pu.CacheRead, pu.CacheWrite5m, pu.CacheWrite1h
+			usage = audit.UsageFrom(u)
+			for kind, n := range map[string]int64{"input": input, "output": output, "cache_read": cacheRead, "cache_write_5m": write5m, "cache_write_1h": write1h} {
 				a.h.metrics.ObserveTokenUsage(kind, a.target.Model, a.target.ProviderName, a.principal.Team, n)
 			}
 		}
+		if a.h.gov != nil {
+			amount, missing := a.h.gov.Settle(subject(a.principal), keyPolicy(a.principal), a.target.ProviderName, a.target.Upstream, pu, a.table, a.admission)
+			cost = &audit.CostRef{AmountUSDMicros: amount, PricingMissing: missing, PricingVersion: governance.PricingVersionOf(a.table),
+				ContextTier: a.table.ContextTier(a.target.ProviderName, a.target.Upstream, pu)}
+			if a.h.usage != nil {
+				a.h.usage.Record(a.principal.Team, requestpolicy.TelemetrySubject(a.principal), a.target.Upstream, pu, amount)
+			}
+			requestpolicy.RecordCost(span, a.target.Provider.Name(), a.target.ProviderName, a.target.Upstream, usage, cost, partial)
+		}
 		tracing.SetGenAIResponse(span, a.target.Provider.Name(), a.target.Upstream, input, output)
+		tracing.SetUsageDetail(span, cacheRead, write5m, write1h)
 	}
 	if partial {
 		tracing.SetPartial(span)
 	}
 	requestpolicy.SettleBudget(a.req, cost, u, status/100 == 2 && !partial)
-	tracing.SetStatus(span, status/100 == 2 && !partial, "")
+	tracing.SetStatus(span, status/100 == 2 && !partial, a.errorCode)
 	a.h.metrics.ObserveRequest("responses", a.target.Model, a.target.ProviderName, a.principal.Team, status, time.Since(a.started).Seconds(), ttft)
 	id := ulid.New()
 	var bodyRef string
@@ -118,6 +117,9 @@ func (a attempt) finish(status int, u *schema.Usage, body []byte, partial bool, 
 		Request:   a.requestRef(), Outcome: &audit.OutcomeRef{Status: status, Partial: partial},
 		Usage: usage, Cost: cost,
 		Latency: &audit.LatencyRef{TotalMs: time.Since(a.started).Milliseconds(), TTFTMs: int64(ttft * 1000)},
+	}
+	if a.errorCode != "" {
+		rec.Outcome.Error = &a.errorCode
 	}
 	if bodyRef != "" {
 		rec.BodyRef = &bodyRef

@@ -62,23 +62,32 @@ func TestSpanCarriesCacheCostAndPartial(t *testing.T) {
 	}
 }
 
-// TestSpanOmitsZeroCacheTiers keeps a plain uncached request's span clean —
-// a zero tier is absence of a cache write, not a fact worth an attribute
-// (mirrors SetGenAIResponse's existing >0 guard).
-func TestSpanOmitsZeroCacheTiers(t *testing.T) {
+// A later zero-usage attempt must not inherit a prior attempt's cache counts.
+func TestSpanClearsPreviousAttemptUsage(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr)))
 	t.Cleanup(Disable)
 
 	_, span := Start(context.Background(), "chat m")
+	SetGenAIResponse(span, "bedrock", "first", 10, 20)
+	SetUsageDetail(span, 30, 40, 50)
+	SetGenAIResponse(span, "bedrock", "second", 0, 0)
 	SetUsageDetail(span, 0, 0, 0)
 	span.End()
 
+	found := 0
 	for _, a := range sr.Ended()[0].Attributes() {
 		if k := string(a.Key); k == "inferplane.usage.cache_read_input_tokens" ||
 			k == "inferplane.usage.cache_write_5m_input_tokens" ||
-			k == "inferplane.usage.cache_write_1h_input_tokens" {
-			t.Errorf("zero tier %s should be omitted", k)
+			k == "inferplane.usage.cache_write_1h_input_tokens" ||
+			k == "gen_ai.usage.input_tokens" || k == "gen_ai.usage.output_tokens" {
+			found++
+			if a.Value.AsInt64() != 0 {
+				t.Errorf("%s retained prior attempt's count", k)
+			}
 		}
+	}
+	if found != 5 {
+		t.Fatal("final usage counts missing")
 	}
 }

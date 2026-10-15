@@ -318,6 +318,61 @@ class LauncherTests(unittest.TestCase):
         ]
         self.assert_refused(self.run_launcher())
 
+    def search_native_fixture(self):
+        self.payload["data"][3].update({
+            "responses_mode": "native", "codex_model": "gpt-6-astra",
+        })
+        bundled = self.directory / "bundled.json"
+        bundled.write_text(json.dumps({"models": [{
+            "slug": "gpt-6-astra", "web_search_tool_type": "text_and_image",
+            "supports_search_tool": True,
+        }]}))
+        self.env["FAKE_BUNDLED"] = str(bundled)
+
+    def test_web_search_is_disabled_without_explicit_opt_in(self):
+        self.search_native_fixture()
+        result = self.run_launcher("-m", "openai.gpt-6-astra")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.record()["config"]["web_search"]), "disabled")
+
+    def test_cached_web_search_uses_native_only_text_catalog(self):
+        self.search_native_fixture()
+        self.env["INFERPLANE_CODEX_WEB_SEARCH"] = "cached"
+        result = self.run_launcher("exec", "-m", "openai.gpt-6-astra",
+                                   "-c", 'web_search="live"', "--", "literal prompt")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        record = self.record()
+        self.assertEqual(json.loads(record["config"]["web_search"]), "cached")
+        self.assertEqual([m["slug"] for m in record["catalog"]["models"]], ["openai.gpt-6-astra"])
+        self.assertEqual(record["catalog"]["models"][0]["web_search_tool_type"], "text")
+        self.assertFalse(record["catalog"]["models"][0]["use_responses_lite"])
+        self.assertEqual(record["args"][-2:], ["--", "literal prompt"])
+
+    def test_web_search_cannot_enable_a_bridge_even_for_gpt_names(self):
+        self.search_native_fixture()
+        self.env["INFERPLANE_CODEX_WEB_SEARCH"] = "cached"
+        for model in ["test.grok", "global.openai.gpt-6-astra"]:
+            with self.subTest(model=model):
+                result = self.run_launcher("-m", model)
+                self.assert_refused(result)
+                self.assertIn("native", result.stderr)
+
+    def test_web_search_rejects_invalid_or_live_mode_without_echoing_it(self):
+        for value in ["live", "indexed", "", "offline-placeholder"]:
+            with self.subTest(value=value):
+                self.env["INFERPLANE_CODEX_WEB_SEARCH"] = value
+                self.assert_refused(self.run_launcher())
+                self.assertEqual(self.requests, [])
+
+    def test_live_search_flag_cannot_override_cached_or_disabled_mode(self):
+        self.search_native_fixture()
+        for mode in ["disabled", "cached"]:
+            with self.subTest(mode=mode):
+                self.env["INFERPLANE_CODEX_WEB_SEARCH"] = mode
+                result = self.run_launcher("--search", "-m", "openai.gpt-6-astra")
+                self.assert_refused(result)
+                self.assertIn("--search", result.stderr)
+
     def test_bridge_effort_override_follows_user_options_and_precedes_separator(self):
         self.payload["data"][1]["responses_mode"] = "bridge"
         args = [
@@ -808,6 +863,24 @@ class InstalledCodexTests(unittest.TestCase):
         })
         body = self.run_cli('model_reasoning_effort="xhigh"\n', model="openai.gpt-6-astra")
         self.assertEqual(body.get("reasoning", {}).get("effort"), "xhigh")
+
+    def test_cached_mantle_search_emits_text_tool_without_external_access(self):
+        self.fixture.env["INFERPLANE_CODEX_WEB_SEARCH"] = "cached"
+        for slug in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+                     "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]:
+            with self.subTest(slug=slug):
+                self.fixture.response_requests.clear()
+                self.fixture.payload["data"][3].update({
+                    "id": "openai." + slug, "responses_mode": "native", "codex_model": slug,
+                    "capabilities": ["tools", "reasoning"],
+                })
+                body = self.run_cli('web_search="live"\n', model="openai." + slug)
+                tools = [tool for tool in body.get("tools", []) if tool.get("type") == "web_search"]
+                self.assertEqual(len(tools), 1)
+                self.assertIs(tools[0].get("external_web_access"), False)
+                self.assertNotIn("enable_image_search", tools[0])
+                self.assertNotIn("enable_image_open", tools[0])
+                self.assertFalse(any(item.get("type") == "additional_tools" for item in body["input"]))
 
     def test_unsupported_route_does_not_block_an_installed_cli_bridge_launch(self):
         self.fixture.payload["data"].append({

@@ -1,6 +1,6 @@
 ---
 translation_source: reference/agent-llm.md
-translation_source_sha256: 7284295643d10cafc94cbdb13b50c4143e69b248f55fdfa757839dbd978dbfc8
+translation_source_sha256: 2248707d3e25cf79b316bcbdd44634f7f9290b1fe630fcac23bacd4fb5c0f872
 ---
 
 # 에이전트·LLM 구현 {#agent-llm}
@@ -26,6 +26,8 @@ Anthropic·Bedrock·OpenAI 호환 업스트림과 통신하는 공급자 추상�
 | 필터 | `internal/filter/` | RequestFilter와 레지스트리 |
 | 기존 PII 필터 | `plugins/piimask/` | 선택적 정규식·Luhn, 형식별 자리표시자, 단방향·금고 없음, 메시지 텍스트 마스킹 |
 | 트레이싱 | `internal/tracing/` | 선택적 OTLP 트레이스, GenAI와 캐시·비용·부분 결과, W3C 전파·감사 trace_id. 기본 no-op |
+
+정산 span에는 `inferplane.cost.pricing_version`과 유한한 `inferplane.cost.context_tier`도 표시됩니다. 각 정산은 정수 microUSD·누락 여부·가격 메타데이터를 가진 `inferplane.cost.settled` 이벤트를 추가해 재시도가 앞선 시도 증거를 덮어쓰지 않게 합니다. 호환되는 span 수준 금액은 마지막 정산 시도입니다. 샘플링·전송 손실 때문에 어느 쪽도 회계 원장이 아니며 내용 없는 시도별 audit가 영속 원천입니다. 클라이언트 보고 금액이나 AWS 청구서가 아닌 게이트웨이 설정 단가 추정값입니다. 컨텍스트 요금은 [가격 가이드](pricing.ko.md)를 참고하세요.
 
 ### 3. 주요 결정 {#3-key-decisions}
 

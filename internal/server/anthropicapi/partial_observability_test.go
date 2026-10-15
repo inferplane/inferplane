@@ -133,6 +133,32 @@ func TestMessagesPartialStreamMarksSpanPartialAndErrored(t *testing.T) {
 	if got := span.Status().Code.String(); got != "Error" {
 		t.Errorf("partial span status = %s, want Error", got)
 	}
+	events := ended[0].Events()
+	if len(events) != 1 || events[0].Name != "inferplane.cost.settled" {
+		t.Fatalf("missing partial settlement event: %+v", events)
+	}
+	facts := map[string]bool{}
+	for _, a := range events[0].Attributes {
+		switch string(a.Key) {
+		case "inferplane.provider.name":
+			facts["provider"] = a.Value.AsString() == "p"
+		case "gen_ai.response.model":
+			facts["model"] = a.Value.AsString() == "up"
+		case "inferplane.usage.input_tokens_total":
+			facts["total"] = a.Value.AsInt64() == 74
+		case "inferplane.usage.cache_write_ttl_known":
+			facts["ttl"] = a.Value.AsBool()
+		case "inferplane.usage.accounting_uncertain":
+			facts["uncertain"] = a.Value.AsBool()
+		case "inferplane.response.partial":
+			facts["partial"] = a.Value.AsBool()
+		}
+	}
+	for _, key := range []string{"provider", "model", "total", "ttl", "uncertain", "partial"} {
+		if !facts[key] {
+			t.Errorf("settlement event lost %s evidence", key)
+		}
+	}
 	var partial bool
 	ints := map[string]int64{}
 	for _, a := range span.Attributes() {

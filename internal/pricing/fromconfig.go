@@ -13,7 +13,10 @@ type ConfigRate struct {
 	CacheWrite1hPerMTok float64
 	// Free declares a genuinely zero-cost model, and is the ONLY way to get a
 	// 0-cost row into the table (see Unpriced).
-	Free bool
+	Free                  bool
+	ShortContextLimit     int64
+	LongContext           *ConfigRate
+	CacheWriteUnsupported bool
 }
 
 // Unpriced reports whether this override declares no price at all: both
@@ -40,6 +43,39 @@ type ConfigRate struct {
 // and by every hot reload.
 func (cr ConfigRate) Unpriced() bool {
 	return cr.InputPerMTok == 0 && cr.OutputPerMTok == 0 && !cr.Free
+}
+
+func (cr ConfigRate) valid() bool {
+	if cr.CacheWriteUnsupported && (cr.CacheWrite5mPerMTok != 0 || cr.CacheWrite1hPerMTok != 0) {
+		return false
+	}
+	for _, n := range []float64{cr.InputPerMTok, cr.OutputPerMTok, cr.CacheReadPerMTok, cr.CacheWrite5mPerMTok, cr.CacheWrite1hPerMTok} {
+		if math.IsNaN(n) || math.IsInf(n, 0) || n < 0 || n >= float64(math.MaxInt64)/1_000_000 {
+			return false
+		}
+	}
+	if !configRateValues(cr).valid() {
+		return false
+	}
+	if cr.LongContext == nil {
+		return cr.ShortContextLimit == 0
+	}
+	long := cr.LongContext
+	return cr.ShortContextLimit > 0 && !cr.Free && !long.Free && !long.Unpriced() &&
+		long.ShortContextLimit == 0 && long.LongContext == nil && long.valid()
+}
+
+func configRateValues(cr ConfigRate) Rate {
+	r := Rate{
+		InputPerMTok: usdToMicros(cr.InputPerMTok), OutputPerMTok: usdToMicros(cr.OutputPerMTok),
+		CacheReadPerMTok:    derivedRate(cr.CacheReadPerMTok, cr.InputPerMTok, cacheReadRatio),
+		CacheWrite5mPerMTok: derivedRate(cr.CacheWrite5mPerMTok, cr.InputPerMTok, cacheWrite5mRatio),
+		CacheWrite1hPerMTok: derivedRate(cr.CacheWrite1hPerMTok, cr.InputPerMTok, cacheWrite1hRatio),
+	}
+	if cr.CacheWriteUnsupported {
+		r.CacheWrite5mPerMTok, r.CacheWrite1hPerMTok, r.CacheWriteUnsupported = 0, 0, true
+	}
+	return r
 }
 
 // Cache rates are fixed multiples of the input rate on every provider that
@@ -74,16 +110,18 @@ func FromConfigVersioned(onMissing, version string, overrides map[string]map[str
 	rates := Bundled()
 	for provider, models := range overrides {
 		for model, cr := range models {
-			if cr.Unpriced() {
+			if cr.Unpriced() || !cr.valid() {
+				// An invalid exact override must not fall through to an older
+				// bundled or region-stripped row after a UI write/hot reload.
+				rates[Key{provider, model}] = Rate{ShortContextLimit: -1}
 				continue
 			}
-			rates[Key{Provider: provider, Model: model}] = Rate{
-				InputPerMTok:        usdToMicros(cr.InputPerMTok),
-				OutputPerMTok:       usdToMicros(cr.OutputPerMTok),
-				CacheReadPerMTok:    derivedRate(cr.CacheReadPerMTok, cr.InputPerMTok, cacheReadRatio),
-				CacheWrite5mPerMTok: derivedRate(cr.CacheWrite5mPerMTok, cr.InputPerMTok, cacheWrite5mRatio),
-				CacheWrite1hPerMTok: derivedRate(cr.CacheWrite1hPerMTok, cr.InputPerMTok, cacheWrite1hRatio),
+			r := configRateValues(cr)
+			if cr.LongContext != nil {
+				long := configRateValues(*cr.LongContext)
+				r.ShortContextLimit, r.LongContext = cr.ShortContextLimit, &long
 			}
+			rates[Key{Provider: provider, Model: model}] = r
 		}
 	}
 	om := OnMissingAllow

@@ -1,0 +1,129 @@
+{
+  "verified_at_utc": "2026-10-07T11:39:04.380494+00:00",
+  "host": "https://inferplane.atomai.click",
+  "issue": "Valid SSO bootstrap fanned out three API calls against the deployed JWT signature-check in-flight limiter.",
+  "fix": "Session-fenced client queue for OIDC API reads and writes; no auth retry, no verifier change.",
+  "previous_release": "releases/5f8a9a9349c5dcec9c3acfb4",
+  "release": "releases/2cafdb1ae2073e2358d71ac2",
+  "distribution_status": "Deployed",
+  "stack_status": "UPDATE_COMPLETE",
+  "invalidation_status": "Completed",
+  "changed_existing_resources": [
+    {
+      "logical_id": "Distribution",
+      "replacement": false
+    }
+  ],
+  "browser_replay_before": {
+    "deployed_assets": true,
+    "token_and_all_protected_apis_synthetic": true,
+    "actual_human_login_tested": false,
+    "expected_old_failure": true,
+    "jwks_inflight_denials": 2,
+    "max_accepted_api_inflight": 1,
+    "statuses": [
+      401,
+      401,
+      200
+    ],
+    "pkce_cleared": true,
+    "no_js_errors": true
+  },
+  "browser_replay_after": {
+    "deployed_assets": true,
+    "token_and_all_protected_apis_synthetic": true,
+    "actual_human_login_tested": false,
+    "expected_old_failure": false,
+    "jwks_inflight_denials": 0,
+    "max_accepted_api_inflight": 1,
+    "statuses": [
+      200,
+      200,
+      200,
+      200,
+      200,
+      200
+    ],
+    "pkce_cleared": true,
+    "no_js_errors": true
+  },
+  "deployed_read_and_asset_checks": {
+    "host": "https://inferplane.atomai.click",
+    "release": "releases/2cafdb1ae2073e2358d71ac2",
+    "assets": {
+      "/ui/": {
+        "status": 200,
+        "sha256": "aaa9e234c49b742bc71c101a4db014de78f6e4b931e785ef30971100d292c639",
+        "no_store": true,
+        "csp_preserved": true
+      },
+      "/ui/index.html": {
+        "status": 200,
+        "sha256": "aaa9e234c49b742bc71c101a4db014de78f6e4b931e785ef30971100d292c639",
+        "no_store": true,
+        "csp_preserved": true
+      },
+      "/ui/app.js": {
+        "status": 200,
+        "sha256": "f3c53b907ac1872d4d9eb2a05f8aa99ff9ce3695b20afdccdcbf2970c4bba960",
+        "no_store": true,
+        "csp_preserved": true
+      },
+      "/ui/style.css": {
+        "status": 200,
+        "sha256": "a7706a0ab23ce9d3189d27265a4280105d6b0646cc8c99dae6ef1113d58faf9a",
+        "no_store": true,
+        "csp_preserved": true
+      }
+    },
+    "protected_unauthenticated": {
+      "/v1alpha1/usage": 401,
+      "/v1alpha1/policies": 401,
+      "/v1alpha1/dataplanes": 401
+    },
+    "authenticated_reads": {
+      "/v1alpha1/usage": 200,
+      "/v1alpha1/policies": 200,
+      "/v1alpha1/dataplanes": 200
+    },
+    "browser": {
+      "actual_aws_apis": true,
+      "read_login": true,
+      "write_controls_disabled_in_read_session": true,
+      "all_views": true,
+      "mobile_390_all_views": true,
+      "disconnect_clears_data": true,
+      "sso_authorization_redirect": true,
+      "no_csp_or_js_errors": true
+    },
+    "root_redirect": {
+      "status": 302,
+      "location": "/ui/"
+    },
+    "s3_anonymous": 403,
+    "sso_config_available": true,
+    "server_policy_store_writable": false
+  },
+  "preserved": {
+    "only_static_origin_prefix_changed": true,
+    "cp_service_and_tasks_unchanged": true,
+    "cognito_configuration_unchanged": true,
+    "api_auth_and_group_verification_unchanged": true
+  },
+  "tests": {
+    "cold_real_signature_jwks_group_verifier": true,
+    "shipped_sso_callback_and_six_read_200_responses": true,
+    "pkce_state_nonce_adversarial_checks": true,
+    "denied_tokens_remain_fail_closed_and_not_retried": true,
+    "queued_old_sessions_not_sent_after_disconnect": true,
+    "two_static_binary_builds": true,
+    "full_go_race_and_vet": true,
+    "harness_passed": 69
+  },
+  "limits": [
+    "Live Cognito human sign-in completion was not performed; user should retry with a fresh page.",
+    "Browser replay uses synthetic token exchange and protected API responses; no synthetic JWT is sent to the real CP.",
+    "Separate tabs/clients can still contend at the existing server-wide verifier limiter.",
+    "Live policy mutation was not performed; the existing file-authoritative store remains read-only."
+  ]
+}

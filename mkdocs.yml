@@ -95,6 +95,8 @@ plugins:
             Credential brokering: 자격 증명 중개
             Console SSO: 콘솔 SSO
             Operations: 운영
+            Control-plane dashboard: Control plane 대시보드
+            Dashboard on CloudFront: CloudFront 대시보드 배포
             Deploy with containers: 컨테이너 배포
             Monitor & troubleshoot: 모니터링과 문제 해결
             Upgrade & recover: 업그레이드와 복구
@@ -155,6 +157,9 @@ nav:
       - Credential brokering: runbooks/credential-brokering.md
       - Console SSO: runbooks/inferplaned-console-sso.md
   - Operations:
+      - Control-plane dashboard: runbooks/inferplaned-dashboard.md
+      - Dashboard on CloudFront: runbooks/inferplaned-cloudfront.md
+      - Persisted budget settings on ECS: runbooks/inferplaned-policy-store.md
       - Deploy with containers: operations/deployment.md
       - Monitor & troubleshoot: operations/observability.md
       - Upgrade & recover: operations/recovery.md
