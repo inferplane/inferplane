@@ -110,9 +110,9 @@ curl -fsS -X POST -H "Authorization: Bearer $INFERPLANED_POLICY_WRITE_TOKEN" \
 
 Import REPLACES the whole set. Every document missing from the file is
 deleted. A `409` means policies changed after the preview; re-run the preview.
-An empty file needs `allow_empty=true`. Files are capped at 64 MiB; the estimated
-full sync response (`2 × set JSON bytes + total rules × 1024 + 512 KiB`) must fit
-the 8 MiB data-plane decode bound, or import returns `400`. A `500`
+An empty file needs `allow_empty=true`. The YAML transport cap is 64 MiB; the measured
+worst-case sync response for the set (both sync modes, request-driven authority
+items included) must fit the 8 MiB data-plane decode bound, or import returns `400`. A `500`
 saying "committed but not applied" means the store holds the new set; re-run a
 dry run to confirm what is distributed. The console offers the same flow under
 Policies → Export YAML / Import (restore).

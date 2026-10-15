@@ -100,6 +100,6 @@ curl -fsS -X POST -H "Authorization: Bearer $INFERPLANED_POLICY_WRITE_TOKEN" \
   --data-binary @policies.yaml "$CP/v1alpha1/config/import?expected_generation=$GEN"
 ```
 
-가져오기는 정책 세트 전체를 교체합니다. 파일에 없는 문서는 삭제됩니다. `409`가 나오면 미리보기 이후 정책이 바뀐 것이니 미리보기를 다시 실행하세요. 빈 파일은 `allow_empty=true`가 필요합니다. 파일은 최대 64 MiB이며, 전체 sync 응답의 추정 크기(`세트 JSON 바이트 × 2 + 전체 규칙 수 × 1024 + 512 KiB`)가 데이터 플레인 디코딩 한도인 8 MiB를 초과하면 `400`으로 거부됩니다. "committed but not applied" `500`이 나오면 store에는 이미 새 세트가 반영된 것이니, 미리보기를 다시 실행해 실제로 배포 중인 세트를 확인하세요. 콘솔의 Policies → Export YAML / Import (restore)에서도 같은 흐름을 제공합니다.
+가져오기는 정책 세트 전체를 교체합니다. 파일에 없는 문서는 삭제됩니다. `409`가 나오면 미리보기 이후 정책이 바뀐 것이니 미리보기를 다시 실행하세요. 빈 파일은 `allow_empty=true`가 필요합니다. YAML 전송 한도는 64 MiB이며, 두 sync 모드와 요청에 따른 authority 항목을 포함해 측정한 정책 세트의 최악의 경우 sync 응답 크기가 데이터 플레인 디코딩 한도인 8 MiB를 초과하면 `400`으로 거부됩니다. "committed but not applied" `500`이 나오면 store에는 이미 새 세트가 반영된 것이니, 미리보기를 다시 실행해 실제로 배포 중인 세트를 확인하세요. 콘솔의 Policies → Export YAML / Import (restore)에서도 같은 흐름을 제공합니다.
 
 이 변경 이전에 준비한 배포에서는 `/v1alpha1/config/*` 요청이 여전히 기존 CP origin으로 갑니다. `prepare-policy-controlplane.py`는 이미 policy origin이 있으면 실행을 거부하므로, `/v1alpha1/config/*` behavior(policy-cp origin, `forward-auth` origin request policy)를 검토를 거쳐 수동으로 추가하세요. 그다음 policy/SSO/config 경로 6개를 무효화합니다.

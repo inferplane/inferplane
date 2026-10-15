@@ -1,17 +1,25 @@
 package controlplane
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"sigs.k8s.io/yaml"
+
+	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
 	"github.com/inferplane/inferplane/internal/identity"
 	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/policystore"
@@ -603,35 +611,212 @@ func TestImportRefusesUndistributableSet(t *testing.T) {
 	importMaxSyncBytes = 256
 	t.Cleanup(func() { importMaxSyncBytes = prev })
 	resp, b := postImport(t, ts, "w", "?dry_run=true", cpPolicyYAML+"---\n"+importDocB)
-	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(b), "sync") {
-		t.Fatalf("oversized set: %d %s, want 400 naming the sync bound", resp.StatusCode, b)
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(b), "worst-case sync") {
+		t.Fatalf("oversized set: %d %s, want 400 naming the worst-case sync bound", resp.StatusCode, b)
 	}
 	if fs.replaceCalls != 0 {
 		t.Fatal("undistributable set reached the store")
 	}
 }
 
-func TestImportSizeEstimateCountsRules(t *testing.T) {
+func TestImportRefusesRepeatedLongIdentifiers(t *testing.T) {
 	_, ts, fs := importServer(t)
-	// Three rules, including two non-budget rules: every kind contributes
-	// to the conservative estimate.
-	bundle := cpPolicyYAML + "---\n" + importDocB
-	docs, err := policy.ParseWireDocs([]byte(bundle))
+	doc := v1alpha1.GovernancePolicy{
+		TypeMeta: v1alpha1.TypeMeta{APIVersion: v1alpha1.APIVersion, Kind: v1alpha1.KindGovernancePolicy},
+		Metadata: v1alpha1.ObjectMeta{Name: "repeated-long-identifiers"},
+		Spec: v1alpha1.GovernancePolicySpec{
+			// No charset restriction: these bytes expand sixfold in JSON
+			// and the team is repeated in every lease and authority budget.
+			Subject: v1alpha1.Subject{Team: strings.Repeat("<&", 32<<10)},
+		},
+	}
+	for i := 0; i < 256; i++ {
+		doc.Spec.Rules = append(doc.Spec.Rules, v1alpha1.Rule{
+			Name: fmt.Sprintf("cap-%03d", i), FailurePolicy: v1alpha1.FailClosed,
+			Budget: &v1alpha1.BudgetRule{
+				LimitMilliUSD: 100, HardCap: true,
+				Lease: v1alpha1.LeaseSpec{GrantMilliUSD: 10, RenewInterval: "5s"},
+			},
+		})
+	}
+	if _, err := policy.FromV1Alpha1(&doc); err != nil {
+		t.Fatalf("long-identifier fixture must be valid: %v", err)
+	}
+	bundle, err := yaml.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	setJSON, err := json.Marshal(docs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	prev := importMaxSyncBytes
-	importMaxSyncBytes = 2*len(setJSON) + importEnvelopeFixedBytes + 2*importEnvelopeBytesPerRule
-	t.Cleanup(func() { importMaxSyncBytes = prev })
-	resp, b := postImport(t, ts, "w", "?dry_run=true", bundle)
-	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(b), "sync") {
-		t.Fatalf("per-rule estimate: %d %s, want 400 naming the sync bound", resp.StatusCode, b)
+	resp, b := postImport(t, ts, "w", "?dry_run=true", string(bundle))
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(b), "worst-case sync") {
+		t.Fatalf("repeated long identifiers: %d %s, want 400 naming the worst-case sync bound", resp.StatusCode, b)
 	}
 	if fs.replaceCalls != 0 {
 		t.Fatal("undistributable set reached the store")
+	}
+}
+
+func worstCaseSyncFixture(t *testing.T) []v1alpha1.GovernancePolicy {
+	t.Helper()
+	doc := v1alpha1.GovernancePolicy{
+		TypeMeta: v1alpha1.TypeMeta{APIVersion: v1alpha1.APIVersion, Kind: v1alpha1.KindGovernancePolicy},
+		Metadata: v1alpha1.ObjectMeta{Name: strings.Repeat("policy<&", 32), Generation: 1},
+		Spec: v1alpha1.GovernancePolicySpec{
+			Subject: v1alpha1.Subject{Team: strings.Repeat("team<&", 128)},
+			Rules: []v1alpha1.Rule{
+				{
+					Name: strings.Repeat("monthly-cap<&", 32), FailurePolicy: v1alpha1.FailClosed,
+					Budget: &v1alpha1.BudgetRule{
+						LimitMilliUSD: 100, HardCap: true,
+						Lease: v1alpha1.LeaseSpec{GrantMilliUSD: 10, RenewInterval: "5s"},
+					},
+				},
+				{
+					Name: strings.Repeat("daily-cap<&", 32), FailurePolicy: v1alpha1.FailClosed,
+					Budget: &v1alpha1.BudgetRule{
+						LimitMilliUSD: 100, HardCap: true, Period: v1alpha1.PeriodCalendarDay,
+						Lease: v1alpha1.LeaseSpec{GrantMilliUSD: 10, RenewInterval: "5s"},
+					},
+				},
+				{
+					Name: strings.Repeat("routing<&", 32), FailurePolicy: v1alpha1.FailOpen,
+					Routing: &v1alpha1.RoutingRule{BudgetTiers: &v1alpha1.BudgetTiersRule{
+						BudgetRef: strings.Repeat("monthly-cap<&", 32), EnforceTargets: true,
+						Tiers: []v1alpha1.BudgetTier{
+							{ThresholdPercent: 80, Substitute: map[string]string{
+								strings.Repeat("premium-a<&", 32): strings.Repeat("economy-a<&", 32),
+								strings.Repeat("premium-b<&", 32): strings.Repeat("economy-b<&", 32),
+								strings.Repeat("premium-c<&", 32): strings.Repeat("economy-c<&", 32),
+							}},
+							{ThresholdPercent: 95, Substitute: map[string]string{"premium": "economy"}},
+						},
+					}},
+				},
+			},
+		},
+	}
+	if _, err := policy.FromV1Alpha1(&doc); err != nil {
+		t.Fatalf("sync calibration fixture must be valid: %v", err)
+	}
+	return []v1alpha1.GovernancePolicy{doc}
+}
+
+func TestWorstCaseSyncBoundsRealHeartbeat(t *testing.T) {
+	docs := worstCaseSyncFixture(t)
+	raw, err := yaml.Marshal(docs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "p.yaml"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer("t", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Hold the clock within one window so the latch check cannot race midnight.
+	now := time.Now()
+	s.now = func() time.Time { return now }
+	mux := http.NewServeMux()
+	s.Mount(mux)
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	active := doSync(t, ts.URL, "t", policy.SyncRequest{
+		Dataplane: "dp", APIVersions: policy.SupportedAPIVersions,
+		Reports: []policy.ConsumptionReport{{
+			Policy: docs[0].Metadata.Name, Rule: docs[0].Spec.Rules[0].Name,
+			Team: docs[0].Spec.Subject.Team, SpentMicroUSD: 80_000,
+		}},
+	})
+	if len(active.ActiveTiers) != 1 || active.ActiveTiers[0].ThresholdPercent != 80 || len(active.ActiveTiers[0].Substitute) != 3 {
+		t.Fatalf("consumption did not activate the largest tier: %+v", active.ActiveTiers)
+	}
+	// Drop spend below the activation threshold: the measured response must
+	// still carry the latched tier, plus the full policy set and leases.
+	requestBody, err := json.Marshal(policy.SyncRequest{
+		Dataplane: "dp", APIVersions: policy.SupportedAPIVersions,
+		Reports: []policy.ConsumptionReport{{
+			Policy: docs[0].Metadata.Name, Rule: docs[0].Spec.Rules[0].Name,
+			Team: docs[0].Spec.Subject.Team, SpentMicroUSD: 1,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/v1alpha1/sync", bytes.NewReader(requestBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer t")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sync status %d: %s", resp.StatusCode, body)
+	}
+	var real policy.SyncResponse
+	if err := json.Unmarshal(body, &real); err != nil {
+		t.Fatal(err)
+	}
+	if len(real.Policies) != 1 || len(real.Leases) != 2 || len(real.ActiveTiers) != 1 ||
+		real.ActiveTiers[0].ThresholdPercent != 80 || len(real.ActiveTiers[0].Substitute) != 3 {
+		t.Fatalf("calibration must include policies, leases and the latched tier: %+v", real)
+	}
+	bound, err := worstCaseSyncBytes(docs, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("memory heartbeat: measured=%d bytes, worst-case sync=%d bytes", len(body), bound)
+	if len(body) > bound {
+		t.Fatalf("real heartbeat %d bytes exceeds worst-case sync %d bytes", len(body), bound)
+	}
+}
+
+func TestWorstCaseSyncCoversAuthorityEnvelope(t *testing.T) {
+	docs := worstCaseSyncFixture(t)
+	now := time.Now()
+	budgets, err := policy.AuthorityBudgets(docs, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(budgets) != 2 {
+		t.Fatalf("calibration must include two authority budgets, got %d", len(budgets))
+	}
+	generation := policy.GenerationOf(docs)
+	env := policy.SyncResponse{
+		Policies: docs, Generation: generation, SyncIntervalSeconds: 10,
+		Authority: &policy.AuthorityResponse{
+			AuthorityID: strings.Repeat("f", 64),
+			Protocol:    policy.AuthorityProtocol, ServerTime: now, Budgets: budgets,
+			Generation: generation, Policies: docs,
+		},
+	}
+	for i := 0; i < 1024; i++ {
+		b := budgets[i%len(budgets)]
+		env.Authority.Grants = append(env.Authority.Grants, policy.AuthorityGrant{
+			ID: fmt.Sprintf("%064x", i), RequestID: fmt.Sprintf("%064x", i+1024),
+			Key: b.Key, Revision: b.Revision, WindowID: b.WindowID,
+			Amount: math.MaxInt64, ExpiresAt: now,
+		})
+	}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := worstCaseSyncBytes(docs, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("authority envelope: measured=%d bytes, worst-case sync=%d bytes (1024 grants)", len(raw), bound)
+	if len(raw) > bound {
+		t.Fatalf("authority envelope %d bytes exceeds worst-case sync %d bytes", len(raw), bound)
 	}
 }
