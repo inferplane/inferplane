@@ -811,6 +811,44 @@ func TestWorstCaseSyncBoundsRealHeartbeat(t *testing.T) {
 	}
 }
 
+func TestWorstCaseActiveTierCountsThresholdWidth(t *testing.T) {
+	docs := worstCaseSyncFixture(t)
+	doc := &docs[0]
+	for i := range doc.Spec.Rules {
+		rule := &doc.Spec.Rules[i]
+		if rule.Routing == nil || rule.Routing.BudgetTiers == nil {
+			continue
+		}
+		bt := rule.Routing.BudgetTiers
+		substitute := map[string]string{"premium": "economy"}
+		bt.Tiers = []v1alpha1.BudgetTier{
+			{ThresholdPercent: 1, Substitute: substitute},
+			{ThresholdPercent: 100, Substitute: substitute},
+		}
+		active := policy.ActiveTier{
+			Policy: doc.Metadata.Name, Rule: rule.Name, BudgetRef: bt.BudgetRef,
+			Team: doc.Spec.Subject.Team, User: doc.Spec.Subject.User,
+			ThresholdPercent: 100, Substitute: substitute, EnforceTargets: bt.EnforceTargets,
+		}
+		raw, err := json.Marshal(active)
+		if err != nil {
+			t.Fatal(err)
+		}
+		size, exceeded, err := worstCaseSyncSize(docs, time.Now(), importMaxSyncBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if exceeded {
+			t.Fatalf("threshold-width fixture exceeded sync bound: %+v", size)
+		}
+		if size.ActiveTiers < len(raw)+1 {
+			t.Fatalf("active tier bound %d bytes, want >= %d bytes for threshold 100", size.ActiveTiers, len(raw)+1)
+		}
+		return
+	}
+	t.Fatal("fixture must include a budgetTiers rule")
+}
+
 func TestWorstCaseSyncCoversAuthorityEnvelope(t *testing.T) {
 	docs := worstCaseSyncFixture(t)
 	now := time.Date(2026, 10, 15, 12, 0, 0, 123456789, time.UTC)
@@ -860,6 +898,90 @@ func TestWorstCaseSyncCoversAuthorityEnvelope(t *testing.T) {
 	t.Logf("authority envelope: measured=%d bytes, fixed bound=%d bytes, total=%d bytes", len(raw), fixed, size.Total)
 	if len(raw) > fixed {
 		t.Fatalf("authority envelope %d bytes exceeds fixed sync bound %d bytes", len(raw), fixed)
+	}
+	largestBudget := budgets[0]
+	largestKey := budgets[0].Key
+	for _, b := range budgets[1:] {
+		if len(b.Key)+len(b.Revision)+len(b.WindowID) > len(largestBudget.Key)+len(largestBudget.Revision)+len(largestBudget.WindowID) {
+			largestBudget = b
+		}
+		if len(b.Key) > len(largestKey) {
+			largestKey = b.Key
+		}
+	}
+	maxDigest := strings.Repeat("f", 64)
+	grant := policy.AuthorityGrant{
+		ID: maxDigest, RequestID: maxDigest,
+		Key: largestBudget.Key, Revision: largestBudget.Revision, WindowID: largestBudget.WindowID,
+		Amount: math.MaxInt64, ExpiresAt: worstCaseSyncTimestamp(),
+	}
+	ack := policy.AuthorityAck{
+		Instance: maxDigest, ID: maxDigest, Sequence: math.MaxInt64,
+	}
+	denial := policy.AuthorityDenial{
+		RequestID: maxDigest, Key: largestKey, Reason: strings.Repeat("x", 512),
+	}
+	for _, item := range []struct {
+		name  string
+		value any
+	}{
+		{"grant", grant},
+		{"ack", ack},
+		{"denial", denial},
+	} {
+		raw, err := json.Marshal(item.value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(raw)+1 > size.AuthorityItemMax {
+			t.Errorf("%s %d bytes exceeds authority item maximum %d bytes", item.name, len(raw)+1, size.AuthorityItemMax)
+		}
+	}
+	if size.AuthorityItems != 1024*size.AuthorityItemMax {
+		t.Errorf("authority items bound %d bytes, want %d", size.AuthorityItems, 1024*size.AuthorityItemMax)
+	}
+	if size.RequestEcho != 1<<20 {
+		t.Errorf("request echo bound %d bytes, want %d", size.RequestEcho, 1<<20)
+	}
+	if size.RequestDriven != size.AuthorityItems+size.RequestEcho {
+		t.Errorf("request-driven bound %d bytes, want %d", size.RequestDriven, size.AuthorityItems+size.RequestEcho)
+	}
+	skeleton := policy.SyncResponse{
+		IdentityFingerprint:      fingerprint,
+		IdentityPoliciesComplete: true,
+		Generation:               maxDigest,
+		Policies:                 []v1alpha1.GovernancePolicy{},
+		Leases:                   []policy.LeaseGrant{},
+		ActiveTiers:              []policy.ActiveTier{},
+		SyncIntervalSeconds:      math.MaxInt32,
+		Authority: &policy.AuthorityResponse{
+			IdentityFingerprint: fingerprint,
+			AuthorityID:         maxDigest,
+			Protocol:            policy.AuthorityProtocol,
+			ServerTime:          worstCaseSyncTimestamp(),
+			Generation:          maxDigest,
+			Policies:            []v1alpha1.GovernancePolicy{},
+			Budgets:             []policy.AuthorityBudget{},
+			Grants:              []policy.AuthorityGrant{grant},
+			ReportAcks:          []policy.AuthorityAck{ack},
+			MeterAcks:           []policy.AuthorityAck{ack},
+			Denied:              []policy.AuthorityDenial{denial},
+		},
+	}
+	raw, err = json.Marshal(skeleton)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scalars := len(raw)
+	for _, item := range []any{grant, ack, ack, denial} {
+		raw, err := json.Marshal(item)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scalars -= len(raw)
+	}
+	if scalars > size.Scalars+4 {
+		t.Errorf("authority skeleton %d bytes exceeds scalar bound plus four separators %d bytes", scalars, size.Scalars+4)
 	}
 	var grants []policy.AuthorityGrant
 	var denials []policy.AuthorityDenial

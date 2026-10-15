@@ -309,6 +309,7 @@ func (s *Server) ApplyImport(ctx context.Context, body []byte, opts ImportOption
 
 type syncSizeBreakdown struct {
 	Scalars, Policies, AuthorityPolicies, Leases, ActiveTiers, Budgets, RequestDriven, Total int
+	AuthorityItems, RequestEcho, AuthorityItemMax                                            int
 }
 
 // worstCaseSyncTimestamp uses the longest JSON-valid RFC3339Nano representation,
@@ -406,22 +407,22 @@ func worstCaseSyncSize(docs []v1alpha1.GovernancePolicy, now time.Time, limit in
 				continue
 			}
 			bt := r.Routing.BudgetTiers
-			var largest policy.BudgetTier
+			var active policy.ActiveTier
 			largestBytes := 0
 			for _, tier := range bt.Tiers {
-				raw, err := json.Marshal(tier.Substitute)
+				candidate := policy.ActiveTier{
+					Policy: p.Name, Rule: r.Name, BudgetRef: bt.BudgetRef,
+					Team: p.Subject.Team, User: p.Subject.User,
+					ThresholdPercent: tier.ThresholdPercent, Substitute: tier.Substitute,
+					EnforceTargets: bt.EnforceTargets,
+				}
+				raw, err := json.Marshal(candidate)
 				if err != nil {
-					return size, false, fmt.Errorf("controlplane: encode tier substitute: %w", err)
+					return size, false, fmt.Errorf("controlplane: encode active tier: %w", err)
 				}
 				if len(raw) > largestBytes {
-					largest, largestBytes = tier, len(raw)
+					active, largestBytes = candidate, len(raw)
 				}
-			}
-			active := policy.ActiveTier{
-				Policy: p.Name, Rule: r.Name, BudgetRef: bt.BudgetRef,
-				Team: p.Subject.Team, User: p.Subject.User,
-				ThresholdPercent: largest.ThresholdPercent, Substitute: largest.Substitute,
-				EnforceTargets: bt.EnforceTargets,
 			}
 			if exceeded, err := measure(&size.ActiveTiers, "active tier", active); exceeded || err != nil {
 				return size, exceeded, err
@@ -465,7 +466,10 @@ func worstCaseSyncSize(docs []v1alpha1.GovernancePolicy, now time.Time, limit in
 		authorityItemCap     = 1024
 		syncRequestEchoBytes = 1 << 20
 	)
-	requestDriven := int64(authorityItemCap)*int64(maxItem) + syncRequestEchoBytes
+	size.AuthorityItemMax = maxItem
+	size.AuthorityItems = authorityItemCap * maxItem
+	size.RequestEcho = syncRequestEchoBytes
+	requestDriven := int64(size.AuthorityItems) + int64(size.RequestEcho)
 	exceeded, err := add(&size.RequestDriven, requestDriven)
 	return size, exceeded, err
 }
