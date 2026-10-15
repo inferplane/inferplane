@@ -1,5 +1,5 @@
 // Data-free shell; all API data is bearer gated. Both credentials live only in
-// this closure. The only persisted values are ADR-037's short-lived PKCE keys.
+// this closure. Storage holds PKCE values and a credential-free SSO resume marker.
 (function () {
   "use strict";
   const $ = id => document.getElementById(id);
@@ -16,6 +16,8 @@
   let session = 0, refreshID = 0, modelID = 0, activeView = "overview";
   let controller = new AbortController();
   let oidcRequests = Promise.resolve();
+  const ssoMaxSessionMS = 8 * 60 * 60 * 1000;
+  let ssoRuntime = null, ssoRenewal = null, ssoTimer = null;
   let usage = null, fleet = null, policies = null, errors = {};
   let userUsage = null, scopedUserUsage = null, userRequestID = 0, userModelID = 0, userModelDegraded = false;
   let appliedRange = null, pendingChange = null, dirty = false;
@@ -111,12 +113,16 @@
   }
 
   async function request(path, { method = "GET", body, write = false, byteLimit = 0 } = {}) {
-    const auth = write ? writeToken || token : token;
     const sid = session, signal = controller.signal;
     async function send() {
       if (sid !== session || signal.aborted) {
         const err = Error("Request canceled after disconnect."); err.name = "AbortError"; throw err;
       }
+      if (ssoSession) await ensureSSOToken(sid);
+      if (sid !== session || signal.aborted) {
+        const err = Error("Request canceled after disconnect."); err.name = "AbortError"; throw err;
+      }
+      const auth = write ? writeToken || token : token;
       const resp = await fetch(path, {
         method, signal, cache: "no-store", credentials: "omit", redirect: "error",
         headers: { ...(auth ? { Authorization: "Bearer " + auth } : {}), ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
@@ -226,6 +232,7 @@
   }
   function lock() {
     session++; refreshID++; modelID++; controller.abort(); controller = new AbortController();
+    clearSSOSession();
     oidcRequests = Promise.resolve();
     token = writeToken = ""; connected = ssoSession = false;
     $("token").value = $("write-token").value = "";
@@ -1427,6 +1434,99 @@
   $("since").value = today.slice(0, 8) + "01"; $("until").value = today;
   /* ---------- console SSO (ADR-037, ported from mayu's adminui) ---------- */
 
+  function readSSOMarker() {
+    const raw = sessionStorage.getItem("ip_sso_session");
+    if (!raw) return null;
+    try {
+      const saved = JSON.parse(raw);
+      if (!saved || Object.keys(saved).sort().join(",") !== "expiresAt,pending"
+          || !Number.isSafeInteger(saved.expiresAt) || typeof saved.pending !== "boolean"
+          || saved.expiresAt <= Date.now() || saved.expiresAt > Date.now() + ssoMaxSessionMS) throw Error();
+      return saved;
+    } catch {
+      sessionStorage.removeItem("ip_sso_session");
+      return null;
+    }
+  }
+
+  function clearSSOSession() {
+    if (ssoTimer !== null) clearTimeout(ssoTimer);
+    ssoTimer = ssoRuntime = ssoRenewal = null;
+    sessionStorage.removeItem("ip_sso_session");
+    clearSSOState();
+  }
+
+  function scheduleSSORenewal(sid) {
+    if (ssoTimer !== null) clearTimeout(ssoTimer);
+    if (!ssoRuntime || sid !== session) return;
+    const tokenExpiry = ssoRuntime.claims.exp * 1000;
+    const delay = Math.max(1000, Math.min(ssoRuntime.expiresAt - Date.now(),
+      tokenExpiry - Date.now() - (ssoRuntime.refreshToken ? 60000 : 0), 2147483647));
+    ssoTimer = setTimeout(async () => {
+      if (sid !== session || !ssoRuntime) return;
+      try {
+        if (!ssoRuntime.refreshToken) throw Error("SSO session expired.");
+        await ensureSSOToken(sid);
+      } catch (e) {
+        if (sid === session) { lock(); setError("SSO session expired. Sign in again."); }
+      }
+    }, delay);
+  }
+
+  async function ensureSSOToken(sid) {
+    const current = ssoRuntime;
+    if (!current || sid !== session) return;
+    if (Date.now() >= current.expiresAt) {
+      lock(); throw Error("SSO session expired. Sign in again.");
+    }
+    if (current.claims.exp * 1000 > Date.now() + 60000) return;
+    if (!current.refreshToken) {
+      if (current.claims.exp * 1000 > Date.now()) return;
+      lock(); throw Error("SSO session expired. Sign in again.");
+    }
+    if (ssoRenewal) return ssoRenewal;
+    const pending = (async () => {
+      const parentSignal = controller.signal, renewalController = new AbortController();
+      const abortRenewal = () => renewalController.abort();
+      parentSignal.addEventListener("abort", abortRenewal, { once: true });
+      const timeout = setTimeout(abortRenewal, 15000);
+      try {
+        const response = await fetch(current.endpoint, {
+          method: "POST", credentials: "omit", cache: "no-store", redirect: "error",
+          signal: renewalController.signal,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ grant_type: "refresh_token", client_id: current.config.client_id,
+            refresh_token: current.refreshToken }).toString(),
+        });
+        if (!response.ok) throw Error("SSO renewal refused.");
+        const tokens = await response.json();
+        if (typeof tokens.id_token !== "string") throw Error("Invalid SSO renewal.");
+        const next = decodeIDTokenPayload(tokens.id_token);
+        // Resource servers still verify signatures and permissions on every call.
+        // Renewal must also remain bound to the identity admitted at sign-in.
+        if (!Number.isSafeInteger(next.exp) || next.exp * 1000 <= Date.now()
+            || typeof current.claims.sub !== "string" || !current.claims.sub
+            || next.sub !== current.claims.sub || next.iss !== current.claims.iss
+            || JSON.stringify(next.aud) !== JSON.stringify(current.claims.aud)
+            || next.token_use !== current.claims.token_use) throw Error("SSO identity changed during renewal.");
+        if (sid !== session || ssoRuntime !== current) return;
+        token = tokens.id_token;
+        current.claims = next;
+        if (typeof tokens.refresh_token === "string" && tokens.refresh_token) current.refreshToken = tokens.refresh_token;
+        scheduleSSORenewal(sid);
+      } catch (e) {
+        if (sid === session && ssoRuntime === current) { lock(); setError("SSO session expired. Sign in again."); }
+        throw Error("SSO session expired. Sign in again.");
+      } finally {
+        clearTimeout(timeout);
+        parentSignal.removeEventListener("abort", abortRenewal);
+      }
+    })();
+    ssoRenewal = pending;
+    try { return await pending; }
+    finally { if (ssoRenewal === pending) ssoRenewal = null; }
+  }
+
   function clearSSOState() {
     sessionStorage.removeItem("ip_sso_verifier");
     sessionStorage.removeItem("ip_sso_state");
@@ -1481,8 +1581,10 @@
     return discovery;
   }
 
-  async function startSSO(config) {
+  async function startSSO(config, resume = false) {
     try {
+      const saved = resume ? readSSOMarker() : null;
+      const expiresAt = saved ? saved.expiresAt : Date.now() + ssoMaxSessionMS;
       const discovery = await discoverSSO(config.issuer);
       const verifier = randomBase64url();
       const state = randomBase64url();
@@ -1492,6 +1594,7 @@
       sessionStorage.setItem("ip_sso_verifier", verifier);
       sessionStorage.setItem("ip_sso_state", state);
       sessionStorage.setItem("ip_sso_nonce", nonce);
+      sessionStorage.setItem("ip_sso_session", JSON.stringify({ expiresAt, pending: true }));
 
       const target = new URL(discovery.authorization_endpoint);
       const query = new URLSearchParams({
@@ -1508,6 +1611,7 @@
       location.assign(target.toString());
     } catch {
       clearSSOState();
+      sessionStorage.removeItem("ip_sso_session");
       setError("Unable to start SSO sign-in.");
     }
   }
@@ -1522,6 +1626,8 @@
   }
 
   async function handleSSOCallback(params, configPromise) {
+    const expectedSession = session;
+    const expectedPKCEState = sessionStorage.getItem("ip_sso_state");
     const hasCode = params.has("code");
     const hasError = params.has("error");
     const hasState = params.has("state");
@@ -1571,6 +1677,7 @@
       });
       if (!tokenResp.ok) throw new Error("SSO token exchange failed");
       const tokens = await tokenResp.json();
+      if (expectedSession !== session) return;
       if (!tokens.id_token) throw new Error("SSO token response did not include an ID token");
 
       const payload = decodeIDTokenPayload(tokens.id_token);
@@ -1578,11 +1685,25 @@
         throw new Error("SSO token nonce mismatch");
       }
 
+      const saved = readSSOMarker();
+      const expiresAt = saved ? saved.expiresAt : Date.now() + ssoMaxSessionMS;
       await unlock(tokens.id_token, true);
+      if (connected && session === expectedSession + 1 && token === tokens.id_token) {
+        sessionStorage.setItem("ip_sso_session", JSON.stringify({ expiresAt, pending: false }));
+        if (Number.isSafeInteger(payload.exp) && payload.exp * 1000 > Date.now()) {
+          ssoRuntime = { config, endpoint: discovery.token_endpoint, claims: payload, expiresAt,
+            refreshToken: typeof tokens.refresh_token === "string" ? tokens.refresh_token : "" };
+          scheduleSSORenewal(session);
+        }
+      }
     } catch (err) {
-      setError(String(err.message || err));
+      if (expectedSession === session) {
+        sessionStorage.removeItem("ip_sso_session");
+        setError(String(err.message || err));
+      }
     } finally {
-      clearSSOState();
+      if (sessionStorage.getItem("ip_sso_state") === expectedPKCEState) clearSSOState();
+      if (!connected && expectedSession === session) sessionStorage.removeItem("ip_sso_session");
     }
   }
 
@@ -1599,6 +1720,11 @@
       $("sso-button").hidden = false;
       $("sso-divider").hidden = false;
       $("sso-button").addEventListener("click", () => startSSO(config));
+      if (!isCallback && !connected) {
+        const saved = readSSOMarker();
+        if (saved?.pending) { sessionStorage.removeItem("ip_sso_session"); clearSSOState(); }
+        else if (saved) await startSSO(config, true);
+      }
     } catch {
       // Non-SSO and unavailable-config deployments keep the opt-in button hidden.
       // Callback exchange failures are reported by handleSSOCallback.

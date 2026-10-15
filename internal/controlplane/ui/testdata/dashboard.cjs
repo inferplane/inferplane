@@ -45,9 +45,14 @@ function boot(options = {}) {
   }
   for (const id of ['teams', 'models', 'fleet-table', 'users-table', 'user-models', 'budget-table']) elements.get(id).append(new Element('tbody'));
   const $ = id => { assert(elements.has(id), 'unknown DOM id ' + id); return elements.get(id); };
-  const calls = [], writes = [];
-  const pkce = new Map([['ip_sso_verifier', 'fixture-verifier'], ['ip_sso_state', 'fixture-state'], ['ip_sso_nonce', 'fixture-nonce']]);
-  const idToken = options.idToken || ['fixture-header', Buffer.from(JSON.stringify({ nonce: 'fixture-nonce', token_use: 'id' })).toString('base64url'), 'fixture-signature'].join('.');
+  const calls = [], writes = [], redirects = [], timers = new Map();
+  let now = options.now || Date.now(), timerID = 0;
+  class ClockDate extends Date {
+    constructor(...args) { super(...(args.length ? args : [now])); }
+    static now() { return now; }
+  }
+  const pkce = options.storage || new Map([['ip_sso_verifier', 'fixture-verifier'], ['ip_sso_state', 'fixture-state'], ['ip_sso_nonce', 'fixture-nonce']]);
+  const idToken = options.idToken || ['fixture-header', Buffer.from(JSON.stringify({ nonce: 'fixture-nonce', token_use: 'id', iss: 'https://fixture-idp.invalid', aud: 'fixture-client', sub: 'fixture-operator', exp: Math.floor(now / 1000) + 3600 })).toString('base64url'), 'fixture-signature'].join('.');
   let jwtInFlight = 0, maxJWTInFlight = 0, jwtDenied = 0;
   let usage = options.usage || { total_micro_usd: 1496085, rows, degraded: false };
   let userUsage = options.users || { total_micro_usd: 1496085, rows: [{ ...rows[0], key: 'developer-a' }], degraded: false };
@@ -57,22 +62,27 @@ function boot(options = {}) {
   const resp = (status, body) => ({ status, ok: status >= 200 && status < 300, text: async () => typeof body === 'string' ? body : JSON.stringify(body), json: async () => body });
   const context = vm.createContext({
     document: Object.assign(new Element('document'), { getElementById: $, createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag), documentElement: new Element('html'), body: new Element('body') }),
-    URLSearchParams, URL, Date, BigInt, Intl, AbortController, structuredClone, Blob, atob, btoa, TextEncoder, TextDecoder,
+    URLSearchParams, URL, Date: ClockDate, BigInt, Intl, AbortController, structuredClone, Blob, atob, btoa, TextEncoder, TextDecoder,
+    crypto: require('node:crypto').webcrypto,
+    setTimeout: (fn, delay) => { const id = ++timerID; timers.set(id, { fn, due: now + delay }); return id; },
+    clearTimeout: id => timers.delete(id),
     matchMedia: () => ({ matches: false }), confirm: () => true,
-    location: { search: options.sso ? '?code=fixture-code&state=' + (options.callbackState || 'fixture-state') : '', origin: 'http://localhost', pathname: '/ui/' },
-    history: { replaceState() {} }, sessionStorage: { getItem: k => pkce.get(k), removeItem: k => pkce.delete(k) },
+    location: { search: options.sso ? '?code=fixture-code&state=' + (options.callbackState || 'fixture-state') : '', origin: 'http://localhost', pathname: '/ui/', assign: url => redirects.push(url) },
+    history: { replaceState() {} }, sessionStorage: { getItem: k => pkce.get(k), setItem: (k, v) => pkce.set(k, String(v)), removeItem: k => pkce.delete(k) },
     fetch: async (url, init = {}) => {
       calls.push({ url, init });
-      if (url === '/ui/auth/config') return options.sso ? resp(200, { sso: true, issuer: 'https://fixture-idp.invalid', client_id: 'fixture-client' }) : resp(404, {});
+      if (url === '/ui/auth/config') return options.sso || options.ssoEnabled ? resp(200, { sso: true, issuer: 'https://fixture-idp.invalid', client_id: 'fixture-client' }) : resp(404, {});
       if (url === 'https://fixture-idp.invalid/.well-known/openid-configuration') return resp(200, { authorization_endpoint: 'https://fixture-idp.invalid/auth', token_endpoint: 'https://fixture-idp.invalid/token' });
       if (url === 'https://fixture-idp.invalid/token') {
         const body = new URLSearchParams(init.body);
+        if (options.tokenEndpoint) return options.tokenEndpoint(body, resp);
+        if (body.get('grant_type') === 'refresh_token') return resp(200, { id_token: options.refreshedIDToken || idToken, refresh_token: 'fixture-rotated-refresh' });
         assert.equal(body.get('code_verifier'), 'fixture-verifier');
         assert.equal(body.get('redirect_uri'), 'http://localhost/ui/');
-        return resp(200, { id_token: idToken, access_token: 'fixture-access-not-the-id-token' });
+        return resp(200, { id_token: idToken, access_token: 'fixture-access-not-the-id-token', ...(options.refreshToken ? { refresh_token: options.refreshToken } : {}) });
       }
       if (options.sso && url.startsWith('/v1alpha1/')) {
-        assert.equal(init.headers.Authorization, 'Bearer ' + idToken, 'SSO used the wrong token kind');
+        assert((options.acceptTokens || [idToken]).some(token => init.headers.Authorization === 'Bearer ' + token), 'SSO used the wrong token kind');
         if (options.rejectConcurrentJWT && jwtInFlight) { jwtDenied++; return resp(401, {}); }
         jwtInFlight++; maxJWTInFlight = Math.max(maxJWTInFlight, jwtInFlight);
         await new Promise(resolve => setTimeout(resolve, 10));
@@ -102,7 +112,10 @@ function boot(options = {}) {
     }, console,
   });
   vm.runInContext(source, context);
-  return { $, document: context.document, calls, writes, pkce, jwtState: () => ({ maxJWTInFlight, jwtDenied }), setUsage: v => usage = v, setUsers: v => userUsage = v, setFailure: v => fail = v, setCustom: v => custom = v, policy,
+  return { $, document: context.document, calls, writes, pkce, redirects, timers,
+    advance: ms => { now += ms; },
+    runTimers: async () => { for (const [id, timer] of [...timers]) if (timer.due <= now) { timers.delete(id); await timer.fn(); } await flush(); },
+    jwtState: () => ({ maxJWTInFlight, jwtDenied }), setUsage: v => usage = v, setUsers: v => userUsage = v, setFailure: v => fail = v, setCustom: v => custom = v, policy,
     connect: async () => { $('token').value = 'read-secret'; await $('connect-form').fire('submit'); },
     credential: async () => { $('write-token').value = 'write-secret'; await $('write-token-form').fire('submit'); } };
 }
@@ -116,7 +129,8 @@ process.exitCode = 1; // unresolved promises must not exit as a successful suite
   await new Promise(resolve => setTimeout(resolve, 100)); await flush();
   assert.equal(sso.$('workspace-content').hidden, false, 'SSO bootstrap was rejected by concurrent JWT verification');
   assert.deepEqual(sso.jwtState(), { maxJWTInFlight: 1, jwtDenied: 0 });
-  assert.equal(sso.pkce.size, 0, 'PKCE state survived the callback');
+  for (const key of ['ip_sso_verifier', 'ip_sso_state', 'ip_sso_nonce']) assert.equal(sso.pkce.has(key), false, 'PKCE state survived the callback');
+  assert.equal(sso.pkce.size, 1, 'storage must contain only the credential-free resume marker');
   assert.equal(sso.$('new-policy').disabled, false, 'SSO identity did not retain its policy write path');
   await sso.$('refresh').fire('click');
   assert.deepEqual(sso.jwtState(), { maxJWTInFlight: 1, jwtDenied: 0 }, 'refresh reintroduced concurrent signature verification');

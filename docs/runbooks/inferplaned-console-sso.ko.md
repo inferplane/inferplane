@@ -1,6 +1,6 @@
 ---
 translation_source: runbooks/inferplaned-console-sso.md
-translation_source_sha256: 7c42801345f31461fb9c0d3bf4f8d7fe6a912b379cb2b523f3e0f9e3acff3b04
+translation_source_sha256: 65efeacad69b3eb7844644317669a5c6c4c8a3644fd7db672cfc712dfa0de95b
 ---
 
 # 운영 절차: inferplaned 콘솔 SSO {#runbook-inferplaned-console-sso-adr-037}
@@ -62,10 +62,26 @@ INFERPLANED_OIDC_GROUPS_CLAIM=cognito:groups
 1. `https://<console-host>/ui/`를 엽니다.
 2. OIDC와 브라우저 로그인 origin이 설정되어 있으면 수동 토큰 아래 SSO 버튼이 표시됩니다.
 3. 버튼을 눌러 Cognito Hosted UI에서 로그인하면 `/ui/`로 돌아와 콘솔이 열립니다.
-4. `ip_sso_verifier`·`ip_sso_state`·`ip_sso_nonce`는 왕복 중에만 sessionStorage에 저장하고 성공·실패 후 즉시 지웁니다. ID 토큰은 페이지 메모리에만 두며 디스크·localStorage·쿠키에 저장하지 않습니다.
+4. `ip_sso_verifier`·`ip_sso_state`·`ip_sso_nonce`는 왕복 중에만 sessionStorage에 저장하고 성공·실패 후 즉시 지웁니다. ID·access·refresh 토큰은 페이지 메모리에만 두며 디스크·localStorage·쿠키에 저장하지 않습니다. 별도의 `ip_sso_session`에는 새로고침 복원용 만료 시각과 진행 여부만 저장합니다.
 5. 허용 그룹에서 자신을 모두 제거하고 다시 로그인해 403 거부를 확인합니다. 기본 팀을 자동 부여하면 안 됩니다.
 
 수동 토큰 입력 기능은 남습니다. SSO 경로 자체가 설정된 정적 토큰을 비활성화하지는 않습니다.
+
+### 새로고침과 토큰 갱신 {#reload-and-token-renewal}
+
+새로고침하면 Authorization Code + PKCE 리다이렉트로 SSO를 복원합니다.
+IdP 세션이 유효하면 보통 비밀번호를 다시 입력하지 않습니다. IdP 세션이 만료되면
+로그인이 필요합니다. 복원 표시는 자격 증명을 포함하지 않으며 수동 입력 토큰을
+복원하지 않습니다.
+
+페이지를 열어 둔 동안 refresh 토큰이 제공되면 ID 토큰 만료 1분 전에 갱신하고,
+회전된 refresh 토큰을 메모리에서 교체합니다. 브라우저 세션의 최대 시간은
+8시간입니다. 갱신 실패 시 콘솔을 잠그며 issuer·audience·subject·토큰 종류가
+동일해야 합니다. 보호 API의 서명·만료·그룹 검증은 요청마다 계속 적용됩니다.
+
+Disconnect는 복원 표시와 메모리 자격 증명을 지웁니다. 이후 새로고침해도 잠금 상태를
+유지합니다. 로컬 Disconnect는 IdP 세션을 취소하지 않으므로 SSO를 다시 직접 선택하면
+비밀번호 없이 로그인될 수 있습니다.
 
 ## 머신 경로 확인 {#verify-the-machine-path-is-unaffected}
 
