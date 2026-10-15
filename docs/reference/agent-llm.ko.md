@@ -1,6 +1,6 @@
 ---
 translation_source: reference/agent-llm.md
-translation_source_sha256: 46d6939dbfebe8840e41fdf8d2b997d0eb7d3e06a9b5721fbba29050b2b8cabd
+translation_source_sha256: 2248707d3e25cf79b316bcbdd44634f7f9290b1fe630fcac23bacd4fb5c0f872
 ---
 
 # 에이전트·LLM 구현 {#agent-llm}
@@ -66,6 +66,13 @@ OTLP는 트레이스에만 사용합니다. 메트릭은 관리 포트 Prometheu
 OpenAI 스트림은 Anthropic의 시작·끝·블록 닫힘이 없어 ReadChatSSE가 정규 소비자용 수명주기를 합성합니다. 첫 파싱 청크 전에 공개 모델명의 message_start, 열리지 않은 인덱스의 텍스트 시작, message_delta 전 열린 블록 종료, DONE의 message_stop을 만듭니다. Chunk만 만들고 Raw는 nil이어서 OpenAI 수신에는 가짜 줄을 전달하지 않습니다. finish_reason과 usage-only 메시지가 모두 없이 끝나면 DONE에서 end_turn message_delta 하나를 합성합니다. 어떤 메시지 수준 프레임이라도 있으면 중복 종료로 해석되지 않도록 합성을 억제합니다.
 
 캐시 사용량이 있는 모든 경로는 티어별 정산입니다. Anthropic·Invoke는 message_start와 delta를 MergeUsage로 합치고, Converse는 CacheReadInputTokens·CacheDetails를 정규 분리에 매핑합니다. 5분·1시간 쓰기를 끝까지 별도 가격으로 처리합니다. GPT-5.6 계열의 Converse inputTokens는 2026-08-29~31 실측에서 캐시를 포함해 해당 허용 목록에만 읽기·쓰기를 빼고 0으로 제한합니다. 그렇지 않으면 컨텍스트·청구를 이중 계산합니다. 벤더 전체가 아닌 계열별 예외입니다. GPT-6 Astra는 2026-09-09 실측에서 input=2·cacheWrite=4008처럼 이미 분리해 보고하므로 목록에 넣으면 실제 입력을 0으로 만드는 오류가 됩니다.
+
+캐시 쓰기 TTL이 일부만 보고돼도 평탄한 총량을 보존합니다. 총량 100과 5m 수량 40만 있으면
+quota와 가격 계산에 100을 반영합니다. 확인된 1h 수량은 해당 요금을 유지하고 나머지는
+기존 5m 요금으로 추정합니다. `CacheWriteAccounting`은 수량과 TTL의 확인 여부를 구분하며,
+미확인 TTL은 금전 예약 반환의 근거가 아닙니다. 음수·오버플로·0이 아닌 완전한 분해와
+총량의 불일치는 카운터 변경 전에 거부합니다. 평탄한 값과 분해 값을 더하지 않으며 원문은
+변경하지 않습니다.
 
 ### 5. 모델별 Converse·Mantle 추론 인수 처리 {#5-per-model-conversemantle-inference-param-strip-rules}
 

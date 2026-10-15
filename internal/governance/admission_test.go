@@ -45,6 +45,63 @@ func TestAdmissionSettlesCountersExactlyOnce(t *testing.T) {
 	}
 }
 
+func TestAdmissionFinalizesRatesOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		usage        pricing.Usage
+		missingPrice bool
+		panicAt      string
+		wantActual   int64 // -1 means retain the estimate without reconciling.
+	}{
+		{name: "valid", usage: pricing.Usage{Input: 20}, wantActual: 20},
+		{name: "invalid", usage: pricing.Usage{Input: -1}, wantActual: -1},
+		{name: "uncertain", usage: pricing.Usage{Input: 20, Uncertain: true}, wantActual: 100},
+		{name: "missing-price", usage: pricing.Usage{Input: 20}, missingPrice: true, wantActual: 20},
+		{name: "panic-before-reconciliation", usage: pricing.Usage{Input: 20}, panicAt: "lookup", wantActual: -1},
+		{name: "panic-after-reconciliation", usage: pricing.Usage{Input: 20}, panicAt: "notify", wantActual: 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewGovernor(map[string]TeamPolicy{"t": {BudgetMicrosPerMonth: 1000}}, limiter.NewMemory(), budget.NewMemory(), nil)
+			d := g.PreCheck(Subject{Team: "t"}, KeyPolicy{}, 100)
+			if !d.Allowed {
+				t.Fatal(d)
+			}
+			defer d.Admission.Close()
+			calls, actual := 0, int64(-1)
+			// Deliberately non-idempotent: settlement must not rely on a
+			// limiter silently ignoring a second finalization callback.
+			d.Admission.rates = append(d.Admission.rates, func(n *int64) {
+				calls++
+				if n != nil {
+					actual = *n
+				}
+			})
+			if tc.panicAt == "lookup" {
+				g.SetTeamLookup(func(string) (TeamPolicy, bool) { panic("lookup") })
+			}
+			if tc.panicAt == "notify" {
+				g.SetBudgetNotify(func(string, int64, int64) { panic("notify") })
+			}
+			table := testTable()
+			if tc.missingPrice {
+				table = nil
+			}
+			var recovered any
+			func() {
+				defer func() { recovered = recover() }()
+				g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", tc.usage, table, d.Admission)
+			}()
+			if tc.panicAt == "" && recovered != nil || tc.panicAt != "" && recovered != tc.panicAt {
+				t.Fatalf("panic=%v want %q", recovered, tc.panicAt)
+			}
+			d.Admission.Close()
+			if calls != 1 || actual != tc.wantActual {
+				t.Fatalf("finalizer calls=%d actual=%d want calls=1 actual=%d", calls, actual, tc.wantActual)
+			}
+		})
+	}
+}
+
 func TestClosedOrUncertainAdmissionCannotRefundEstimate(t *testing.T) {
 	for _, closeFirst := range []bool{false, true} {
 		l := limiter.NewMemory()

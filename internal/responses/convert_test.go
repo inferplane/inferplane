@@ -183,3 +183,21 @@ func TestCacheWritesAndZeroUsageAreNotDoubleCounted(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestStoredReference(t *testing.T) {
+	for body, want := range map[string]bool{
+		`{"model":"m","input":"hi"}`:                                                                false,
+		`{"model":"m","input":"hi","store":true,"background":false}`:                                false,
+		`{"model":"m","input":"hi","previous_response_id":null}`:                                    false,
+		`{"model":"m","input":[{"role":"user","content":"hi"}]}`:                                    false,
+		`{"model":"m","input":"hi","previous_response_id":"resp_1"}`:                                true,
+		`{"model":"m","input":"hi","conversation":"conv_1"}`:                                        true,
+		`{"model":"m","input":"hi","conversation":{"id":"conv_1"}}`:                                 true,
+		`{"model":"m","input":[{"type":"item_reference","id":"msg_1"}]}`:                            true,
+		`{"model":"m","input":[{"role":"user","content":"hi"},{"type":"item_reference","id":"x"}]}`: true,
+	} {
+		if got := StoredReference([]byte(body)); got != want {
+			t.Errorf("StoredReference(%s)=%v want %v", body, got, want)
+		}
+	}
+}

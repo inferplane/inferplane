@@ -242,6 +242,31 @@ func contentToCanonical(raw json.RawMessage) ([]schema.ContentBlock, error) {
 	return out, nil
 }
 
+// StoredReference reports whether a request names provider-held state: a
+// previous response, a conversation or a stored input item. Upstreams resolve
+// these under the gateway's shared credential, not the caller's identity, so
+// the gateway has no ownership evidence for them. Invalid documents report
+// false; RequestToCanonical rejects those separately.
+func StoredReference(raw []byte) bool {
+	m, err := object(raw)
+	if err != nil {
+		return false
+	}
+	if present(m["previous_response_id"]) || present(m["conversation"]) {
+		return true
+	}
+	var items []map[string]json.RawMessage
+	if json.Unmarshal(m["input"], &items) != nil {
+		return false
+	}
+	for _, item := range items {
+		if optionalText(item["type"]) == "item_reference" {
+			return true
+		}
+	}
+	return false
+}
+
 // ValidateConversion rejects features whose semantics cannot be carried by the
 // supported stateless text/function/custom-tool bridge. Native forwarding does
 // not call this function.

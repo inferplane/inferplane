@@ -605,6 +605,9 @@ func (h *InvokeHandler) observeTokens(model, provider, team string, u *schema.Us
 	if u == nil {
 		return
 	}
+	if _, err := pricing.FromUsage(u).TotalTokens(); err != nil {
+		return
+	}
 	write5m, write1h := u.CacheWriteTiers()
 	h.metrics.ObserveTokenUsage("input", model, provider, team, deref(u.InputTokens))
 	h.metrics.ObserveTokenUsage("output", model, provider, team, deref(u.OutputTokens))
@@ -749,6 +752,9 @@ func recordSpanSettled(req *http.Request, system, providerName, upstream string,
 // CacheWriteTiers resolution settle() bills from — see anthropicapi's twin for
 // why reading the flat field alone recorded a zero.
 func usageRef(u *schema.Usage) *audit.UsageRef {
+	if _, err := pricing.FromUsage(u).TotalTokens(); err != nil {
+		return nil
+	}
 	return audit.UsageFrom(u)
 }
 

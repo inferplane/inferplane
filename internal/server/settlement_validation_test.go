@@ -1,6 +1,9 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
+	"math"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -8,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/internal/budget"
 	"github.com/inferplane/inferplane/internal/config"
 	"github.com/inferplane/inferplane/internal/governance"
@@ -99,7 +103,7 @@ func TestEveryIngressClosesAdmissionOnPanic(t *testing.T) {
 
 func TestEveryIngressValidatesAccountingAndClosesAdmission(t *testing.T) {
 	for _, ing := range authorityIngresses() {
-		for _, kind := range []string{"negative", "partial-ttl", "missing", "failure", "interrupted"} {
+		for _, kind := range []string{"negative", "negative-cache", "negative-tier", "overflow", "contradictory-ttl", "partial-ttl", "missing", "failure", "interrupted"} {
 			t.Run(ing.name()+"/"+kind, func(t *testing.T) {
 				f := routingtest.New(t, func(c *config.Config) {
 					c.Pricing.Overrides["public"]["up"] = config.RateConfig{InputPerMTok: 1, OutputPerMTok: 1}
@@ -110,6 +114,17 @@ func TestEveryIngressValidatesAccountingAndClosesAdmission(t *testing.T) {
 				switch kind {
 				case "negative":
 					out = -1000
+				case "negative-cache":
+					flat = -1
+					u.CacheCreationInputTokens = &flat
+				case "negative-tier":
+					five = -1
+					u.CacheCreation = &schema.CacheCreation{Ephemeral5mInputTokens: &five}
+				case "overflow":
+					in = math.MaxInt64
+				case "contradictory-ttl":
+					u.CacheCreationInputTokens = &flat
+					u.CacheCreation = &schema.CacheCreation{Ephemeral5mInputTokens: &five, Ephemeral1hInputTokens: &five}
 				case "partial-ttl":
 					u.CacheCreationInputTokens = &flat
 					u.CacheCreation = &schema.CacheCreation{Ephemeral5mInputTokens: &five}
@@ -127,7 +142,15 @@ func TestEveryIngressValidatesAccountingAndClosesAdmission(t *testing.T) {
 				l.DebitQuota("quota:team", 900, 24*time.Hour)
 				b := budget.NewMemory()
 				g := governance.NewGovernor(map[string]governance.TeamPolicy{"team": {TokensPerDay: 10000, TokensPerMinute: 1000, BudgetMicrosPerMonth: 100000}}, l, b, nil)
-				_ = policyDo(policyMux(f, nil, g, nil, nil), ing.path, authorityBody(ing), true)
+				aud, buf := policyAudit(t)
+				closeAudit := sync.OnceFunc(func() {
+					if err := aud.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+				defer closeAudit()
+				_ = policyDo(policyMux(f, aud, g, nil, nil), ing.path, authorityBody(ing), true)
+				closeAudit()
 				if len(f.Public.Calls) != 1 {
 					t.Fatalf("provider was not exercised: %d", len(f.Public.Calls))
 				}
@@ -140,6 +163,31 @@ func TestEveryIngressValidatesAccountingAndClosesAdmission(t *testing.T) {
 				w := budget.CalendarMonthIn(time.UTC)
 				if got := b.Spent(budget.Key(budget.ScopeTeam, "team", w), w); got != wantCost {
 					t.Fatalf("cost=%d want %d", got, wantCost)
+				}
+				if kind == "failure" || kind == "missing" {
+					return
+				}
+				var completed *audit.Record
+				for _, line := range bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n")) {
+					var record audit.Record
+					if err := json.Unmarshal(line, &record); err != nil {
+						t.Fatal(err)
+					}
+					if record.Event == "request_completed" {
+						completed = &record
+					}
+				}
+				if completed == nil || completed.Cost == nil {
+					t.Fatalf("missing completion/cost evidence: %s", buf)
+				}
+				if wantCost == 0 {
+					if completed.Usage != nil || !completed.Cost.PricingMissing {
+						t.Fatalf("invalid usage recorded as settled: usage=%+v cost=%+v", completed.Usage, completed.Cost)
+					}
+				} else if completed.Usage == nil || completed.Usage.InputTokens != in || completed.Usage.OutputTokens != out || completed.Cost.PricingMissing {
+					t.Fatalf("valid usage lost: usage=%+v cost=%+v", completed.Usage, completed.Cost)
+				} else if kind == "partial-ttl" && (completed.Usage.CacheCreationInputTokens != 100 || completed.Usage.CacheCreation5mInputTokens != 100) {
+					t.Fatalf("partial TTL total lost: %+v", completed.Usage)
 				}
 			})
 		}

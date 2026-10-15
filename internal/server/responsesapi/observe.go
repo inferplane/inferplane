@@ -71,9 +71,16 @@ func (a attempt) finish(status int, u *schema.Usage, body []byte, partial bool, 
 	var cost *audit.CostRef
 	span := trace.SpanFromContext(a.req.Context())
 	if u != nil {
-		write5m, write1h := u.CacheWriteTiers()
 		pu := pricing.FromUsage(u)
-		usage = audit.UsageFrom(u)
+		var input, output, cacheRead, write5m, write1h int64
+		if _, err := pu.TotalTokens(); err == nil {
+			input, output = pu.Input, pu.Output
+			cacheRead, write5m, write1h = pu.CacheRead, pu.CacheWrite5m, pu.CacheWrite1h
+			usage = audit.UsageFrom(u)
+			for kind, n := range map[string]int64{"input": input, "output": output, "cache_read": cacheRead, "cache_write_5m": write5m, "cache_write_1h": write1h} {
+				a.h.metrics.ObserveTokenUsage(kind, a.target.Model, a.target.ProviderName, a.principal.Team, n)
+			}
+		}
 		if a.h.gov != nil {
 			amount, missing := a.h.gov.Settle(subject(a.principal), keyPolicy(a.principal), a.target.ProviderName, a.target.Upstream, pu, a.table, a.admission)
 			cost = &audit.CostRef{AmountUSDMicros: amount, PricingMissing: missing, PricingVersion: governance.PricingVersionOf(a.table),
@@ -83,13 +90,8 @@ func (a attempt) finish(status int, u *schema.Usage, body []byte, partial bool, 
 			}
 			requestpolicy.RecordCost(span, a.target.Provider.Name(), a.target.ProviderName, a.target.Upstream, usage, cost, partial)
 		}
-		if _, err := pu.TotalTokens(); err == nil {
-			for kind, n := range map[string]int64{"input": pu.Input, "output": pu.Output, "cache_read": pu.CacheRead, "cache_write_5m": write5m, "cache_write_1h": write1h} {
-				a.h.metrics.ObserveTokenUsage(kind, a.target.Model, a.target.ProviderName, a.principal.Team, n)
-			}
-		}
-		tracing.SetGenAIResponse(span, a.target.Provider.Name(), a.target.Upstream, pu.Input, pu.Output)
-		tracing.SetUsageDetail(span, pu.CacheRead, write5m, write1h)
+		tracing.SetGenAIResponse(span, a.target.Provider.Name(), a.target.Upstream, input, output)
+		tracing.SetUsageDetail(span, cacheRead, write5m, write1h)
 	}
 	if partial {
 		tracing.SetPartial(span)

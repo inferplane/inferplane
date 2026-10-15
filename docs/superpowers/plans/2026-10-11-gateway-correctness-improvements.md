@@ -6,7 +6,7 @@
 PR-11/12/13과 direct/proxy qualification을 추가한다. 기존 PR-01~10만으로
 Bedrock Runtime·Mantle의 전체 native 기능이 동일해진다고 주장하지 않는다.
 
-근거: `46ab5ad`에서 수행한 로컬 로그 분석과 12개 adversarial 재현.
+근거: 로컬 작업 브랜치 커밋 `46ab5ad`(main 미병합)에서 수행한 로컬 로그 분석과 12개 adversarial 재현.
 상세 자료는 비판적 검토(`review/critical-direction-2026-10-11/README.ko.md`)와
 재현 결과(`review/critical-direction-2026-10-11/reproductions.log`)에
 있다. `review/`는 `.gitignore` 대상인 operator-local 자료로 저장소에 포함되지 않으므로 아래 완료 조건은 해당 파일 없이도

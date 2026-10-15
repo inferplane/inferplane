@@ -74,8 +74,8 @@ func (u *Usage) CacheWriteTiers() (write5m, write1h int64) {
 
 // CacheWriteCounts separates a known quantity from known TTL prices. Unknown
 // TTLs use the legacy 5m estimate but never become evidence for a money refund.
-// Invalid observations are retained for audit; callers must check Invalid
-// before using these numbers to mutate accounting.
+// Invalid observations remain available for validation; callers must check
+// Invalid before using these numbers for accounting or settled audit usage.
 type CacheWriteCounts struct {
 	FiveMinutes, OneHour, Total      int64
 	QuantityKnown, TTLKnown, Invalid bool

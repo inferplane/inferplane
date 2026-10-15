@@ -334,7 +334,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) (deci
 		}
 	}()
 	if estimateTokens < 0 {
-		return GovDecision{Status: 429, Reason: "invalid token estimate", Code: audit.DenyTeamTokenRateLimited}
+		return GovDecision{Status: 429, Reason: "invalid token estimate", Code: audit.DenyInvalidTokenEstimate}
 	}
 	reserve := func(key string, rate int64) bool {
 		finish, allowed := g.lim.ReserveRate(key, estimateTokens, rate, rate)
@@ -626,7 +626,12 @@ func (g *Governor) Settle(s Subject, kp KeyPolicy, provider, model string, u pri
 }
 
 func (g *Governor) settle(s Subject, kp KeyPolicy, provider, model string, u pricing.Usage, table *pricing.Table, admission *Admission) (costMicros int64, pricingMissing bool) {
-	defer admission.finishRates(nil)
+	ratesFinalized := false
+	defer func() {
+		if !ratesFinalized {
+			admission.finishRates(nil)
+		}
+	}()
 	actualTokens, err := u.TotalTokens()
 	if err != nil {
 		return 0, true
@@ -661,6 +666,9 @@ func (g *Governor) settle(s Subject, kp KeyPolicy, provider, model string, u pri
 		if u.Uncertain {
 			actual = max(actual, admission.estimate)
 		}
+		// Keep the deferred fallback for early returns/panics, without
+		// requiring the limiter's finalization callbacks to be idempotent.
+		ratesFinalized = true
 		admission.finishRates(&actual)
 	}
 	if table == nil {

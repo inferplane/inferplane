@@ -19,6 +19,8 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
 | Documentation delivery | `.github/workflows/docs.yml` | Strict build, translation coverage/freshness, and rendered-link checks on PRs; Pages deployment from main with isolated deployment permissions |
 
 ### 3. Key Decisions
+
+- Build with Go 1.26.9 or newer; both Docker builders pin 1.26.9. The HTTP/2 security fixes in `golang.org/x/net` v0.60.0 require Go 1.26+.
 - `CGO_ENABLED=0` static binary so the image can be distroless/nonroot with no libc.
 - The admin key console's static assets (`internal/server/adminui/static/`) ship inside the binary via `go:embed` — no image, chart, or build-pipeline change (ADR-001).
 - **Config hot-reload (ADR-006):** edit config and `kill -HUP <pid>` (K8s: signal PID 1 or roll the pods) to apply provider/model/pricing changes with no restart — the topology is swapped atomically, governance counters/keystore/audit persist, and a bad config rolls back. Listen addrs, TLS, drain, and team policy limits are NOT hot (restart required).
