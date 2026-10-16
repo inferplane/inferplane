@@ -22,6 +22,17 @@ func TestDashboardBehavior(t *testing.T) {
 	}
 }
 
+func TestSSOSessionLifecycle(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("SSO session checks need Node (stdlib only)")
+	}
+	out, err := exec.Command(node, "testdata/sso_session.cjs").CombinedOutput()
+	if err != nil {
+		t.Fatalf("SSO session regression: %v\n%s", err, out)
+	}
+}
+
 func TestCostFirstLayoutBehavior(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {

@@ -98,8 +98,9 @@ right after login, check this env var first.
 4. The three PKCE working values (`ip_sso_verifier`/`ip_sso_state`/
    `ip_sso_nonce`) live in `sessionStorage` only for the duration of the
    round trip and are cleared immediately after, success or failure. The
-   ID token itself is held in page memory only — never written to disk,
-   `localStorage`, or a cookie.
+   ID/access/refresh tokens are held in page memory only — never written to disk,
+   `localStorage`, or a cookie. A separate `ip_sso_session` marker contains only
+   an expiry time and an in-progress flag for reload recovery.
 5. Remove yourself from every group in `INFERPLANED_OIDC_ALLOWED_GROUPS` and
    re-login to confirm the deny path: you should see 403, not a silently
    granted default team.
@@ -107,6 +108,23 @@ right after login, check this env var first.
 The manual token field keeps working unconditionally — SSO is an additional
 path, not a replacement, and there is no way to disable the static token from
 the SSO side.
+
+### Reload and token renewal
+
+SSO sessions recover on reload through a new Authorization Code + PKCE redirect.
+If the IdP session is valid, another password prompt is normally unnecessary.
+Expired IdP sessions still need sign-in. The marker contains no credential and
+cannot restore a manually entered token.
+
+While the page remains open, a supplied refresh token renews the ID token
+one minute before expiry and honors refresh-token rotation. The browser session
+is capped at eight hours. Renewal failures lock the console; issuer, audience,
+subject and token kind must remain consistent. Resource-server signature,
+expiry and group checks run on every protected API request.
+
+Disconnect removes the marker and all memory credentials. Reload after
+disconnect remains locked. This local disconnect does not revoke the IdP
+session; manually choosing SSO again may therefore sign in without a password.
 
 ## Verify the machine path is unaffected
 

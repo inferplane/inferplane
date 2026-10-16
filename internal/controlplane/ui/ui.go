@@ -4,8 +4,8 @@
 // unauthenticated; every data fetch the page performs goes through the
 // bearer-gated usage, dataplane, and policy APIs with a token the operator enters
 // once (JS memory only) or an OIDC console-SSO login (ADR-037, ported from
-// mayu's adminui — sessionStorage holds only the three short-lived PKCE
-// keys, never localStorage/cookies, id_token stays memory-only). This
+// mayu's adminui — sessionStorage holds PKCE keys and a credential-free
+// resume marker; ID/access/refresh tokens stay memory-only). This
 // resolves the "UI behind bearer" paradox the P2 gate raised: the shell is
 // public, the data is not.
 // Policy mutations separately select a dedicated write token or console OIDC

@@ -1,0 +1,34 @@
+{
+  "status": "local-validation-complete-deployment-pending",
+  "scope": "CP /ui/ SSO session only",
+  "checks": {
+    "full_go_race": true,
+    "static_binaries": 2,
+    "go_vet": true,
+    "gofmt": true,
+    "harness": 70,
+    "bilingual_doc_pairs": 44,
+    "rendered_html_pages": 191,
+    "real_jwt_verifier": true,
+    "synthetic_browser_sso": true,
+    "existing_dashboard_browser": true
+  },
+  "credentials_persisted": false,
+  "automatic_restore_requires_valid_idp_session": true,
+  "resource_server_verification_unchanged": true,
+  "refresh_tokens_memory_only": true,
+  "session_max_hours": 8,
+  "node_session_tests": [
+    "reload restores through PKCE",
+    "corrupt/expired marker refusal",
+    "pending-resume redirect-loop refusal",
+    "refresh rotation",
+    "issuer/audience/subject binding",
+    "invalid_grant refusal without retry",
+    "absolute expiry",
+    "stale code/renewal reply fencing",
+    "manual token never persists",
+    "equivalent audience string/array and ordering; malformed or expanded audience refusal"
+  ],
+  "actual_human_signin_tested": false
+}

@@ -189,6 +189,30 @@ are never presented as healthy or zero. See the
 [operations runbook](../runbooks/inferplaned-dashboard.md) for the operator flow,
 verification commands and remaining limitations.
 
+## Reload recovery and renewal extension (2026-10-15)
+
+The CP console retains a fourth, credential-free sessionStorage entry:
+`ip_sso_session` contains only an expiry timestamp and an in-progress flag.
+The three PKCE values are still short-lived; ID, access and refresh tokens
+remain memory-only. Manual read/write tokens never create this marker.
+
+Reload starts a new Authorization Code + PKCE round trip through the configured
+IdP. A still-valid IdP session can return without another password prompt.
+An interrupted attempt, invalid marker or failed callback cannot cause a redirect
+loop. An expired IdP session requires sign-in; the marker is not authentication.
+
+While the page stays open, a supplied refresh token obtains a new ID token
+before expiry. Renewal is single-flight, bounded by a 15-second request timeout,
+and preserves issuer/audience/subject/token kind. Rotated refresh tokens replace
+the previous memory value. Existing API verification and authorization remain
+authoritative; rejected API requests are never retried to weaken authentication.
+The console session has an eight-hour maximum independent of token expiry.
+
+Disconnect clears credentials, timers, marker and fetched data. In-flight
+renewals and queued requests cannot revive an old session. This is a static-only
+UI change: no IdP lifetime change, server session store, new secret, cookie-based
+API authentication or control-plane restart is required.
+
 ### Guided budget settings (2026-10-07)
 
 The workspace also exposes a dedicated **Budgets** view. Guided forms create

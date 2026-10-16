@@ -38,12 +38,13 @@ func TestAssetsServedWithCSP(t *testing.T) {
 }
 
 // allowedSessionStorageKeys are the ONLY sessionStorage keys the console may
-// ever use — the three short-lived PKCE values (ADR-037 console SSO,
+// ever use — three short-lived PKCE values (ADR-037 console SSO,
 // ported from mayu's adminui/ADR-026) that must survive the browser
 // round-trip to the IdP and back (a plain JS variable does not survive a
-// full-page navigation). The id_token itself must NEVER be persisted
+// full-page navigation) and a credential-free expiry/pending resume marker.
+// ID/access/refresh tokens themselves must NEVER be persisted
 // anywhere — it stays memory-only, same as today.
-var allowedSessionStorageKeys = []string{"ip_sso_verifier", "ip_sso_state", "ip_sso_nonce"}
+var allowedSessionStorageKeys = []string{"ip_sso_verifier", "ip_sso_state", "ip_sso_nonce", "ip_sso_session"}
 
 // sessionStorageCallRE mirrors adminui_test.go's regex exactly: it is NOT a
 // blanket ban and NOT a blanket "ip_sso_" prefix exemption (that would let
@@ -69,7 +70,7 @@ func sessionStorageUsesOnlyAllowedKeys(body string) (ok bool, offendingKey strin
 }
 
 // The token-storage discipline, mechanically checked: the served JS must
-// never touch persistent browser storage EXCEPT the three named PKCE keys
+// never touch browser storage EXCEPT named PKCE keys and a credential-free marker
 // above, and the served bytes carry no secret. Inline handlers/styles would
 // violate the CSP — check those too.
 func TestServedBytesDiscipline(t *testing.T) {
