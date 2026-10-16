@@ -55,8 +55,8 @@ helm install inferplane charts/inferplane -f examples/helm.pii-classifier-ko.yam
 - **문서 단위.** 독립 합성 한국어 평가셋 2,236행에서 F1 0.953, FPR 0.036,
   AUROC 0.993입니다. 같은 셋에서 게이트웨이 정규식 탐지기는 F1 0.478입니다.
   자세한 내용은 `model-card.md`를 보세요.
-- **코딩 어시스턴트 요청 안에서**(Task 14, `<date>`, 이미지 `<digest>`):
-  감싼 본문 F1 `<f1>`, FPR `<fpr>`, abstain 또는 오류 `<n>`건.
+- **코딩 어시스턴트 요청 안에서**(2026-10-16, `SHA256SUMS`의 가중치로 `laya-serve/`에서 빌드한 이미지로 측정):
+  감싼 본문 F1 `0.951`, FPR `0.032`, abstain 또는 오류 `1`건.
 
 평가 데이터는 모두 합성입니다. 실제 트래픽에서의 정확도는 Shadow로 측정하기
 전까지 알 수 없습니다.
@@ -82,7 +82,7 @@ helm install inferplane charts/inferplane -f examples/helm.pii-classifier-ko.yam
   이름과 속성은 함께 판정되지 않습니다. 판정 캐시는 윈도 전체만 저장하므로
   함께 판정된 내용을 나누거나 합치지 않습니다.
 - CPU 프로필은 긴 코딩 세션을 감당하지 못합니다.
-- 구간 마스킹은 없습니다. Mask 규칙은 `onUninspectable` 동작으로 격상됩니다.
+- 분류기 탐지에는 구간 마스킹이 없습니다. Mask 규칙은 대신 `onUninspectable` 동작을 적용합니다(정규식 탐지는 그대로 마스킹합니다).
 - 내부 자체 호스팅 분류기만 지원합니다.
 
 가중치: Hugging Face의 `<namespace>/laya-ko-pii`, revision `<revision>` (Apache-2.0).

@@ -56,8 +56,8 @@ port, and its probes run inside the container.
 - **Document level.** The checkpoint scores F1 0.953, FPR 0.036 and AUROC
   0.993 on an independent synthetic Korean set of 2,236 rows; the gateway's
   regex detectors score F1 0.478 on the same set. See `model-card.md`.
-- **Inside a coding-assistant request** (Task 14, `<date>`, image `<digest>`):
-  wrapped-body F1 `<f1>`, FPR `<fpr>`, abstain or error `<n>`.
+- **Inside a coding-assistant request** (measured 2026-10-16 against the image built from `laya-serve/` with the weights in `SHA256SUMS`):
+  wrapped-body F1 `0.951`, FPR `0.032`, abstain or error `1`.
 
 All evaluation data is synthetic. Accuracy on your traffic is unknown until
 you measure it in Shadow.
@@ -85,7 +85,7 @@ you measure it in Shadow.
   different windows or turns are not read together. The verdict cache stores
   whole windows only, so it never joins or splits what was judged together.
 - The CPU profile does not cover long coding sessions.
-- No span masking: a Mask rule escalates to its `onUninspectable` action.
+- No span masking for classifier flags: a Mask rule applies its `onUninspectable` action instead (regex detections still mask).
 - Only internal, self-hosted classifiers are supported.
 
 Weights: `<namespace>/laya-ko-pii` at revision `<revision>` on Hugging Face (Apache-2.0).
