@@ -180,6 +180,7 @@ internal/          - Private packages (gateway internals)
   proxy/ cache/ telemetry/ - proxy/ owns the control-plane Syncer + LeaseTable (ADR-034) and the UsagePusher (ADR-036); telemetry/ is live (ADR-036): usage wire types, window collector, memory/postgres/durable aggregators; cache/ owns VolatileStore (unimplemented, ADR-031 consolidation target)
   server/          - HTTP data plane + admin plane, ingress handlers
   router/          - Model→provider resolution, fallback chain, circuit breaker; SubstituteTier applies ADR-041 budget-tier substitution
+  classifier/      - Opt-in PII classifier seam: registry, verdict cache, Run (sub-project 1 of the PII classifier design)
   sensitivity/     - Original-byte inspection and complete finite request redaction; latest-user context signals (ADR-043/044)
   responses/       - Responses observation, stateless tool adapters, native/translated SSE
   tier/            - ADR-041 budget-tier substitution: per-team Table, window-latched activation, shared by controlplane/ and proxy/
@@ -202,7 +203,7 @@ internal/          - Private packages (gateway internals)
 providers/         - Upstream provider implementations (the extension surface)
   anthropic/ bedrock/ openaicompat/ openairesponses/ - One package per provider; testing/ has mocks
 pkg/               - Public packages: schema/ (canonical types), ulid/
-plugins/           - Concrete filter implementations (piimask/, ADR-009)
+plugins/           - Concrete filters (piimask/, ADR-009) and PII classifiers (systemone/)
 docs/              - decisions (ADRs), runbooks, reference, architecture
 charts/inferplane/ - Helm chart (incl. policies ConfigMap channel, ADR-035)
 deploy/crd/        - GovernancePolicy CustomResourceDefinition (ADR-035)

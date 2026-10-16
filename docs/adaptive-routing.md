@@ -19,7 +19,7 @@ names do not determine cost, model size, protocol support or data boundary.
 |---|---|
 | Weak / normal / strong | `simpleModel` / optional `normalModel` / `complexModel`; local size and latest-user keyword signals |
 | Avoid frequent changes | Explicit `stability`; default 5-minute hold, 3 successful requests, 30-minute session TTL |
-| PII dedicated model | `InternalOnly` with explicit approved models and internal provider metadata |
+| PII dedicated model | `InternalOnly` with explicit approved models and internal provider metadata; optional `pii_classification` (Shadow/Enforce) adds a learned trigger |
 | PII masking | `Mask` on detected inspectable content; complete transformation plus reinspection before egress |
 | Budget cutover | `budgetTiers.enforceTargets: true`; threshold 100 is supported; all retries stay within the selected model |
 | Total hard limit | Remains independent; exhaustion denies even a cheap/internal target |

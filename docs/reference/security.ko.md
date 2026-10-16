@@ -1,6 +1,6 @@
 ---
 translation_source: reference/security.md
-translation_source_sha256: 3f0c24bc3a4516942f3fa84af68667f15c6d4cd3dea0533a4cd0731f8d1a743b
+translation_source_sha256: 49c7156c54a38e47913055f2491b783e981b7e126fc73f52b7feee727729593f
 ---
 
 # 보안 {#security}
@@ -60,3 +60,34 @@ ADR-044의 유한한 완전 Mask는 외부 체인 반환 전에 수행하며 Int
 
 내장 인증서·키 TLS 설정은 데이터 영역에만 적용됩니다. 관리 영역의 원격 접속은
 별도 TLS 종단 또는 보호된 터널을 필요로 합니다.
+
+### 옵트인 PII 분류기 (systemone)
+
+`pii_classification`은 자체 호스팅 분류기를 최대 4개까지 기존 `sensitiveData`
+규칙에 연결합니다(명세:
+`docs/superpowers/specs/2026-10-16-systemone-korean-pii-sample-design.md`).
+
+**입력.** 분류기는 정규식 검사기가 읽는 텍스트를 모두 읽습니다. system 입력,
+도구 스키마, 모든 turn과 tool result가 여기에 포함됩니다. 역할이나 기록 위치는
+신뢰하지 않습니다.
+
+**제한.** 라우팅을 제한하는 것은 Enforce 항목뿐입니다.
+- 탐지되면 `onDetected`를 적용합니다. Mask 규칙은 판정에 지울 구간이 없으므로
+  `onUninspectable`로 격상합니다.
+- Abstain, 타임아웃, 오류는 `onUninspectable`을 적용합니다. 즉 fail-closed입니다.
+- Shadow 항목은 기록만 하고 라우팅을 바꾸지 않습니다.
+- count_tokens는 분류기를 호출하지 않습니다. Enforce 항목이 있는 팀의 count는 검사할 수 없는 것으로 보고 `onUninspectable`을 적용하며, 거부되더라도 로컬 추정치로 HTTP 200을 반환합니다.
+
+**경계.** `internal` 경계만 지원합니다. HTTP 클라이언트는 프록시 환경 변수와
+리다이렉트를 따르지 않습니다.
+
+**판정 캐시.** 노드 로컬 캐시에는 Clear 판정만 저장합니다. 키는 세대마다 새로
+만드는 임의 키로 계산한 HMAC이며, 팀, 분류기 설정, 적용되는 정책 세대, 텍스트를
+덮습니다. 윈도 텍스트 전체가 키이므로 따로 Clear된 조각이 그 조합을 Clear로
+만들 수 없습니다. 원문은 저장하지 않고, 재적재나 재시작 때마다 비웁니다.
+
+**증거.** 감사와 메트릭에는 제한된 열거값만 남깁니다. 텍스트, 윈도, 확률,
+digest, 엔드포인트는 남기지 않습니다.
+
+**알려진 한계.** 서로 다른 윈도나 turn에 있는 이름과 속성은 함께 판정되지
+않습니다.

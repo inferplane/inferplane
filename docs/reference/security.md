@@ -70,3 +70,36 @@ Responses remote-tool egress cannot be authorized merely by an internal model
 label. Strict budget constraints also gate rejected policy updates and filter
 every subsequent context choice, affinity hit and fallback. Session hints are
 scoped HMAC inputs only; they never become principals or audit dimensions.
+
+### Opt-in PII classifiers (systemone)
+
+`pii_classification` attaches up to four self-hosted classifiers to the existing
+`sensitiveData` rules (specification:
+`docs/superpowers/specs/2026-10-16-systemone-korean-pii-sample-design.md`).
+
+**Input.** A classifier reads every text the regex inspector reads: system
+input, tool schemas, all turns and tool results. Roles and history positions
+are never trusted.
+
+**Restriction.** Only Enforce entries restrict routing.
+- A flag applies `onDetected`. A Mask rule escalates to `onUninspectable`,
+  because a verdict has no spans to redact.
+- Abstain, timeout and errors apply `onUninspectable`, so the classifier fails
+  closed.
+- Shadow entries are recorded and never change routing.
+- count_tokens never calls a classifier. For a team with an Enforce entry, a count is uninspectable and gets `onUninspectable`; a denied count still returns HTTP 200 with a local estimate.
+
+**Boundary.** Only the `internal` boundary is supported. The HTTP client
+ignores proxy environment variables and redirects.
+
+**Verdict cache.** A node-local cache stores only clear verdicts, keyed by an
+HMAC under a per-generation random key over the team, the classifier settings,
+the applicable policy generations and the whole window text, so parts cleared
+separately never clear their combination. It stores no text, and it is
+cleared on every reload and restart.
+
+**Evidence.** Audit and metrics carry bounded enums only. They never carry
+text, windows, probabilities, digests or endpoints.
+
+**Known limit.** A name and an attribute in different windows or turns are not
+read together.

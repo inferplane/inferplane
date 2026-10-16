@@ -20,6 +20,7 @@ client and upstream protocols without losing thinking blocks or `cache_control`.
 | Canonical schema | `pkg/schema/` | Anthropic-superset types, Extra preservation, SSE writer |
 | Filter chain | `internal/filter/` | `RequestFilter` interface + registry (the spec's filter chain ⑥, ADR-009) |
 | PII mask filter | `plugins/piimask/` | opt-in regex+Luhn PII masking → typed placeholders; one-way (no vault); masks messages text only |
+| PII classifier (systemone) | `internal/classifier/`, `plugins/systemone/` | opt-in learned PII signal over `/v1/systemone` and `/v1/systemone/batch` (`noul`); restricts routing only; sends the `model`/`criteria` settings the checkpoint was trained with; Korean sample in `examples/pii-classifier-ko/` |
 | Tracing | `internal/tracing/` | opt-in OTel: OTLP **trace** exporter + GenAI-semconv spans (+ `inferplane.*` cache-tier / cost / partial attributes) + W3C propagation + trace_id in audit; no-op default (ADR-011) |
 
 Settled spans also expose `inferplane.cost.pricing_version` and bounded
