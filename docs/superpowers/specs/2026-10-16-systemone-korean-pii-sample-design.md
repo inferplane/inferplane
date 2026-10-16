@@ -575,7 +575,7 @@ and evaluation scripts from the experiment, with these changes:
 - data, virtual environments and model caches stay git-ignored.
 
 The README gives the steps, the label policy and the measured GPU time. Laya
-seed 1 trained in 40 minutes on `ml.g5.2xlarge`.
+seed 1 trained in about 43 minutes on `ml.g6.2xlarge` (one NVIDIA L4).
 
 **Publication gates.** Each one must pass before the first push to Hugging
 Face or GHCR:

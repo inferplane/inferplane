@@ -6101,7 +6101,7 @@ It is false for:
 3. `datagen/convert.py`: writes the Laya and strands-decider training formats.
 4. Upload `data/` to `s3://<bucket>/data/`, then run:
    `python3 sagemaker/launch.py --backend laya --bucket <bucket> --role-arn <role> --hp laya_args="--loss soft-ce --grad-accum 2" --hp epochs=8 --hp seed=1`.
-   Laya seed 1 trained in 40 minutes on `ml.g5.2xlarge`.
+   Laya seed 1 trained in about 43 minutes on `ml.g6.2xlarge` (one NVIDIA L4).
 5. `indep/gen.py`, `indep/build.py` and `indep/audit.py`: build an independent
    evaluation set with other generator models, unseen genres and value formats,
    and audit its labels. Score it with `indep/score_one.sh` and
@@ -6203,8 +6203,8 @@ the same person is personal data.
   released.
 - Instructions: the trained statement plus four paraphrases (two Korean) as
   augmentation.
-- Recipe: soft cross-entropy, 8 epochs, effective batch 16, seed 1, about 40
-  minutes on one A10G.
+- Recipe: soft cross-entropy, 8 epochs, effective batch 16, seed 1, about 43
+  minutes on one NVIDIA L4 (`ml.g6.2xlarge`).
 
 ## Evaluation
 
