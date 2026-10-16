@@ -70,6 +70,7 @@ These amendments are refinements found while mapping the spec to the code. None 
    - Everything else stays under `examples/pii-classifier-ko/`.
 5. **Egress hygiene.** The systemone HTTP client sets `Proxy: nil` and does not follow redirects. Request text then never travels through an environment proxy, and a redirect never moves it to another host.
 7. **Whole windows are the cache grain (2026-10-16, after the commit security review).** Unit-level caching let parts cleared separately bypass the check on their combination. The cache now stores whole window texts (`Classifier.Windows` / `Score`, Task 5a), and window edges are content-defined so windows stay stable as a conversation grows. The spec's "Known limit" no longer includes a cache-widened gap.
+8. **Keyed window edges and overlap carry (2026-10-16, second commit security review).** Boundary units are chosen by a per-generation keyed hash, and packed windows carry trailing units within `window_overlap_runes`, so no edge separates nearby parts (Task 5b).
 6. **Image weights stage.** The Dockerfile takes the weights either from the Hugging Face repository at a pinned commit (`WEIGHTS=hf`, the published build) or from the build context (`WEIGHTS=local`, used for acceptance before publication). Both paths verify `SHA256SUMS`.
 
 ## File structure
@@ -3336,6 +3337,471 @@ Expected: PASS. The tests include `TestRunCannotBeBypassedByCachingPartsSeparate
 gofmt -w internal/classifier plugins/systemone && test -z "$(gofmt -l internal/classifier plugins/systemone)" && go vet ./internal/classifier/ ./plugins/systemone/
 git add internal/classifier plugins/systemone
 git commit -s -m "fix(classifier): cache whole windows so separately cleared parts never clear their combination" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+### Task 5b: Keyed window edges and overlap carry (second commit security review)
+
+A second commit security review flagged a bypass in `plugins/systemone/window.go`. With a public FNV boundary hash, an adversary can find a short boundary unit offline in about 16 tries. Placed between a name and a diagnosis that are not adjacent, it splits them, and the one-unit carry of Task 5a no longer reads them together.
+
+The fix has two parts:
+- The boundary hash becomes `hash/maphash` with a seed drawn randomly for each classifier instance, which means once per generation.
+- Each packed window carries the previous window's trailing units within `window_overlap_runes` (always at least its last unit). Any two short units within the overlap are then read together across every edge.
+
+**Files:**
+- Replace: `plugins/systemone/window.go`, `plugins/systemone/window_test.go`.
+- Modify: `plugins/systemone/systemone.go` (a `seed` field, `New`, `Windows`, a new `boundary` method), `plugins/systemone/systemone_test.go` (replace `TestRunJudgesAdjacentPartsTogetherThroughRealWindows`, add `TestBoundaryHashIsKeyedPerInstance`).
+- Modify: `docs/superpowers/specs/2026-10-16-systemone-korean-pii-sample-design.md` §4 Windowing.
+
+**Interfaces:**
+- Consumes: Task 5a as committed.
+- Produces:
+  - `buildWindows(units []string, size, overlap int, boundary func(string) bool) []string`;
+  - `tail` and `joinedRunes` helpers;
+  - `(*systemone).boundary(unit string) bool`.
+- The `Classifier` contract is unchanged.
+
+- [ ] **Step 1: Replace the window tests and add the systemone tests**
+
+`plugins/systemone/window_test.go`:
+
+```go
+package systemone
+
+import (
+	"fmt"
+	"hash/fnv"
+	"slices"
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
+
+// fnvBoundary is a deterministic stand-in for the classifier's keyed hash.
+func fnvBoundary(u string) bool {
+	h := fnv.New32a()
+	h.Write([]byte(u))
+	return h.Sum32()%boundaryEvery == 0
+}
+
+func never(string) bool { return false }
+
+func always(string) bool { return true }
+
+func TestBuildWindowsPacksShortUnits(t *testing.T) {
+	got := buildWindows([]string{"a", "", "bc"}, 10, 2, never)
+	if !slices.Equal(got, []string{"a\n\nbc"}) {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestBuildWindowsFlushesWhenFull(t *testing.T) {
+	got := buildWindows([]string{"aaaa", "bbbb"}, 6, 0, never)
+	if !slices.Equal(got, []string{"aaaa", "bbbb"}) {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestBuildWindowsSplitsAnOversizedUnit(t *testing.T) {
+	long := strings.Repeat("가", 25)
+	got := buildWindows([]string{"short", long}, 10, 2, never)
+	if got[0] != "short" {
+		t.Fatalf("the short unit was not flushed before the split: %q", got)
+	}
+	if !slices.Equal(got[1:], splitRunes(long, 10, 2)) {
+		t.Fatalf("split windows %q", got[1:])
+	}
+	for _, w := range got {
+		if utf8.RuneCountInString(w) > 10 {
+			t.Fatalf("window over size: %q", w)
+		}
+	}
+}
+
+func TestBuildWindowsEndsAWindowAtAContentBoundary(t *testing.T) {
+	marker := func(u string) bool { return u == "M" }
+	got := buildWindows([]string{"x", "M", "y"}, 100, 0, marker)
+	if !slices.Equal(got, []string{"x\n\nM", "M\n\ny"}) {
+		t.Fatalf("%q", got)
+	}
+}
+
+// Security regression (2026-10-16 commit review): a filler unit that is a
+// boundary must not separate two nearby parts.
+func TestACraftedBoundaryCannotSeparateNearbyParts(t *testing.T) {
+	filler := func(u string) bool { return strings.HasPrefix(u, "filler") }
+	units := []string{"환자 서지수", "filler-1", "filler-2", "진단: 우울증"}
+	for _, w := range buildWindows(units, 200, 150, filler) {
+		if strings.Contains(w, "서지수") && strings.Contains(w, "우울증") {
+			return
+		}
+	}
+	t.Fatal("boundary fillers separated the name from the diagnosis")
+}
+
+// Any two short units within overlap runes of each other share a window,
+// whatever the boundary function decides.
+func TestBuildWindowsCoReadUnitsWithinTheOverlap(t *testing.T) {
+	units := make([]string, 300)
+	for i := range units {
+		units[i] = fmt.Sprintf("<%d|%s>", i, strings.Repeat("내용", i%7))
+	}
+	const size, overlap = 200, 60
+	for name, b := range map[string]func(string) bool{"fnv": fnvBoundary, "always": always, "never": never} {
+		windows := buildWindows(units, size, overlap, b)
+		for i := range units {
+			span := utf8.RuneCountInString(units[i])
+			for j := i + 1; j < len(units); j++ {
+				span += 2 + utf8.RuneCountInString(units[j])
+				if span > overlap {
+					break
+				}
+				together := false
+				for _, w := range windows {
+					if strings.Contains(w, units[i]) && strings.Contains(w, units[j]) {
+						together = true
+						break
+					}
+				}
+				if !together {
+					t.Fatalf("%s: units %d and %d (span %d <= %d) never share a window", name, i, j, span, overlap)
+				}
+			}
+		}
+	}
+}
+
+// A conversation grows by appending turns, and a client may place later
+// fields (tool schemas) after the messages. Content-defined boundaries keep
+// the windows before and after a change identical, so their cache entries
+// keep hitting; size-only packing does not.
+func TestBuildWindowsStayStableAsAConversationGrows(t *testing.T) {
+	units := make([]string, 300)
+	for i := range units {
+		units[i] = fmt.Sprintf("메시지 %d: 이 함수의 오류 처리를 검토해 주세요.", i)
+	}
+	grown := slices.Insert(slices.Clone(units), 3, strings.Repeat("중간에 끼어든 새 메시지 ", 4))
+	keptAfterInsert := func(b func(string) bool) (int, int) {
+		before := buildWindows(units, 200, 20, b)
+		after := buildWindows(grown, 200, 20, b)
+		kept := 0
+		for _, w := range before {
+			if slices.Contains(after, w) {
+				kept++
+			}
+		}
+		return kept, len(before)
+	}
+	before := buildWindows(units, 200, 20, fnvBoundary)
+	appended := buildWindows(append(slices.Clone(units), "새 질문"), 200, 20, fnvBoundary)
+	if !slices.Equal(appended[:len(before)-1], before[:len(before)-1]) {
+		t.Fatal("appending a turn changed earlier windows")
+	}
+	kept, total := keptAfterInsert(fnvBoundary)
+	if kept < total*9/10 {
+		t.Fatalf("an early insertion kept only %d of %d windows", kept, total)
+	}
+	if sizeOnly, n := keptAfterInsert(never); sizeOnly*10 >= n*9 {
+		t.Fatalf("size-only packing also kept %d of %d windows; the fixture does not exercise boundaries", sizeOnly, n)
+	}
+}
+
+func TestBuildWindowsCoverEveryUnit(t *testing.T) {
+	units := []string{"a", strings.Repeat("나", 33), "", "bc", strings.Repeat("다", 7)}
+	joined := strings.Join(buildWindows(units, 10, 3, fnvBoundary), "|")
+	for _, u := range units {
+		for _, r := range u {
+			if !strings.ContainsRune(joined, r) {
+				t.Fatalf("rune %q of unit %q is in no window", r, u)
+			}
+		}
+	}
+}
+
+func TestSplitRunesPrefersALateNewline(t *testing.T) {
+	s := strings.Repeat("a", 8) + "\n" + strings.Repeat("b", 20)
+	got := splitRunes(s, 10, 2)
+	if got[0] != strings.Repeat("a", 8)+"\n" {
+		t.Fatalf("first window %q", got[0])
+	}
+}
+
+func TestSplitRunesOverlapsAndCoversEverything(t *testing.T) {
+	s := strings.Repeat("가나다라마바사\n", 40) + "끝"
+	for _, size := range []int{5, 7, 12, 40} {
+		for overlap := 0; overlap <= size/2; overlap++ {
+			got := splitRunes(s, size, overlap)
+			rebuilt := got[0]
+			for _, w := range got[1:] {
+				prev := []rune(rebuilt)
+				if !strings.HasPrefix(w, string(prev[len(prev)-overlap:])) {
+					t.Fatalf("size %d overlap %d: window does not repeat the overlap", size, overlap)
+				}
+				rebuilt += string([]rune(w)[overlap:])
+			}
+			if rebuilt != s {
+				t.Fatalf("size %d overlap %d: windows do not cover the text", size, overlap)
+			}
+		}
+	}
+}
+
+func TestSplitRunesNeverBreaksARune(t *testing.T) {
+	s := strings.Repeat("가a😀\n김", 50)
+	for size := 5; size <= 13; size++ {
+		for overlap := 0; overlap <= size/2; overlap++ {
+			for _, w := range splitRunes(s, size, overlap) {
+				if !utf8.ValidString(w) || utf8.RuneCountInString(w) > size {
+					t.Fatalf("size %d overlap %d: bad window %q", size, overlap, w)
+				}
+			}
+		}
+	}
+}
+```
+
+In `plugins/systemone/systemone_test.go`, replace `TestRunJudgesAdjacentPartsTogetherThroughRealWindows` (with its doc comment) with the following, and add `"fmt"` to the imports if it is missing:
+
+```go
+// The 2026-10-16 review cases: a name and a diagnosis, adjacent or with a
+// boundary filler between them, must be judged together through the real
+// windows and the cache.
+func TestRunJudgesNearbyPartsTogetherThroughRealWindows(t *testing.T) {
+	const name, diagnosis = "환자 서지수", "진단: 우울증"
+	srv := batchServer(t, nil, func(states []string) []float64 {
+		out := make([]float64, len(states))
+		for i, s := range states {
+			if strings.Contains(s, name) && strings.Contains(s, diagnosis) {
+				out[i] = 0.99
+			}
+		}
+		return out
+	})
+	c := newClassifier(t, srv.URL, `{"window_runes":200}`, 0.5, "")
+	var filler string
+	for i := 0; filler == ""; i++ {
+		if f := fmt.Sprintf("참고 %d", i); c.(*systemone).boundary(f) {
+			filler = f
+		}
+	}
+	set, err := classifier.NewSet([]classifier.Entry{{Name: "laya-ko", Mode: classifier.Enforce, Classifier: c, Global: true}}, 5*time.Second, 1<<20, 100, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(segments ...string) classifier.Outcome {
+		return set.Run(context.Background(), set.Entries, classifier.Request{Team: "kr", Segments: segments})[0].Outcome
+	}
+	for _, part := range []string{name, diagnosis, filler} {
+		if got := run(part); got != classifier.OutcomeClear {
+			t.Fatalf("part %q alone: %s", part, got)
+		}
+	}
+	for _, segments := range [][]string{{name, diagnosis}, {name, filler, diagnosis}} {
+		if got := run(segments...); got != classifier.OutcomeFlagged {
+			t.Fatalf("%q were not judged together: %s", segments, got)
+		}
+	}
+}
+
+func TestBoundaryHashIsKeyedPerInstance(t *testing.T) {
+	a := newClassifier(t, "http://127.0.0.1:1", "", 0.5, "").(*systemone)
+	b := newClassifier(t, "http://127.0.0.1:1", "", 0.5, "").(*systemone)
+	differ := false
+	for i := 0; i < 2000; i++ {
+		u := fmt.Sprintf("unit %d", i)
+		if a.boundary(u) != a.boundary(u) {
+			t.Fatal("one instance gave two answers for the same unit")
+		}
+		differ = differ || a.boundary(u) != b.boundary(u)
+	}
+	if !differ {
+		t.Fatal("two instances share boundary decisions; the hash is not keyed")
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `go test ./plugins/systemone/ -v`
+Expected: FAIL to compile (`too many arguments in call to buildWindows`, `c.(*systemone).boundary undefined`).
+
+- [ ] **Step 3: Implement**
+
+Replace `plugins/systemone/window.go` with:
+
+```go
+package systemone
+
+import (
+	"slices"
+	"strings"
+	"unicode/utf8"
+)
+
+// boundaryEvery sets the expected number of short units per window. A unit
+// for which the classifier's keyed boundary hash is divisible by it ends its
+// window, so window edges depend on content, not position: content inserted
+// earlier in a request changes the windows only up to the next boundary, and
+// later windows, with their cache entries, stay identical as a conversation
+// grows. The hash is seeded randomly per classifier instance (one per
+// generation), so nobody can compute boundary units offline.
+const boundaryEvery = 16
+
+// buildWindows packs consecutive short units into windows of at most size
+// runes, joined by a blank line; ends a window after a unit for which
+// boundary reports true; and splits a unit longer than size with splitRunes.
+// Each packed window starts with the trailing units of the previous packed
+// window: always its last unit, plus earlier ones while the carried text
+// stays within overlap runes, dropping the oldest until the new unit fits.
+// So two short units with at most overlap runes of text from the first to
+// the second are read together in some window, and no edge can separate them.
+// Empty units get no window. The result depends only on the arguments.
+func buildWindows(units []string, size, overlap int, boundary func(string) bool) []string {
+	var out []string
+	var win, carry []string // units of the open window; trailing units carried into the next
+	runes := 0              // runes of the open window, separators included
+	flush := func(keep bool) {
+		if len(win) > 0 {
+			out = append(out, strings.Join(win, "\n\n"))
+			if keep {
+				carry = tail(win, overlap)
+			}
+		}
+		if !keep {
+			carry = nil
+		}
+		win, runes = nil, 0
+	}
+	for _, u := range units {
+		n := utf8.RuneCountInString(u)
+		switch {
+		case n == 0:
+			continue
+		case n > size:
+			flush(false)
+			out = append(out, splitRunes(u, size, overlap)...)
+			continue
+		}
+		if len(win) > 0 && runes+2+n > size {
+			flush(true)
+		}
+		if len(win) == 0 {
+			for len(carry) > 0 && joinedRunes(carry)+2+n > size {
+				carry = carry[1:] // drop the oldest carried unit until u fits
+			}
+			win, runes, carry = carry, joinedRunes(carry), nil
+		}
+		if len(win) > 0 {
+			runes += 2
+		}
+		win = append(win, u)
+		runes += n
+		if boundary(u) {
+			flush(true)
+		}
+	}
+	flush(false)
+	return out
+}
+
+// tail returns the last unit plus earlier units while the carried text,
+// separators included, stays within overlap runes.
+func tail(units []string, overlap int) []string {
+	i := len(units) - 1
+	total := utf8.RuneCountInString(units[i])
+	for i > 0 {
+		next := total + 2 + utf8.RuneCountInString(units[i-1])
+		if next > overlap {
+			break
+		}
+		total, i = next, i-1
+	}
+	return slices.Clone(units[i:])
+}
+
+func joinedRunes(units []string) int {
+	n := 0
+	for i, u := range units {
+		if i > 0 {
+			n += 2
+		}
+		n += utf8.RuneCountInString(u)
+	}
+	return n
+}
+
+// splitRunes cuts s into windows of at most size runes. Each cut prefers the
+// last newline in the final fifth of the window, and each window after the
+// first repeats the previous window's last overlap runes. It requires
+// 0 <= overlap <= size/2, which the option bounds guarantee.
+func splitRunes(s string, size, overlap int) []string {
+	r := []rune(s)
+	var out []string
+	for start := 0; ; {
+		end := start + size
+		if end >= len(r) {
+			return append(out, string(r[start:]))
+		}
+		for j := end - 1; j >= start+size*4/5; j-- {
+			if r[j] == '\n' {
+				end = j + 1
+				break
+			}
+		}
+		out = append(out, string(r[start:end]))
+		next := end - overlap
+		if next <= start {
+			next = end
+		}
+		start = next
+	}
+}
+```
+
+In `plugins/systemone/systemone.go`:
+- add `seed maphash.Seed // keys the window-boundary hash; random per instance` to the `systemone` struct;
+- end `New` with `return &systemone{endpoint: strings.TrimRight(cfg.Endpoint, "/"), token: cfg.BearerToken, client: client, s: s, seed: maphash.MakeSeed()}, nil`;
+- add `"hash/maphash"` to the imports;
+- replace the body of `Windows` and add `boundary`:
+
+```go
+func (c *systemone) Windows(segments []string) []string {
+	return buildWindows(segments, c.s.windowRunes, c.s.overlapRunes, c.boundary)
+}
+
+// boundary reports whether unit ends its window, under this instance's seed.
+func (c *systemone) boundary(unit string) bool {
+	return maphash.String(c.seed, unit)%boundaryEvery == 0
+}
+```
+
+In the spec, §4 Windowing, replace the boundary bullet ("A segment whose FNV-1a hash …") and the carry bullet ("Each packed window starts with the previous packed window's last unit …") with:
+
+```markdown
+- A segment whose keyed hash is divisible by 16 ends its window. The hash is
+  seeded randomly per classifier instance, once per generation, so boundary
+  units cannot be computed offline. Edges depend on content, not position:
+  content inserted earlier in a request changes the windows only up to the
+  next edge, and the later windows, with their cache entries, stay identical
+  as a conversation grows.
+- Each packed window starts with the previous packed window's trailing units:
+  always its last unit, plus earlier ones while they total at most
+  `window_overlap_runes`. Any two short units with at most that much text from
+  the first to the second are read together in some window, so no edge,
+  natural or crafted, separates them (second commit security review,
+  2026-10-16).
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `go test ./plugins/systemone/ ./internal/classifier/ -race -count=2 -v`
+Expected: PASS. The tests include `TestACraftedBoundaryCannotSeparateNearbyParts` and `TestBuildWindowsCoReadUnitsWithinTheOverlap`, which checks the overlap property under the FNV, always-boundary and never-boundary functions. They also include `TestBuildWindowsStayStableAsAConversationGrows`, which fails if size-only packing would also pass, `TestRunJudgesNearbyPartsTogetherThroughRealWindows` and `TestBoundaryHashIsKeyedPerInstance`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+gofmt -w plugins/systemone && test -z "$(gofmt -l plugins/systemone)" && go vet ./plugins/systemone/
+git add plugins/systemone docs/superpowers/specs/2026-10-16-systemone-korean-pii-sample-design.md
+git commit -s -m "fix(systemone): key window edges per generation and carry the overlap across them" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ### Task 6: `pii_classification` config and the per-generation Set
