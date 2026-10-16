@@ -1,12 +1,14 @@
 # systemone PII classifier and the Korean opt-in sample
 
-Status: draft for review, 2026-10-16. This is sub-project 1 of
+Status: approved by the user on 2026-10-16, including the three proposals in
+Decisions. This is sub-project 1 of
 [the pluggable PII classifiers spec](2026-10-07-pii-classifiers-design.md)
 (the umbrella). It follows the boundary rules of
 [PR-08](../plans/2026-10-11-gateway-correctness-improvements.md) and settles
 the inspection-scope question that PR-08 left open in the umbrella.
-Implementation is not authorized until this spec is approved and its
-implementation plan is approved.
+Implementation starts only after its implementation plan is approved.
+Amendments 1–6 come from mapping this spec to the code, and are listed in the
+plan (`docs/superpowers/plans/2026-10-16-systemone-korean-pii-sample.md`).
 
 ## Goal
 
@@ -120,17 +122,21 @@ type Verdict int // Clear | Flagged | Abstain
 type Mode string // "Shadow" | "Enforce"
 
 type Input struct {
-	Texts []string // segments not served from cache; borrowed, never retained
+	Texts []string // units not served from cache; borrowed, never retained
 }
 
 type Output struct {
 	Verdict Verdict
 	// Clear[i] reports that Texts[i] was read completely and judged clear.
-	// Only these segments may be cached. A nil slice means none.
-	Clear []bool
+	// Only these units may be cached. A nil slice means none.
+	Clear   []bool
+	Windows int // windows sent, for metrics only
 }
 
 type Classifier interface {
+	// Units splits segments into the deterministic units the classifier reads
+	// and the cache stores (amendment 1, 2026-10-16).
+	Units(segments []string) []string
 	Classify(ctx context.Context, in Input) (Output, error)
 }
 
@@ -201,9 +207,11 @@ marks every entry `skipped`.
 
 ### 3. Verdict cache
 
-The cache stores which segments a classifier has already judged clear, so that
+The cache stores which units a classifier has already judged clear, so that
 repeated content (system prompt, tool definitions, earlier turns) is classified
-once.
+once. A unit is a short segment, or one deterministic chunk of a long segment
+(amendment 1). Caching chunks lets a tool result longer than `max_windows`
+windows be read across a few requests instead of abstaining forever.
 
 **Key.** Each key is HMAC-SHA256 under a 32-byte key drawn from `crypto/rand`
 for each Set generation. It covers, length-prefixed:
@@ -286,7 +294,9 @@ The `criteria` field is present only when configured.
 
 The common `threshold` field defaults to 0.5 and must lie in (0,1).
 
-**Windowing.** Windows are cut from the uncached segments, in body order:
+**Units and windowing.** `Units` keeps a segment of at most `window_runes`
+whole and splits a longer one into overlapping chunks, as described below.
+Windows are cut from the uncached units, in body order:
 - Consecutive segments are packed into one window, joined by a blank line,
   while the window stays within `window_runes`.
 - A segment longer than `window_runes` is split. The cut prefers the last
@@ -318,7 +328,9 @@ The common `threshold` field defaults to 0.5 and must lie in (0,1).
   An error reports no clear segments.
 
 **Hygiene.**
-- Uses stdlib `net/http`.
+- Uses stdlib `net/http`, with `Proxy: nil` and no redirect following, so
+  request text never travels through an environment proxy or to another host
+  (amendment 5).
 - Sends `Authorization: Bearer` only when an `api_key` ref is configured.
 - Error values carry a bounded class only: `timeout`, `transport`, `status`
   or `decode`. They never carry request text, the response body or the
@@ -357,7 +369,9 @@ Boot validation fails on any of these:
   - `external` is rejected as unsupported in this version;
 - an endpoint that is not an absolute `http(s)` URL, or that carries
   userinfo, a query or a fragment;
-- an inline secret (only `env:`, `file:` and `secret:` refs);
+- an inline `api_key`; the token is `api_key_ref: {"env": NAME}` or
+  `{"file": "/abs"}`, the repository's `SecretRef` convention (amendment 2);
+- any unknown field in the block, which is decoded strictly (amendment 3);
 - an invalid `mode`;
 - a threshold outside (0,1);
 - `timeout_ms` outside 1–30000;
@@ -461,12 +475,12 @@ second audit record that is linked to the first. It is deferred.
 **Layout:**
 
 ```
+examples/config.pii-classifier-ko.json   a complete mayu config: Shadow, team pilot-ko, CPU profile
+examples/helm.pii-classifier-ko.yaml     chart values that enable the Laya sidecar
 examples/pii-classifier-ko/
   README.md, README.ko.md     rollout steps, CPU and GPU profiles, evidence, limits
-  config.json                 a complete mayu config: Shadow, team pilot-ko, CPU profile
-  policies/privacy-ko.yaml    GovernancePolicy: sensitiveData InternalOnly
+  governance.yaml             GovernancePolicy: sensitiveData InternalOnly
                               to a self-hosted internal model, onUninspectable InternalOnly
-  helm-values.yaml            chart values that enable the Laya sidecar
   laya-serve/Dockerfile       the published CPU image
   laya-serve/requirements.txt hash-pinned
   laya-serve/SHA256SUMS       digests of the published weight files
@@ -479,7 +493,9 @@ examples/pii-classifier-ko/
 - Dependencies installed with `--require-hashes`: `laya[serve]==0.4.6` and
   CPU torch wheels for both architectures.
 - A build stage fetches the weights from the Hugging Face repository at a
-  pinned commit and verifies them against `SHA256SUMS`.
+  pinned commit (`WEIGHTS=hf`) or takes them from a local build context
+  (`WEIGHTS=local`, for acceptance before publication). Both verify them
+  against `SHA256SUMS` (amendment 6).
 - Only safetensors, tokenizer and config files are copied into
   `/models/laya-ko-pii`. The optimizer state (`checkpoint_latest`, 647 MB) is
   never published.
@@ -510,11 +526,12 @@ examples/pii-classifier-ko/
 - When enabled, the chart renders a second container in the gateway pod. The
   container:
   - binds `127.0.0.1`, with no Service port and no containerPort exposure;
-  - has startup and readiness probes on `/health`, so the pod is not Ready,
-    and receives no traffic, until the model has loaded;
+  - has startup and readiness probes on `/health`, run inside the container
+    because the server binds `127.0.0.1`, so the pod is not Ready, and
+    receives no traffic, until the model has loaded;
   - runs non-root with a read-only root filesystem and an emptyDir `/tmp`.
-- The chart does not edit the gateway config. `helm-values.yaml` shows the
-  matching `pii_classification` block.
+- The chart does not edit the gateway config. `examples/helm.pii-classifier-ko.yaml`
+  shows the matching `pii_classification` block (amendment 4).
 - The GPU profile is documented as an in-namespace ClusterIP Service on a GPU
   node pool, with a NetworkPolicy that admits only gateway pods. It is never a
   LoadBalancer or a public endpoint. Its suggested settings are
