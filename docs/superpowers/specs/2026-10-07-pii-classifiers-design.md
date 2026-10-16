@@ -101,6 +101,10 @@ measured in Shadow mode. This implementation does not establish them as benefits
 
 ### 1. Seam: new leaf package `internal/classifier`
 
+*(Superseded for sub-project 1: the shipped seam is the `Windows`/`Score`
+contract with whole-window caching, in
+[the systemone spec §1](2026-10-16-systemone-korean-pii-sample-design.md).)*
+
 ```go
 type Verdict int // Clear | Flagged | Abstain
 

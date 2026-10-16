@@ -11,7 +11,7 @@ under `plugins/<name>/` plus a blank import in `cmd/mayu/main.go`, with
 - `piimask/` — opt-in PII masking (ADR-009). Regex + Luhn detectors (email,
   phone, credit-card, SSN, IPv4) → typed placeholders (`‹EMAIL›` …). One-way: no
   vault, no un-masking, **no PII stored**. Registers as `pii-mask` in `init()`.
-- `systemone/` — PII classifier for `/v1/systemone` servers (Laya, strands-decider); registers as `systemone` via `classifier.Register` in `init()`; overlapping windows over the joined request text with per-instance keyed boundaries, at most `max_windows` sent per request, bounded error classes; never edits a body or logs text.
+- `systemone/` — PII classifier for `/v1/systemone` servers (Laya, strands-decider); registers as `systemone` via `classifier.Register` in `init()`; overlapping windows over the joined request text with per-instance keyed boundaries, at most `max_windows` sent per request, bounded error classes; a window the server reports as cut (`usage.truncated`/`state_tokens_dropped`) is never Clear, and under the default `truncation: "reported"` a result without `usage.truncated` is Abstain (the plugin never estimates tokens); never edits a body or logs text.
 
 ## Rules
 - A plugin registers itself with `filter.Register(...)` in `init()`; it is

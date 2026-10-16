@@ -70,8 +70,11 @@ These amendments are refinements found while mapping the spec to the code. None 
    - Everything else stays under `examples/pii-classifier-ko/`.
 5. **Egress hygiene.** The systemone HTTP client sets `Proxy: nil` and does not follow redirects. Request text then never travels through an environment proxy, and a redirect never moves it to another host.
 7. **Whole windows are the cache grain (2026-10-16, after the commit security review).** Unit-level caching let parts cleared separately bypass the check on their combination. The cache now stores whole window texts (`Classifier.Windows` / `Score`, Task 5a), and window edges are content-defined so windows stay stable as a conversation grows. The spec's "Known limit" no longer includes a cache-widened gap.
-8. **Keyed window edges and overlap carry (2026-10-16, second commit security review).** Boundary units are chosen by a per-generation keyed hash, and packed windows carry trailing units within `window_overlap_runes`, so no edge separates nearby parts (Task 5b).
+8. **Keyed window edges (2026-10-16, second commit security review).** Boundary units are chosen by a per-generation keyed hash (Task 5b). *(Its overlap carry of packed units is superseded by amendment 9.)*
 6. **Image weights stage.** The Dockerfile takes the weights either from the Hugging Face repository at a pinned commit (`WEIGHTS=hf`, the published build) or from the build context (`WEIGHTS=local`, used for acceptance before publication). Both paths verify `SHA256SUMS`.
+9. **Overlapping windows over the joined request text (2026-10-16, Task 5b fix round, Ruling 12).** Unit packing, `splitRunes` and the unit-level carry are removed. `buildWindows` cuts the non-empty segments, joined by a blank line, into windows of at most `window_runes` that share exactly `window_overlap_runes` runes, so any stretch within the overlap is read whole whatever the segment sizes or crafted boundaries. Cuts prefer a keyed boundary segment end, then the last fitting segment end, then a late newline, then `window_runes`; the total stays within about three times the input. Spec §4 Windowing.
+10. **A window the server did not read whole is never Clear (2026-10-16, final review, Ruling 21).** The plugin decodes `usage.truncated` and `usage.state_tokens_dropped` per result in both wires. A cut window that would be Clear or Abstain is Abstain (never cached); a flag stands. New option `truncation`: `"reported"` (default; a result without `usage.truncated` is Abstain) or `"rejected"` (the operator asserts the server refuses over-length input with an HTTP error, such as strands-decider `--strict-window`; a reported cut is still honoured). A malformed `usage` is a decode error. Spec §4 Verdict and option table.
+11. **Independent classified and uninspectable signals (2026-10-16, final review, Ruling 23).** `Combine` no longer clears `uninspectable` when another Enforce entry flagged; the rule loop applies both, so the stricter action wins. Spec §6 Combination.
 
 ## File structure
 
@@ -79,12 +82,12 @@ These amendments are refinements found while mapping the spec to the code. None 
 |---|---|
 | `internal/classifier/classifier.go` | Verdict, Mode, Input/Output, Classifier interface, Config, error classes, factory registry, `SettingsDigest` |
 | `internal/classifier/set.go` | `Entry`, `Set`, `NewSet`, `For` |
-| `internal/classifier/cache.go` | HMAC-keyed, TTL-bounded LRU of clear units |
+| `internal/classifier/cache.go` | HMAC-keyed, TTL-bounded LRU of clear whole windows (amendment 7) |
 | `internal/classifier/run.go` | `Request`, `Result`, `Outcome`, `Set.Run`, `Combine`, `Failed` |
 | `internal/sensitivity/segments.go` | `Segments`: the inspector walker's visit sequence |
-| `plugins/systemone/window.go` | `splitRunes`, `buildWindows` |
-| `plugins/systemone/systemone.go` | options, factory, `Units`, `Classify`, verdict rule |
-| `plugins/systemone/client.go` | batch and single wire, bounded errors |
+| `plugins/systemone/window.go` | `buildWindows`: overlapping windows over the joined request text (amendment 9) |
+| `plugins/systemone/systemone.go` | options, factory, `Windows`, `Score`, verdict rule including truncation (amendments 7, 10) |
+| `plugins/systemone/client.go` | batch and single wire, per-result `usage` coverage (amendment 10), bounded errors |
 | `internal/config/piiclassification.go` | `PIIClassificationConfig`, strict decode, validation |
 | `internal/live/classifiers.go` | build the `*classifier.Set` for a State; boot warning |
 | `internal/router/request_routing.go` (modify) | run classifiers, map signals to rule actions, `model_pii` |

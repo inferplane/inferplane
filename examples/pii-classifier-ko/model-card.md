@@ -32,7 +32,9 @@ Every request must carry `"model": "multilingual"` and the trained statement:
     {"model": "multilingual", "state": "<text>",
      "questions": {"pii": {"type": "noul", "instructions": "Does this text contain personal information about a specific person, or a secret credential?"}}}
 
-The answer is `answers.pii.noul`, the probability of "yes".
+The answer is `answers.pii.noul`, the probability of "yes". The response's
+`usage.truncated` and `usage.state_tokens_dropped` report whether the whole
+text was read (see Limitations).
 
 Without `"model": "multilingual"`, Laya routes Latin-script text to its stock
 English checkpoint. The image `ghcr.io/inferplane/laya-ko-pii` contains this
@@ -92,6 +94,15 @@ measurement on labeled samples of real traffic before enforcement.
 - **Windowed use.** inferplane reads long requests in windows of about 1,000
   characters. A name and an attribute in different windows, or in different
   turns of a conversation, are not read together.
+- **Token budget.** The checkpoint's `max_len` is 1,024 tokens, which leaves
+  about 980 for the text after the question. `laya-serve` cuts longer text
+  without an error and reports the cut in `usage`; a caller must read it,
+  because the score then covers only the beginning of the text. inferplane
+  never treats a cut window as clear: it abstains unless the part that was
+  read is flagged. 1,000 characters are about 600 tokens of Korean prose, 170
+  of English prose and 370 of Go code, but up to 1,035 for phone or
+  resident-number lists. Keep `LAYA_JEV_STRICT` off: it removes the truncation
+  fields from `usage`.
 - **Calibration.** The model is calibrated only on synthetic data (ECE 0.031).
 - **Abbreviation styles.** Korean abbreviations and mixed-script identifiers
   outside the training formats may be missed.

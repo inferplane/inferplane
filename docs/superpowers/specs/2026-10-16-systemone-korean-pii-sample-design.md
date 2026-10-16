@@ -7,9 +7,14 @@ Decisions. This is sub-project 1 of
 [PR-08](../plans/2026-10-11-gateway-correctness-improvements.md) and settles
 the inspection-scope question that PR-08 left open in the umbrella.
 Implementation starts only after its implementation plan is approved.
-Amendments 1–7 come from mapping this spec to the code (7 from the commit
-security review; it supersedes 1), and are listed in the
-plan (`docs/superpowers/plans/2026-10-16-systemone-korean-pii-sample.md`).
+Amendments 1–11 come from mapping this spec to the code and from its reviews,
+and are listed in the plan
+(`docs/superpowers/plans/2026-10-16-systemone-korean-pii-sample.md`). 7 (from
+the commit security review) supersedes 1; 9 replaces the window packing of 7
+and 8. Amendment 10 (final review) makes a window the server did not read
+whole never Clear, with a new `truncation` option. Amendment 11 (final
+review) makes a flag no longer hide another Enforce entry's abstain or
+error: both signals apply.
 
 ## Goal
 
@@ -272,10 +277,12 @@ The `criteria` field is present only when configured.
 - `batch` mode (default, Laya):
   - request: `POST {endpoint}/v1/systemone/batch` with
     `{"states": [w1, …, wn], "questions": {"pii": Q}, "model"?: m}`;
-  - response: `{"results": [{"answers": {"pii": {"type": "noul", "noul": p}}}, …]}`.
+  - response: `{"results": [{"answers": {"pii": {"type": "noul", "noul": p}},
+    "usage": {"truncated": t, "state_tokens_dropped": d, …}}, …]}`.
 - `single` mode (strands-decider, which has no batch route):
   - request: `POST {endpoint}/v1/systemone` with
     `{"state": w, "questions": {"pii": Q}, "model"?: m}` for each window;
+  - response: one result of the batch shape, with its own `usage`;
   - at most `concurrency` requests run at once, under the shared deadline.
 
 **Options.** Each one is validated at boot. An unknown option is an error.
@@ -291,6 +298,7 @@ The `criteria` field is present only when configured.
 | `window_overlap_runes` | 150 | 0 to `window_runes`/2 | |
 | `max_windows` | 64 | 1–64 | 64 is Laya's batch-state cap. |
 | `abstain_band` | absent | `{"low": l, "high": h}` with 0 < l < `threshold` < h < 1 | |
+| `truncation` | `"reported"` | `"reported"` or `"rejected"` | How the gateway learns that a window was read whole (amendment 10). `reported`: from each result's `usage`, as laya-serve reports it. `rejected`: the operator asserts the server refuses over-length input with an HTTP error, as strands-decider `--strict-window` does with 422. |
 
 The common `threshold` field defaults to 0.5 and must lie in (0,1).
 
@@ -310,10 +318,16 @@ second and third commit security reviews, 2026-10-16):
 - The hash is `hash/maphash`, seeded randomly per classifier instance, once
   per generation, so boundary segments cannot be computed offline. It is not
   a cryptographic hash; the overlap guarantee does not depend on it.
-- Edges at boundary segments depend on content, not position: text inserted
-  earlier in a request changes the windows only up to the next such edge, and
-  every window but the last stays identical when a turn is appended, so their
-  cache entries keep hitting.
+- Every window but the last stays identical when a turn is appended, so
+  their cache entries keep hitting. Edges at boundary segments depend on
+  content, not position, so after text is inserted earlier in a request the
+  windows usually fall back into step at a later boundary segment. That is
+  probabilistic, not guaranteed: at the defaults, one insertion changed about
+  two windows on average (200 random keys, one insertion at a random
+  position: 91% of the windows of a 300-message conversation kept, 99% of a
+  3,000-message one). With `window_overlap_runes` at `window_runes`/2 a
+  window must hold about `window_runes` runes before any segment end can end
+  it, so with uniform short segments an insertion changes most later windows.
 - A window ends at a segment only after taking in at least
   `window_overlap_runes` new runes, so the windows' total text stays within
   about three times the request text (measured: twice, for 262,144 one-rune
@@ -328,6 +342,35 @@ second and third commit security reviews, 2026-10-16):
   - with a configured band, `low < p < high` is Abstain;
   - otherwise `p >= threshold` is Flagged;
   - anything else is Clear.
+- A window the server did not read whole is never Clear (amendment 10, after
+  the final review, 2026-10-16). laya-serve 0.4.6 cuts a state to the
+  checkpoint's token budget without an error: with `max_len` 1024 and about
+  42 tokens for the question, about 980 state tokens per window are read. It
+  reports the cut in each result's `usage` (`truncated`,
+  `state_tokens_dropped`). The gateway never estimates token counts:
+  - a window counts as cut when `usage.truncated` is true or
+    `usage.state_tokens_dropped` is above 0;
+  - a cut window whose verdict would be Clear or Abstain is Abstain; a
+    Flagged verdict stays Flagged, because the part that was read already
+    contains personal data;
+  - under `truncation: "reported"` (the default) a result without
+    `usage.truncated` is Abstain, whatever its probability;
+  - under `truncation: "rejected"` `usage` is optional, and a reported cut is
+    still honoured; the server's refusal of an over-length window is a
+    `status` error;
+  - Abstain is never cached.
+
+  The default `window_runes` fits ordinary coding text with room: measured
+  with the checkpoint tokenizer, 1,000 runes are about 600 tokens of Korean
+  prose, 170 of English prose and 370 of Go code. Dense text comes close
+  (lock-file hashes 805, JSON numbers 850, UUID lists 934 tokens per 1,000
+  runes), and phone or resident-number lists exceed it (1,035), as can
+  crafted windows or a larger `window_runes` (Korean prose passes the budget
+  at about 1,650 runes). Such windows now fail closed instead of being judged
+  on a prefix.
+  `LAYA_JEV_STRICT` must stay off for laya-serve: it reduces `usage` to
+  `input_tokens` and `output_tokens`, so every result would be Abstain under
+  the default.
 - The request verdict combines the windows: any Flagged window gives Flagged;
   otherwise any Abstain or an unread remainder gives Abstain; otherwise Clear.
 - The following are errors, never verdicts:
@@ -335,7 +378,9 @@ second and third commit security reviews, 2026-10-16):
   - a body that is not strict JSON, or that exceeds 256 KiB;
   - a result count that differs from the window count;
   - a missing or non-`noul` answer;
-  - a probability outside [0,1] or not finite.
+  - a probability outside [0,1] or not finite;
+  - a malformed `usage` object, such as a field of the wrong type or a
+    negative `state_tokens_dropped`.
 
   An error caches nothing.
 
@@ -390,6 +435,9 @@ Boot validation fails on any of these:
 - `max_input_bytes` outside 1 KiB–16 MiB;
 - `cache.max_entries` outside 0–1,000,000, or `cache.ttl_seconds` outside
   60–86,400;
+- an explicit empty `teams` list, a team name that is empty after trimming or
+  carries surrounding whitespace, or a duplicate team name in one entry;
+- an `api_key_ref` that resolves to an empty token;
 - a plugin option error.
 
 Further behavior:
@@ -426,10 +474,17 @@ Teams without both a privacy rule and an entry pay nothing.
 - An entry still pending at the deadline is an error. Its completed windows
   are not cached, because they were not reported back.
 
-**Combination.** Only Enforce entries count:
+**Combination.** Only Enforce entries count, and the two signals are
+independent (amendment 11, after the final review, 2026-10-16; it replaces
+"Otherwise, any Enforce Abstain or error"):
 1. Any Enforce Flagged makes the request classified.
-2. Otherwise, any Enforce Abstain or error makes it classifier-uninspectable.
-3. Otherwise the request is clear.
+2. Any Enforce Abstain or error makes it classifier-uninspectable, whether or
+   not another entry flagged. A flag never hides another entry's failure.
+3. A request with neither signal is clear.
+
+The rule loop applies both signals, so the stricter action wins, as for the
+regex triggers: a flag from one entry and an error from another, under
+`onDetected: InternalOnly` and `onUninspectable: Block`, is blocked.
 
 This signal is router-local and is not added to `sensitivity.Result`. As a
 result, Mask reinspection never sees it, and it can still mask regex spans in a
@@ -596,7 +651,7 @@ Face or GHCR:
 | Condition | Shadow | Enforce |
 |---|---|---|
 | Flagged | recorded, `WouldRestrict` | rule `onDetected`; Mask becomes `onUninspectable` |
-| Abstain (band, unread remainder over `max_windows`, `max_input_bytes`) | recorded, `WouldRestrict` | `onUninspectable` |
+| Abstain (band, unread remainder over `max_windows`, `max_input_bytes`, a window the server did not read whole) | recorded, `WouldRestrict` | `onUninspectable` |
 | Error (timeout, transport, status, decode, extraction) | recorded, `WouldRestrict` | `onUninspectable` |
 | Clear, including all segments from cache | recorded | none |
 | Skipped (nothing extracted) | recorded | none |
@@ -623,13 +678,21 @@ Face or GHCR:
   - no cache key or value is derivable without the per-generation HMAC key;
   - a window is cached only when its own verdict was Clear, and parts cleared
     separately never clear their combination (amendment 7);
-  - windows stay identical after a turn is appended, and nearly all survive an
-    insertion earlier in the request.
+  - windows stay identical after a turn is appended, and most survive an
+    insertion earlier in the request (probabilistic; the test checks at least
+    nine in ten on a fixture where size-only cutting keeps fewer).
 - **systemone plugin**, against `httptest` fakes of the batch and single wires:
   - threshold and band boundaries, including equality at `threshold`, `low`
     and `high`;
-  - window packing across segments, splitting on a newline or a rune boundary,
-    overlap, and multi-byte Korean text cut at every offset;
+  - overlapping windows over the joined request text: consecutive windows
+    share exactly the overlap and rebuild the text, any stretch within the
+    overlap is co-read whatever the segment sizes or crafted boundaries, the
+    total stays within about three times the input, the preferred cut points,
+    and multi-byte Korean text cut at every offset;
+  - truncation (amendment 10), in both wires: a cut window, or one with
+    dropped state tokens, is Abstain and never cached; a cut window that flags
+    is Flagged; a result without `usage` is Abstain under `reported` and a
+    normal verdict under `rejected`; a malformed `usage` is a decode error;
   - above `max_windows`: exactly `max_windows` windows sent, the unsent ones
     are Abstain, and only the read clear windows are cached;
   - the request carries `instructions`, `criteria` and `model` verbatim when
@@ -655,9 +718,10 @@ Face or GHCR:
   - count requests make no classifier call and stay HTTP 200;
   - Block precedence, the internal-model intersection, Mask combined with
     InternalOnly, and the remote-tool boundary refusal are preserved.
-- **Combination.** Any Enforce Flagged wins. Enforce error or abstain gives
-  uninspectable. Shadow never changes routing. The shared deadline cancels
-  pending calls.
+- **Combination.** Any Enforce Flagged classifies, and any Enforce error or
+  abstain makes the request uninspectable, independently; a flag plus another
+  entry's error applies the stricter action. Shadow never changes routing,
+  also next to an Enforce entry. The shared deadline cancels pending calls.
 - **Config.** Every validation rule above. A rejected reload keeps the current
   Set.
 - **Audit and metrics.**
@@ -709,6 +773,10 @@ Face or GHCR:
   flagged verdicts.
 - Publishing the training or evaluation data, or the strands-decider weights.
 - Policy schema or CRD changes.
+- A cross-request cap on in-flight classifier calls. Classification runs in
+  `RouteRequest`, before governance admission, so per-key limits do not bound
+  classifier load; the cap changes failure semantics and needs its own design
+  (a follow-up, recorded as a known limit).
 
 ## Documentation (same change as the implementation)
 

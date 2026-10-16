@@ -38,8 +38,9 @@ It is false for:
    minimal pairs, and splits the data by template, with two genres held out.
 3. `datagen/convert.py`: writes the Laya and strands-decider training formats.
 4. Upload `data/` to `s3://<bucket>/data/`, then run:
-   `python3 sagemaker/launch.py --backend laya --bucket <bucket> --role-arn <role> --hp laya_args="--loss soft-ce --grad-accum 2" --hp epochs=8 --hp seed=1`.
+   `python3 sagemaker/launch.py --backend laya --instance ml.g6.2xlarge --bucket <bucket> --role-arn <role> --hp laya_args="--loss soft-ce --grad-accum 2" --hp epochs=8 --hp seed=1`.
    Laya seed 1 trained in about 43 minutes on `ml.g6.2xlarge` (one NVIDIA L4).
+   Each job writes its source bundle and outputs under `s3://<bucket>/jobs/`.
 5. `indep/gen.py`, `indep/build.py` and `indep/audit.py`: build an independent
    evaluation set with other generator models, unseen genres and value formats,
    and audit its labels. Score it with `indep/score_one.sh` and

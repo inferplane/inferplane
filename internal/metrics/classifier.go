@@ -73,7 +73,8 @@ func (m *Metrics) ObservePIIClassifier(name, revision, mode, result string, seco
 // generation's name → revision map. It deletes the series of removed
 // classifiers and of replaced revisions, so a process exports one revision
 // per classifier. A request still finishing on the previous generation can
-// re-create an old series until the next swap.
+// re-create an old series after the swap; that series is no longer tracked,
+// so it lives until the process restarts (bounded by the revisions seen).
 func (m *Metrics) RetainPIIClassifiers(current map[string]string) {
 	if m == nil || m.classifiers == nil {
 		return

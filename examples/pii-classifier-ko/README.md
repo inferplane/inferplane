@@ -37,6 +37,13 @@ helm install inferplane charts/inferplane -f examples/helm.pii-classifier-ko.yam
 The sidecar listens on `127.0.0.1` inside the gateway pod. It has no Service
 port, and its probes run inside the container.
 
+To require a bearer token on the sidecar, set `piiClassifier.laya.apiKeySecret`
+to a Secret that holds the key `LAYA_API_KEY`; the chart passes it to the
+sidecar as `LAYA_API_KEY`. The gateway container loads every key of
+`secrets.existingSecret` as an environment variable (`envFrom`), so put the
+same `LAYA_API_KEY` in that Secret, or name that Secret in `apiKeySecret`, and
+add `api_key_ref: {env: LAYA_API_KEY}` to the classifier entry.
+
 ## Profiles
 
 - **CPU (as shipped).** About 0.5 s per 1,000-character Korean window, and a
@@ -50,6 +57,37 @@ port, and its probes run inside the container.
   node pool. Use a NetworkPolicy that admits only the gateway pods; never a
   LoadBalancer or a public endpoint. Set `max_windows: 64` and `timeout_ms`
   above the measured p95.
+
+## Token budget and truncation
+
+laya-serve reads about 980 tokens of each window (`max_len` 1024 for this
+checkpoint, less the question) and cuts the rest without an error, reporting
+the cut in the response's `usage`. The gateway never estimates tokens: a
+window the server reports as cut is `abstain` unless the part it read flags,
+so it is never Clear. Tokens per 1,000 characters, measured with the
+checkpoint tokenizer on 2026-10-16:
+
+| Text | Tokens |
+|---|---|
+| English prose | 169 |
+| Go code | 366 |
+| Emoji chat | 471 |
+| Korean prose | 596 |
+| base64 | 691 |
+| Hanja | 749 |
+| sha256 lock-file lines | 805 |
+| JSON numbers | 850 |
+| UUID list | 934 |
+| Phone and resident-number list | 1,035 |
+
+The default `window_runes: 1000` fits ordinary coding text. Dense or crafted
+windows can exceed the budget (a phone or resident-number list already does
+at 1,000 characters, and Korean prose does past about 1,650) and then fail
+closed (`onUninspectable` in Enforce). Keep `LAYA_JEV_STRICT` unset: it removes the truncation fields from
+`usage`, and under the default `truncation: "reported"` every result would
+then be `abstain`. strands-decider reports no truncation; run it with
+`--strict-window`, which refuses an over-length window with HTTP 422, and set
+`truncation: "rejected"`.
 
 ## Evidence
 
@@ -85,6 +123,14 @@ you measure it in Shadow.
   different windows or turns are not read together. The verdict cache stores
   whole windows only, so it never joins or splits what was judged together.
 - The CPU profile does not cover long coding sessions.
+- Per-key rate and budget limits do not bound classifier load: classification
+  runs during routing, before admission, so a key over its limits still costs
+  up to `max_windows` inferences per request before it is refused. Size the
+  sidecar for the teams it serves. laya-serve admits `LAYA_MAX_CONCURRENT`
+  requests at once (default 16), answers the rest with 503 and runs one
+  inference at a time; batch mode sends one sidecar request per gateway
+  request. Saturation fails closed in Enforce and adds up to `timeout_ms` of
+  latency in Shadow. A cross-request cap is a follow-up.
 - No span masking for classifier flags: a Mask rule applies its `onUninspectable` action instead (regex detections still mask).
 - Only internal, self-hosted classifiers are supported.
 
