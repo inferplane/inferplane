@@ -2,13 +2,17 @@
 
 Status: design approved in the 2026-10-07/11 brainstorming conversation. The
 spec was revised to a pluggable classifier-provider structure and is awaiting
-review. No implementation is authorized yet.
+review. No implementation is authorized yet. Sub-project 1 (the `systemone`
+type, internal boundary, file config and a Korean sample) is specified in
+[2026-10-16-systemone-korean-pii-sample-design.md](2026-10-16-systemone-korean-pii-sample-design.md).
 
 Superseded in part: the 2026-10-11 gateway correctness plan
 ([PR-08](../plans/2026-10-11-gateway-correctness-improvements.md)) changes the
 default inspection scope below from "new input only" to the full protected
 content actually retransmitted. Treat §5's input scope as the original proposal
-until a follow-up design or ADR settles it.
+until a follow-up design or ADR settles it. Sub-project 1 settles it for its
+scope: classifiers read every string the regex inspector reads, and a
+team-scoped, node-local cache of clear verdicts keeps long sessions affordable.
 
 ## Product goal
 
@@ -42,7 +46,7 @@ measured in Shadow mode. This implementation does not establish them as benefits
 | Backend | Internal and external backends are both supported. Whether new input may be sent to an external classifier depends on each organization's policy, so it is an explicit operator setting (`allowed_boundaries`). The default is internal only. |
 | External safety | External classifiers run only on requests that local signals have left clear (local-first), over TLS only, and every audit record names the classifier boundary. |
 | Shape | LiteLLM-style typed classifier plugins, several at once, each scoped and moded independently. |
-| Korean | Not solved by Laya, whose multilingual accuracy is well below English. Covered by adding a `presidio` (Korean recognizers) or `generic` classifier. |
+| Korean | Zero-shot Laya does not solve it. Fine-tuned Laya multilingual and fine-tuned strands-decider detect synthetic Korean personal data (independent-set F1 0.95–0.96, 2026-10-16). Real-traffic accuracy is a Shadow gate. `presidio` and `generic` remain alternatives. |
 | Inspection scope | New input only: user text and tool results after the last assistant turn. |
 | Enforcement | Per-classifier `mode: Shadow | Enforce`. Shadow records only. |
 | Policy schema | Unchanged. There is no new rule type and no CRD change. |
@@ -224,7 +228,7 @@ means zero overhead.
 - External classifiers are an egress dependency. Their availability and latency
   are outside the operator's cluster. A failure in Enforce mode fails closed, so
   an outage of the external API restricts the scoped teams' requests.
-- ADR-049 amends ADR-044's "no network dependency" wording to cover opt-in
+- ADR-052 (ADR-049 is now taken) amends ADR-044's "no network dependency" wording to cover opt-in
   internal classifiers and the opt-in external boundary.
 
 ### 5. Routing integration
