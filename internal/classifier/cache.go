@@ -20,7 +20,7 @@ type PolicyRef struct {
 	Rule       string
 }
 
-// verdictCache remembers which units a classifier already judged clear. Keys
+// verdictCache remembers which windows a classifier already judged clear. Keys
 // are HMAC-SHA256 under a per-generation random key, so neither a key nor its
 // presence means anything outside this generation. It stores no text and no
 // verdict other than Clear.

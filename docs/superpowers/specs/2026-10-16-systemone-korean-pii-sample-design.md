@@ -223,7 +223,7 @@ for each Set generation. It covers, length-prefixed:
 - the policy references (name, generation and rule) of the rules that apply
   to the request, which `RouteRequest` always has, unlike the snapshot-only
   policy generation string;
-- the segment text.
+- the window text.
 
 **Value.** Only the Clear mark and its insertion time. Flagged, Abstain and
 error results are never cached, so flagged content is classified again on every
@@ -301,6 +301,7 @@ The common `threshold` field defaults to 0.5 and must lie in (0,1).
   therefore depend on content, not position: content inserted earlier in a
   request changes the windows only up to the next such edge, and the later
   windows, with their cache entries, stay identical as a conversation grows.
+- Each packed window starts with the previous packed window's last unit when it fits, so every two adjacent short units are read together in some window.
 - A segment longer than `window_runes` is split. The cut prefers the last
   newline in the final 20% of the window. Otherwise it falls on a rune
   boundary, never inside a UTF-8 sequence.
@@ -336,7 +337,7 @@ The common `threshold` field defaults to 0.5 and must lie in (0,1).
 - Error values carry a bounded class only: `timeout`, `transport`, `status`
   or `decode`. They never carry request text, the response body or the
   endpoint's credentials.
-- Window text is built per call and is not retained after `Classify` returns.
+- Window text is built per call and is not retained after `Score` returns.
 
 ### 5. Configuration
 

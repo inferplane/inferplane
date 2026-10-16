@@ -183,6 +183,21 @@ func TestRunCannotBeBypassedByCachingPartsSeparately(t *testing.T) {
 	}
 }
 
+func TestRunCachesOnlyTheClearWindowsOfAFlaggedRequest(t *testing.T) {
+	f := &fake{score: func(context.Context, []string) (Scores, error) {
+		return Scores{Verdicts: []Verdict{Clear, Flagged}, Sent: 2}, nil
+	}}
+	s := testSet(t, 100, enforce("laya", f))
+	if got := s.Run(context.Background(), s.Entries, req("kr", "clean", "risky")); got[0].Outcome != OutcomeFlagged {
+		t.Fatalf("%+v", got)
+	}
+	f.setScore(allClear)
+	s.Run(context.Background(), s.Entries, req("kr", "clean", "risky"))
+	if got := f.calls[1]; !slices.Equal(got, []string{"risky"}) {
+		t.Fatalf("second call sent %q, want only the flagged window", got)
+	}
+}
+
 func TestRunFlaggedWinsOverAbstain(t *testing.T) {
 	for _, verdicts := range [][]Verdict{{Abstain, Flagged}, {Flagged, Abstain}, {Clear, Flagged, Abstain}} {
 		f := &fake{score: func(context.Context, []string) (Scores, error) {

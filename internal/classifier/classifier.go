@@ -19,7 +19,7 @@ import (
 	"sync"
 )
 
-// Verdict is a classifier's answer for one request.
+// Verdict is a classifier's answer for one window, or for one request after Run combines its windows.
 type Verdict int
 
 const (

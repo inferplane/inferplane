@@ -21,18 +21,22 @@ func boundary(unit string) bool {
 
 // buildWindows packs consecutive short units into windows of at most size
 // runes, joined by a blank line, ends a window after a boundary unit, and
-// splits a unit longer than size with splitRunes. Empty units get no window.
-// The result depends only on units, size and overlap.
+// splits a unit longer than size with splitRunes. Each packed window starts
+// with the previous packed window's last unit when it fits, so every two
+// adjacent short units are read together in some window. Empty units get no
+// window. The result depends only on units, size and overlap.
 func buildWindows(units []string, size, overlap int) []string {
 	var out []string
 	var cur strings.Builder
 	runes, open := 0, false
-	flush := func() {
+	last, carry := "", "" // last unit in the open window; unit carried into the next one
+	flush := func(next string) {
 		if open {
 			out = append(out, cur.String())
 		}
 		cur.Reset()
 		runes, open = 0, false
+		carry = next
 	}
 	for _, u := range units {
 		n := utf8.RuneCountInString(u)
@@ -40,29 +44,31 @@ func buildWindows(units []string, size, overlap int) []string {
 		case n == 0:
 			continue
 		case n > size:
-			flush()
+			flush("")
 			out = append(out, splitRunes(u, size, overlap)...)
 			continue
 		}
-		sep := 0
+		if open && runes+2+n > size {
+			flush(last)
+		}
+		if !open && carry != "" {
+			if c := utf8.RuneCountInString(carry); c+2+n <= size {
+				cur.WriteString(carry)
+				runes, open = c, true
+			}
+		}
 		if open {
-			sep = 2
-		}
-		if runes+sep+n > size {
-			flush()
-			sep = 0
-		}
-		if sep > 0 {
 			cur.WriteString("\n\n")
+			runes += 2
 		}
 		cur.WriteString(u)
-		runes += sep + n
-		open = true
+		runes += n
+		open, last = true, u
 		if boundary(u) {
-			flush()
+			flush(u)
 		}
 	}
-	flush()
+	flush("")
 	return out
 }
 

@@ -316,3 +316,41 @@ func TestOptionValidation(t *testing.T) {
 		}
 	}
 }
+
+// The 2026-10-16 review case: a boundary name unit followed by a diagnosis
+// must be judged together through the real windows and the cache.
+func TestRunJudgesAdjacentPartsTogetherThroughRealWindows(t *testing.T) {
+	var name string
+	for _, n := range []string{"서지수", "김민수", "이영희", "박철수", "최유나", "정다은", "한지민", "오세훈", "윤서연", "장도윤", "임하늘", "강민호", "조은비", "신동현", "권나래", "황보람", "송지호", "백승우", "유하린", "문태호"} {
+		if boundary("환자 " + n) {
+			name = "환자 " + n
+			break
+		}
+	}
+	if name == "" {
+		t.Fatal("no boundary fixture among the candidate names")
+	}
+	srv := batchServer(t, nil, func(states []string) []float64 {
+		out := make([]float64, len(states))
+		for i, s := range states {
+			if strings.Contains(s, name) && strings.Contains(s, "우울증") {
+				out[i] = 0.99
+			}
+		}
+		return out
+	})
+	c := newClassifier(t, srv.URL, `{"window_runes":200}`, 0.5, "")
+	set, err := classifier.NewSet([]classifier.Entry{{Name: "laya-ko", Mode: classifier.Enforce, Classifier: c, Global: true}}, 5*time.Second, 1<<20, 100, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(segments ...string) classifier.Outcome {
+		return set.Run(context.Background(), set.Entries, classifier.Request{Team: "kr", Segments: segments})[0].Outcome
+	}
+	if run(name) != classifier.OutcomeClear || run("진단: 우울증") != classifier.OutcomeClear {
+		t.Fatal("each part alone must be clear")
+	}
+	if got := run(name, "진단: 우울증"); got != classifier.OutcomeFlagged {
+		t.Fatalf("adjacent parts across a boundary edge were not judged together: %s", got)
+	}
+}

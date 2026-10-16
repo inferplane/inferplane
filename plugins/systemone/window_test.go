@@ -49,7 +49,7 @@ func TestBuildWindowsEndsAWindowAtAContentBoundary(t *testing.T) {
 		t.Fatal("fixture units must not be boundaries")
 	}
 	got := buildWindows([]string{"x", marker, "y"}, 100, 0)
-	if !slices.Equal(got, []string{"x\n\n" + marker, "y"}) {
+	if !slices.Equal(got, []string{"x\n\n" + marker, marker + "\n\ny"}) {
 		t.Fatalf("%q", got)
 	}
 }
@@ -68,7 +68,7 @@ func TestBuildWindowsStayStableAsAConversationGrows(t *testing.T) {
 	if !slices.Equal(appended[:len(before)-1], before[:len(before)-1]) {
 		t.Fatal("appending a turn changed earlier windows")
 	}
-	inserted := buildWindows(slices.Insert(slices.Clone(units), 3, "중간에 끼어든 새 메시지"), 200, 20)
+	inserted := buildWindows(slices.Insert(slices.Clone(units), 3, strings.Repeat("중간에 끼어든 새 메시지 ", 4)), 200, 20)
 	kept := 0
 	for _, w := range before {
 		if slices.Contains(inserted, w) {
@@ -129,6 +129,26 @@ func TestSplitRunesNeverBreaksARune(t *testing.T) {
 					t.Fatalf("size %d overlap %d: bad window %q", size, overlap, w)
 				}
 			}
+		}
+	}
+}
+
+func TestBuildWindowsAlwaysPairAdjacentUnits(t *testing.T) {
+	units := make([]string, 400)
+	for i := range units {
+		units[i] = fmt.Sprintf("턴 %d 내용", i)
+	}
+	windows := buildWindows(units, 200, 20)
+	for i := 1; i < len(units); i++ {
+		paired := false
+		for _, w := range windows {
+			if strings.Contains(w, units[i-1]+"\n\n"+units[i]) {
+				paired = true
+				break
+			}
+		}
+		if !paired {
+			t.Fatalf("units %d and %d never share a window", i-1, i)
 		}
 	}
 }

@@ -32,6 +32,7 @@ type Result struct {
 	Windows        int
 	CacheHits      int
 	CacheMisses    int
+	clear          [][32]byte // cache keys of windows judged Clear; stored by Run, never exposed
 }
 
 // Run classifies req with every entry in parallel under the Set's timeout. It
@@ -67,18 +68,33 @@ func (s *Set) Run(ctx context.Context, entries []Entry, req Request) []Result {
 			done[i] <- res
 		}(i, results[i])
 	}
+	// Clear windows are cached even when another window of the same entry
+	// flagged or abstained: each verdict covers exactly its window's text, so a
+	// long request warms the cache window by window. Only results accepted
+	// here are stored; an entry cut off at the deadline stores nothing.
+	accept := func(i int, r Result) {
+		if s.cache != nil {
+			for _, k := range r.clear {
+				s.cache.store(k)
+			}
+		}
+		r.clear = nil
+		results[i] = r
+	}
 	for i := range entries {
 		select {
-		case results[i] = <-done[i]:
+		case r := <-done[i]:
+			accept(i, r)
 			continue
 		default:
 		}
 		select {
-		case results[i] = <-done[i]:
+		case r := <-done[i]:
+			accept(i, r)
 		case <-ctx.Done():
 			// A classifier that ignores its context must not hold the request
 			// past the deadline. Its late answer is discarded and, because
-			// runEntry checks ctx.Err() before storing, never cached.
+			// nothing is stored for it, never cached.
 			results[i].Outcome = OutcomeError
 			results[i].Duration = time.Since(start)
 		}
@@ -133,13 +149,10 @@ func (s *Set) runEntry(ctx context.Context, e *Entry, req Request, res *Result) 
 			return
 		}
 	}
-	// Clear windows are cached even when another window flagged or abstained:
-	// each verdict covers exactly its window's text, so a long request warms
-	// the cache window by window and a later request reads only the rest.
 	if s.cache != nil {
 		for i, v := range out.Verdicts {
 			if v == Clear {
-				s.cache.store(keys[i])
+				res.clear = append(res.clear, keys[i])
 			}
 		}
 	}
