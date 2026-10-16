@@ -95,7 +95,7 @@ then be `abstain`. strands-decider reports no truncation; run it with
   0.993 on an independent synthetic Korean set of 2,236 rows; the gateway's
   regex detectors score F1 0.478 on the same set. See `model-card.md`.
 - **Inside a coding-assistant request** (measured 2026-10-16 against the image built from `laya-serve/` with the weights in `SHA256SUMS`):
-  wrapped-body F1 `0.951`, FPR `0.032`, abstain or error `1`.
+  wrapped-body F1 `0.952`, FPR `0.035`, abstain or error `1`.
 
 All evaluation data is synthetic. Accuracy on your traffic is unknown until
 you measure it in Shadow.

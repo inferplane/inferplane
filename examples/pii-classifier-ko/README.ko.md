@@ -93,7 +93,7 @@ fail-closed가 됩니다(Enforce에서는 `onUninspectable`). `LAYA_JEV_STRICT`�
   AUROC 0.993입니다. 같은 셋에서 게이트웨이 정규식 탐지기는 F1 0.478입니다.
   자세한 내용은 `model-card.md`를 보세요.
 - **코딩 어시스턴트 요청 안에서**(2026-10-16, `SHA256SUMS`의 가중치로 `laya-serve/`에서 빌드한 이미지로 측정):
-  감싼 본문 F1 `0.951`, FPR `0.032`, abstain 또는 오류 `1`건.
+  감싼 본문 F1 `0.952`, FPR `0.035`, abstain 또는 오류 `1`건.
 
 평가 데이터는 모두 합성입니다. 실제 트래픽에서의 정확도는 Shadow로 측정하기
 전까지 알 수 없습니다.
