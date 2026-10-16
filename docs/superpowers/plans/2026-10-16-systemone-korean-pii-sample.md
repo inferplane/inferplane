@@ -5027,11 +5027,11 @@ for f in docs/reference/security.md docs/reference/agent-llm.md docs/policy-rout
   sed -i "s/^translation_source_sha256: .*/translation_source_sha256: $sum/" "$ko"
 done
 python3 scripts/check_docs_translations.py
-python3 -m venv /tmp/docs-venv && /tmp/docs-venv/bin/pip install -q --require-hashes -r requirements-docs.txt \
-  && /tmp/docs-venv/bin/python -m mkdocs build --strict -d /tmp/docs-site
+python3 -m venv .venv-docs && .venv-docs/bin/pip install -q --require-hashes -r requirements-docs.txt \
+  && .venv-docs/bin/python -m mkdocs build --strict -d .local/docs-site
 ```
 
-Expected: the translation check passes, and mkdocs builds with no warning. The relative links to `examples/…` files resolve through `scripts/docs_hooks.py`.
+Expected: the translation check passes, and mkdocs builds with no warning. `.venv-docs/` and `.local/` are git-ignored; this host's `/tmp` is a small tmpfs, so no large file goes there. The relative links to `examples/…` files resolve through `scripts/docs_hooks.py`.
 
 - [ ] **Step 4: Update the module guides and CHANGELOG**
 
@@ -5272,7 +5272,7 @@ until curl -sf http://127.0.0.1:18095/health >/dev/null; do sleep 2; done
 INFERPLANE_LIVE_SYSTEMONE_URL=http://127.0.0.1:18095 go test -tags liveclassifier ./cmd/mayu/ -run TestLive -v
 D=$HOME/inferplane-pii-ft/research/pii-finetune/data/indep
 INFERPLANE_LIVE_SYSTEMONE_URL=http://127.0.0.1:18095 INFERPLANE_LIVE_ROWS=$D/rows_v3.jsonl INFERPLANE_LIVE_EXCLUDE=$D/disputed_ids_v3.txt \
-  go test -tags liveclassifier ./plugins/systemone/ -run TestLiveWrappedBodies -v -timeout 3h | tee /tmp/live-eval.log
+  go test -tags liveclassifier ./plugins/systemone/ -run TestLiveWrappedBodies -v -timeout 3h > .local/live-eval.log 2>&1; echo "exit $?"; grep -E 'wrapped bodies|^(--- |ok|FAIL)' .local/live-eval.log
 docker stop laya-ko-accept
 ```
 
@@ -5310,7 +5310,7 @@ git commit -s -m "test(classifier): live acceptance and wrapped-body evaluation 
 ```bash
 git fetch origin && git rebase origin/main
 gofmt -l . ; go vet ./... ; CGO_ENABLED=0 go build -trimpath -o bin/mayu ./cmd/mayu && CGO_ENABLED=0 go build -trimpath -o bin/inferplaned ./cmd/inferplaned
-go test ./... -race -count=1 -timeout 20m > /tmp/full-test.log 2>&1; echo "exit $?"; grep -E '^(FAIL|---)' /tmp/full-test.log
+mkdir -p .local && go test ./... -race -count=1 -timeout 20m > .local/full-test.log 2>&1; echo "exit $?"; grep -E '^(FAIL|---)' .local/full-test.log
 INFERPLANE_ADMIN_TOKEN=lint go run ./cmd/mayu pricing check --config examples/config.json
 bash tests/run-all.sh
 ```
@@ -5328,7 +5328,7 @@ Ask with `AskUserQuestion`, and do not proceed without an explicit yes. The ques
 
 ```bash
 REPO=<namespace>/laya-ko-pii
-STAGE=$(mktemp -d)
+STAGE=$PWD/.local/hf-stage && rm -rf "$STAGE" && mkdir -p "$STAGE"
 C=$HOME/inferplane-pii-ft/research/pii-finetune/data/runs/laya-v3-s1/laya-ko-pii
 (cd $C && while read -r _ f; do mkdir -p "$STAGE/$(dirname "$f")" && cp "$f" "$STAGE/$f"; done < $OLDPWD/examples/pii-classifier-ko/laya-serve/SHA256SUMS)
 cp examples/pii-classifier-ko/model-card.md $STAGE/README.md
@@ -5337,7 +5337,7 @@ cp LICENSE $STAGE/LICENSE && cp examples/pii-classifier-ko/NOTICE $STAGE/NOTICE
 hf repo create $REPO --repo-type model
 hf upload $REPO $STAGE . --commit-message "laya-ko-pii-v3s1"
 REV=$(curl -s https://huggingface.co/api/models/$REPO | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')
-python3 examples/pii-classifier-ko/laya-serve/fetch_weights.py $REPO $REV examples/pii-classifier-ko/laya-serve/SHA256SUMS $(mktemp -d)
+python3 examples/pii-classifier-ko/laya-serve/fetch_weights.py $REPO $REV examples/pii-classifier-ko/laya-serve/SHA256SUMS .local/hf-verify
 echo "HF revision $REV"
 ```
 
