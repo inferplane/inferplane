@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -161,11 +162,34 @@ func validatePIIClassification(p *PIIClassificationConfig) error {
 		if err := ValidateSecretRef(c.APIKeyRef); err != nil {
 			return fmt.Errorf("%s.api_key_ref: %w", at, err)
 		}
-		for _, team := range c.Teams {
-			if team == "" {
-				return fmt.Errorf("%s: teams entries must be non-empty", at)
-			}
+		if err := validateClassifierTeams(c.Teams); err != nil {
+			return fmt.Errorf("%s: %w", at, err)
 		}
+	}
+	return nil
+}
+
+// validateClassifierTeams checks an entry's scope. An absent list means every
+// team; an explicit empty list is rejected, because it would otherwise read as
+// "no team" and silently apply to all of them.
+func validateClassifierTeams(teams []string) error {
+	if teams == nil {
+		return nil
+	}
+	if len(teams) == 0 {
+		return errors.New("teams must list at least one team; omit teams to apply to every team")
+	}
+	seen := make(map[string]bool, len(teams))
+	for _, team := range teams {
+		switch {
+		case strings.TrimSpace(team) == "":
+			return errors.New("teams entries must be non-empty")
+		case strings.TrimSpace(team) != team:
+			return fmt.Errorf("teams entry %q has surrounding whitespace", team)
+		case seen[team]:
+			return fmt.Errorf("duplicate team %q in teams", team)
+		}
+		seen[team] = true
 	}
 	return nil
 }

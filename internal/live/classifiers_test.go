@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -77,6 +79,14 @@ func TestBuildStateRejectsBadClassifiers(t *testing.T) {
 	badOption.Options = map[string]json.RawMessage{"fail": json.RawMessage("true")}
 	unset := liveEntry("unset", "Shadow")
 	unset.APIKeyRef = &config.SecretRef{Env: "LIVE_TEST_CLASSIFIER_UNSET"}
+	// A token file that holds only whitespace resolves to an empty token; like
+	// an empty env token, it must fail the build instead of running unauthenticated.
+	blankFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(blankFile, []byte(" \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	blank := liveEntry("blank", "Shadow")
+	blank.APIKeyRef = &config.SecretRef{File: blankFile}
 	for name, tc := range map[string]struct {
 		entry config.ClassifierConfig
 		want  string
@@ -84,9 +94,11 @@ func TestBuildStateRejectsBadClassifiers(t *testing.T) {
 		"unknown type": {unknown, "unknown type"},
 		"bad option":   {badOption, "bad option"},
 		"unset token":  {unset, "LIVE_TEST_CLASSIFIER_UNSET"},
+		"empty token":  {blank, "resolved to an empty token"},
 	} {
-		if _, _, err := BuildState(withClassifiers(tc.entry)); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s: err = %v", name, err)
+		st, _, err := BuildState(withClassifiers(tc.entry))
+		if err == nil || !strings.Contains(err.Error(), tc.want) || st != nil {
+			t.Errorf("%s: state %v, err = %v", name, st != nil, err)
 		}
 	}
 }

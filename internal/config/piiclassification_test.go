@@ -78,6 +78,11 @@ func TestPIIClassificationRejects(t *testing.T) {
 		classifiers(entry(map[string]any{"endpoint": "http://127.0.0.1:1/?k=v"})):                 "query",
 		classifiers(entry(map[string]any{"threshold": 1})):                                        "threshold",
 		classifiers(entry(map[string]any{"teams": []string{""}})):                                 "teams",
+		classifiers(entry(map[string]any{"teams": []string{}})):                                   "teams must list at least one team",
+		classifiers(entry(map[string]any{"teams": []string{" "}})):                                "teams entries must be non-empty",
+		classifiers(entry(map[string]any{"teams": []string{" pilot-ko"}})):                        "surrounding whitespace",
+		classifiers(entry(map[string]any{"teams": []string{"pilot-ko\t"}})):                       "surrounding whitespace",
+		classifiers(entry(map[string]any{"teams": []string{"pilot-ko", "kr", "pilot-ko"}})):       "duplicate team",
 		classifiers(entry(map[string]any{"api_key": "inline-value-123"})):                         "inline api_key",
 		classifiers(entry(map[string]any{"api_key_ref": map[string]string{"env": "not a name"}})): "api_key_ref",
 		classifiers(entry(map[string]any{"endpont": "http://127.0.0.1:1"})):                       "unknown field",
@@ -90,6 +95,18 @@ func TestPIIClassificationRejects(t *testing.T) {
 		if _, err := loadPII(t, block); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("block %s: err = %v, want %q", block, err, want)
 		}
+	}
+}
+
+// An explicit team list scopes the entry; only an absent list is global.
+func TestPIIClassificationTeamScope(t *testing.T) {
+	cfg, err := loadPII(t, classifiers(entry(map[string]any{"teams": []string{"pilot-ko", "kr"}})))
+	if err != nil || len(cfg.PIIClassification.Classifiers[0].Teams) != 2 {
+		t.Fatalf("a valid team list: %v", err)
+	}
+	cfg, err = loadPII(t, classifiers(entry(nil)))
+	if err != nil || cfg.PIIClassification.Classifiers[0].Teams != nil {
+		t.Fatalf("an absent team list must stay absent: %v", err)
 	}
 }
 

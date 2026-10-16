@@ -20,6 +20,11 @@ func buildClassifiers(p *config.PIIClassificationConfig) (*classifier.Set, error
 		if err != nil {
 			return nil, fmt.Errorf("live: classifier %q api_key_ref: %w", cc.Name, err)
 		}
+		if cc.APIKeyRef != nil && token == "" {
+			// The env path already rejects an empty value; a whitespace-only
+			// token file must not silently run without a bearer either.
+			return nil, fmt.Errorf("live: classifier %q api_key_ref resolved to an empty token", cc.Name)
+		}
 		cfg := classifier.Config{Name: cc.Name, Type: cc.Type, Revision: cc.Revision, Endpoint: cc.Endpoint,
 			BearerToken: token, Threshold: cc.EffectiveThreshold(), Options: cc.Options}
 		c, err := classifier.New(cfg)
