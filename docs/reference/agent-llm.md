@@ -210,8 +210,9 @@ supported on this route" (probed live 2026-09-02, matching its model card) while
 `internal/sensitivity` inspects original Anthropic/OpenAI/decoded native-Bedrock
 JSON without mutation. Its finite email/phone/Luhn-card/SSN/IPv4/Korean-ID detectors
 include nested tool JSON and exact numeric spellings. Opaque media, redacted
-thinking, unknown blocks/shapes are uninspectable; there is no remote classifier
-or universal PII guarantee. `internal/router.RouteRequest` applies privacy to every
+thinking, unknown blocks/shapes are uninspectable; there is no built-in remote classifier
+(an opt-in `pii_classification` classifier can add a learned signal; see the PII
+classifier row above) or universal PII guarantee. `internal/router.RouteRequest` applies privacy to every
 attempt before optional context preferences, masking, admission, or capture.
 
 `routing.context` is Shadow-default and FailOpen; Enforce requires a completely

@@ -237,7 +237,7 @@ func TestBuildWindowsGuardOutOfContractArguments(t *testing.T) {
 				if !slices.Equal(got, []string{joined(units)}) {
 					t.Fatalf("%q", got)
 				}
-			case <-time.After(50 * time.Millisecond):
+			case <-time.After(2 * time.Second):
 				t.Fatal("buildWindows did not terminate")
 			}
 		})

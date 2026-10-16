@@ -85,7 +85,10 @@ fail-closed가 됩니다(Enforce에서는 `onUninspectable`). `LAYA_JEV_STRICT`�
 설정은 `usage`에서 잘림 정보를 지우므로, 기본값 `truncation: "reported"`에서는
 모든 결과가 `abstain`이 됩니다. strands-decider는 잘림을 보고하지 않으므로,
 너무 긴 윈도를 HTTP 422로 거부하는 `--strict-window`로 실행하고
-`truncation: "rejected"`를 설정합니다.
+`truncation: "rejected"`를 설정합니다. `rejected`에서는 게이트웨이가 그 주장을
+그대로 믿습니다. 입력을 조용히 자르는 서버(예: `--strict-window` 없는
+strands-decider)는 앞부분만 보고 판정하므로, 그 판정이 Clear로 캐시될 수
+있습니다.
 
 ## 근거
 

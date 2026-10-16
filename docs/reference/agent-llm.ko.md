@@ -1,6 +1,6 @@
 ---
 translation_source: reference/agent-llm.md
-translation_source_sha256: 1792eac9e88ba3cbb2df1912482872ad5f7633910402231d02d07cef13e16887
+translation_source_sha256: e5891c6bf647981c5a3835dab7dd6d590c29e596be17deaabc4c749b212deea6
 ---
 
 # 에이전트·LLM 구현 {#agent-llm}
@@ -131,7 +131,7 @@ router의 해석·폴백, openai 변환, keystore의 팀 가드레일과 ADR-019
 
 ### 정책 기반 라우팅 · ADR-043 {#policy-aware-routing-adr-043}
 
-sensitivity는 Anthropic·OpenAI·디코딩된 Bedrock JSON 원본을 변경하지 않고 검사합니다. 중첩 도구 JSON·숫자 표기까지 유한한 이메일·전화·카드·SSN·IPv4·주민번호를 확인합니다. 불투명 미디어·삭제된 thinking·모르는 블록은 검사 불가입니다. 원격 분류기·보편적인 PII 보장은 없습니다. RouteRequest는 컨텍스트 선호·마스킹·승인·본문 수집 전에 모든 시도에 개인정보를 적용합니다.
+sensitivity는 Anthropic·OpenAI·디코딩된 Bedrock JSON 원본을 변경하지 않고 검사합니다. 중첩 도구 JSON·숫자 표기까지 유한한 이메일·전화·카드·SSN·IPv4·주민번호를 확인합니다. 불투명 미디어·삭제된 thinking·모르는 블록은 검사 불가입니다. 기본 제공 원격 분류기는 없으며(선택적 `pii_classification` 분류기가 학습 기반 신호를 더할 수 있음), 보편적인 PII 보장도 없습니다. RouteRequest는 컨텍스트 선호·마스킹·승인·본문 수집 전에 모든 시도에 개인정보를 적용합니다.
 
 기존 context는 Shadow 기본·FailOpen이고 Enforce는 이력·도구·미디어·추론·구조화 출력 없는 완전 검사 가능한 단일 사용자 턴만 적용합니다. 입력 임계값은 큰 요청 제외가 아니라 simple/complex 선택입니다. 적격 큰 요청도 다른 호환 complex 모델을 선택할 수 있습니다. Shadow도 개인정보는 집행합니다. 자동 대안은 선언된 컨텍스트·관측 기능·가격·RBAC·리전·호환 전송이 필요합니다. 기능은 tools/vision/reasoning/structured_output, 경계는 internal/external/unknown입니다. 운영자 메타데이터이며 실제 신뢰·변환기 지원의 증거가 아닙니다. OpenAI 직접 Anthropic 선택, 네이티브 Bedrock, Converse·교차 형식 손실의 기존 제한을 유지합니다. ADR-043 자체는 Responses·세션 고정을 추가하지 않았습니다.
 

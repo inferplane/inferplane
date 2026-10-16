@@ -87,7 +87,9 @@ closed (`onUninspectable` in Enforce). Keep `LAYA_JEV_STRICT` unset: it removes 
 `usage`, and under the default `truncation: "reported"` every result would
 then be `abstain`. strands-decider reports no truncation; run it with
 `--strict-window`, which refuses an over-length window with HTTP 422, and set
-`truncation: "rejected"`.
+`truncation: "rejected"`. Under `rejected` the gateway trusts that assertion: a
+server that cuts input silently (for example strands-decider without
+`--strict-window`) gets verdicts on a prefix, which can be Clear and cached.
 
 ## Evidence
 

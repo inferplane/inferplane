@@ -1,6 +1,6 @@
 ---
 translation_source: reference/security.md
-translation_source_sha256: 52c53a2f4f70d18e4863a27e20ec615ed506d27e7439cc1839c4b1a125bf5cd1
+translation_source_sha256: 8eb7bf2a0f76de9965953745db19ad232b6eeedbbb564d6ddcdbb8ad0d8e7e5e
 ---
 
 # 보안 {#security}
@@ -94,7 +94,10 @@ Go 코드 370토큰이므로 일반적인 코딩 텍스트는 기본 `window_run
 `truncation: "reported"`에서는 `usage.truncated`가 없는 결과가 Abstain이므로,
 laya-serve에서는 `LAYA_JEV_STRICT`를 꺼 두어야 합니다. 이 설정이 해당 필드를
 지우기 때문입니다. `truncation: "rejected"`는 strands-decider
-`--strict-window`처럼 너무 긴 입력을 HTTP 오류로 거부하는 서버용입니다.
+`--strict-window`처럼 너무 긴 입력을 HTTP 오류로 거부하는 서버용입니다. `rejected`에서는 게이트웨이가 그 주장을 그대로
+믿습니다. 입력을 조용히 자르는 서버(예: `--strict-window` 없는
+strands-decider)는 앞부분만 보고 판정하므로, 그 판정이 Clear로 캐시될 수
+있습니다.
 
 **경계.** `internal` 경계만 지원합니다. HTTP 클라이언트는 프록시 환경 변수와
 리다이렉트를 따르지 않습니다.

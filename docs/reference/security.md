@@ -106,7 +106,10 @@ tokens. Under the default `truncation: "reported"` a result without
 `usage.truncated` is Abstain, so `LAYA_JEV_STRICT` must stay off for
 laya-serve: it strips those fields.
 `truncation: "rejected"` is for a server that refuses over-length input with
-an HTTP error, such as strands-decider `--strict-window`.
+an HTTP error, such as strands-decider `--strict-window`. Under `rejected` the
+gateway trusts that assertion: a server that cuts input silently (for example
+strands-decider without `--strict-window`) gets verdicts on a prefix, which can
+be Clear and cached.
 
 **Boundary.** Only the `internal` boundary is supported. The HTTP client
 ignores proxy environment variables and redirects.
