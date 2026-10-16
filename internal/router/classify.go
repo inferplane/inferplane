@@ -55,3 +55,13 @@ func (r *Router) classify(ctx context.Context, in RequestRoutingInput, rules []r
 	classified, uninspectable := classifier.Combine(results)
 	return classifierSignal{classified: classified, uninspectable: uninspectable}
 }
+
+// hasEnforce reports whether any entry can restrict routing.
+func hasEnforce(entries []classifier.Entry) bool {
+	for _, e := range entries {
+		if e.Mode == classifier.Enforce {
+			return true
+		}
+	}
+	return false
+}

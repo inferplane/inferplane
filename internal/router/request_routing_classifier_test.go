@@ -165,6 +165,9 @@ func TestClassifierFlaggedUnderMaskRuleUsesOnUninspectable(t *testing.T) {
 	if err != nil || got2.Model != "private" || !got2.Decision.Masked || bytes.Contains(got2.SanitizedBody, []byte("person@example.test")) {
 		t.Fatalf("regex Mask plus classifier flag: %+v %v", got2, err)
 	}
+	if !slices.Contains(got2.Decision.Categories, "model_pii") || !slices.Contains(got2.Decision.Categories, "email") {
+		t.Fatalf("masked evidence lost a category: %v", got2.Decision.Categories)
+	}
 }
 
 // Review Focus 5: no call, no latency outside the classifier's scope.
@@ -186,9 +189,57 @@ func TestClassifierNotCalledOutsideScope(t *testing.T) {
 	t.Run("count only", func(t *testing.T) {
 		r, in, f := classifierSetup(t, "Enforce", always(classifier.Flagged))
 		installRoutingPolicies(r, privatePolicy("privacy", "private-alias"))
+		in.CountOnly, in.AllowedRegions = true, []string{"eu"}
+		got, err := r.RouteRequest(context.Background(), in)
+		if err != nil || f.calls() != 0 || got.Model != "private" {
+			t.Fatalf("%+v %v calls=%d", got, err, f.calls())
+		}
+	})
+}
+
+// Ruling 13: counts make no classifier call, but an Enforce team's count is
+// uninspectable, so it never goes to a destination the request could not use.
+func TestCountOnlyWithAnEnforceClassifierIsUninspectable(t *testing.T) {
+	t.Run("internal only", func(t *testing.T) {
+		r, in, f := classifierSetup(t, "Enforce", always(classifier.Clear))
+		installRoutingPolicies(r, privatePolicy("privacy", "private-alias"))
+		in.CountOnly, in.AllowedRegions = true, []string{"eu"}
+		got, err := r.RouteRequest(context.Background(), in)
+		if err != nil || got.Model != "private" || f.calls() != 0 {
+			t.Fatalf("%+v %v calls=%d", got, err, f.calls())
+		}
+		for _, ct := range got.Chain {
+			if ct.DataBoundary != "internal" {
+				t.Fatalf("count routed to an external target: %+v", ct)
+			}
+		}
+	})
+	t.Run("block", func(t *testing.T) {
+		r, in, f := classifierSetup(t, "Enforce", always(classifier.Clear))
+		p := privatePolicy("privacy", "private-alias")
+		p.Rules[0].SensitiveData.OnUninspectable = v1alpha1.Block
+		installRoutingPolicies(r, p)
 		in.CountOnly = true
-		if _, err := r.RouteRequest(context.Background(), in); err != nil || f.calls() != 0 {
-			t.Fatalf("%v calls=%d", err, f.calls())
+		got, err := r.RouteRequest(context.Background(), in)
+		requireDenied(t, got, err, "sensitive_blocked")
+		if f.calls() != 0 {
+			t.Fatal("a count called the classifier")
+		}
+	})
+	t.Run("shadow does not restrict", func(t *testing.T) {
+		r0, in0 := routingSetup(t, routingConfig())
+		installRoutingPolicies(r0, privatePolicy("privacy", "private-alias"))
+		in0.CountOnly = true
+		want, err := r0.RouteRequest(context.Background(), in0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, in, f := classifierSetup(t, "Shadow", always(classifier.Flagged))
+		installRoutingPolicies(r, privatePolicy("privacy", "private-alias"))
+		in.CountOnly = true
+		got, err := r.RouteRequest(context.Background(), in)
+		if err != nil || got.Model != want.Model || f.calls() != 0 {
+			t.Fatalf("%+v %v calls=%d", got, err, f.calls())
 		}
 	})
 }

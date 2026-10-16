@@ -413,7 +413,9 @@ not change and the generation always matches.
 rule loop, only when all of the following hold:
 - a `sensitiveData` rule applies (`hasPrivacy`);
 - the request is not `CountOnly`, which keeps the count_tokens HTTP-200
-  invariant and adds no network dependency to counts;
+  invariant and adds no network dependency to counts. A count still applies
+  the rule's `onUninspectable` when the team has an Enforce entry, because the
+  body was not read (Ruling 13, after the Task 8 review);
 - the entry list is non-empty.
 
 Teams without both a privacy rule and an entry pay nothing.

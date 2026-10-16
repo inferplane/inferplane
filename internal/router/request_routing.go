@@ -254,11 +254,18 @@ func (r *Router) RouteRequest(ctx context.Context, in RequestRoutingInput) (Requ
 		return r.applyContext(out, boundary, rules, inspected), nil
 	}
 	var signal classifierSignal
-	if hasPrivacy && !in.CountOnly {
+	switch {
+	case hasPrivacy && !in.CountOnly:
 		signal = r.classify(ctx, in, rules, &out)
 		if signal.classified {
 			out.Decision.Categories = boundedCategories(append(slices.Clone(inspected.Categories), "model_pii"))
 		}
+	case hasPrivacy && hasEnforce(in.State.Classifiers().For(in.Principal.Team)):
+		// Counts make no classifier call, so they stay HTTP 200 with no network
+		// dependency. An Enforce classifier still governs the team: the unread
+		// body is uninspectable, so a count never forwards content to a
+		// destination the request itself might not be allowed to use.
+		signal.uninspectable = true
 	}
 	// All triggered privacy rules apply, regardless of document delivery order.
 	// A nil model set means unrestricted; a non-nil empty intersection denies.
