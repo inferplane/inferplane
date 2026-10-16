@@ -2,7 +2,7 @@ package classifier
 
 import (
 	"context"
-	"sync"
+	"slices"
 	"time"
 )
 
@@ -36,8 +36,9 @@ type Result struct {
 }
 
 // Run classifies req with every entry in parallel under the Set's timeout. It
-// never retries. An entry still running at the deadline is an error, and its
-// answer, if it arrives later, is not cached.
+// never retries and returns by the deadline even if a classifier ignores its
+// context; an entry still running at the deadline is an error, and its late
+// answer is never cached.
 func (s *Set) Run(ctx context.Context, entries []Entry, req Request) []Result {
 	results := make([]Result, len(entries))
 	for i, e := range entries {
@@ -58,15 +59,31 @@ func (s *Set) Run(ctx context.Context, entries []Entry, req Request) []Result {
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
 	defer cancel()
-	var wg sync.WaitGroup
+	start := time.Now()
+	done := make([]chan Result, len(entries))
 	for i := range entries {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			s.runEntry(ctx, &entries[i], req, &results[i])
-		}(i)
+		done[i] = make(chan Result, 1) // buffered: a late answer never blocks its goroutine
+		go func(i int, res Result) {
+			s.runEntry(ctx, &entries[i], req, &res)
+			done[i] <- res
+		}(i, results[i])
 	}
-	wg.Wait()
+	for i := range entries {
+		select {
+		case results[i] = <-done[i]:
+			continue
+		default:
+		}
+		select {
+		case results[i] = <-done[i]:
+		case <-ctx.Done():
+			// A classifier that ignores its context must not hold the request
+			// past the deadline. Its late answer is discarded and, because
+			// runEntry checks ctx.Err() before storing, never cached.
+			results[i].Outcome = OutcomeError
+			results[i].Duration = time.Since(start)
+		}
+	}
 	return results
 }
 
@@ -104,6 +121,10 @@ func (s *Set) runEntry(ctx context.Context, e *Entry, req Request, res *Result) 
 	}
 	switch out.Verdict {
 	case Clear:
+		if slices.Contains(out.Clear, false) { // a Clear verdict cannot leave units unread (PR-08)
+			res.Outcome = OutcomeError
+			return
+		}
 		res.Outcome = OutcomeClear
 	case Flagged:
 		res.Outcome = OutcomeFlagged

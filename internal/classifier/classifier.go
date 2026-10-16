@@ -53,7 +53,9 @@ type Output struct {
 
 // Classifier is one configured backend. Units splits request segments into the
 // deterministic units the classifier reads and the cache stores; Classify
-// receives only units that Units produced.
+// receives only units that Units produced. Units must carry the text of every
+// non-empty segment; a unit set that dropped text would let Run report Clear
+// for content no classifier read.
 type Classifier interface {
 	Units(segments []string) []string
 	Classify(ctx context.Context, in Input) (Output, error)

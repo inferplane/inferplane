@@ -26,8 +26,17 @@ func (f *fake) Units(s []string) []string {
 func (f *fake) Classify(ctx context.Context, in Input) (Output, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, slices.Clone(in.Texts))
+	answer := f.answer
 	f.mu.Unlock()
-	return f.answer(ctx, in)
+	return answer(ctx, in)
+}
+
+// setAnswer swaps the answer under the lock: a classifier that Run abandoned at
+// the deadline may still be inside Classify when the test changes it.
+func (f *fake) setAnswer(a func(context.Context, Input) (Output, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.answer = a
 }
 
 func (f *fake) callCount() int {
@@ -189,7 +198,7 @@ func TestRunDeadlineIsAnErrorAndCachesNothing(t *testing.T) {
 	if got := s.Run(context.Background(), s.Entries, req("kr", "hello")); got[0].Outcome != OutcomeError {
 		t.Fatalf("deadline: %+v", got)
 	}
-	f.answer = allClear
+	f.setAnswer(allClear)
 	s.Timeout = time.Second
 	s.Run(context.Background(), s.Entries, req("kr", "hello"))
 	if f.callCount() != 2 {
@@ -264,6 +273,42 @@ func TestCombineCountsOnlyEnforce(t *testing.T) {
 func TestFailedMarksEveryEntryError(t *testing.T) {
 	got := Failed([]Entry{{Name: "a", Mode: Enforce}, {Name: "b", Mode: Shadow}})
 	if len(got) != 2 || got[0].Outcome != OutcomeError || got[1].Outcome != OutcomeError || got[1].Mode != Shadow {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// A classifier that ignores its context must not hold the request past the deadline.
+func TestRunReturnsAtTheDeadlineDespiteAStuckClassifier(t *testing.T) {
+	var stuck atomic.Bool
+	stuck.Store(true)
+	release := make(chan struct{})
+	f := &fake{answer: func(ctx context.Context, in Input) (Output, error) {
+		if stuck.Load() {
+			<-release // ignores ctx entirely
+		}
+		return allClear(ctx, in)
+	}}
+	s := testSet(t, 100, enforce("laya", f))
+	s.Timeout = 50 * time.Millisecond
+	start := time.Now()
+	got := s.Run(context.Background(), s.Entries, req("kr", "hello"))
+	if elapsed := time.Since(start); got[0].Outcome != OutcomeError || elapsed > time.Second {
+		t.Fatalf("Run waited %v for a stuck classifier: %+v", elapsed, got)
+	}
+	stuck.Store(false)
+	close(release) // the late answer arrives after Run returned and must not be cached
+	s.Timeout = time.Second
+	if got := s.Run(context.Background(), s.Entries, req("kr", "hello")); got[0].Outcome != OutcomeClear || f.callCount() != 2 {
+		t.Fatalf("late answer was cached or the rerun failed: %+v calls=%d", got, f.callCount())
+	}
+}
+
+func TestRunRejectsAClearVerdictWithUnreadUnits(t *testing.T) {
+	f := &fake{answer: func(context.Context, Input) (Output, error) {
+		return Output{Verdict: Clear, Clear: []bool{true, false}}, nil
+	}}
+	s := testSet(t, 100, enforce("laya", f))
+	if got := s.Run(context.Background(), s.Entries, req("kr", "a", "b")); got[0].Outcome != OutcomeError {
 		t.Fatalf("%+v", got)
 	}
 }
