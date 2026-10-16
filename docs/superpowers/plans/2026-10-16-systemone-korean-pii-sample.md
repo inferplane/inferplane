@@ -57,7 +57,7 @@
 
 These amendments are refinements found while mapping the spec to the code. None of them widens what a classifier may do.
 
-1. **Units, not whole segments, are the cache grain.** `classifier.Classifier` gains `Units(segments []string) []string`.
+1. **Units, not whole segments, are the cache grain.** *(Superseded by amendment 7.)* `classifier.Classifier` gains `Units(segments []string) []string`.
    - `systemone` returns each short segment unchanged. It splits a segment longer than `window_runes` into deterministic overlapping chunks.
    - The cache stores clear units, so a long tool result is read across a few requests instead of abstaining forever. Review Focus 1 covers this.
    - The "Known limit" in spec §3 applies to units in the same way.
@@ -69,6 +69,7 @@ These amendments are refinements found while mapping the spec to the code. None 
    - The policy is `examples/pii-classifier-ko/governance.yaml`.
    - Everything else stays under `examples/pii-classifier-ko/`.
 5. **Egress hygiene.** The systemone HTTP client sets `Proxy: nil` and does not follow redirects. Request text then never travels through an environment proxy, and a redirect never moves it to another host.
+7. **Whole windows are the cache grain (2026-10-16, after the commit security review).** Unit-level caching let parts cleared separately bypass the check on their combination. The cache now stores whole window texts (`Classifier.Windows` / `Score`, Task 5a), and window edges are content-defined so windows stay stable as a conversation grows. The spec's "Known limit" no longer includes a cache-widened gap.
 6. **Image weights stage.** The Dockerfile takes the weights either from the Hugging Face repository at a pinned commit (`WEIGHTS=hf`, the published build) or from the build context (`WEIGHTS=local`, used for acceptance before publication). Both paths verify `SHA256SUMS`.
 
 ## File structure
@@ -2223,6 +2224,1120 @@ git add plugins/systemone
 git commit -s -m "feat(systemone): Laya/strands-decider classifier over the /v1/systemone wire" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
+### Task 5a: Window-level verdict cache (security fix from the 2026-10-16 commit review)
+
+The commit security review found a bypass in the unit-level cache of Tasks 2 and 5. Two short parts, a name and a diagnosis, each sent alone, are each cached Clear. Sent together later, both are cache hits, so their combination is never judged, although without the cache the two would have shared a window and been flagged.
+
+The user chose (2026-10-16) to cache whole windows instead: a window is skipped only when that exact window text was judged Clear before. Windows get content-defined edges so they stay stable as a conversation grows. This task replaces the `Units`/`Classify` contract with `Windows`/`Score`. Spec amendment 7 records the change.
+
+**Files:**
+- Modify: `internal/classifier/classifier.go` (replace the `Input`, `Output` and `Classifier` declarations), `internal/classifier/run.go` (`runEntry`), `internal/classifier/classifier_test.go` (the stub's two methods).
+- Replace: `internal/classifier/run_test.go`, `plugins/systemone/window.go`, `plugins/systemone/window_test.go`, `plugins/systemone/systemone_test.go`.
+- Modify: `plugins/systemone/systemone.go` (`New`; replace `Units` and `Classify`), `plugins/systemone/client.go` (`score` takes `[]string`).
+
+**Interfaces:**
+- Consumes: Tasks 1, 2, 4 and 5 as committed.
+- Produces:
+  - `type Scores struct{ Verdicts []Verdict; Sent int }`;
+  - `type Classifier interface{ Windows([]string) []string; Score(context.Context, []string) (Scores, error) }`.
+  - Removes `Input`, `Output`, `Units` and `Classify`.
+  - `buildWindows(units []string, size, overlap int) []string`; `boundary(unit string) bool`; `boundaryEvery = 16`.
+  - Later tasks' test fakes implement `Windows` and `Score`.
+
+- [ ] **Step 1: Replace the test files**
+
+`internal/classifier/run_test.go`:
+
+```go
+package classifier
+
+import (
+	"context"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// fake is a classifier whose windows and scores the test controls. Without a
+// windows function every segment is its own window.
+type fake struct {
+	mu      sync.Mutex
+	calls   [][]string
+	windows func([]string) []string
+	score   func(context.Context, []string) (Scores, error)
+}
+
+func (f *fake) Windows(s []string) []string {
+	if f.windows != nil {
+		return f.windows(s)
+	}
+	return s
+}
+
+func (f *fake) Score(ctx context.Context, windows []string) (Scores, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, slices.Clone(windows))
+	score := f.score
+	f.mu.Unlock()
+	return score(ctx, windows)
+}
+
+// setScore swaps the answer under the mutex: an abandoned Score from an
+// earlier deadline test may still be running.
+func (f *fake) setScore(score func(context.Context, []string) (Scores, error)) {
+	f.mu.Lock()
+	f.score = score
+	f.mu.Unlock()
+}
+
+func (f *fake) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+func all(v Verdict) func(context.Context, []string) (Scores, error) {
+	return func(_ context.Context, windows []string) (Scores, error) {
+		out := make([]Verdict, len(windows))
+		for i := range out {
+			out[i] = v
+		}
+		return Scores{Verdicts: out, Sent: len(windows)}, nil
+	}
+}
+
+var allClear = all(Clear)
+
+func testSet(t *testing.T, cache int, entries ...Entry) *Set {
+	t.Helper()
+	s, err := NewSet(entries, 2*time.Second, 1<<20, cache, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func enforce(name string, c Classifier) Entry {
+	return Entry{Name: name, Mode: Enforce, Classifier: c, Global: true}
+}
+
+func req(team string, segments ...string) Request {
+	return Request{Team: team, Policies: []PolicyRef{{Name: "privacy", Generation: 7, Rule: "protect"}}, Segments: segments}
+}
+
+func TestRunSecondIdenticalRequestIsServedFromCache(t *testing.T) {
+	f := &fake{score: allClear}
+	s := testSet(t, 100, enforce("laya", f))
+	first := s.Run(context.Background(), s.Entries, req("kr", "system prompt", "hello"))
+	second := s.Run(context.Background(), s.Entries, req("kr", "system prompt", "hello"))
+	if first[0].Outcome != OutcomeClear || second[0].Outcome != OutcomeClear || f.callCount() != 1 {
+		t.Fatalf("first=%+v second=%+v calls=%d", first, second, f.callCount())
+	}
+	if second[0].CacheHits != 2 || second[0].CacheMisses != 0 {
+		t.Fatalf("cache accounting %+v", second[0])
+	}
+}
+
+func TestRunNeverCachesFlaggedAbstainOrError(t *testing.T) {
+	for name, score := range map[string]func(context.Context, []string) (Scores, error){
+		"flagged": all(Flagged),
+		"abstain": all(Abstain),
+		"error":   func(context.Context, []string) (Scores, error) { return Scores{}, ErrStatus },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &fake{score: score}
+			s := testSet(t, 100, enforce("laya", f))
+			s.Run(context.Background(), s.Entries, req("kr", "김민수 010-2345-6789"))
+			s.Run(context.Background(), s.Entries, req("kr", "김민수 010-2345-6789"))
+			if f.callCount() != 2 {
+				t.Fatalf("a %s window was cached", name)
+			}
+		})
+	}
+}
+
+func TestRunCachesOnlyClearWindows(t *testing.T) {
+	f := &fake{score: func(context.Context, []string) (Scores, error) {
+		return Scores{Verdicts: []Verdict{Clear, Abstain}, Sent: 1}, nil
+	}}
+	s := testSet(t, 100, enforce("laya", f))
+	s.Run(context.Background(), s.Entries, req("kr", "read", "unread"))
+	f.setScore(allClear)
+	s.Run(context.Background(), s.Entries, req("kr", "read", "unread"))
+	if got := f.calls[1]; !slices.Equal(got, []string{"unread"}) {
+		t.Fatalf("second call sent %q", got)
+	}
+}
+
+// Review Focus 1: a long tool result is read across requests, never abstaining forever.
+func TestRunWarmsAcrossRequestsUntilEverythingIsRead(t *testing.T) {
+	const perCall = 2
+	f := &fake{
+		windows: func(segments []string) []string { // split each segment into 3-rune windows
+			var out []string
+			for _, s := range segments {
+				r := []rune(s)
+				for len(r) > 3 {
+					out, r = append(out, string(r[:3])), r[3:]
+				}
+				out = append(out, string(r))
+			}
+			return out
+		},
+		score: func(_ context.Context, windows []string) (Scores, error) {
+			out := make([]Verdict, len(windows))
+			for i := range out {
+				if i >= perCall {
+					out[i] = Abstain // past the classifier's cap: not read
+				}
+			}
+			return Scores{Verdicts: out, Sent: min(len(windows), perCall)}, nil
+		},
+	}
+	s := testSet(t, 100, enforce("laya", f))
+	long := "가나다라마바사아자차카타파하거" // five distinct 3-rune windows
+	var outcomes []Outcome
+	for range 4 {
+		outcomes = append(outcomes, s.Run(context.Background(), s.Entries, req("kr", long))[0].Outcome)
+	}
+	if !slices.Equal(outcomes, []Outcome{OutcomeAbstain, OutcomeAbstain, OutcomeClear, OutcomeClear}) || f.callCount() != 3 {
+		t.Fatalf("outcomes %v, calls %d", outcomes, f.callCount())
+	}
+}
+
+// Security regression (2026-10-16 commit review): parts cleared separately
+// must never clear their combination. The cache holds whole windows only.
+func TestRunCannotBeBypassedByCachingPartsSeparately(t *testing.T) {
+	f := &fake{
+		windows: func(segments []string) []string { return []string{strings.Join(segments, "\n\n")} },
+		score: func(_ context.Context, windows []string) (Scores, error) {
+			out := make([]Verdict, len(windows))
+			for i, w := range windows {
+				if strings.Contains(w, "김민수") && strings.Contains(w, "우울증") {
+					out[i] = Flagged
+				}
+			}
+			return Scores{Verdicts: out, Sent: len(windows)}, nil
+		},
+	}
+	s := testSet(t, 100, enforce("laya", f))
+	for _, part := range []string{"환자 김민수", "진단: 우울증"} {
+		if got := s.Run(context.Background(), s.Entries, req("kr", part)); got[0].Outcome != OutcomeClear {
+			t.Fatalf("part %q: %+v", part, got)
+		}
+	}
+	if got := s.Run(context.Background(), s.Entries, req("kr", "환자 김민수", "진단: 우울증")); got[0].Outcome != OutcomeFlagged {
+		t.Fatalf("the combination was served from its parts' cache entries: %+v", got)
+	}
+}
+
+func TestRunFlaggedWinsOverAbstain(t *testing.T) {
+	for _, verdicts := range [][]Verdict{{Abstain, Flagged}, {Flagged, Abstain}, {Clear, Flagged, Abstain}} {
+		f := &fake{score: func(context.Context, []string) (Scores, error) {
+			return Scores{Verdicts: verdicts, Sent: len(verdicts)}, nil
+		}}
+		s := testSet(t, 100, enforce("laya", f))
+		segments := []string{"a", "b", "c"}[:len(verdicts)]
+		if got := s.Run(context.Background(), s.Entries, req("kr", segments...)); got[0].Outcome != OutcomeFlagged {
+			t.Errorf("verdicts %v: %+v", verdicts, got)
+		}
+	}
+}
+
+func TestRunDeduplicatesIdenticalWindows(t *testing.T) {
+	f := &fake{score: allClear}
+	s := testSet(t, 100, enforce("laya", f))
+	s.Run(context.Background(), s.Entries, req("kr", "role", "user", "role", "hello"))
+	if !slices.Equal(f.calls[0], []string{"role", "user", "hello"}) {
+		t.Fatalf("sent %q", f.calls[0])
+	}
+}
+
+func TestRunCacheIsScopedByTeamAndPolicy(t *testing.T) {
+	f := &fake{score: allClear}
+	s := testSet(t, 100, enforce("laya", f))
+	s.Run(context.Background(), s.Entries, req("kr", "hello"))
+	s.Run(context.Background(), s.Entries, req("us", "hello"))
+	changed := req("kr", "hello")
+	changed.Policies = []PolicyRef{{Name: "privacy", Generation: 8, Rule: "protect"}}
+	s.Run(context.Background(), s.Entries, changed)
+	if f.callCount() != 3 {
+		t.Fatalf("calls = %d, want 3 (team and policy generation scope the cache)", f.callCount())
+	}
+}
+
+func TestRunSkipsEmptyAndAbstainsOverInputCap(t *testing.T) {
+	f := &fake{score: allClear}
+	s := testSet(t, 100, enforce("laya", f))
+	if got := s.Run(context.Background(), s.Entries, req("kr", "", "")); got[0].Outcome != OutcomeSkipped {
+		t.Fatalf("empty input: %+v", got)
+	}
+	s.MaxInputBytes = 4
+	if got := s.Run(context.Background(), s.Entries, req("kr", "12345")); got[0].Outcome != OutcomeAbstain {
+		t.Fatalf("over cap: %+v", got)
+	}
+	if f.callCount() != 0 {
+		t.Fatal("a skipped or over-cap request reached the classifier")
+	}
+}
+
+func TestRunDeadlineIsAnErrorAndCachesNothing(t *testing.T) {
+	f := &fake{score: func(ctx context.Context, windows []string) (Scores, error) {
+		<-ctx.Done()
+		return allClear(ctx, windows) // a plugin that ignores the deadline must still not populate the cache
+	}}
+	s := testSet(t, 100, enforce("laya", f))
+	s.Timeout = 20 * time.Millisecond
+	if got := s.Run(context.Background(), s.Entries, req("kr", "hello")); got[0].Outcome != OutcomeError {
+		t.Fatalf("deadline: %+v", got)
+	}
+	f.setScore(allClear)
+	s.Timeout = time.Second
+	s.Run(context.Background(), s.Entries, req("kr", "hello"))
+	if f.callCount() != 2 {
+		t.Fatal("a late answer populated the cache")
+	}
+}
+
+// A classifier that ignores its context must not hold the request past the deadline.
+func TestRunReturnsAtTheDeadlineDespiteAStuckClassifier(t *testing.T) {
+	var stuck atomic.Bool
+	stuck.Store(true)
+	release := make(chan struct{})
+	f := &fake{score: func(ctx context.Context, windows []string) (Scores, error) {
+		if stuck.Load() {
+			<-release // ignores ctx entirely
+		}
+		return allClear(ctx, windows)
+	}}
+	s := testSet(t, 100, enforce("laya", f))
+	s.Timeout = 50 * time.Millisecond
+	start := time.Now()
+	got := s.Run(context.Background(), s.Entries, req("kr", "hello"))
+	if elapsed := time.Since(start); got[0].Outcome != OutcomeError || elapsed > time.Second {
+		t.Fatalf("Run waited %v for a stuck classifier: %+v", elapsed, got)
+	}
+	stuck.Store(false)
+	close(release) // the late answer arrives after Run returned and must not be cached
+	s.Timeout = time.Second
+	if got := s.Run(context.Background(), s.Entries, req("kr", "hello")); got[0].Outcome != OutcomeClear || f.callCount() != 2 {
+		t.Fatalf("late answer was cached or the rerun failed: %+v calls=%d", got, f.callCount())
+	}
+}
+
+func TestRunRejectsMismatchedVerdictsAndUnknownVerdict(t *testing.T) {
+	for name, out := range map[string]Scores{
+		"short verdicts":  {Verdicts: []Verdict{Clear}},
+		"unknown verdict": {Verdicts: []Verdict{Clear, Verdict(42)}},
+	} {
+		f := &fake{score: func(context.Context, []string) (Scores, error) { return out, nil }}
+		s := testSet(t, 100, enforce("laya", f))
+		if got := s.Run(context.Background(), s.Entries, req("kr", "a", "b")); got[0].Outcome != OutcomeError {
+			t.Errorf("%s: %+v", name, got)
+		}
+	}
+}
+
+func TestRunEntriesInParallel(t *testing.T) {
+	var arrived atomic.Int32
+	ready := make(chan struct{})
+	both := func(ctx context.Context, windows []string) (Scores, error) {
+		if arrived.Add(1) == 2 {
+			close(ready)
+		}
+		select {
+		case <-ready: // reached only if both entries are in flight at once
+			return allClear(ctx, windows)
+		case <-ctx.Done():
+			return Scores{}, ErrTimeout
+		}
+	}
+	a, b := &fake{score: both}, &fake{score: both}
+	s := testSet(t, 0, enforce("a", a), Entry{Name: "b", Mode: Shadow, Classifier: b, Global: true})
+	for _, r := range s.Run(context.Background(), s.Entries, req("kr", "hello")) {
+		if r.Outcome != OutcomeClear {
+			t.Fatalf("entries did not run in parallel: %+v", r)
+		}
+	}
+}
+
+func TestRunWithoutCacheStillClassifies(t *testing.T) {
+	f := &fake{score: allClear}
+	s := testSet(t, 0, enforce("laya", f))
+	s.Run(context.Background(), s.Entries, req("kr", "hello"))
+	s.Run(context.Background(), s.Entries, req("kr", "hello"))
+	if f.callCount() != 2 {
+		t.Fatal("a disabled cache served a hit")
+	}
+}
+
+func TestCombineCountsOnlyEnforce(t *testing.T) {
+	for _, tc := range []struct {
+		results                   []Result
+		classified, uninspectable bool
+	}{
+		{[]Result{{Mode: Shadow, Outcome: OutcomeFlagged}}, false, false},
+		{[]Result{{Mode: Enforce, Outcome: OutcomeFlagged}, {Mode: Enforce, Outcome: OutcomeError}}, true, false},
+		{[]Result{{Mode: Enforce, Outcome: OutcomeAbstain}}, false, true},
+		{[]Result{{Mode: Enforce, Outcome: OutcomeError}, {Mode: Shadow, Outcome: OutcomeFlagged}}, false, true},
+		{[]Result{{Mode: Enforce, Outcome: OutcomeClear}, {Mode: Enforce, Outcome: OutcomeSkipped}}, false, false},
+	} {
+		c, u := Combine(tc.results)
+		if c != tc.classified || u != tc.uninspectable {
+			t.Errorf("Combine(%+v) = %v %v", tc.results, c, u)
+		}
+	}
+}
+
+func TestFailedMarksEveryEntryError(t *testing.T) {
+	got := Failed([]Entry{{Name: "a", Mode: Enforce}, {Name: "b", Mode: Shadow}})
+	if len(got) != 2 || got[0].Outcome != OutcomeError || got[1].Outcome != OutcomeError || got[1].Mode != Shadow {
+		t.Fatalf("%+v", got)
+	}
+}
+```
+
+`plugins/systemone/window_test.go`:
+
+```go
+package systemone
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
+
+func TestBuildWindowsPacksShortUnits(t *testing.T) {
+	got := buildWindows([]string{"a", "", "bc"}, 10, 2)
+	if !slices.Equal(got, []string{"a\n\nbc"}) {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestBuildWindowsFlushesWhenFull(t *testing.T) {
+	got := buildWindows([]string{"aaaa", "bbbb"}, 6, 0)
+	if !slices.Equal(got, []string{"aaaa", "bbbb"}) {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestBuildWindowsSplitsAnOversizedUnit(t *testing.T) {
+	long := strings.Repeat("가", 25)
+	got := buildWindows([]string{"short", long}, 10, 2)
+	if got[0] != "short" {
+		t.Fatalf("the short unit was not flushed before the split: %q", got)
+	}
+	if !slices.Equal(got[1:], splitRunes(long, 10, 2)) {
+		t.Fatalf("split windows %q", got[1:])
+	}
+	for _, w := range got {
+		if utf8.RuneCountInString(w) > 10 {
+			t.Fatalf("window over size: %q", w)
+		}
+	}
+}
+
+func TestBuildWindowsEndsAWindowAtAContentBoundary(t *testing.T) {
+	var marker string
+	for i := 0; marker == ""; i++ {
+		if u := fmt.Sprintf("u%d", i); boundary(u) {
+			marker = u
+		}
+	}
+	if boundary("x") || boundary("y") {
+		t.Fatal("fixture units must not be boundaries")
+	}
+	got := buildWindows([]string{"x", marker, "y"}, 100, 0)
+	if !slices.Equal(got, []string{"x\n\n" + marker, "y"}) {
+		t.Fatalf("%q", got)
+	}
+}
+
+// A conversation grows by appending turns, and a client may place later
+// fields (tool schemas) after the messages. Content-defined boundaries keep
+// the windows before and after a change identical, so their cache entries
+// keep hitting.
+func TestBuildWindowsStayStableAsAConversationGrows(t *testing.T) {
+	units := make([]string, 300)
+	for i := range units {
+		units[i] = fmt.Sprintf("메시지 %d: 이 함수의 오류 처리를 검토해 주세요.", i)
+	}
+	before := buildWindows(units, 200, 20)
+	appended := buildWindows(append(slices.Clone(units), "새 질문"), 200, 20)
+	if !slices.Equal(appended[:len(before)-1], before[:len(before)-1]) {
+		t.Fatal("appending a turn changed earlier windows")
+	}
+	inserted := buildWindows(slices.Insert(slices.Clone(units), 3, "중간에 끼어든 새 메시지"), 200, 20)
+	kept := 0
+	for _, w := range before {
+		if slices.Contains(inserted, w) {
+			kept++
+		}
+	}
+	if kept < len(before)*9/10 {
+		t.Fatalf("an early insertion kept only %d of %d windows", kept, len(before))
+	}
+}
+
+func TestBuildWindowsCoverEveryUnit(t *testing.T) {
+	units := []string{"a", strings.Repeat("나", 33), "", "bc", strings.Repeat("다", 7)}
+	joined := strings.Join(buildWindows(units, 10, 3), "|")
+	for _, u := range units {
+		for _, r := range u {
+			if !strings.ContainsRune(joined, r) {
+				t.Fatalf("rune %q of unit %q is in no window", r, u)
+			}
+		}
+	}
+}
+
+func TestSplitRunesPrefersALateNewline(t *testing.T) {
+	s := strings.Repeat("a", 8) + "\n" + strings.Repeat("b", 20)
+	got := splitRunes(s, 10, 2)
+	if got[0] != strings.Repeat("a", 8)+"\n" {
+		t.Fatalf("first window %q", got[0])
+	}
+}
+
+func TestSplitRunesOverlapsAndCoversEverything(t *testing.T) {
+	s := strings.Repeat("가나다라마바사\n", 40) + "끝"
+	for _, size := range []int{5, 7, 12, 40} {
+		for overlap := 0; overlap <= size/2; overlap++ {
+			got := splitRunes(s, size, overlap)
+			rebuilt := got[0]
+			for _, w := range got[1:] {
+				prev := []rune(rebuilt)
+				if !strings.HasPrefix(w, string(prev[len(prev)-overlap:])) {
+					t.Fatalf("size %d overlap %d: window does not repeat the overlap", size, overlap)
+				}
+				rebuilt += string([]rune(w)[overlap:])
+			}
+			if rebuilt != s {
+				t.Fatalf("size %d overlap %d: windows do not cover the text", size, overlap)
+			}
+		}
+	}
+}
+
+func TestSplitRunesNeverBreaksARune(t *testing.T) {
+	s := strings.Repeat("가a😀\n김", 50)
+	for size := 5; size <= 13; size++ {
+		for overlap := 0; overlap <= size/2; overlap++ {
+			for _, w := range splitRunes(s, size, overlap) {
+				if !utf8.ValidString(w) || utf8.RuneCountInString(w) > size {
+					t.Fatalf("size %d overlap %d: bad window %q", size, overlap, w)
+				}
+			}
+		}
+	}
+}
+```
+
+`plugins/systemone/systemone_test.go`:
+
+```go
+package systemone
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"math"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/inferplane/inferplane/internal/classifier"
+)
+
+const bearer = "bearer-value-123"
+
+func options(t *testing.T, raw string) map[string]json.RawMessage {
+	t.Helper()
+	if raw == "" {
+		return nil
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func newClassifier(t *testing.T, endpoint, opts string, threshold float64, token string) classifier.Classifier {
+	t.Helper()
+	c, err := New(classifier.Config{Name: "laya-ko", Type: "systemone", Endpoint: endpoint, Threshold: threshold, BearerToken: token, Options: options(t, opts)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// batchServer answers /v1/systemone/batch with one probability per state.
+func batchServer(t *testing.T, seen func(r *http.Request, body map[string]any), probs func(states []string) []float64) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("request body: %v", err)
+		}
+		if seen != nil {
+			seen(r, body)
+		}
+		var states []string
+		for _, s := range body["states"].([]any) {
+			states = append(states, s.(string))
+		}
+		var results []map[string]any
+		for _, p := range probs(states) {
+			results = append(results, map[string]any{"model": "laya-rl-agent", "answers": map[string]any{"pii": map[string]any{"type": "noul", "noul": p}}})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"results": results, "total_usage": map[string]int{"input_tokens": 1}})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func constant(p float64) func([]string) []float64 {
+	return func(states []string) []float64 {
+		out := make([]float64, len(states))
+		for i := range out {
+			out[i] = p
+		}
+		return out
+	}
+}
+
+func TestRegistersSystemoneType(t *testing.T) {
+	if !slices.Contains(classifier.Types(), "systemone") {
+		t.Fatal("systemone is not registered")
+	}
+}
+
+func TestBatchRequestCarriesTheTrainedQuestion(t *testing.T) {
+	srv := batchServer(t, func(r *http.Request, body map[string]any) {
+		if r.URL.Path != "/v1/systemone/batch" || r.Header.Get("Content-Type") != "application/json" || r.Header.Get("Authorization") != "" {
+			t.Errorf("path %s, content-type %q, authorization %q", r.URL.Path, r.Header.Get("Content-Type"), r.Header.Get("Authorization"))
+		}
+		q := body["questions"].(map[string]any)["pii"].(map[string]any)
+		if q["type"] != "noul" || q["instructions"] != defaultInstructions || q["criteria"] != nil || body["model"] != nil {
+			t.Errorf("question %v, model %v", q, body["model"])
+		}
+	}, constant(0.01))
+	out, err := newClassifier(t, srv.URL, "", 0.5, "").Score(context.Background(), []string{"hello"})
+	if err != nil || !slices.Equal(out.Verdicts, []classifier.Verdict{classifier.Clear}) || out.Sent != 1 {
+		t.Fatalf("%+v %v", out, err)
+	}
+}
+
+func TestRequestCarriesConfiguredSettingsVerbatim(t *testing.T) {
+	srv := batchServer(t, func(r *http.Request, body map[string]any) {
+		q := body["questions"].(map[string]any)["pii"].(map[string]any)
+		crit := q["criteria"].(map[string]any)
+		if r.Header.Get("Authorization") != "Bearer "+bearer || body["model"] != "multilingual" || q["instructions"] != "Is there PII?" || crit["true"] != "yes" || crit["false"] != "no" {
+			t.Errorf("body %v", body)
+		}
+	}, constant(0.01))
+	c := newClassifier(t, srv.URL+"/", `{"model":"multilingual","instructions":"Is there PII?","criteria":{"true":"yes","false":"no"}}`, 0.5, bearer)
+	if _, err := c.Score(context.Background(), []string{"hello"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerdictBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		opts string
+		p    float64
+		want classifier.Verdict
+	}{
+		{"", 0.4999, classifier.Clear},
+		{"", 0.5, classifier.Flagged},
+		{`{"abstain_band":{"low":0.1,"high":0.9}}`, 0.1, classifier.Clear},
+		{`{"abstain_band":{"low":0.1,"high":0.9}}`, 0.1000001, classifier.Abstain},
+		{`{"abstain_band":{"low":0.1,"high":0.9}}`, 0.5, classifier.Abstain},
+		{`{"abstain_band":{"low":0.1,"high":0.9}}`, 0.9, classifier.Flagged},
+		{`{"abstain_band":{"low":0.1,"high":0.9}}`, 0.05, classifier.Clear},
+	} {
+		srv := batchServer(t, nil, constant(tc.p))
+		out, err := newClassifier(t, srv.URL, tc.opts, 0.5, "").Score(context.Background(), []string{"x"})
+		if err != nil || len(out.Verdicts) != 1 || out.Verdicts[0] != tc.want {
+			t.Errorf("opts %s p %v: %+v %v", tc.opts, tc.p, out, err)
+		}
+	}
+}
+
+func TestScoreReturnsOneVerdictPerWindow(t *testing.T) {
+	srv := batchServer(t, nil, func(states []string) []float64 { return []float64{0.01, 0.99} })
+	out, err := newClassifier(t, srv.URL, "", 0.5, "").Score(context.Background(), []string{"clean window", "flagged window"})
+	if err != nil || !slices.Equal(out.Verdicts, []classifier.Verdict{classifier.Clear, classifier.Flagged}) || out.Sent != 2 {
+		t.Fatalf("%+v %v", out, err)
+	}
+}
+
+// Review Focus 1: read a prefix of windows; the rest are Abstain and unsent.
+func TestMaxWindowsReadsPrefixAndAbstains(t *testing.T) {
+	var states atomic.Int64
+	srv := batchServer(t, func(_ *http.Request, body map[string]any) { states.Store(int64(len(body["states"].([]any)))) }, constant(0.01))
+	out, err := newClassifier(t, srv.URL, `{"max_windows":2}`, 0.5, "").Score(context.Background(), []string{"one", "two", "three"})
+	want := []classifier.Verdict{classifier.Clear, classifier.Clear, classifier.Abstain}
+	if err != nil || !slices.Equal(out.Verdicts, want) || states.Load() != 2 || out.Sent != 2 {
+		t.Fatalf("%+v %v states=%d", out, err, states.Load())
+	}
+}
+
+func TestWindowsAreDeterministicAndBounded(t *testing.T) {
+	c := newClassifier(t, "http://127.0.0.1:1", `{"window_runes":200,"window_overlap_runes":20}`, 0.5, "")
+	segments := []string{"short", strings.Repeat("가", 450), "", "tail"}
+	first, second := c.Windows(segments), c.Windows(segments)
+	if !slices.Equal(first, second) || len(first) < 4 || first[0] != "short" {
+		t.Fatalf("windows %d %q", len(first), first[:1])
+	}
+	for _, w := range first {
+		if n := []rune(w); len(n) > 200 || len(n) == 0 {
+			t.Fatalf("window of %d runes", len(n))
+		}
+	}
+}
+
+// Review Focus 3: every failure is a bounded class with no request text or token.
+func TestErrorsAreBoundedClasses(t *testing.T) {
+	const pii = "김민수 010-2345-6789"
+	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("a redirect was followed") }))
+	t.Cleanup(other.Close)
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	for name, tc := range map[string]struct {
+		handler http.HandlerFunc
+		url     string
+		timeout time.Duration
+		want    error
+	}{
+		"500":          {handler: func(w http.ResponseWriter, _ *http.Request) { http.Error(w, pii+" "+bearer, 500) }, want: classifier.ErrStatus},
+		"503":          {handler: func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(503) }, want: classifier.ErrStatus},
+		"redirect":     {handler: func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, other.URL, http.StatusFound) }, want: classifier.ErrStatus},
+		"malformed":    {handler: func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, `{"results":[`) }, want: classifier.ErrDecode},
+		"count":        {handler: func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, `{"results":[]}`) }, want: classifier.ErrDecode},
+		"not noul":     {handler: answerWith(`{"type":"choice","choice":"a"}`), want: classifier.ErrDecode},
+		"out of range": {handler: answerWith(`{"type":"noul","noul":1.5}`), want: classifier.ErrDecode},
+		"missing":      {handler: answerWith(`{"type":"noul"}`), want: classifier.ErrDecode},
+		"oversized": {handler: func(w http.ResponseWriter, _ *http.Request) {
+			io.WriteString(w, `{"results":[{"answers":{"pii":{"type":"noul","noul":0.1}}}],"pad":"`+strings.Repeat("x", maxResponseBytes)+`"}`)
+		}, want: classifier.ErrDecode},
+		"refused": {url: closed.URL, want: classifier.ErrTransport},
+		"timeout": {handler: func(w http.ResponseWriter, r *http.Request) {
+			io.Copy(io.Discard, r.Body) // the server notices a closed client only after the body is read
+			<-r.Context().Done()
+		}, timeout: 50 * time.Millisecond, want: classifier.ErrTimeout},
+	} {
+		t.Run(name, func(t *testing.T) {
+			url := tc.url
+			if tc.handler != nil {
+				srv := httptest.NewServer(tc.handler)
+				t.Cleanup(srv.Close)
+				url = srv.URL
+			}
+			ctx := context.Background()
+			if tc.timeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, tc.timeout)
+				defer cancel()
+			}
+			out, err := newClassifier(t, url, "", 0.5, bearer).Score(ctx, []string{pii})
+			if !errors.Is(err, tc.want) || out.Verdicts != nil {
+				t.Fatalf("got %+v %v, want %v", out, err, tc.want)
+			}
+			if strings.Contains(err.Error(), "김민수") || strings.Contains(err.Error(), bearer) || strings.Contains(err.Error(), "127.0.0.1") {
+				t.Fatalf("error leaks request data: %v", err)
+			}
+		})
+	}
+}
+
+func answerWith(item string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, `{"results":[{"answers":{"pii":`+item+`}}]}`)
+	}
+}
+
+func TestSingleModeBoundsConcurrency(t *testing.T) {
+	var inFlight, peak, calls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		n := inFlight.Add(1)
+		for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
+		}
+		time.Sleep(20 * time.Millisecond)
+		inFlight.Add(-1)
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if r.URL.Path != "/v1/systemone" || body["state"] == nil {
+			t.Errorf("single request %s %v", r.URL.Path, body)
+		}
+		io.WriteString(w, `{"answers":{"pii":{"type":"noul","noul":0.01}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	units := make([]string, 6)
+	for i := range units {
+		units[i] = strings.Repeat(string(rune('가'+i)), 150)
+	}
+	out, err := newClassifier(t, srv.URL, `{"batch":false,"concurrency":2}`, 0.5, "").Score(context.Background(), units)
+	if err != nil || len(out.Verdicts) != 6 || slices.Contains(out.Verdicts, classifier.Flagged) || calls.Load() != 6 || peak.Load() > 2 {
+		t.Fatalf("%+v %v calls=%d peak=%d", out, err, calls.Load(), peak.Load())
+	}
+}
+
+func TestSingleModeFailsOnTheFirstError(t *testing.T) {
+	var calls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(500)
+			return
+		}
+		io.WriteString(w, `{"answers":{"pii":{"type":"noul","noul":0.01}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	_, err := newClassifier(t, srv.URL, `{"batch":false,"concurrency":1}`, 0.5, "").Score(context.Background(), []string{"first window", "second window"})
+	if !errors.Is(err, classifier.ErrStatus) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNoWindowsMeansNoCall(t *testing.T) {
+	c := newClassifier(t, "http://127.0.0.1:1", "", 0.5, "")
+	if w := c.Windows([]string{"", ""}); len(w) != 0 {
+		t.Fatalf("empty segments produced windows %q", w)
+	}
+	out, err := c.Score(context.Background(), nil)
+	if err != nil || len(out.Verdicts) != 0 || out.Sent != 0 {
+		t.Fatalf("%+v %v", out, err)
+	}
+}
+
+func TestNewRejectsAThresholdOutsideTheOpenUnitInterval(t *testing.T) {
+	for _, threshold := range []float64{0, 1, 1.5, -0.1, math.NaN()} {
+		if _, err := New(classifier.Config{Name: "laya-ko", Type: "systemone", Endpoint: "http://127.0.0.1:1", Threshold: threshold}); err == nil || !strings.Contains(err.Error(), "threshold") {
+			t.Errorf("threshold %v: err = %v", threshold, err)
+		}
+	}
+}
+
+func TestClientIgnoresProxiesAndRedirects(t *testing.T) {
+	c := newClassifier(t, "http://127.0.0.1:1", "", 0.5, "").(*systemone)
+	tr, ok := c.client.Transport.(*http.Transport)
+	if !ok || tr.Proxy != nil || c.client.CheckRedirect == nil {
+		t.Fatal("classifier text could leave through a proxy or a redirect")
+	}
+}
+
+func TestOptionValidation(t *testing.T) {
+	for opts, wantField := range map[string]string{
+		`{"unknown":1}`: "unknown",
+		`{"abstain_band":{"low":0.6,"high":0.9}}`:         "abstain_band",
+		`{"abstain_band":{"low":0.1}}`:                    "abstain_band",
+		`{"window_runes":200,"window_overlap_runes":101}`: "window_overlap_runes",
+		`{"max_windows":65}`:                              "max_windows",
+		`{"concurrency":0}`:                               "concurrency",
+		`{"model":"Multi lingual"}`:                       "model",
+		`{"instructions":""}`:                             "instructions",
+		`{"criteria":{"true":"yes"}}`:                     "criteria",
+		`{"batch":null}`:                                  "batch",
+		`{"window_runes":4.5}`:                            "window_runes",
+	} {
+		_, err := New(classifier.Config{Name: "laya-ko", Type: "systemone", Endpoint: "http://127.0.0.1:1", Threshold: 0.5, Options: options(t, opts)})
+		if err == nil || !strings.Contains(err.Error(), wantField) {
+			t.Errorf("options %s: err = %v, want it to name %s", opts, err, wantField)
+		}
+	}
+}
+```
+
+In `internal/classifier/classifier_test.go`, replace the stub's two methods with:
+
+```go
+func (stubClassifier) Windows(s []string) []string                     { return s }
+func (stubClassifier) Score(context.Context, []string) (Scores, error) { return Scores{}, nil }
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `go test ./internal/classifier/ ./plugins/systemone/ -v`
+Expected: FAIL to compile (`undefined: Scores`, `c.Windows undefined`).
+
+- [ ] **Step 3: Implement the new contract**
+
+In `internal/classifier/classifier.go`, replace everything from `// Input holds the units` through the end of the `Classifier` interface with:
+
+```go
+// Scores is a classifier's answer for the windows it was given: one verdict
+// per window, in order. A window past the classifier's own cap is Abstain and
+// was not sent. Sent counts the windows actually sent, for metrics only.
+type Scores struct {
+	Verdicts []Verdict
+	Sent     int
+}
+
+// Classifier is one configured backend. Windows cuts request segments into
+// the deterministic windows the classifier reads and the verdict cache
+// stores: the same segments always give the same windows, and the text of
+// every non-empty segment appears in some window. Score judges windows that
+// Windows produced; the slice is borrowed for the call and must not be
+// retained. The cache stores whole windows only, so content judged together
+// is judged together again: clearing two parts separately can never clear
+// their combination.
+type Classifier interface {
+	Windows(segments []string) []string
+	Score(ctx context.Context, windows []string) (Scores, error)
+}
+```
+
+In `internal/classifier/run.go`, replace `runEntry` with the following, and drop the now-unused `slices` import:
+
+```go
+func (s *Set) runEntry(ctx context.Context, e *Entry, req Request, res *Result) {
+	start := time.Now()
+	defer func() { res.Duration = time.Since(start) }()
+	var pending []string
+	var keys [][32]byte
+	seen := make(map[string]bool)
+	for _, w := range e.Classifier.Windows(req.Segments) {
+		if w == "" || seen[w] {
+			continue
+		}
+		seen[w] = true
+		if s.cache != nil {
+			k := s.cache.digest(req.Team, e, req.Policies, w)
+			if s.cache.clear(k) {
+				res.CacheHits++
+				continue
+			}
+			keys = append(keys, k)
+		}
+		res.CacheMisses++
+		pending = append(pending, w)
+	}
+	if len(pending) == 0 {
+		res.Outcome = OutcomeClear
+		return
+	}
+	out, err := e.Classifier.Score(ctx, pending)
+	res.Windows = out.Sent
+	if err != nil || ctx.Err() != nil || len(out.Verdicts) != len(pending) {
+		res.Outcome = OutcomeError
+		return
+	}
+	res.Outcome = OutcomeClear
+	for _, v := range out.Verdicts {
+		switch v {
+		case Clear:
+		case Flagged:
+			res.Outcome = OutcomeFlagged
+		case Abstain:
+			if res.Outcome == OutcomeClear {
+				res.Outcome = OutcomeAbstain
+			}
+		default:
+			res.Outcome = OutcomeError
+			return
+		}
+	}
+	// Clear windows are cached even when another window flagged or abstained:
+	// each verdict covers exactly its window's text, so a long request warms
+	// the cache window by window and a later request reads only the rest.
+	if s.cache != nil {
+		for i, v := range out.Verdicts {
+			if v == Clear {
+				s.cache.store(keys[i])
+			}
+		}
+	}
+}
+```
+
+Replace `plugins/systemone/window.go` with:
+
+```go
+package systemone
+
+import (
+	"hash/fnv"
+	"strings"
+	"unicode/utf8"
+)
+
+// boundaryEvery sets the expected number of short units per window. A unit
+// whose FNV-1a hash is divisible by it ends its window, so window edges
+// depend on content, not position: content inserted earlier in a request
+// changes the windows only up to the next boundary, and every later window,
+// with its cache entry, stays identical as a conversation grows.
+const boundaryEvery = 16
+
+func boundary(unit string) bool {
+	h := fnv.New32a()
+	h.Write([]byte(unit))
+	return h.Sum32()%boundaryEvery == 0
+}
+
+// buildWindows packs consecutive short units into windows of at most size
+// runes, joined by a blank line, ends a window after a boundary unit, and
+// splits a unit longer than size with splitRunes. Empty units get no window.
+// The result depends only on units, size and overlap.
+func buildWindows(units []string, size, overlap int) []string {
+	var out []string
+	var cur strings.Builder
+	runes, open := 0, false
+	flush := func() {
+		if open {
+			out = append(out, cur.String())
+		}
+		cur.Reset()
+		runes, open = 0, false
+	}
+	for _, u := range units {
+		n := utf8.RuneCountInString(u)
+		switch {
+		case n == 0:
+			continue
+		case n > size:
+			flush()
+			out = append(out, splitRunes(u, size, overlap)...)
+			continue
+		}
+		sep := 0
+		if open {
+			sep = 2
+		}
+		if runes+sep+n > size {
+			flush()
+			sep = 0
+		}
+		if sep > 0 {
+			cur.WriteString("\n\n")
+		}
+		cur.WriteString(u)
+		runes += sep + n
+		open = true
+		if boundary(u) {
+			flush()
+		}
+	}
+	flush()
+	return out
+}
+
+// splitRunes cuts s into windows of at most size runes. Each cut prefers the
+// last newline in the final fifth of the window, and each window after the
+// first repeats the previous window's last overlap runes. It requires
+// 0 <= overlap <= size/2, which the option bounds guarantee.
+func splitRunes(s string, size, overlap int) []string {
+	r := []rune(s)
+	var out []string
+	for start := 0; ; {
+		end := start + size
+		if end >= len(r) {
+			return append(out, string(r[start:]))
+		}
+		for j := end - 1; j >= start+size*4/5; j-- {
+			if r[j] == '\n' {
+				end = j + 1
+				break
+			}
+		}
+		out = append(out, string(r[start:end]))
+		next := end - overlap
+		if next <= start {
+			next = end
+		}
+		start = next
+	}
+}
+```
+
+In `plugins/systemone/systemone.go`, replace `New` (with its doc comment) with:
+
+```go
+// New validates the threshold and options and builds the classifier. The
+// endpoint and token ref are validated by the config layer before New is
+// called; the threshold is checked again here so a direct caller cannot
+// build a classifier that fails open.
+func New(cfg classifier.Config) (classifier.Classifier, error) {
+	if !(cfg.Threshold > 0 && cfg.Threshold < 1) {
+		return nil, fmt.Errorf("systemone %q: threshold must be in (0,1)", cfg.Name)
+	}
+	s, err := parseOptions(cfg.Options, cfg.Threshold)
+	if err != nil {
+		return nil, fmt.Errorf("systemone %q: %w", cfg.Name, err)
+	}
+	tr := &http.Transport{}
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		tr = base.Clone()
+	}
+	tr.Proxy = nil // request text never leaves through an environment proxy
+	client := &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return &systemone{endpoint: strings.TrimRight(cfg.Endpoint, "/"), token: cfg.BearerToken, client: client, s: s}, nil
+}
+```
+
+Replace `Units` and `Classify` (with their doc comments) with:
+
+```go
+// Windows packs and splits segments into the deterministic windows this
+// classifier reads and the verdict cache stores.
+func (c *systemone) Windows(segments []string) []string {
+	return buildWindows(segments, c.s.windowRunes, c.s.overlapRunes)
+}
+
+// Score reads at most maxWindows windows. Windows past the cap are Abstain
+// and are not sent, so a request with unread content is never Clear (PR-08);
+// a later request reads them once the read ones are cached.
+func (c *systemone) Score(ctx context.Context, windows []string) (classifier.Scores, error) {
+	read := windows
+	if len(read) > c.s.maxWindows {
+		read = windows[:c.s.maxWindows]
+	}
+	verdicts := make([]classifier.Verdict, len(windows))
+	for i := range verdicts {
+		verdicts[i] = classifier.Abstain
+	}
+	if len(read) == 0 {
+		return classifier.Scores{Verdicts: verdicts}, nil
+	}
+	probs, err := c.score(ctx, read)
+	if err != nil {
+		return classifier.Scores{Sent: len(read)}, err
+	}
+	for i, p := range probs {
+		verdicts[i] = c.judge(p)
+	}
+	return classifier.Scores{Verdicts: verdicts, Sent: len(read)}, nil
+}
+```
+
+In `plugins/systemone/client.go`, change the signature to `func (c *systemone) score(ctx context.Context, windows []string) ([]float64, error)`, replace the `states` loop and its body line with `body := map[string]any{"states": windows, "questions": q}`, and replace `"state": windows[i].text` with `"state": windows[i]`.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `go test ./internal/classifier/ ./plugins/systemone/ -race -count=2 -v`
+Expected: PASS. The tests include `TestRunCannotBeBypassedByCachingPartsSeparately` (the regression for the review finding) and `TestBuildWindowsStayStableAsAConversationGrows`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+gofmt -w internal/classifier plugins/systemone && test -z "$(gofmt -l internal/classifier plugins/systemone)" && go vet ./internal/classifier/ ./plugins/systemone/
+git add internal/classifier plugins/systemone
+git commit -s -m "fix(classifier): cache whole windows so separately cleared parts never clear their combination" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
 ### Task 6: `pii_classification` config and the per-generation Set
 
 **Files:**
@@ -2596,9 +3711,9 @@ import (
 
 type liveTestClassifier struct{ cfg classifier.Config }
 
-func (liveTestClassifier) Units(s []string) []string { return s }
-func (liveTestClassifier) Classify(context.Context, classifier.Input) (classifier.Output, error) {
-	return classifier.Output{}, nil
+func (liveTestClassifier) Windows(s []string) []string { return s }
+func (liveTestClassifier) Score(context.Context, []string) (classifier.Scores, error) {
+	return classifier.Scores{}, nil
 }
 
 func init() {
@@ -2909,7 +4024,7 @@ type classifierMetrics struct {
 	decisions *prometheus.CounterVec   // inferplane_pii_classifier_decisions_total
 	duration  *prometheus.HistogramVec // inferplane_pii_classifier_duration_seconds
 	windows   *prometheus.HistogramVec // inferplane_pii_classifier_windows
-	cache     *prometheus.CounterVec   // inferplane_pii_classifier_cache_segments_total
+	cache     *prometheus.CounterVec   // inferplane_pii_classifier_cache_windows_total
 	mu        sync.Mutex
 	current   map[string]string // name → revision of the live generation
 }
@@ -2928,7 +4043,7 @@ func newClassifierMetrics(reg *prometheus.Registry) *classifierMetrics {
 			Buckets: []float64{1, 2, 4, 8, 16, 32, 64},
 		}, []string{"classifier"}),
 		cache: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "inferplane_pii_classifier_cache_segments_total", Help: "Verdict-cache lookups of classifier units by hit or miss.",
+			Name: "inferplane_pii_classifier_cache_windows_total", Help: "Verdict-cache lookups of classifier windows by hit or miss.",
 		}, []string{"classifier", "result"}),
 		current: map[string]string{},
 	}
@@ -3100,21 +4215,21 @@ type routerFake struct {
 	decide func([]string) (classifier.Verdict, error)
 }
 
-func (f *routerFake) Units(s []string) []string { return s }
+func (f *routerFake) Windows(s []string) []string { return s }
 
-func (f *routerFake) Classify(_ context.Context, in classifier.Input) (classifier.Output, error) {
+func (f *routerFake) Score(_ context.Context, windows []string) (classifier.Scores, error) {
 	f.mu.Lock()
-	f.inputs = append(f.inputs, slices.Clone(in.Texts))
+	f.inputs = append(f.inputs, slices.Clone(windows))
 	f.mu.Unlock()
-	v, err := f.decide(in.Texts)
+	v, err := f.decide(windows)
 	if err != nil {
-		return classifier.Output{}, err
+		return classifier.Scores{}, err
 	}
-	clear := make([]bool, len(in.Texts))
-	for i := range clear {
-		clear[i] = v == classifier.Clear
+	verdicts := make([]classifier.Verdict, len(windows))
+	for i := range verdicts {
+		verdicts[i] = v
 	}
-	return classifier.Output{Verdict: v, Clear: clear, Windows: 1}, nil
+	return classifier.Scores{Verdicts: verdicts, Sent: len(windows)}, nil
 }
 
 func (f *routerFake) calls() int {
@@ -4782,8 +5897,8 @@ you measure it in Shadow.
 
 - The evaluation is synthetic and document-level.
 - The gateway reads long requests in windows. A name and an attribute in
-  different windows or turns are not read together, and the cache can widen
-  this gap.
+  different windows or turns are not read together. The verdict cache stores
+  whole windows only, so it never joins or splits what was judged together.
 - The CPU profile does not cover long coding sessions.
 - No span masking: a Mask rule escalates to its `onUninspectable` action.
 - Only internal, self-hosted classifiers are supported.
@@ -4874,7 +5989,8 @@ helm install inferplane charts/inferplane -f examples/helm.pii-classifier-ko.yam
 
 - 평가는 합성 데이터의 문서 단위 결과입니다.
 - 게이트웨이는 긴 요청을 윈도 단위로 읽습니다. 서로 다른 윈도나 turn에 있는
-  이름과 속성은 함께 판정되지 않으며, 캐시가 이 간극을 넓힐 수 있습니다.
+  이름과 속성은 함께 판정되지 않습니다. 판정 캐시는 윈도 전체만 저장하므로
+  함께 판정된 내용을 나누거나 합치지 않습니다.
 - CPU 프로필은 긴 코딩 세션을 감당하지 못합니다.
 - 구간 마스킹은 없습니다. Mask 규칙은 `onUninspectable` 동작으로 격상됩니다.
 - 내부 자체 호스팅 분류기만 지원합니다.
@@ -4932,7 +6048,8 @@ ignores proxy environment variables and redirects.
 
 **Verdict cache.** A node-local cache stores only clear verdicts, keyed by an
 HMAC under a per-generation random key over the team, the classifier settings,
-the applicable policy generations and the text. It stores no text, and it is
+the applicable policy generations and the whole window text, so parts cleared
+separately never clear their combination. It stores no text, and it is
 cleared on every reload and restart.
 
 **Evidence.** Audit and metrics carry bounded enums only. They never carry
@@ -4967,7 +6084,7 @@ In `docs/reference/security.ko.md`, add the same section in Korean at the same p
 
 **판정 캐시.** 노드 로컬 캐시에는 Clear 판정만 저장합니다. 키는 세대마다 새로
 만드는 임의 키로 계산한 HMAC이며, 팀, 분류기 설정, 적용되는 정책 세대, 텍스트를
-덮습니다. 원문은 저장하지 않고, 재적재나 재시작 때마다 비웁니다.
+덮습니다. 윈도 텍스트 전체가 키이므로 따로 Clear된 조각이 그 조합을 Clear로 만들 수 없습니다. 원문은 저장하지 않고, 재적재나 재시작 때마다 비웁니다.
 
 **증거.** 감사와 메트릭에는 제한된 열거값만 남깁니다. 텍스트, 윈도, 확률,
 digest, 엔드포인트는 남기지 않습니다.
@@ -5129,7 +6246,7 @@ func cacheHits(t *testing.T, g *gateway) float64 {
 		t.Fatal(err)
 	}
 	for _, mf := range families {
-		if mf.GetName() != "inferplane_pii_classifier_cache_segments_total" {
+		if mf.GetName() != "inferplane_pii_classifier_cache_windows_total" {
 			continue
 		}
 		for _, m := range mf.GetMetric() {

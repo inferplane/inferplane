@@ -7,7 +7,8 @@ Decisions. This is sub-project 1 of
 [PR-08](../plans/2026-10-11-gateway-correctness-improvements.md) and settles
 the inspection-scope question that PR-08 left open in the umbrella.
 Implementation starts only after its implementation plan is approved.
-Amendments 1–6 come from mapping this spec to the code, and are listed in the
+Amendments 1–7 come from mapping this spec to the code (7 from the commit
+security review; it supersedes 1), and are listed in the
 plan (`docs/superpowers/plans/2026-10-16-systemone-korean-pii-sample.md`).
 
 ## Goal
@@ -121,23 +122,19 @@ GPU-backed endpoint.
 type Verdict int // Clear | Flagged | Abstain
 type Mode string // "Shadow" | "Enforce"
 
-type Input struct {
-	Texts []string // units not served from cache; borrowed, never retained
-}
-
-type Output struct {
-	Verdict Verdict
-	// Clear[i] reports that Texts[i] was read completely and judged clear.
-	// Only these units may be cached. A nil slice means none.
-	Clear   []bool
-	Windows int // windows sent, for metrics only
+// Scores holds one verdict per window, in order; a window past the
+// classifier's cap is Abstain and was not sent (amendment 7, 2026-10-16).
+type Scores struct {
+	Verdicts []Verdict
+	Sent     int // windows sent, for metrics only
 }
 
 type Classifier interface {
-	// Units splits segments into the deterministic units the classifier reads
-	// and the cache stores (amendment 1, 2026-10-16).
-	Units(segments []string) []string
-	Classify(ctx context.Context, in Input) (Output, error)
+	// Windows cuts segments into the deterministic windows the classifier
+	// reads and the cache stores; every non-empty segment's text is in some
+	// window.
+	Windows(segments []string) []string
+	Score(ctx context.Context, windows []string) (Scores, error)
 }
 
 type Config struct {
@@ -176,11 +173,11 @@ func (s *Set) For(team string) []Entry // nil-safe
 - The resolved `*Set` is a field of `live.State`, built by `BuildStateWith`.
   A request therefore uses classifiers and a cache from the same generation as
   its routes.
-- `Run(ctx, req)` is the package's entry point for the router. It filters each
-  entry's segments through the cache, calls the classifiers in parallel,
-  stores new Clear results and returns one result per entry. Identical
-  uncached segments in one request are sent once. The router never touches
-  the cache itself.
+- `Run(ctx, req)` is the package's entry point for the router. It asks each
+  entry for its windows, filters them through the cache, scores the rest in
+  parallel, stores newly clear windows and returns one result per entry.
+  Identical uncached windows in one request are sent once. The router never
+  touches the cache itself.
 
 ### 2. Content extraction
 
@@ -207,11 +204,17 @@ marks every entry `skipped`.
 
 ### 3. Verdict cache
 
-The cache stores which units a classifier has already judged clear, so that
-repeated content (system prompt, tool definitions, earlier turns) is classified
-once. A unit is a short segment, or one deterministic chunk of a long segment
-(amendment 1). Caching chunks lets a tool result longer than `max_windows`
-windows be read across a few requests instead of abstaining forever.
+The cache stores which whole windows a classifier has already judged clear, so
+that repeated content (system prompt, tool definitions, earlier turns) is
+classified once (amendment 7). A long segment is split into deterministic
+windows, so a tool result longer than `max_windows` windows is read across a
+few requests instead of abstaining forever.
+
+Amendment 1 cached units (short segments and chunks) instead. The 2026-10-16
+commit security review showed that it let two parts cleared separately, such as
+a name and a diagnosis, bypass the check on their combination. Whole-window
+caching cannot do that, because a window is skipped only when that exact text
+was judged clear.
 
 **Key.** Each key is HMAC-SHA256 under a 32-byte key drawn from `crypto/rand`
 for each Set generation. It covers, length-prefixed:
@@ -246,18 +249,15 @@ string. Keying by team confines that timing signal to the team's own traffic.
 
 **Safety argument.** The verdict depends on content, not on role or position.
 So forged assistant history gains nothing: the same text gets the same verdict
-whether it is marked as history or as new input. A segment is cached as clear
-only when every window that held any part of it was clear.
+whether it is marked as history or as new input. A window is cached only when
+its own verdict was clear, and a request's windows are judged as wholes, so
+what was judged together is always judged together again.
 
 **Known limit.** A document-level classifier judges one window at a time. A
 name in one place and a health fact in another are judged together only when
-they share a window. With the cache, a cached clear segment no longer joins
-new windows. So a name in an earlier turn and a diagnosis in the current turn
-are not read together, even if, without the cache, they would have been packed
-into the same window. Content that is sensitive on its own (direct
-identifiers, credentials, or a name and an attribute in the same window) is
-unaffected, because it is never cached. Rollout gate 2 measures this class
-separately.
+they share a window, so a name in an earlier turn and a diagnosis in the
+current turn may not be read together. The cache does not widen this gap: it
+never joins or splits windows. Rollout gate 2 measures this class separately.
 
 ### 4. Plugin `plugins/systemone`
 
@@ -294,22 +294,23 @@ The `criteria` field is present only when configured.
 
 The common `threshold` field defaults to 0.5 and must lie in (0,1).
 
-**Units and windowing.** `Units` keeps a segment of at most `window_runes`
-whole and splits a longer one into overlapping chunks, as described below.
-Windows are cut from the uncached units, in body order:
+**Windowing.** `Windows` cuts all segments, cached or not, in body order:
 - Consecutive segments are packed into one window, joined by a blank line,
   while the window stays within `window_runes`.
+- A segment whose FNV-1a hash is divisible by 16 ends its window. Edges
+  therefore depend on content, not position: content inserted earlier in a
+  request changes the windows only up to the next such edge, and the later
+  windows, with their cache entries, stay identical as a conversation grows.
 - A segment longer than `window_runes` is split. The cut prefers the last
   newline in the final 20% of the window. Otherwise it falls on a rune
   boundary, never inside a UTF-8 sequence.
 - Consecutive windows of one split segment overlap by `window_overlap_runes`,
   so an entity that crosses a cut is read whole in at least one window when it
   is shorter than the overlap.
-- When more than `max_windows` windows are needed, the plugin classifies the
-  first `max_windows` windows and returns Abstain. It never returns Clear for a
-  request whose remainder was not read (PR-08). The segments fully contained
-  in the classified clear windows are reported in `Output.Clear`, so the cache
-  warms and a later request has less left to read.
+- When more than `max_windows` uncached windows remain, `Score` reads the
+  first `max_windows` and returns Abstain for the rest without sending them.
+  A request with unread windows is never Clear (PR-08). The read clear windows
+  are cached, so a later request has less left to read.
 
 **Verdict.**
 - Each window is judged first:
@@ -325,7 +326,7 @@ Windows are cut from the uncached units, in body order:
   - a missing or non-`noul` answer;
   - a probability outside [0,1] or not finite.
 
-  An error reports no clear segments.
+  An error caches nothing.
 
 **Hygiene.**
 - Uses stdlib `net/http`, with `Proxy: nil` and no redirect following, so
@@ -465,7 +466,7 @@ second audit record that is linked to the first. It is deferred.
   - `inferplane_pii_classifier_windows{classifier}`, a histogram of windows
     sent per request. It is the sizing signal for choosing between CPU and
     GPU;
-  - `inferplane_pii_classifier_cache_segments_total{classifier,result}`, with
+  - `inferplane_pii_classifier_cache_windows_total{classifier,result}`, with
     `result` one of `hit` or `miss`.
 
   Series for a replaced revision are deleted on a generation swap.
@@ -607,15 +608,17 @@ Face or GHCR:
   - TTL expiry and LRU eviction lead to classification again;
   - `max_entries: 0` disables the cache;
   - no cache key or value is derivable without the per-generation HMAC key;
-  - a segment is cached only when every window holding part of it was Clear.
+  - a window is cached only when its own verdict was Clear, and parts cleared
+    separately never clear their combination (amendment 7);
+  - windows stay identical after a turn is appended, and nearly all survive an
+    insertion earlier in the request.
 - **systemone plugin**, against `httptest` fakes of the batch and single wires:
   - threshold and band boundaries, including equality at `threshold`, `low`
     and `high`;
   - window packing across segments, splitting on a newline or a rune boundary,
     overlap, and multi-byte Korean text cut at every offset;
-  - above `max_windows`: exactly `max_windows` windows sent, the result is
-    Abstain even when every window is clear, and only fully covered segments
-    are reported clear;
+  - above `max_windows`: exactly `max_windows` windows sent, the unsent ones
+    are Abstain, and only the read clear windows are cached;
   - the request carries `instructions`, `criteria` and `model` verbatim when
     configured, and omits them when not;
   - result count mismatch, non-`noul` answers, NaN, values outside [0,1],
