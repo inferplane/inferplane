@@ -1,0 +1,306 @@
+package systemone
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/inferplane/inferplane/internal/classifier"
+)
+
+const bearer = "bearer-value-123"
+
+func options(t *testing.T, raw string) map[string]json.RawMessage {
+	t.Helper()
+	if raw == "" {
+		return nil
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func newClassifier(t *testing.T, endpoint, opts string, threshold float64, token string) classifier.Classifier {
+	t.Helper()
+	c, err := New(classifier.Config{Name: "laya-ko", Type: "systemone", Endpoint: endpoint, Threshold: threshold, BearerToken: token, Options: options(t, opts)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// batchServer answers /v1/systemone/batch with one probability per state.
+func batchServer(t *testing.T, seen func(r *http.Request, body map[string]any), probs func(states []string) []float64) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("request body: %v", err)
+		}
+		if seen != nil {
+			seen(r, body)
+		}
+		var states []string
+		for _, s := range body["states"].([]any) {
+			states = append(states, s.(string))
+		}
+		var results []map[string]any
+		for _, p := range probs(states) {
+			results = append(results, map[string]any{"model": "laya-rl-agent", "answers": map[string]any{"pii": map[string]any{"type": "noul", "noul": p}}})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"results": results, "total_usage": map[string]int{"input_tokens": 1}})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func constant(p float64) func([]string) []float64 {
+	return func(states []string) []float64 {
+		out := make([]float64, len(states))
+		for i := range out {
+			out[i] = p
+		}
+		return out
+	}
+}
+
+func TestRegistersSystemoneType(t *testing.T) {
+	if !slices.Contains(classifier.Types(), "systemone") {
+		t.Fatal("systemone is not registered")
+	}
+}
+
+func TestBatchRequestCarriesTheTrainedQuestion(t *testing.T) {
+	srv := batchServer(t, func(r *http.Request, body map[string]any) {
+		if r.URL.Path != "/v1/systemone/batch" || r.Header.Get("Content-Type") != "application/json" || r.Header.Get("Authorization") != "" {
+			t.Errorf("path %s, content-type %q, authorization %q", r.URL.Path, r.Header.Get("Content-Type"), r.Header.Get("Authorization"))
+		}
+		q := body["questions"].(map[string]any)["pii"].(map[string]any)
+		if q["type"] != "noul" || q["instructions"] != defaultInstructions || q["criteria"] != nil || body["model"] != nil {
+			t.Errorf("question %v, model %v", q, body["model"])
+		}
+	}, constant(0.01))
+	out, err := newClassifier(t, srv.URL, "", 0.5, "").Classify(context.Background(), classifier.Input{Texts: []string{"hello"}})
+	if err != nil || out.Verdict != classifier.Clear || !slices.Equal(out.Clear, []bool{true}) || out.Windows != 1 {
+		t.Fatalf("%+v %v", out, err)
+	}
+}
+
+func TestRequestCarriesConfiguredSettingsVerbatim(t *testing.T) {
+	srv := batchServer(t, func(r *http.Request, body map[string]any) {
+		q := body["questions"].(map[string]any)["pii"].(map[string]any)
+		crit := q["criteria"].(map[string]any)
+		if r.Header.Get("Authorization") != "Bearer "+bearer || body["model"] != "multilingual" || q["instructions"] != "Is there PII?" || crit["true"] != "yes" || crit["false"] != "no" {
+			t.Errorf("body %v", body)
+		}
+	}, constant(0.01))
+	c := newClassifier(t, srv.URL+"/", `{"model":"multilingual","instructions":"Is there PII?","criteria":{"true":"yes","false":"no"}}`, 0.5, bearer)
+	if _, err := c.Classify(context.Background(), classifier.Input{Texts: []string{"hello"}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerdictBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		opts string
+		p    float64
+		want classifier.Verdict
+	}{
+		{"", 0.4999, classifier.Clear},
+		{"", 0.5, classifier.Flagged},
+		{`{"abstain_band":{"low":0.1,"high":0.9}}`, 0.1, classifier.Clear},
+		{`{"abstain_band":{"low":0.1,"high":0.9}}`, 0.1000001, classifier.Abstain},
+		{`{"abstain_band":{"low":0.1,"high":0.9}}`, 0.5, classifier.Abstain},
+		{`{"abstain_band":{"low":0.1,"high":0.9}}`, 0.9, classifier.Flagged},
+		{`{"abstain_band":{"low":0.1,"high":0.9}}`, 0.05, classifier.Clear},
+	} {
+		srv := batchServer(t, nil, constant(tc.p))
+		out, err := newClassifier(t, srv.URL, tc.opts, 0.5, "").Classify(context.Background(), classifier.Input{Texts: []string{"x"}})
+		if err != nil || out.Verdict != tc.want {
+			t.Errorf("opts %s p %v: %+v %v", tc.opts, tc.p, out, err)
+		}
+	}
+}
+
+func TestOneFlaggedWindowFlagsTheRequestAndClearsTheRest(t *testing.T) {
+	srv := batchServer(t, nil, func(states []string) []float64 { return []float64{0.01, 0.99} })
+	units := []string{strings.Repeat("가", 150), strings.Repeat("나", 150)}
+	out, err := newClassifier(t, srv.URL, `{"window_runes":200}`, 0.5, "").Classify(context.Background(), classifier.Input{Texts: units})
+	if err != nil || out.Verdict != classifier.Flagged || !slices.Equal(out.Clear, []bool{true, false}) {
+		t.Fatalf("%+v %v", out, err)
+	}
+}
+
+// Review Focus 1: read a prefix of windows, abstain, and report what was read.
+func TestMaxWindowsReadsPrefixAndAbstains(t *testing.T) {
+	var states atomic.Int64
+	srv := batchServer(t, func(_ *http.Request, body map[string]any) { states.Store(int64(len(body["states"].([]any)))) }, constant(0.01))
+	units := []string{strings.Repeat("가", 150), strings.Repeat("나", 150), strings.Repeat("다", 150)}
+	out, err := newClassifier(t, srv.URL, `{"window_runes":200,"max_windows":2}`, 0.5, "").Classify(context.Background(), classifier.Input{Texts: units})
+	if err != nil || out.Verdict != classifier.Abstain || !slices.Equal(out.Clear, []bool{true, true, false}) || states.Load() != 2 || out.Windows != 2 {
+		t.Fatalf("%+v %v states=%d", out, err, states.Load())
+	}
+}
+
+func TestUnitsSplitsOnlyLongSegments(t *testing.T) {
+	c := newClassifier(t, "http://127.0.0.1:1", `{"window_runes":200,"window_overlap_runes":20}`, 0.5, "")
+	units := c.Units([]string{"short", strings.Repeat("가", 450)})
+	if units[0] != "short" || len(units) != 4 {
+		t.Fatalf("units %d", len(units))
+	}
+	for _, u := range units[1:] {
+		if n := []rune(u); len(n) > 200 {
+			t.Fatalf("unit of %d runes", len(n))
+		}
+	}
+}
+
+// Review Focus 3: every failure is a bounded class with no request text or token.
+func TestErrorsAreBoundedClasses(t *testing.T) {
+	const pii = "김민수 010-2345-6789"
+	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("a redirect was followed") }))
+	t.Cleanup(other.Close)
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	for name, tc := range map[string]struct {
+		handler http.HandlerFunc
+		url     string
+		timeout time.Duration
+		want    error
+	}{
+		"500":          {handler: func(w http.ResponseWriter, _ *http.Request) { http.Error(w, pii+" "+bearer, 500) }, want: classifier.ErrStatus},
+		"503":          {handler: func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(503) }, want: classifier.ErrStatus},
+		"redirect":     {handler: func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, other.URL, http.StatusFound) }, want: classifier.ErrStatus},
+		"malformed":    {handler: func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, `{"results":[`) }, want: classifier.ErrDecode},
+		"count":        {handler: func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, `{"results":[]}`) }, want: classifier.ErrDecode},
+		"not noul":     {handler: answerWith(`{"type":"choice","choice":"a"}`), want: classifier.ErrDecode},
+		"out of range": {handler: answerWith(`{"type":"noul","noul":1.5}`), want: classifier.ErrDecode},
+		"missing":      {handler: answerWith(`{"type":"noul"}`), want: classifier.ErrDecode},
+		"oversized": {handler: func(w http.ResponseWriter, _ *http.Request) {
+			io.WriteString(w, `{"results":[{"answers":{"pii":{"type":"noul","noul":0.1}}}],"pad":"`+strings.Repeat("x", maxResponseBytes)+`"}`)
+		}, want: classifier.ErrDecode},
+		"refused": {url: closed.URL, want: classifier.ErrTransport},
+		"timeout": {handler: func(w http.ResponseWriter, r *http.Request) {
+			io.Copy(io.Discard, r.Body) // the server notices a closed client only after the body is read
+			<-r.Context().Done()
+		}, timeout: 50 * time.Millisecond, want: classifier.ErrTimeout},
+	} {
+		t.Run(name, func(t *testing.T) {
+			url := tc.url
+			if tc.handler != nil {
+				srv := httptest.NewServer(tc.handler)
+				t.Cleanup(srv.Close)
+				url = srv.URL
+			}
+			ctx := context.Background()
+			if tc.timeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, tc.timeout)
+				defer cancel()
+			}
+			out, err := newClassifier(t, url, "", 0.5, bearer).Classify(ctx, classifier.Input{Texts: []string{pii}})
+			if !errors.Is(err, tc.want) || out.Clear != nil {
+				t.Fatalf("got %+v %v, want %v", out, err, tc.want)
+			}
+			if strings.Contains(err.Error(), "김민수") || strings.Contains(err.Error(), bearer) || strings.Contains(err.Error(), "127.0.0.1") {
+				t.Fatalf("error leaks request data: %v", err)
+			}
+		})
+	}
+}
+
+func answerWith(item string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, `{"results":[{"answers":{"pii":`+item+`}}]}`)
+	}
+}
+
+func TestSingleModeBoundsConcurrency(t *testing.T) {
+	var inFlight, peak, calls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		n := inFlight.Add(1)
+		for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
+		}
+		time.Sleep(20 * time.Millisecond)
+		inFlight.Add(-1)
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if r.URL.Path != "/v1/systemone" || body["state"] == nil {
+			t.Errorf("single request %s %v", r.URL.Path, body)
+		}
+		io.WriteString(w, `{"answers":{"pii":{"type":"noul","noul":0.01}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	units := make([]string, 6)
+	for i := range units {
+		units[i] = strings.Repeat(string(rune('가'+i)), 150)
+	}
+	out, err := newClassifier(t, srv.URL, `{"batch":false,"concurrency":2,"window_runes":200}`, 0.5, "").Classify(context.Background(), classifier.Input{Texts: units})
+	if err != nil || out.Verdict != classifier.Clear || calls.Load() != 6 || peak.Load() > 2 {
+		t.Fatalf("%+v %v calls=%d peak=%d", out, err, calls.Load(), peak.Load())
+	}
+}
+
+func TestSingleModeFailsOnTheFirstError(t *testing.T) {
+	var calls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(500)
+			return
+		}
+		io.WriteString(w, `{"answers":{"pii":{"type":"noul","noul":0.01}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	_, err := newClassifier(t, srv.URL, `{"batch":false,"concurrency":1,"window_runes":200}`, 0.5, "").Classify(context.Background(), classifier.Input{Texts: []string{strings.Repeat("가", 150), strings.Repeat("나", 150)}})
+	if !errors.Is(err, classifier.ErrStatus) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEmptyUnitsAreClearWithoutACall(t *testing.T) {
+	c := newClassifier(t, "http://127.0.0.1:1", "", 0.5, "")
+	out, err := c.Classify(context.Background(), classifier.Input{Texts: []string{"", ""}})
+	if err != nil || out.Verdict != classifier.Clear || !slices.Equal(out.Clear, []bool{true, true}) || out.Windows != 0 {
+		t.Fatalf("%+v %v", out, err)
+	}
+}
+
+func TestClientIgnoresProxiesAndRedirects(t *testing.T) {
+	c := newClassifier(t, "http://127.0.0.1:1", "", 0.5, "").(*systemone)
+	tr, ok := c.client.Transport.(*http.Transport)
+	if !ok || tr.Proxy != nil || c.client.CheckRedirect == nil {
+		t.Fatal("classifier text could leave through a proxy or a redirect")
+	}
+}
+
+func TestOptionValidation(t *testing.T) {
+	for opts, wantField := range map[string]string{
+		`{"unknown":1}`: "unknown",
+		`{"abstain_band":{"low":0.6,"high":0.9}}`:         "abstain_band",
+		`{"abstain_band":{"low":0.1}}`:                    "abstain_band",
+		`{"window_runes":200,"window_overlap_runes":101}`: "window_overlap_runes",
+		`{"max_windows":65}`:                              "max_windows",
+		`{"concurrency":0}`:                               "concurrency",
+		`{"model":"Multi lingual"}`:                       "model",
+		`{"instructions":""}`:                             "instructions",
+		`{"criteria":{"true":"yes"}}`:                     "criteria",
+		`{"batch":null}`:                                  "batch",
+		`{"window_runes":4.5}`:                            "window_runes",
+	} {
+		_, err := New(classifier.Config{Name: "laya-ko", Type: "systemone", Endpoint: "http://127.0.0.1:1", Threshold: 0.5, Options: options(t, opts)})
+		if err == nil || !strings.Contains(err.Error(), wantField) {
+			t.Errorf("options %s: err = %v, want it to name %s", opts, err, wantField)
+		}
+	}
+}
