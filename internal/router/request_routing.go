@@ -97,6 +97,7 @@ type RoutingDecision struct {
 	Policies        []RoutingPolicyRef      `json:"policies,omitempty"`
 	Recommendations []RoutingRecommendation `json:"recommendations,omitempty"`
 	Masked          bool                    `json:"masked,omitempty"`
+	Classifiers     []ClassifierRef         `json:"classifiers,omitempty"`
 }
 
 // RequestRedactor transforms a complete ingress body locally. Errors and
@@ -252,6 +253,13 @@ func (r *Router) RouteRequest(ctx context.Context, in RequestRoutingInput) (Requ
 		}
 		return r.applyContext(out, boundary, rules, inspected), nil
 	}
+	var signal classifierSignal
+	if hasPrivacy && !in.CountOnly {
+		signal = r.classify(ctx, in, rules, &out)
+		if signal.classified {
+			out.Decision.Categories = boundedCategories(append(slices.Clone(inspected.Categories), "model_pii"))
+		}
+	}
 	// All triggered privacy rules apply, regardless of document delivery order.
 	// A nil model set means unrestricted; a non-nil empty intersection denies.
 	block := false
@@ -261,11 +269,16 @@ func (r *Router) RouteRequest(ctx context.Context, in RequestRoutingInput) (Requ
 		}
 		sd := rule.sensitive
 		internal := false
+		classifiedAction := sd.OnDetected
+		if classifiedAction == v1alpha1.Mask {
+			classifiedAction = sd.OnUninspectable // a verdict gives Mask nothing to redact
+		}
 		for index, trigger := range []struct {
 			active bool
 			action v1alpha1.SensitiveDataAction
 		}{
 			{len(inspected.Categories) > 0, sd.OnDetected}, {!inspected.Complete, sd.OnUninspectable},
+			{signal.classified, classifiedAction}, {signal.uninspectable, sd.OnUninspectable},
 		} {
 			if !trigger.active {
 				continue
@@ -855,7 +868,7 @@ func boundedCategories(categories []string) []string {
 	var out []string
 	for _, c := range categories {
 		switch c {
-		case "email", "phone", "credit_card", "ssn", "ipv4", "korean_rrn":
+		case "email", "phone", "credit_card", "ssn", "ipv4", "korean_rrn", "model_pii":
 			out = append(out, c)
 		}
 	}
