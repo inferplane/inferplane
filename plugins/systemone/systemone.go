@@ -25,6 +25,17 @@ const (
 	defaultInstructions = "Does this text contain personal information about a specific person, or a secret credential?"
 	questionID          = "pii"
 	maxResponseBytes    = 256 << 10
+
+	// truncationReported (the default) needs the server to report in usage
+	// whether it cut each window, as laya-serve does. truncationRejected is
+	// the operator's assertion that the server refuses over-length input with
+	// an HTTP error instead, as strands-decider --strict-window does.
+	truncationReported = "reported"
+	truncationRejected = "rejected"
+
+	// maxIdleConnsPerHost keeps connections to one sidecar warm under
+	// concurrent requests; the transport default is two.
+	maxIdleConnsPerHost = 16
 )
 
 func init() { classifier.Register("systemone", New) }
@@ -44,6 +55,7 @@ type settings struct {
 	maxWindows   int
 	threshold    float64
 	band         *band
+	truncation   string // truncationReported or truncationRejected
 }
 
 type systemone struct {
@@ -71,12 +83,13 @@ func New(cfg classifier.Config) (classifier.Classifier, error) {
 		tr = base.Clone()
 	}
 	tr.Proxy = nil // request text never leaves through an environment proxy
+	tr.MaxIdleConnsPerHost = maxIdleConnsPerHost
 	client := &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return &systemone{endpoint: strings.TrimRight(cfg.Endpoint, "/"), token: cfg.BearerToken, client: client, s: s, seed: maphash.MakeSeed()}, nil
 }
 
 func parseOptions(raw map[string]json.RawMessage, threshold float64) (settings, error) {
-	s := settings{instructions: defaultInstructions, batch: true, concurrency: 4, windowRunes: 1000, overlapRunes: 150, maxWindows: 64, threshold: threshold}
+	s := settings{instructions: defaultInstructions, batch: true, concurrency: 4, windowRunes: 1000, overlapRunes: 150, maxWindows: 64, threshold: threshold, truncation: truncationReported}
 	keys := make([]string, 0, len(raw))
 	for k := range raw {
 		keys = append(keys, k)
@@ -129,6 +142,10 @@ func parseOptions(raw map[string]json.RawMessage, threshold float64) (settings, 
 				} else {
 					s.band = &band{low: *b.Low, high: *b.High}
 				}
+			}
+		case "truncation":
+			if err = decodeStrict(v, &s.truncation); err == nil && s.truncation != truncationReported && s.truncation != truncationRejected {
+				err = errors.New(`must be "reported" or "rejected"`)
 			}
 		default:
 			return settings{}, fmt.Errorf("unknown option %q", key)
@@ -191,7 +208,11 @@ func (c *systemone) boundary(unit string) bool {
 
 // Score reads at most maxWindows windows. Windows past the cap are Abstain
 // and are not sent, so a request with unread content is never Clear (PR-08);
-// a later request reads them once the read ones are cached.
+// a later request reads them once the read ones are cached. A window the
+// server did not read whole is never Clear either: a cut window is Abstain
+// unless the part that was read already flags, and under truncation
+// "reported" a result that does not report its coverage is Abstain. Abstain
+// is never cached.
 func (c *systemone) Score(ctx context.Context, windows []string) (classifier.Scores, error) {
 	read := windows
 	if len(read) > c.s.maxWindows {
@@ -204,12 +225,19 @@ func (c *systemone) Score(ctx context.Context, windows []string) (classifier.Sco
 	if len(read) == 0 {
 		return classifier.Scores{Verdicts: verdicts}, nil
 	}
-	probs, err := c.score(ctx, read)
+	readings, err := c.score(ctx, read)
 	if err != nil {
 		return classifier.Scores{Sent: len(read)}, err
 	}
-	for i, p := range probs {
-		verdicts[i] = c.judge(p)
+	for i, r := range readings {
+		v := c.judge(r.p)
+		switch {
+		case r.coverage == unreported:
+			v = classifier.Abstain
+		case r.coverage == readCut && v != classifier.Flagged:
+			v = classifier.Abstain
+		}
+		verdicts[i] = v
 	}
 	return classifier.Scores{Verdicts: verdicts, Sent: len(read)}, nil
 }

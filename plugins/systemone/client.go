@@ -23,22 +23,61 @@ type answer struct {
 		Type string   `json:"type"`
 		Noul *float64 `json:"noul"`
 	} `json:"answers"`
+	Usage *usage `json:"usage"`
 }
 
-func (a answer) probability() (float64, bool) {
+// usage is the server's report on whether it read the whole window. laya-serve
+// cuts a state to its token budget without an error and reports the cut here;
+// a strict Jev server reports neither field. A field of the wrong type fails
+// the JSON decode, so a malformed report is a decode error.
+type usage struct {
+	Truncated          *bool `json:"truncated"`
+	StateTokensDropped *int  `json:"state_tokens_dropped"`
+}
+
+// coverage is how much of a window the server says it read.
+type coverage int
+
+const (
+	readWhole  coverage = iota // the server read the whole window
+	readCut                    // the server reports it cut the window
+	unreported                 // truncation "reported", and the result does not say
+)
+
+// reading is the server's answer for one window.
+type reading struct {
+	p        float64
+	coverage coverage
+}
+
+// read checks one result. The gateway never estimates token counts: whether a
+// window was read whole comes only from the server's usage report, or from the
+// operator's "rejected" assertion that the server refuses over-length input.
+func (a answer) read(truncation string) (reading, bool) {
 	ans, ok := a.Answers[questionID]
 	if !ok || ans.Type != "noul" || ans.Noul == nil {
-		return 0, false
+		return reading{}, false
 	}
 	p := *ans.Noul
 	if math.IsNaN(p) || math.IsInf(p, 0) || p < 0 || p > 1 {
-		return 0, false
+		return reading{}, false
 	}
-	return p, true
+	r := reading{p: p, coverage: readWhole}
+	u := a.Usage
+	if u != nil && u.StateTokensDropped != nil && *u.StateTokensDropped < 0 {
+		return reading{}, false
+	}
+	switch {
+	case truncation == truncationReported && (u == nil || u.Truncated == nil):
+		r.coverage = unreported
+	case u != nil && ((u.Truncated != nil && *u.Truncated) || (u.StateTokensDropped != nil && *u.StateTokensDropped > 0)):
+		r.coverage = readCut
+	}
+	return r, true
 }
 
-// score returns one probability per window, in order.
-func (c *systemone) score(ctx context.Context, windows []string) ([]float64, error) {
+// score returns one reading per window, in order.
+func (c *systemone) score(ctx context.Context, windows []string) ([]reading, error) {
 	q := map[string]question{questionID: {Type: "noul", Instructions: c.s.instructions, Criteria: c.s.criteria}}
 	if c.s.batch {
 		body := map[string]any{"states": windows, "questions": q}
@@ -54,19 +93,19 @@ func (c *systemone) score(ctx context.Context, windows []string) ([]float64, err
 		if len(resp.Results) != len(windows) {
 			return nil, classifier.ErrDecode
 		}
-		out := make([]float64, len(windows))
+		out := make([]reading, len(windows))
 		for i, a := range resp.Results {
-			p, ok := a.probability()
+			r, ok := a.read(c.s.truncation)
 			if !ok {
 				return nil, classifier.ErrDecode
 			}
-			out[i] = p
+			out[i] = r
 		}
 		return out, nil
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	out := make([]float64, len(windows))
+	out := make([]reading, len(windows))
 	sem := make(chan struct{}, c.s.concurrency)
 	var wg sync.WaitGroup
 	var once sync.Once
@@ -92,12 +131,12 @@ func (c *systemone) score(ctx context.Context, windows []string) ([]float64, err
 				fail(err)
 				return
 			}
-			p, ok := a.probability()
+			r, ok := a.read(c.s.truncation)
 			if !ok {
 				fail(classifier.ErrDecode)
 				return
 			}
-			out[i] = p
+			out[i] = r
 		}(i)
 	}
 	wg.Wait()

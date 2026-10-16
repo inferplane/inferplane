@@ -58,7 +58,7 @@ func batchServer(t *testing.T, seen func(r *http.Request, body map[string]any), 
 		}
 		var results []map[string]any
 		for _, p := range probs(states) {
-			results = append(results, map[string]any{"model": "laya-rl-agent", "answers": map[string]any{"pii": map[string]any{"type": "noul", "noul": p}}})
+			results = append(results, map[string]any{"model": "laya-rl-agent", "answers": map[string]any{"pii": map[string]any{"type": "noul", "noul": p}}, "usage": json.RawMessage(wholeUsage)})
 		}
 		json.NewEncoder(w).Encode(map[string]any{"results": results, "total_usage": map[string]int{"input_tokens": 1}})
 	}))
@@ -241,7 +241,7 @@ func TestSingleModeBoundsConcurrency(t *testing.T) {
 		if r.URL.Path != "/v1/systemone" || body["state"] == nil {
 			t.Errorf("single request %s %v", r.URL.Path, body)
 		}
-		io.WriteString(w, `{"answers":{"pii":{"type":"noul","noul":0.01}}}`)
+		io.WriteString(w, `{"answers":{"pii":{"type":"noul","noul":0.01}},"usage":`+wholeUsage+`}`)
 	}))
 	t.Cleanup(srv.Close)
 	units := make([]string, 6)
@@ -261,7 +261,7 @@ func TestSingleModeFailsOnTheFirstError(t *testing.T) {
 			w.WriteHeader(500)
 			return
 		}
-		io.WriteString(w, `{"answers":{"pii":{"type":"noul","noul":0.01}}}`)
+		io.WriteString(w, `{"answers":{"pii":{"type":"noul","noul":0.01}},"usage":`+wholeUsage+`}`)
 	}))
 	t.Cleanup(srv.Close)
 	_, err := newClassifier(t, srv.URL, `{"batch":false,"concurrency":1}`, 0.5, "").Score(context.Background(), []string{"first window", "second window"})
@@ -294,6 +294,11 @@ func TestClientIgnoresProxiesAndRedirects(t *testing.T) {
 	tr, ok := c.client.Transport.(*http.Transport)
 	if !ok || tr.Proxy != nil || c.client.CheckRedirect == nil {
 		t.Fatal("classifier text could leave through a proxy or a redirect")
+	}
+	// Ruling 22: concurrent requests to one sidecar reuse connections instead
+	// of churning through the default two idle connections per host.
+	if tr.MaxIdleConnsPerHost != 16 {
+		t.Fatalf("MaxIdleConnsPerHost = %d, want 16", tr.MaxIdleConnsPerHost)
 	}
 }
 

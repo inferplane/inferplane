@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/inferplane/inferplane/api/v1alpha1"
@@ -58,10 +59,19 @@ func TestPIIClassifierKoExampleLoads(t *testing.T) {
 	}
 }
 
-// fakeSystemone flags any window that contains marker.
+// fakeSystemone flags any window that contains marker. Like laya-serve, it
+// reports in usage that it read every window whole.
 func fakeSystemone(t *testing.T, marker string) *httptest.Server {
 	t.Helper()
+	return fakeSystemoneCounting(t, marker, nil)
+}
+
+func fakeSystemoneCounting(t *testing.T, marker string, calls *atomic.Int64) *httptest.Server {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls != nil {
+			calls.Add(1)
+		}
 		var body struct {
 			States []string `json:"states"`
 		}
@@ -75,7 +85,8 @@ func fakeSystemone(t *testing.T, marker string) *httptest.Server {
 			if strings.Contains(s, marker) {
 				p = 0.99
 			}
-			results[i] = map[string]any{"answers": map[string]any{"pii": map[string]any{"type": "noul", "noul": p}}}
+			results[i] = map[string]any{"answers": map[string]any{"pii": map[string]any{"type": "noul", "noul": p}},
+				"usage": map[string]any{"input_tokens": 64, "state_tokens": 32, "state_tokens_dropped": 0, "truncated": false}}
 		}
 		json.NewEncoder(w).Encode(map[string]any{"results": results})
 	}))
