@@ -36,29 +36,25 @@ const (
 	Enforce Mode = "Enforce"
 )
 
-// Input holds the units not served from the verdict cache. The texts are
-// borrowed for the call and must not be retained.
-type Input struct {
-	Texts []string
+// Scores is a classifier's answer for the windows it was given: one verdict
+// per window, in order. A window past the classifier's own cap is Abstain and
+// was not sent. Sent counts the windows actually sent, for metrics only.
+type Scores struct {
+	Verdicts []Verdict
+	Sent     int
 }
 
-// Output is a classifier's answer. Clear[i] reports that Texts[i] was read
-// completely and judged clear; only those units may be cached. A nil Clear
-// means none. Windows counts the windows sent, for metrics only.
-type Output struct {
-	Verdict Verdict
-	Clear   []bool
-	Windows int
-}
-
-// Classifier is one configured backend. Units splits request segments into the
-// deterministic units the classifier reads and the cache stores; Classify
-// receives only units that Units produced. Units must carry the text of every
-// non-empty segment; a unit set that dropped text would let Run report Clear
-// for content no classifier read.
+// Classifier is one configured backend. Windows cuts request segments into
+// the deterministic windows the classifier reads and the verdict cache
+// stores: the same segments always give the same windows, and the text of
+// every non-empty segment appears in some window. Score judges windows that
+// Windows produced; the slice is borrowed for the call and must not be
+// retained. The cache stores whole windows only, so content judged together
+// is judged together again: clearing two parts separately can never clear
+// their combination.
 type Classifier interface {
-	Units(segments []string) []string
-	Classify(ctx context.Context, in Input) (Output, error)
+	Windows(segments []string) []string
+	Score(ctx context.Context, windows []string) (Scores, error)
 }
 
 // Config is one validated entry. BearerToken is the resolved api_key_ref and

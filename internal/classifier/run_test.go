@@ -3,40 +3,43 @@ package classifier
 import (
 	"context"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
+// fake is a classifier whose windows and scores the test controls. Without a
+// windows function every segment is its own window.
 type fake struct {
-	mu     sync.Mutex
-	calls  [][]string
-	units  func([]string) []string
-	answer func(context.Context, Input) (Output, error)
+	mu      sync.Mutex
+	calls   [][]string
+	windows func([]string) []string
+	score   func(context.Context, []string) (Scores, error)
 }
 
-func (f *fake) Units(s []string) []string {
-	if f.units != nil {
-		return f.units(s)
+func (f *fake) Windows(s []string) []string {
+	if f.windows != nil {
+		return f.windows(s)
 	}
 	return s
 }
 
-func (f *fake) Classify(ctx context.Context, in Input) (Output, error) {
+func (f *fake) Score(ctx context.Context, windows []string) (Scores, error) {
 	f.mu.Lock()
-	f.calls = append(f.calls, slices.Clone(in.Texts))
-	answer := f.answer
+	f.calls = append(f.calls, slices.Clone(windows))
+	score := f.score
 	f.mu.Unlock()
-	return answer(ctx, in)
+	return score(ctx, windows)
 }
 
-// setAnswer swaps the answer under the lock: a classifier that Run abandoned at
-// the deadline may still be inside Classify when the test changes it.
-func (f *fake) setAnswer(a func(context.Context, Input) (Output, error)) {
+// setScore swaps the answer under the mutex: an abandoned Score from an
+// earlier deadline test may still be running.
+func (f *fake) setScore(score func(context.Context, []string) (Scores, error)) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.answer = a
+	f.score = score
+	f.mu.Unlock()
 }
 
 func (f *fake) callCount() int {
@@ -45,13 +48,17 @@ func (f *fake) callCount() int {
 	return len(f.calls)
 }
 
-func allClear(_ context.Context, in Input) (Output, error) {
-	ok := make([]bool, len(in.Texts))
-	for i := range ok {
-		ok[i] = true
+func all(v Verdict) func(context.Context, []string) (Scores, error) {
+	return func(_ context.Context, windows []string) (Scores, error) {
+		out := make([]Verdict, len(windows))
+		for i := range out {
+			out[i] = v
+		}
+		return Scores{Verdicts: out, Sent: len(windows)}, nil
 	}
-	return Output{Verdict: Clear, Clear: ok, Windows: 1}, nil
 }
+
+var allClear = all(Clear)
 
 func testSet(t *testing.T, cache int, entries ...Entry) *Set {
 	t.Helper()
@@ -71,7 +78,7 @@ func req(team string, segments ...string) Request {
 }
 
 func TestRunSecondIdenticalRequestIsServedFromCache(t *testing.T) {
-	f := &fake{answer: allClear}
+	f := &fake{score: allClear}
 	s := testSet(t, 100, enforce("laya", f))
 	first := s.Run(context.Background(), s.Entries, req("kr", "system prompt", "hello"))
 	second := s.Run(context.Background(), s.Entries, req("kr", "system prompt", "hello"))
@@ -84,30 +91,30 @@ func TestRunSecondIdenticalRequestIsServedFromCache(t *testing.T) {
 }
 
 func TestRunNeverCachesFlaggedAbstainOrError(t *testing.T) {
-	for name, answer := range map[string]func(context.Context, Input) (Output, error){
-		"flagged": func(context.Context, Input) (Output, error) { return Output{Verdict: Flagged}, nil },
-		"abstain": func(context.Context, Input) (Output, error) { return Output{Verdict: Abstain}, nil },
-		"error":   func(context.Context, Input) (Output, error) { return Output{}, ErrStatus },
+	for name, score := range map[string]func(context.Context, []string) (Scores, error){
+		"flagged": all(Flagged),
+		"abstain": all(Abstain),
+		"error":   func(context.Context, []string) (Scores, error) { return Scores{}, ErrStatus },
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := &fake{answer: answer}
+			f := &fake{score: score}
 			s := testSet(t, 100, enforce("laya", f))
 			s.Run(context.Background(), s.Entries, req("kr", "김민수 010-2345-6789"))
 			s.Run(context.Background(), s.Entries, req("kr", "김민수 010-2345-6789"))
 			if f.callCount() != 2 {
-				t.Fatalf("a %s answer was cached", name)
+				t.Fatalf("a %s window was cached", name)
 			}
 		})
 	}
 }
 
-func TestRunCachesOnlyReportedClearUnits(t *testing.T) {
-	f := &fake{answer: func(_ context.Context, in Input) (Output, error) {
-		return Output{Verdict: Abstain, Clear: []bool{true, false}}, nil
+func TestRunCachesOnlyClearWindows(t *testing.T) {
+	f := &fake{score: func(context.Context, []string) (Scores, error) {
+		return Scores{Verdicts: []Verdict{Clear, Abstain}, Sent: 1}, nil
 	}}
 	s := testSet(t, 100, enforce("laya", f))
 	s.Run(context.Background(), s.Entries, req("kr", "read", "unread"))
-	f.answer = allClear
+	f.setScore(allClear)
 	s.Run(context.Background(), s.Entries, req("kr", "read", "unread"))
 	if got := f.calls[1]; !slices.Equal(got, []string{"unread"}) {
 		t.Fatalf("second call sent %q", got)
@@ -118,7 +125,7 @@ func TestRunCachesOnlyReportedClearUnits(t *testing.T) {
 func TestRunWarmsAcrossRequestsUntilEverythingIsRead(t *testing.T) {
 	const perCall = 2
 	f := &fake{
-		units: func(segments []string) []string { // split each segment into 3-rune chunks
+		windows: func(segments []string) []string { // split each segment into 3-rune windows
 			var out []string
 			for _, s := range segments {
 				r := []rune(s)
@@ -129,19 +136,18 @@ func TestRunWarmsAcrossRequestsUntilEverythingIsRead(t *testing.T) {
 			}
 			return out
 		},
-		answer: func(_ context.Context, in Input) (Output, error) {
-			ok := make([]bool, len(in.Texts))
-			for i := 0; i < len(ok) && i < perCall; i++ {
-				ok[i] = true
+		score: func(_ context.Context, windows []string) (Scores, error) {
+			out := make([]Verdict, len(windows))
+			for i := range out {
+				if i >= perCall {
+					out[i] = Abstain // past the classifier's cap: not read
+				}
 			}
-			if len(in.Texts) > perCall {
-				return Output{Verdict: Abstain, Clear: ok}, nil
-			}
-			return Output{Verdict: Clear, Clear: ok}, nil
+			return Scores{Verdicts: out, Sent: min(len(windows), perCall)}, nil
 		},
 	}
 	s := testSet(t, 100, enforce("laya", f))
-	long := "가나다라마바사아자차카타파하거" // five distinct 3-rune units
+	long := "가나다라마바사아자차카타파하거" // five distinct 3-rune windows
 	var outcomes []Outcome
 	for range 4 {
 		outcomes = append(outcomes, s.Run(context.Background(), s.Entries, req("kr", long))[0].Outcome)
@@ -151,8 +157,47 @@ func TestRunWarmsAcrossRequestsUntilEverythingIsRead(t *testing.T) {
 	}
 }
 
-func TestRunDeduplicatesIdenticalUnits(t *testing.T) {
-	f := &fake{answer: allClear}
+// Security regression (2026-10-16 commit review): parts cleared separately
+// must never clear their combination. The cache holds whole windows only.
+func TestRunCannotBeBypassedByCachingPartsSeparately(t *testing.T) {
+	f := &fake{
+		windows: func(segments []string) []string { return []string{strings.Join(segments, "\n\n")} },
+		score: func(_ context.Context, windows []string) (Scores, error) {
+			out := make([]Verdict, len(windows))
+			for i, w := range windows {
+				if strings.Contains(w, "김민수") && strings.Contains(w, "우울증") {
+					out[i] = Flagged
+				}
+			}
+			return Scores{Verdicts: out, Sent: len(windows)}, nil
+		},
+	}
+	s := testSet(t, 100, enforce("laya", f))
+	for _, part := range []string{"환자 김민수", "진단: 우울증"} {
+		if got := s.Run(context.Background(), s.Entries, req("kr", part)); got[0].Outcome != OutcomeClear {
+			t.Fatalf("part %q: %+v", part, got)
+		}
+	}
+	if got := s.Run(context.Background(), s.Entries, req("kr", "환자 김민수", "진단: 우울증")); got[0].Outcome != OutcomeFlagged {
+		t.Fatalf("the combination was served from its parts' cache entries: %+v", got)
+	}
+}
+
+func TestRunFlaggedWinsOverAbstain(t *testing.T) {
+	for _, verdicts := range [][]Verdict{{Abstain, Flagged}, {Flagged, Abstain}, {Clear, Flagged, Abstain}} {
+		f := &fake{score: func(context.Context, []string) (Scores, error) {
+			return Scores{Verdicts: verdicts, Sent: len(verdicts)}, nil
+		}}
+		s := testSet(t, 100, enforce("laya", f))
+		segments := []string{"a", "b", "c"}[:len(verdicts)]
+		if got := s.Run(context.Background(), s.Entries, req("kr", segments...)); got[0].Outcome != OutcomeFlagged {
+			t.Errorf("verdicts %v: %+v", verdicts, got)
+		}
+	}
+}
+
+func TestRunDeduplicatesIdenticalWindows(t *testing.T) {
+	f := &fake{score: allClear}
 	s := testSet(t, 100, enforce("laya", f))
 	s.Run(context.Background(), s.Entries, req("kr", "role", "user", "role", "hello"))
 	if !slices.Equal(f.calls[0], []string{"role", "user", "hello"}) {
@@ -161,7 +206,7 @@ func TestRunDeduplicatesIdenticalUnits(t *testing.T) {
 }
 
 func TestRunCacheIsScopedByTeamAndPolicy(t *testing.T) {
-	f := &fake{answer: allClear}
+	f := &fake{score: allClear}
 	s := testSet(t, 100, enforce("laya", f))
 	s.Run(context.Background(), s.Entries, req("kr", "hello"))
 	s.Run(context.Background(), s.Entries, req("us", "hello"))
@@ -174,7 +219,7 @@ func TestRunCacheIsScopedByTeamAndPolicy(t *testing.T) {
 }
 
 func TestRunSkipsEmptyAndAbstainsOverInputCap(t *testing.T) {
-	f := &fake{answer: allClear}
+	f := &fake{score: allClear}
 	s := testSet(t, 100, enforce("laya", f))
 	if got := s.Run(context.Background(), s.Entries, req("kr", "", "")); got[0].Outcome != OutcomeSkipped {
 		t.Fatalf("empty input: %+v", got)
@@ -189,16 +234,16 @@ func TestRunSkipsEmptyAndAbstainsOverInputCap(t *testing.T) {
 }
 
 func TestRunDeadlineIsAnErrorAndCachesNothing(t *testing.T) {
-	f := &fake{answer: func(ctx context.Context, in Input) (Output, error) {
+	f := &fake{score: func(ctx context.Context, windows []string) (Scores, error) {
 		<-ctx.Done()
-		return allClear(ctx, in) // a plugin that ignores the deadline must still not populate the cache
+		return allClear(ctx, windows) // a plugin that ignores the deadline must still not populate the cache
 	}}
 	s := testSet(t, 100, enforce("laya", f))
 	s.Timeout = 20 * time.Millisecond
 	if got := s.Run(context.Background(), s.Entries, req("kr", "hello")); got[0].Outcome != OutcomeError {
 		t.Fatalf("deadline: %+v", got)
 	}
-	f.setAnswer(allClear)
+	f.setScore(allClear)
 	s.Timeout = time.Second
 	s.Run(context.Background(), s.Entries, req("kr", "hello"))
 	if f.callCount() != 2 {
@@ -206,12 +251,38 @@ func TestRunDeadlineIsAnErrorAndCachesNothing(t *testing.T) {
 	}
 }
 
-func TestRunRejectsMismatchedClearAndUnknownVerdict(t *testing.T) {
-	for name, out := range map[string]Output{
-		"short clear":     {Verdict: Clear, Clear: []bool{true}},
-		"unknown verdict": {Verdict: Verdict(42)},
+// A classifier that ignores its context must not hold the request past the deadline.
+func TestRunReturnsAtTheDeadlineDespiteAStuckClassifier(t *testing.T) {
+	var stuck atomic.Bool
+	stuck.Store(true)
+	release := make(chan struct{})
+	f := &fake{score: func(ctx context.Context, windows []string) (Scores, error) {
+		if stuck.Load() {
+			<-release // ignores ctx entirely
+		}
+		return allClear(ctx, windows)
+	}}
+	s := testSet(t, 100, enforce("laya", f))
+	s.Timeout = 50 * time.Millisecond
+	start := time.Now()
+	got := s.Run(context.Background(), s.Entries, req("kr", "hello"))
+	if elapsed := time.Since(start); got[0].Outcome != OutcomeError || elapsed > time.Second {
+		t.Fatalf("Run waited %v for a stuck classifier: %+v", elapsed, got)
+	}
+	stuck.Store(false)
+	close(release) // the late answer arrives after Run returned and must not be cached
+	s.Timeout = time.Second
+	if got := s.Run(context.Background(), s.Entries, req("kr", "hello")); got[0].Outcome != OutcomeClear || f.callCount() != 2 {
+		t.Fatalf("late answer was cached or the rerun failed: %+v calls=%d", got, f.callCount())
+	}
+}
+
+func TestRunRejectsMismatchedVerdictsAndUnknownVerdict(t *testing.T) {
+	for name, out := range map[string]Scores{
+		"short verdicts":  {Verdicts: []Verdict{Clear}},
+		"unknown verdict": {Verdicts: []Verdict{Clear, Verdict(42)}},
 	} {
-		f := &fake{answer: func(context.Context, Input) (Output, error) { return out, nil }}
+		f := &fake{score: func(context.Context, []string) (Scores, error) { return out, nil }}
 		s := testSet(t, 100, enforce("laya", f))
 		if got := s.Run(context.Background(), s.Entries, req("kr", "a", "b")); got[0].Outcome != OutcomeError {
 			t.Errorf("%s: %+v", name, got)
@@ -222,18 +293,18 @@ func TestRunRejectsMismatchedClearAndUnknownVerdict(t *testing.T) {
 func TestRunEntriesInParallel(t *testing.T) {
 	var arrived atomic.Int32
 	ready := make(chan struct{})
-	both := func(ctx context.Context, in Input) (Output, error) {
+	both := func(ctx context.Context, windows []string) (Scores, error) {
 		if arrived.Add(1) == 2 {
 			close(ready)
 		}
 		select {
 		case <-ready: // reached only if both entries are in flight at once
-			return allClear(ctx, in)
+			return allClear(ctx, windows)
 		case <-ctx.Done():
-			return Output{}, ErrTimeout
+			return Scores{}, ErrTimeout
 		}
 	}
-	a, b := &fake{answer: both}, &fake{answer: both}
+	a, b := &fake{score: both}, &fake{score: both}
 	s := testSet(t, 0, enforce("a", a), Entry{Name: "b", Mode: Shadow, Classifier: b, Global: true})
 	for _, r := range s.Run(context.Background(), s.Entries, req("kr", "hello")) {
 		if r.Outcome != OutcomeClear {
@@ -243,7 +314,7 @@ func TestRunEntriesInParallel(t *testing.T) {
 }
 
 func TestRunWithoutCacheStillClassifies(t *testing.T) {
-	f := &fake{answer: allClear}
+	f := &fake{score: allClear}
 	s := testSet(t, 0, enforce("laya", f))
 	s.Run(context.Background(), s.Entries, req("kr", "hello"))
 	s.Run(context.Background(), s.Entries, req("kr", "hello"))
@@ -273,42 +344,6 @@ func TestCombineCountsOnlyEnforce(t *testing.T) {
 func TestFailedMarksEveryEntryError(t *testing.T) {
 	got := Failed([]Entry{{Name: "a", Mode: Enforce}, {Name: "b", Mode: Shadow}})
 	if len(got) != 2 || got[0].Outcome != OutcomeError || got[1].Outcome != OutcomeError || got[1].Mode != Shadow {
-		t.Fatalf("%+v", got)
-	}
-}
-
-// A classifier that ignores its context must not hold the request past the deadline.
-func TestRunReturnsAtTheDeadlineDespiteAStuckClassifier(t *testing.T) {
-	var stuck atomic.Bool
-	stuck.Store(true)
-	release := make(chan struct{})
-	f := &fake{answer: func(ctx context.Context, in Input) (Output, error) {
-		if stuck.Load() {
-			<-release // ignores ctx entirely
-		}
-		return allClear(ctx, in)
-	}}
-	s := testSet(t, 100, enforce("laya", f))
-	s.Timeout = 50 * time.Millisecond
-	start := time.Now()
-	got := s.Run(context.Background(), s.Entries, req("kr", "hello"))
-	if elapsed := time.Since(start); got[0].Outcome != OutcomeError || elapsed > time.Second {
-		t.Fatalf("Run waited %v for a stuck classifier: %+v", elapsed, got)
-	}
-	stuck.Store(false)
-	close(release) // the late answer arrives after Run returned and must not be cached
-	s.Timeout = time.Second
-	if got := s.Run(context.Background(), s.Entries, req("kr", "hello")); got[0].Outcome != OutcomeClear || f.callCount() != 2 {
-		t.Fatalf("late answer was cached or the rerun failed: %+v calls=%d", got, f.callCount())
-	}
-}
-
-func TestRunRejectsAClearVerdictWithUnreadUnits(t *testing.T) {
-	f := &fake{answer: func(context.Context, Input) (Output, error) {
-		return Output{Verdict: Clear, Clear: []bool{true, false}}, nil
-	}}
-	s := testSet(t, 100, enforce("laya", f))
-	if got := s.Run(context.Background(), s.Entries, req("kr", "a", "b")); got[0].Outcome != OutcomeError {
 		t.Fatalf("%+v", got)
 	}
 }

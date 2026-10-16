@@ -2,7 +2,6 @@ package classifier
 
 import (
 	"context"
-	"slices"
 	"time"
 )
 
@@ -90,16 +89,16 @@ func (s *Set) Run(ctx context.Context, entries []Entry, req Request) []Result {
 func (s *Set) runEntry(ctx context.Context, e *Entry, req Request, res *Result) {
 	start := time.Now()
 	defer func() { res.Duration = time.Since(start) }()
-	var texts []string
+	var pending []string
 	var keys [][32]byte
 	seen := make(map[string]bool)
-	for _, unit := range e.Classifier.Units(req.Segments) {
-		if unit == "" || seen[unit] {
+	for _, w := range e.Classifier.Windows(req.Segments) {
+		if w == "" || seen[w] {
 			continue
 		}
-		seen[unit] = true
+		seen[w] = true
 		if s.cache != nil {
-			k := s.cache.digest(req.Team, e, req.Policies, unit)
+			k := s.cache.digest(req.Team, e, req.Policies, w)
 			if s.cache.clear(k) {
 				res.CacheHits++
 				continue
@@ -107,36 +106,39 @@ func (s *Set) runEntry(ctx context.Context, e *Entry, req Request, res *Result) 
 			keys = append(keys, k)
 		}
 		res.CacheMisses++
-		texts = append(texts, unit)
+		pending = append(pending, w)
 	}
-	if len(texts) == 0 {
+	if len(pending) == 0 {
 		res.Outcome = OutcomeClear
 		return
 	}
-	out, err := e.Classifier.Classify(ctx, Input{Texts: texts})
-	res.Windows = out.Windows
-	if err != nil || ctx.Err() != nil || (out.Clear != nil && len(out.Clear) != len(texts)) {
+	out, err := e.Classifier.Score(ctx, pending)
+	res.Windows = out.Sent
+	if err != nil || ctx.Err() != nil || len(out.Verdicts) != len(pending) {
 		res.Outcome = OutcomeError
 		return
 	}
-	switch out.Verdict {
-	case Clear:
-		if slices.Contains(out.Clear, false) { // a Clear verdict cannot leave units unread (PR-08)
+	res.Outcome = OutcomeClear
+	for _, v := range out.Verdicts {
+		switch v {
+		case Clear:
+		case Flagged:
+			res.Outcome = OutcomeFlagged
+		case Abstain:
+			if res.Outcome == OutcomeClear {
+				res.Outcome = OutcomeAbstain
+			}
+		default:
 			res.Outcome = OutcomeError
 			return
 		}
-		res.Outcome = OutcomeClear
-	case Flagged:
-		res.Outcome = OutcomeFlagged
-	case Abstain:
-		res.Outcome = OutcomeAbstain
-	default:
-		res.Outcome = OutcomeError
-		return
 	}
+	// Clear windows are cached even when another window flagged or abstained:
+	// each verdict covers exactly its window's text, so a long request warms
+	// the cache window by window and a later request reads only the rest.
 	if s.cache != nil {
-		for i, ok := range out.Clear {
-			if ok {
+		for i, v := range out.Verdicts {
+			if v == Clear {
 				s.cache.store(keys[i])
 			}
 		}

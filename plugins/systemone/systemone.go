@@ -52,14 +52,22 @@ type systemone struct {
 	s        settings
 }
 
-// New validates the options and builds the classifier. Endpoint, threshold and
-// the token ref are validated by the config layer before New is called.
+// New validates the threshold and options and builds the classifier. The
+// endpoint and token ref are validated by the config layer before New is
+// called; the threshold is checked again here so a direct caller cannot
+// build a classifier that fails open.
 func New(cfg classifier.Config) (classifier.Classifier, error) {
+	if !(cfg.Threshold > 0 && cfg.Threshold < 1) {
+		return nil, fmt.Errorf("systemone %q: threshold must be in (0,1)", cfg.Name)
+	}
 	s, err := parseOptions(cfg.Options, cfg.Threshold)
 	if err != nil {
 		return nil, fmt.Errorf("systemone %q: %w", cfg.Name, err)
 	}
-	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr := &http.Transport{}
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		tr = base.Clone()
+	}
 	tr.Proxy = nil // request text never leaves through an environment proxy
 	client := &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return &systemone{endpoint: strings.TrimRight(cfg.Endpoint, "/"), token: cfg.BearerToken, client: client, s: s}, nil
@@ -168,58 +176,35 @@ func runesIn(s string, low, high int) bool {
 	return n >= low && n <= high
 }
 
-// Units keeps short segments whole and splits long ones into deterministic
-// overlapping chunks, so the cache can remember each chunk of a long tool
-// result separately.
-func (c *systemone) Units(segments []string) []string {
-	out := make([]string, 0, len(segments))
-	for _, seg := range segments {
-		if utf8.RuneCountInString(seg) <= c.s.windowRunes {
-			out = append(out, seg)
-			continue
-		}
-		out = append(out, splitRunes(seg, c.s.windowRunes, c.s.overlapRunes)...)
-	}
-	return out
+// Windows packs and splits segments into the deterministic windows this
+// classifier reads and the verdict cache stores.
+func (c *systemone) Windows(segments []string) []string {
+	return buildWindows(segments, c.s.windowRunes, c.s.overlapRunes)
 }
 
-// Classify reads at most maxWindows windows. A request with unread windows is
-// Abstain even when every read window is clear (PR-08); units wholly inside
-// read clear windows are still reported in Output.Clear.
-func (c *systemone) Classify(ctx context.Context, in classifier.Input) (classifier.Output, error) {
-	windows := buildWindows(in.Texts, c.s.windowRunes, c.s.overlapRunes)
+// Score reads at most maxWindows windows. Windows past the cap are Abstain
+// and are not sent, so a request with unread content is never Clear (PR-08);
+// a later request reads them once the read ones are cached.
+func (c *systemone) Score(ctx context.Context, windows []string) (classifier.Scores, error) {
 	read := windows
 	if len(read) > c.s.maxWindows {
 		read = windows[:c.s.maxWindows]
 	}
-	clear := make([]bool, len(in.Texts))
-	for i := range clear {
-		clear[i] = true
+	verdicts := make([]classifier.Verdict, len(windows))
+	for i := range verdicts {
+		verdicts[i] = classifier.Abstain
 	}
 	if len(read) == 0 {
-		return classifier.Output{Verdict: classifier.Clear, Clear: clear}, nil
+		return classifier.Scores{Verdicts: verdicts}, nil
 	}
 	probs, err := c.score(ctx, read)
 	if err != nil {
-		return classifier.Output{Windows: len(read)}, err
+		return classifier.Scores{Sent: len(read)}, err
 	}
-	verdict := classifier.Clear
-	for i, w := range windows {
-		v := classifier.Abstain // unread
-		if i < len(read) {
-			v = c.judge(probs[i])
-		}
-		if v == classifier.Clear {
-			continue
-		}
-		for _, p := range w.parts {
-			clear[p] = false
-		}
-		if v == classifier.Flagged || verdict == classifier.Clear {
-			verdict = v
-		}
+	for i, p := range probs {
+		verdicts[i] = c.judge(p)
 	}
-	return classifier.Output{Verdict: verdict, Clear: clear, Windows: len(read)}, nil
+	return classifier.Scores{Verdicts: verdicts, Sent: len(read)}, nil
 }
 
 func (c *systemone) judge(p float64) classifier.Verdict {

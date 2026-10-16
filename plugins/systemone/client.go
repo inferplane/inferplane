@@ -38,14 +38,10 @@ func (a answer) probability() (float64, bool) {
 }
 
 // score returns one probability per window, in order.
-func (c *systemone) score(ctx context.Context, windows []window) ([]float64, error) {
+func (c *systemone) score(ctx context.Context, windows []string) ([]float64, error) {
 	q := map[string]question{questionID: {Type: "noul", Instructions: c.s.instructions, Criteria: c.s.criteria}}
 	if c.s.batch {
-		states := make([]string, len(windows))
-		for i, w := range windows {
-			states[i] = w.text
-		}
-		body := map[string]any{"states": states, "questions": q}
+		body := map[string]any{"states": windows, "questions": q}
 		if c.s.model != "" {
 			body["model"] = c.s.model
 		}
@@ -87,7 +83,7 @@ func (c *systemone) score(ctx context.Context, windows []window) ([]float64, err
 				return
 			}
 			defer func() { <-sem }()
-			body := map[string]any{"state": windows[i].text, "questions": q}
+			body := map[string]any{"state": windows[i], "questions": q}
 			if c.s.model != "" {
 				body["model"] = c.s.model
 			}

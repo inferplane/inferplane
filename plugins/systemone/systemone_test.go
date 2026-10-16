@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -90,8 +91,8 @@ func TestBatchRequestCarriesTheTrainedQuestion(t *testing.T) {
 			t.Errorf("question %v, model %v", q, body["model"])
 		}
 	}, constant(0.01))
-	out, err := newClassifier(t, srv.URL, "", 0.5, "").Classify(context.Background(), classifier.Input{Texts: []string{"hello"}})
-	if err != nil || out.Verdict != classifier.Clear || !slices.Equal(out.Clear, []bool{true}) || out.Windows != 1 {
+	out, err := newClassifier(t, srv.URL, "", 0.5, "").Score(context.Background(), []string{"hello"})
+	if err != nil || !slices.Equal(out.Verdicts, []classifier.Verdict{classifier.Clear}) || out.Sent != 1 {
 		t.Fatalf("%+v %v", out, err)
 	}
 }
@@ -105,7 +106,7 @@ func TestRequestCarriesConfiguredSettingsVerbatim(t *testing.T) {
 		}
 	}, constant(0.01))
 	c := newClassifier(t, srv.URL+"/", `{"model":"multilingual","instructions":"Is there PII?","criteria":{"true":"yes","false":"no"}}`, 0.5, bearer)
-	if _, err := c.Classify(context.Background(), classifier.Input{Texts: []string{"hello"}}); err != nil {
+	if _, err := c.Score(context.Background(), []string{"hello"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -125,42 +126,42 @@ func TestVerdictBoundaries(t *testing.T) {
 		{`{"abstain_band":{"low":0.1,"high":0.9}}`, 0.05, classifier.Clear},
 	} {
 		srv := batchServer(t, nil, constant(tc.p))
-		out, err := newClassifier(t, srv.URL, tc.opts, 0.5, "").Classify(context.Background(), classifier.Input{Texts: []string{"x"}})
-		if err != nil || out.Verdict != tc.want {
+		out, err := newClassifier(t, srv.URL, tc.opts, 0.5, "").Score(context.Background(), []string{"x"})
+		if err != nil || len(out.Verdicts) != 1 || out.Verdicts[0] != tc.want {
 			t.Errorf("opts %s p %v: %+v %v", tc.opts, tc.p, out, err)
 		}
 	}
 }
 
-func TestOneFlaggedWindowFlagsTheRequestAndClearsTheRest(t *testing.T) {
+func TestScoreReturnsOneVerdictPerWindow(t *testing.T) {
 	srv := batchServer(t, nil, func(states []string) []float64 { return []float64{0.01, 0.99} })
-	units := []string{strings.Repeat("가", 150), strings.Repeat("나", 150)}
-	out, err := newClassifier(t, srv.URL, `{"window_runes":200}`, 0.5, "").Classify(context.Background(), classifier.Input{Texts: units})
-	if err != nil || out.Verdict != classifier.Flagged || !slices.Equal(out.Clear, []bool{true, false}) {
+	out, err := newClassifier(t, srv.URL, "", 0.5, "").Score(context.Background(), []string{"clean window", "flagged window"})
+	if err != nil || !slices.Equal(out.Verdicts, []classifier.Verdict{classifier.Clear, classifier.Flagged}) || out.Sent != 2 {
 		t.Fatalf("%+v %v", out, err)
 	}
 }
 
-// Review Focus 1: read a prefix of windows, abstain, and report what was read.
+// Review Focus 1: read a prefix of windows; the rest are Abstain and unsent.
 func TestMaxWindowsReadsPrefixAndAbstains(t *testing.T) {
 	var states atomic.Int64
 	srv := batchServer(t, func(_ *http.Request, body map[string]any) { states.Store(int64(len(body["states"].([]any)))) }, constant(0.01))
-	units := []string{strings.Repeat("가", 150), strings.Repeat("나", 150), strings.Repeat("다", 150)}
-	out, err := newClassifier(t, srv.URL, `{"window_runes":200,"max_windows":2}`, 0.5, "").Classify(context.Background(), classifier.Input{Texts: units})
-	if err != nil || out.Verdict != classifier.Abstain || !slices.Equal(out.Clear, []bool{true, true, false}) || states.Load() != 2 || out.Windows != 2 {
+	out, err := newClassifier(t, srv.URL, `{"max_windows":2}`, 0.5, "").Score(context.Background(), []string{"one", "two", "three"})
+	want := []classifier.Verdict{classifier.Clear, classifier.Clear, classifier.Abstain}
+	if err != nil || !slices.Equal(out.Verdicts, want) || states.Load() != 2 || out.Sent != 2 {
 		t.Fatalf("%+v %v states=%d", out, err, states.Load())
 	}
 }
 
-func TestUnitsSplitsOnlyLongSegments(t *testing.T) {
+func TestWindowsAreDeterministicAndBounded(t *testing.T) {
 	c := newClassifier(t, "http://127.0.0.1:1", `{"window_runes":200,"window_overlap_runes":20}`, 0.5, "")
-	units := c.Units([]string{"short", strings.Repeat("가", 450)})
-	if units[0] != "short" || len(units) != 4 {
-		t.Fatalf("units %d", len(units))
+	segments := []string{"short", strings.Repeat("가", 450), "", "tail"}
+	first, second := c.Windows(segments), c.Windows(segments)
+	if !slices.Equal(first, second) || len(first) < 4 || first[0] != "short" {
+		t.Fatalf("windows %d %q", len(first), first[:1])
 	}
-	for _, u := range units[1:] {
-		if n := []rune(u); len(n) > 200 {
-			t.Fatalf("unit of %d runes", len(n))
+	for _, w := range first {
+		if n := []rune(w); len(n) > 200 || len(n) == 0 {
+			t.Fatalf("window of %d runes", len(n))
 		}
 	}
 }
@@ -208,8 +209,8 @@ func TestErrorsAreBoundedClasses(t *testing.T) {
 				ctx, cancel = context.WithTimeout(ctx, tc.timeout)
 				defer cancel()
 			}
-			out, err := newClassifier(t, url, "", 0.5, bearer).Classify(ctx, classifier.Input{Texts: []string{pii}})
-			if !errors.Is(err, tc.want) || out.Clear != nil {
+			out, err := newClassifier(t, url, "", 0.5, bearer).Score(ctx, []string{pii})
+			if !errors.Is(err, tc.want) || out.Verdicts != nil {
 				t.Fatalf("got %+v %v, want %v", out, err, tc.want)
 			}
 			if strings.Contains(err.Error(), "김민수") || strings.Contains(err.Error(), bearer) || strings.Contains(err.Error(), "127.0.0.1") {
@@ -246,8 +247,8 @@ func TestSingleModeBoundsConcurrency(t *testing.T) {
 	for i := range units {
 		units[i] = strings.Repeat(string(rune('가'+i)), 150)
 	}
-	out, err := newClassifier(t, srv.URL, `{"batch":false,"concurrency":2,"window_runes":200}`, 0.5, "").Classify(context.Background(), classifier.Input{Texts: units})
-	if err != nil || out.Verdict != classifier.Clear || calls.Load() != 6 || peak.Load() > 2 {
+	out, err := newClassifier(t, srv.URL, `{"batch":false,"concurrency":2}`, 0.5, "").Score(context.Background(), units)
+	if err != nil || len(out.Verdicts) != 6 || slices.Contains(out.Verdicts, classifier.Flagged) || calls.Load() != 6 || peak.Load() > 2 {
 		t.Fatalf("%+v %v calls=%d peak=%d", out, err, calls.Load(), peak.Load())
 	}
 }
@@ -262,17 +263,28 @@ func TestSingleModeFailsOnTheFirstError(t *testing.T) {
 		io.WriteString(w, `{"answers":{"pii":{"type":"noul","noul":0.01}}}`)
 	}))
 	t.Cleanup(srv.Close)
-	_, err := newClassifier(t, srv.URL, `{"batch":false,"concurrency":1,"window_runes":200}`, 0.5, "").Classify(context.Background(), classifier.Input{Texts: []string{strings.Repeat("가", 150), strings.Repeat("나", 150)}})
+	_, err := newClassifier(t, srv.URL, `{"batch":false,"concurrency":1}`, 0.5, "").Score(context.Background(), []string{"first window", "second window"})
 	if !errors.Is(err, classifier.ErrStatus) {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestEmptyUnitsAreClearWithoutACall(t *testing.T) {
+func TestNoWindowsMeansNoCall(t *testing.T) {
 	c := newClassifier(t, "http://127.0.0.1:1", "", 0.5, "")
-	out, err := c.Classify(context.Background(), classifier.Input{Texts: []string{"", ""}})
-	if err != nil || out.Verdict != classifier.Clear || !slices.Equal(out.Clear, []bool{true, true}) || out.Windows != 0 {
+	if w := c.Windows([]string{"", ""}); len(w) != 0 {
+		t.Fatalf("empty segments produced windows %q", w)
+	}
+	out, err := c.Score(context.Background(), nil)
+	if err != nil || len(out.Verdicts) != 0 || out.Sent != 0 {
 		t.Fatalf("%+v %v", out, err)
+	}
+}
+
+func TestNewRejectsAThresholdOutsideTheOpenUnitInterval(t *testing.T) {
+	for _, threshold := range []float64{0, 1, 1.5, -0.1, math.NaN()} {
+		if _, err := New(classifier.Config{Name: "laya-ko", Type: "systemone", Endpoint: "http://127.0.0.1:1", Threshold: threshold}); err == nil || !strings.Contains(err.Error(), "threshold") {
+			t.Errorf("threshold %v: err = %v", threshold, err)
+		}
 	}
 }
 

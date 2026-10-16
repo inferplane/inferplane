@@ -1,6 +1,7 @@
 package systemone
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -9,23 +10,84 @@ import (
 
 func TestBuildWindowsPacksShortUnits(t *testing.T) {
 	got := buildWindows([]string{"a", "", "bc"}, 10, 2)
-	if len(got) != 1 || got[0].text != "a\n\nbc" || !slices.Equal(got[0].parts, []int{0, 2}) {
-		t.Fatalf("%+v", got)
+	if !slices.Equal(got, []string{"a\n\nbc"}) {
+		t.Fatalf("%q", got)
 	}
 }
 
 func TestBuildWindowsFlushesWhenFull(t *testing.T) {
 	got := buildWindows([]string{"aaaa", "bbbb"}, 6, 0)
-	if len(got) != 2 || got[0].text != "aaaa" || got[1].text != "bbbb" || got[1].parts[0] != 1 {
-		t.Fatalf("%+v", got)
+	if !slices.Equal(got, []string{"aaaa", "bbbb"}) {
+		t.Fatalf("%q", got)
 	}
 }
 
 func TestBuildWindowsSplitsAnOversizedUnit(t *testing.T) {
-	got := buildWindows([]string{"short", strings.Repeat("가", 25)}, 10, 2)
-	for i, w := range got[1:] {
-		if !slices.Equal(w.parts, []int{1}) || utf8.RuneCountInString(w.text) > 10 {
-			t.Fatalf("window %d %+v", i+1, w)
+	long := strings.Repeat("가", 25)
+	got := buildWindows([]string{"short", long}, 10, 2)
+	if got[0] != "short" {
+		t.Fatalf("the short unit was not flushed before the split: %q", got)
+	}
+	if !slices.Equal(got[1:], splitRunes(long, 10, 2)) {
+		t.Fatalf("split windows %q", got[1:])
+	}
+	for _, w := range got {
+		if utf8.RuneCountInString(w) > 10 {
+			t.Fatalf("window over size: %q", w)
+		}
+	}
+}
+
+func TestBuildWindowsEndsAWindowAtAContentBoundary(t *testing.T) {
+	var marker string
+	for i := 0; marker == ""; i++ {
+		if u := fmt.Sprintf("u%d", i); boundary(u) {
+			marker = u
+		}
+	}
+	if boundary("x") || boundary("y") {
+		t.Fatal("fixture units must not be boundaries")
+	}
+	got := buildWindows([]string{"x", marker, "y"}, 100, 0)
+	if !slices.Equal(got, []string{"x\n\n" + marker, "y"}) {
+		t.Fatalf("%q", got)
+	}
+}
+
+// A conversation grows by appending turns, and a client may place later
+// fields (tool schemas) after the messages. Content-defined boundaries keep
+// the windows before and after a change identical, so their cache entries
+// keep hitting.
+func TestBuildWindowsStayStableAsAConversationGrows(t *testing.T) {
+	units := make([]string, 300)
+	for i := range units {
+		units[i] = fmt.Sprintf("메시지 %d: 이 함수의 오류 처리를 검토해 주세요.", i)
+	}
+	before := buildWindows(units, 200, 20)
+	appended := buildWindows(append(slices.Clone(units), "새 질문"), 200, 20)
+	if !slices.Equal(appended[:len(before)-1], before[:len(before)-1]) {
+		t.Fatal("appending a turn changed earlier windows")
+	}
+	inserted := buildWindows(slices.Insert(slices.Clone(units), 3, "중간에 끼어든 새 메시지"), 200, 20)
+	kept := 0
+	for _, w := range before {
+		if slices.Contains(inserted, w) {
+			kept++
+		}
+	}
+	if kept < len(before)*9/10 {
+		t.Fatalf("an early insertion kept only %d of %d windows", kept, len(before))
+	}
+}
+
+func TestBuildWindowsCoverEveryUnit(t *testing.T) {
+	units := []string{"a", strings.Repeat("나", 33), "", "bc", strings.Repeat("다", 7)}
+	joined := strings.Join(buildWindows(units, 10, 3), "|")
+	for _, u := range units {
+		for _, r := range u {
+			if !strings.ContainsRune(joined, r) {
+				t.Fatalf("rune %q of unit %q is in no window", r, u)
+			}
 		}
 	}
 }

@@ -10,8 +10,8 @@ import (
 
 type stubClassifier struct{}
 
-func (stubClassifier) Units(s []string) []string                       { return s }
-func (stubClassifier) Classify(context.Context, Input) (Output, error) { return Output{}, nil }
+func (stubClassifier) Windows(s []string) []string                     { return s }
+func (stubClassifier) Score(context.Context, []string) (Scores, error) { return Scores{}, nil }
 
 func stubFactory(Config) (Classifier, error) { return stubClassifier{}, nil }
 

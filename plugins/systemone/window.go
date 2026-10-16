@@ -1,46 +1,51 @@
 package systemone
 
 import (
+	"hash/fnv"
 	"strings"
 	"unicode/utf8"
 )
 
-// window is one /v1/systemone state: text packed from units, and the indexes
-// of every unit with any text in it.
-type window struct {
-	text  string
-	parts []int
+// boundaryEvery sets the expected number of short units per window. A unit
+// whose FNV-1a hash is divisible by it ends its window, so window edges
+// depend on content, not position: content inserted earlier in a request
+// changes the windows only up to the next boundary, and every later window,
+// with its cache entry, stays identical as a conversation grows.
+const boundaryEvery = 16
+
+func boundary(unit string) bool {
+	h := fnv.New32a()
+	h.Write([]byte(unit))
+	return h.Sum32()%boundaryEvery == 0
 }
 
 // buildWindows packs consecutive short units into windows of at most size
-// runes, joined by a blank line, and splits a unit longer than size with
-// splitRunes. Empty units get no window.
-func buildWindows(units []string, size, overlap int) []window {
-	var out []window
+// runes, joined by a blank line, ends a window after a boundary unit, and
+// splits a unit longer than size with splitRunes. Empty units get no window.
+// The result depends only on units, size and overlap.
+func buildWindows(units []string, size, overlap int) []string {
+	var out []string
 	var cur strings.Builder
-	var parts []int
-	runes := 0
+	runes, open := 0, false
 	flush := func() {
-		if len(parts) > 0 {
-			out = append(out, window{text: cur.String(), parts: parts})
+		if open {
+			out = append(out, cur.String())
 		}
 		cur.Reset()
-		parts, runes = nil, 0
+		runes, open = 0, false
 	}
-	for i, u := range units {
+	for _, u := range units {
 		n := utf8.RuneCountInString(u)
 		switch {
 		case n == 0:
 			continue
 		case n > size:
 			flush()
-			for _, chunk := range splitRunes(u, size, overlap) {
-				out = append(out, window{text: chunk, parts: []int{i}})
-			}
+			out = append(out, splitRunes(u, size, overlap)...)
 			continue
 		}
 		sep := 0
-		if len(parts) > 0 {
+		if open {
 			sep = 2
 		}
 		if runes+sep+n > size {
@@ -51,8 +56,11 @@ func buildWindows(units []string, size, overlap int) []window {
 			cur.WriteString("\n\n")
 		}
 		cur.WriteString(u)
-		parts = append(parts, i)
 		runes += sep + n
+		open = true
+		if boundary(u) {
+			flush()
+		}
 	}
 	flush()
 	return out
