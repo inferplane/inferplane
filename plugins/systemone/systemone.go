@@ -195,8 +195,9 @@ func runesIn(s string, low, high int) bool {
 	return n >= low && n <= high
 }
 
-// Windows packs and splits segments into the deterministic windows this
-// classifier reads and the verdict cache stores.
+// Windows cuts the request text, the non-empty segments joined by a blank
+// line, into the deterministic overlapping windows this classifier reads and
+// the verdict cache stores.
 func (c *systemone) Windows(segments []string) []string {
 	return buildWindows(segments, c.s.windowRunes, c.s.overlapRunes, c.boundary)
 }

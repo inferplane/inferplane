@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -219,5 +220,39 @@ func TestBuildWindowsNeverBreakARune(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// Arguments outside the option bounds (size < 1, or overlap outside 0 to
+// size/2) must neither loop nor drop text: the whole text is one window, and
+// the server reports or refuses what it cannot read.
+func TestBuildWindowsGuardOutOfContractArguments(t *testing.T) {
+	for name, args := range map[string][2]int{"size 0": {0, 0}, "negative size": {-5, 0}, "overlap above half": {10, 9}, "negative overlap": {10, -1}} {
+		t.Run(name, func(t *testing.T) {
+			units := []string{strings.Repeat("가", 7) + "\n" + strings.Repeat("나", 30), "끝"}
+			done := make(chan []string, 1)
+			go func() { done <- buildWindows(units, args[0], args[1], never) }()
+			select {
+			case got := <-done:
+				if !slices.Equal(got, []string{joined(units)}) {
+					t.Fatalf("%q", got)
+				}
+			case <-time.After(50 * time.Millisecond):
+				t.Fatal("buildWindows did not terminate")
+			}
+		})
+	}
+}
+
+// The joined text and unit ends are sized once from rune counts instead of
+// growing unit by unit through a temporary rune slice per unit.
+func TestBuildWindowsPreSizeTheirBuffers(t *testing.T) {
+	units := make([]string, 1000)
+	for i := range units {
+		units[i] = "단위"
+	}
+	allocs := testing.AllocsPerRun(20, func() { buildWindows(units, 4000, 150, never) })
+	if allocs > 8 {
+		t.Fatalf("%v allocations for one window over 1,000 units", allocs)
 	}
 }

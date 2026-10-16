@@ -1,12 +1,15 @@
 package systemone
 
+import "unicode/utf8"
+
 // boundaryEvery sets the expected number of short units per window. A unit
-// for which the classifier's keyed boundary hash is divisible by it ends its
-// window, so window edges depend on content, not position: content inserted
-// earlier in a request changes the windows only up to the next boundary, and
-// later windows, with their cache entries, stay identical as a conversation
-// grows. The hash is seeded randomly per classifier instance (one per
-// generation), so nobody can compute boundary units offline.
+// for which the classifier's keyed boundary hash is divisible by it can end
+// its window, so window edges tend to depend on content, not position: after
+// content is inserted earlier in a request, the windows usually fall back
+// into step at a later boundary unit, and the windows after that point keep
+// their cache entries. That is likely, not guaranteed. The hash is seeded
+// randomly per classifier instance (one per generation), so nobody can
+// compute boundary units offline.
 const boundaryEvery = 16
 
 // buildWindows cuts the request text, its non-empty units joined by a blank
@@ -24,20 +27,39 @@ const boundaryEvery = 16
 //   - otherwise at the last newline in its final fifth;
 //   - otherwise at size runes.
 //
-// Boundary edges depend on content, not position, so windows after an edge
-// stay identical when text is inserted before it, and every window but the
-// last stays identical when text is appended. A window ends at a boundary or
-// a unit only after taking in at least overlap new runes, and at a newline or
-// size only after at least a fifth of size minus overlap, so the windows'
-// total text stays within about three times the request text. The result
-// depends only on the arguments.
+// Appending text leaves every window but the last identical. Text inserted
+// earlier changes the windows from the insertion on until a cut falls on the
+// same boundary or unit end again. That resynchronisation is probabilistic:
+// at the default 1000/150, one insertion changed about two windows on
+// average, but when overlap is size/2 a window must hold about size runes
+// before a boundary or unit end can end it, so with uniform short units an
+// insertion then changes most later windows.
+//
+// A window ends at a boundary or a unit only after taking in at least overlap
+// new runes, and at a newline or size only after four fifths of size, plus
+// one, minus overlap, so the windows' total text stays within about three
+// times the request text. The result depends only on the arguments.
+//
+// Arguments outside the option bounds (size < 1, or overlap outside 0 to
+// size/2) would stop the cut from advancing; they give the whole text as one
+// window instead, so nothing loops and no text is dropped.
 func buildWindows(units []string, size, overlap int, boundary func(string) bool) []string {
 	type unitEnd struct {
 		at       int // rune offset just past the unit in the joined text
 		boundary bool
 	}
-	var text []rune
-	var ends []unitEnd
+	runes, count := 0, 0
+	for _, u := range units {
+		if u != "" {
+			runes += utf8.RuneCountInString(u)
+			count++
+		}
+	}
+	if count == 0 {
+		return nil
+	}
+	text := make([]rune, 0, runes+2*(count-1))
+	ends := make([]unitEnd, 0, count)
 	for _, u := range units {
 		if u == "" {
 			continue
@@ -45,8 +67,13 @@ func buildWindows(units []string, size, overlap int, boundary func(string) bool)
 		if len(text) > 0 {
 			text = append(text, '\n', '\n')
 		}
-		text = append(text, []rune(u)...)
+		for _, r := range u {
+			text = append(text, r)
+		}
 		ends = append(ends, unitEnd{at: len(text), boundary: boundary(u)})
+	}
+	if size < 1 || overlap < 0 || overlap > size/2 {
+		return []string{string(text)}
 	}
 	var out []string
 	next := 0 // index of the first unit end after start
@@ -73,7 +100,7 @@ func buildWindows(units []string, size, overlap int, boundary func(string) bool)
 		if end < 0 {
 			end = lastFit
 		}
-		if end < 0 || end-start <= overlap {
+		if end < 0 || end-start <= overlap { // defensive: the 2*overlap filter above already ensures progress
 			end = limit
 			for j := limit - 1; j >= start+size*4/5; j-- {
 				if text[j] == '\n' {
