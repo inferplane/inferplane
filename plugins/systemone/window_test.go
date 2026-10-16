@@ -20,84 +20,155 @@ func never(string) bool { return false }
 
 func always(string) bool { return true }
 
-func TestBuildWindowsPacksShortUnits(t *testing.T) {
-	got := buildWindows([]string{"a", "", "bc"}, 10, 2, never)
-	if !slices.Equal(got, []string{"a\n\nbc"}) {
-		t.Fatalf("%q", got)
-	}
-}
-
-func TestBuildWindowsFlushesWhenFull(t *testing.T) {
-	got := buildWindows([]string{"aaaa", "bbbb"}, 6, 0, never)
-	if !slices.Equal(got, []string{"aaaa", "bbbb"}) {
-		t.Fatalf("%q", got)
-	}
-}
-
-func TestBuildWindowsSplitsAnOversizedUnit(t *testing.T) {
-	long := strings.Repeat("가", 25)
-	got := buildWindows([]string{"short", long}, 10, 2, never)
-	if got[0] != "short" {
-		t.Fatalf("the short unit was not flushed before the split: %q", got)
-	}
-	if !slices.Equal(got[1:], splitRunes(long, 10, 2)) {
-		t.Fatalf("split windows %q", got[1:])
-	}
-	for _, w := range got {
-		if utf8.RuneCountInString(w) > 10 {
-			t.Fatalf("window over size: %q", w)
+// joined is the text buildWindows cuts: non-empty units joined by a blank line.
+func joined(units []string) string {
+	var parts []string
+	for _, u := range units {
+		if u != "" {
+			parts = append(parts, u)
 		}
 	}
+	return strings.Join(parts, "\n\n")
 }
 
-func TestBuildWindowsEndsAWindowAtAContentBoundary(t *testing.T) {
+// offsets returns each window's start rune offset in the joined text.
+func offsets(windows []string, overlap int) []int {
+	out := make([]int, len(windows))
+	for i := 1; i < len(windows); i++ {
+		out[i] = out[i-1] + utf8.RuneCountInString(windows[i-1]) - overlap
+	}
+	return out
+}
+
+// coRead reports whether some window wholly contains runes [a, b) of the text.
+func coRead(windows []string, overlap, a, b int) bool {
+	for i, s := range offsets(windows, overlap) {
+		if s <= a && b <= s+utf8.RuneCountInString(windows[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func fixtures() map[string][]string {
+	long := strings.Repeat("가나다라마바사\n", 60)
+	return map[string][]string{
+		"short":   {"a", "", "bc"},
+		"mixed":   {"role", "user", "", long, "환자 서지수", strings.Repeat("😀a", 300), "진단: 우울증", "끝"},
+		"tiny":    strings.Split(strings.Repeat("x,", 500), ","),
+		"oneLong": {long + long},
+	}
+}
+
+func TestBuildWindowsFitShortTextInOneWindow(t *testing.T) {
+	if got := buildWindows([]string{"a", "", "bc"}, 10, 2, never); !slices.Equal(got, []string{"a\n\nbc"}) {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestBuildWindowsPreferUnitEnds(t *testing.T) {
+	if got := buildWindows([]string{"aaaa", "bbbb"}, 6, 0, never); !slices.Equal(got, []string{"aaaa", "\n\nbbbb"}) {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestBuildWindowsEndAtABoundaryUnit(t *testing.T) {
 	marker := func(u string) bool { return u == "M" }
-	got := buildWindows([]string{"x", "M", "y"}, 100, 0, marker)
-	if !slices.Equal(got, []string{"x\n\nM", "M\n\ny"}) {
+	if got := buildWindows([]string{"x", "M", "y"}, 6, 0, marker); !slices.Equal(got, []string{"x\n\nM", "\n\ny"}) {
 		t.Fatalf("%q", got)
 	}
 }
 
-// Security regression (2026-10-16 commit review): a filler unit that is a
-// boundary must not separate two nearby parts.
-func TestACraftedBoundaryCannotSeparateNearbyParts(t *testing.T) {
-	filler := func(u string) bool { return strings.HasPrefix(u, "filler") }
-	units := []string{"환자 서지수", "filler-1", "filler-2", "진단: 우울증"}
-	for _, w := range buildWindows(units, 200, 150, filler) {
-		if strings.Contains(w, "서지수") && strings.Contains(w, "우울증") {
-			return
-		}
+func TestBuildWindowsPreferALateNewline(t *testing.T) {
+	got := buildWindows([]string{strings.Repeat("a", 8) + "\n" + strings.Repeat("b", 20)}, 10, 2, never)
+	if got[0] != strings.Repeat("a", 8)+"\n" {
+		t.Fatalf("first window %q", got[0])
 	}
-	t.Fatal("boundary fillers separated the name from the diagnosis")
 }
 
-// Any two short units within overlap runes of each other share a window,
-// whatever the boundary function decides.
-func TestBuildWindowsCoReadUnitsWithinTheOverlap(t *testing.T) {
-	units := make([]string, 300)
-	for i := range units {
-		units[i] = fmt.Sprintf("<%d|%s>", i, strings.Repeat("내용", i%7))
-	}
-	const size, overlap = 200, 60
-	for name, b := range map[string]func(string) bool{"fnv": fnvBoundary, "always": always, "never": never} {
-		windows := buildWindows(units, size, overlap, b)
-		for i := range units {
-			span := utf8.RuneCountInString(units[i])
-			for j := i + 1; j < len(units); j++ {
-				span += 2 + utf8.RuneCountInString(units[j])
-				if span > overlap {
-					break
-				}
-				together := false
-				for _, w := range windows {
-					if strings.Contains(w, units[i]) && strings.Contains(w, units[j]) {
-						together = true
-						break
+// Every window is valid, within size and non-empty; consecutive windows share
+// exactly overlap runes; and the windows rebuild the joined text exactly.
+func TestBuildWindowsOverlapAndCoverTheText(t *testing.T) {
+	for name, units := range fixtures() {
+		for _, size := range []int{5, 13, 200, 1000} {
+			for _, overlap := range []int{0, 1, size / 4, size / 2} {
+				for bname, b := range map[string]func(string) bool{"never": never, "always": always, "fnv": fnvBoundary} {
+					windows := buildWindows(units, size, overlap, b)
+					rebuilt := ""
+					for i, w := range windows {
+						r := []rune(w)
+						if len(r) == 0 || len(r) > size || !utf8.ValidString(w) {
+							t.Fatalf("%s size %d overlap %d %s: bad window %d %q", name, size, overlap, bname, i, w)
+						}
+						if i == 0 {
+							rebuilt = w
+							continue
+						}
+						prev := []rune(windows[i-1])
+						if string(prev[len(prev)-overlap:]) != string(r[:overlap]) {
+							t.Fatalf("%s size %d overlap %d %s: windows %d and %d do not share the overlap", name, size, overlap, bname, i-1, i)
+						}
+						rebuilt += string(r[overlap:])
+					}
+					if rebuilt != joined(units) {
+						t.Fatalf("%s size %d overlap %d %s: windows do not rebuild the text", name, size, overlap, bname)
 					}
 				}
-				if !together {
-					t.Fatalf("%s: units %d and %d (span %d <= %d) never share a window", name, i, j, span, overlap)
-				}
+			}
+		}
+	}
+}
+
+// Review cases (2026-10-16): crafted boundaries and long units must not
+// separate a name and a diagnosis that are within the overlap of each other.
+func TestNothingSeparatesNearbyParts(t *testing.T) {
+	const name, diagnosis = "환자 서지수", "진단: 우울증"
+	pad := func(n int) string { return strings.Repeat("앞선 대화 내용입니다. ", n) }
+	filler := func(u string) bool { return strings.HasPrefix(u, "filler") }
+	cases := map[string][]string{
+		"crafted fillers":            {pad(40), name, "filler-1", "filler-2", diagnosis, pad(40)},
+		"long unit after the name":   {"role", "user", "content", name, "role", "user", "content", diagnosis + strings.Repeat("가", 1000)},
+		"long unit before the name":  {strings.Repeat("나", 1200) + name, diagnosis},
+		"near-size diagnosis":        {pad(30), name, diagnosis + strings.Repeat("다", 990)},
+		"name at a window edge":      {pad(45), name, diagnosis, pad(45)},
+		"many boundary units around": append(append(strings.Split(strings.Repeat("filler,", 300), ","), name, diagnosis), strings.Split(strings.Repeat("filler,", 300), ",")...),
+	}
+	for cname, units := range cases {
+		for bname, b := range map[string]func(string) bool{"never": never, "always": always, "fnv": fnvBoundary, "filler": filler} {
+			text := []rune(joined(units))
+			a := strings.Index(string(text), name)
+			a = utf8.RuneCountInString(string(text)[:a])
+			bEnd := strings.Index(string(text), diagnosis)
+			bEnd = utf8.RuneCountInString(string(text)[:bEnd]) + utf8.RuneCountInString(diagnosis)
+			if bEnd-a > 150 {
+				t.Fatalf("%s: fixture span %d exceeds the overlap", cname, bEnd-a)
+			}
+			if !coRead(buildWindows(units, 1000, 150, b), 150, a, bEnd) {
+				t.Fatalf("%s (%s boundaries): the name and the diagnosis never share a window", cname, bname)
+			}
+		}
+	}
+}
+
+// Security regression (third commit security review, 2026-10-16): many tiny
+// units that are all boundaries must not multiply the text the classifier
+// reads or the gateway hashes.
+func TestBuildWindowsBoundTheirTotalSize(t *testing.T) {
+	units := make([]string, 20000)
+	for i := range units {
+		units[i] = fmt.Sprint(i % 10)
+	}
+	units = append(units, strings.Repeat("긴 붙여넣기 ", 4000))
+	input := utf8.RuneCountInString(joined(units))
+	const size = 1000
+	for bname, b := range map[string]func(string) bool{"always": always, "fnv": fnvBoundary, "never": never} {
+		for _, overlap := range []int{150, size / 2} {
+			total := 0
+			for _, w := range buildWindows(units, size, overlap, b) {
+				total += utf8.RuneCountInString(w)
+			}
+			if total > 3*input+size {
+				t.Fatalf("%s, overlap %d: %d runes of windows for %d runes of input", bname, overlap, total, input)
 			}
 		}
 	}
@@ -106,7 +177,7 @@ func TestBuildWindowsCoReadUnitsWithinTheOverlap(t *testing.T) {
 // A conversation grows by appending turns, and a client may place later
 // fields (tool schemas) after the messages. Content-defined boundaries keep
 // the windows before and after a change identical, so their cache entries
-// keep hitting; size-only packing does not.
+// keep hitting; size-only cutting does not.
 func TestBuildWindowsStayStableAsAConversationGrows(t *testing.T) {
 	units := make([]string, 300)
 	for i := range units {
@@ -134,55 +205,15 @@ func TestBuildWindowsStayStableAsAConversationGrows(t *testing.T) {
 		t.Fatalf("an early insertion kept only %d of %d windows", kept, total)
 	}
 	if sizeOnly, n := keptAfterInsert(never); sizeOnly*10 >= n*9 {
-		t.Fatalf("size-only packing also kept %d of %d windows; the fixture does not exercise boundaries", sizeOnly, n)
+		t.Fatalf("size-only cutting also kept %d of %d windows; the fixture does not exercise boundaries", sizeOnly, n)
 	}
 }
 
-func TestBuildWindowsCoverEveryUnit(t *testing.T) {
-	units := []string{"a", strings.Repeat("나", 33), "", "bc", strings.Repeat("다", 7)}
-	joined := strings.Join(buildWindows(units, 10, 3, fnvBoundary), "|")
-	for _, u := range units {
-		for _, r := range u {
-			if !strings.ContainsRune(joined, r) {
-				t.Fatalf("rune %q of unit %q is in no window", r, u)
-			}
-		}
-	}
-}
-
-func TestSplitRunesPrefersALateNewline(t *testing.T) {
-	s := strings.Repeat("a", 8) + "\n" + strings.Repeat("b", 20)
-	got := splitRunes(s, 10, 2)
-	if got[0] != strings.Repeat("a", 8)+"\n" {
-		t.Fatalf("first window %q", got[0])
-	}
-}
-
-func TestSplitRunesOverlapsAndCoversEverything(t *testing.T) {
-	s := strings.Repeat("가나다라마바사\n", 40) + "끝"
-	for _, size := range []int{5, 7, 12, 40} {
-		for overlap := 0; overlap <= size/2; overlap++ {
-			got := splitRunes(s, size, overlap)
-			rebuilt := got[0]
-			for _, w := range got[1:] {
-				prev := []rune(rebuilt)
-				if !strings.HasPrefix(w, string(prev[len(prev)-overlap:])) {
-					t.Fatalf("size %d overlap %d: window does not repeat the overlap", size, overlap)
-				}
-				rebuilt += string([]rune(w)[overlap:])
-			}
-			if rebuilt != s {
-				t.Fatalf("size %d overlap %d: windows do not cover the text", size, overlap)
-			}
-		}
-	}
-}
-
-func TestSplitRunesNeverBreaksARune(t *testing.T) {
+func TestBuildWindowsNeverBreakARune(t *testing.T) {
 	s := strings.Repeat("가a😀\n김", 50)
 	for size := 5; size <= 13; size++ {
 		for overlap := 0; overlap <= size/2; overlap++ {
-			for _, w := range splitRunes(s, size, overlap) {
+			for _, w := range buildWindows([]string{s, "끝"}, size, overlap, fnvBoundary) {
 				if !utf8.ValidString(w) || utf8.RuneCountInString(w) > size {
 					t.Fatalf("size %d overlap %d: bad window %q", size, overlap, w)
 				}

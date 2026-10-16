@@ -1,11 +1,5 @@
 package systemone
 
-import (
-	"slices"
-	"strings"
-	"unicode/utf8"
-)
-
 // boundaryEvery sets the expected number of short units per window. A unit
 // for which the classifier's keyed boundary hash is divisible by it ends its
 // window, so window edges depend on content, not position: content inserted
@@ -15,112 +9,81 @@ import (
 // generation), so nobody can compute boundary units offline.
 const boundaryEvery = 16
 
-// buildWindows packs consecutive short units into windows of at most size
-// runes, joined by a blank line; ends a window after a unit for which
-// boundary reports true; and splits a unit longer than size with splitRunes.
-// Each packed window starts with the trailing units of the previous packed
-// window: always its last unit, plus earlier ones while the carried text
-// stays within overlap runes, dropping the oldest until the new unit fits.
-// So two short units with at most overlap runes of text from the first to
-// the second are read together in some window, and no edge can separate them.
-// Empty units get no window. The result depends only on the arguments.
+// buildWindows cuts the request text, its non-empty units joined by a blank
+// line, into windows of at most size runes. Consecutive windows share exactly
+// overlap runes, so every stretch of at most overlap runes of that text lies
+// wholly inside some window: two parts that close together are always read
+// together, whatever the unit sizes and wherever the edges fall.
+//
+// A window ends, in order of preference:
+//   - at the end of the first unit for which boundary reports true, once the
+//     window holds at least 2*overlap runes, so it took in at least as much new
+//     text as it repeats from the previous window;
+//   - otherwise at the last unit end that fits, if the window then holds at
+//     least 2*overlap runes;
+//   - otherwise at the last newline in its final fifth;
+//   - otherwise at size runes.
+//
+// Boundary edges depend on content, not position, so windows after an edge
+// stay identical when text is inserted before it, and every window but the
+// last stays identical when text is appended. A window ends at a boundary or
+// a unit only after taking in at least overlap new runes, and at a newline or
+// size only after at least a fifth of size minus overlap, so the windows'
+// total text stays within about three times the request text. The result
+// depends only on the arguments.
 func buildWindows(units []string, size, overlap int, boundary func(string) bool) []string {
-	var out []string
-	var win, carry []string // units of the open window; trailing units carried into the next
-	runes := 0              // runes of the open window, separators included
-	flush := func(keep bool) {
-		if len(win) > 0 {
-			out = append(out, strings.Join(win, "\n\n"))
-			if keep {
-				carry = tail(win, overlap)
-			}
-		}
-		if !keep {
-			carry = nil
-		}
-		win, runes = nil, 0
+	type unitEnd struct {
+		at       int // rune offset just past the unit in the joined text
+		boundary bool
 	}
+	var text []rune
+	var ends []unitEnd
 	for _, u := range units {
-		n := utf8.RuneCountInString(u)
-		switch {
-		case n == 0:
-			continue
-		case n > size:
-			flush(false)
-			out = append(out, splitRunes(u, size, overlap)...)
+		if u == "" {
 			continue
 		}
-		if len(win) > 0 && runes+2+n > size {
-			flush(true)
+		if len(text) > 0 {
+			text = append(text, '\n', '\n')
 		}
-		if len(win) == 0 {
-			for len(carry) > 0 && joinedRunes(carry)+2+n > size {
-				carry = carry[1:] // drop the oldest carried unit until u fits
-			}
-			win, runes, carry = carry, joinedRunes(carry), nil
-		}
-		if len(win) > 0 {
-			runes += 2
-		}
-		win = append(win, u)
-		runes += n
-		if boundary(u) {
-			flush(true)
-		}
+		text = append(text, []rune(u)...)
+		ends = append(ends, unitEnd{at: len(text), boundary: boundary(u)})
 	}
-	flush(false)
-	return out
-}
-
-// tail returns the last unit plus earlier units while the carried text,
-// separators included, stays within overlap runes.
-func tail(units []string, overlap int) []string {
-	i := len(units) - 1
-	total := utf8.RuneCountInString(units[i])
-	for i > 0 {
-		next := total + 2 + utf8.RuneCountInString(units[i-1])
-		if next > overlap {
+	var out []string
+	next := 0 // index of the first unit end after start
+	for start := 0; start < len(text); {
+		limit := start + size
+		if limit >= len(text) {
+			out = append(out, string(text[start:]))
 			break
 		}
-		total, i = next, i-1
-	}
-	return slices.Clone(units[i:])
-}
-
-func joinedRunes(units []string) int {
-	n := 0
-	for i, u := range units {
-		if i > 0 {
-			n += 2
+		for next < len(ends) && ends[next].at <= start {
+			next++
 		}
-		n += utf8.RuneCountInString(u)
-	}
-	return n
-}
-
-// splitRunes cuts s into windows of at most size runes. Each cut prefers the
-// last newline in the final fifth of the window, and each window after the
-// first repeats the previous window's last overlap runes. It requires
-// 0 <= overlap <= size/2, which the option bounds guarantee.
-func splitRunes(s string, size, overlap int) []string {
-	r := []rune(s)
-	var out []string
-	for start := 0; ; {
-		end := start + size
-		if end >= len(r) {
-			return append(out, string(r[start:]))
-		}
-		for j := end - 1; j >= start+size*4/5; j-- {
-			if r[j] == '\n' {
-				end = j + 1
+		end, lastFit := -1, -1
+		for k := next; k < len(ends) && ends[k].at <= limit; k++ {
+			if ends[k].at-start < 2*overlap {
+				continue
+			}
+			if ends[k].boundary {
+				end = ends[k].at
 				break
 			}
+			lastFit = ends[k].at
 		}
-		out = append(out, string(r[start:end]))
-		next := end - overlap
-		if next <= start {
-			next = end
+		if end < 0 {
+			end = lastFit
 		}
-		start = next
+		if end < 0 || end-start <= overlap {
+			end = limit
+			for j := limit - 1; j >= start+size*4/5; j-- {
+				if text[j] == '\n' {
+					end = j + 1
+					break
+				}
+			}
+		}
+		out = append(out, string(text[start:end]))
+		start = end - overlap
 	}
+	return out
 }

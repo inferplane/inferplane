@@ -157,7 +157,7 @@ func TestWindowsAreDeterministicAndBounded(t *testing.T) {
 	c := newClassifier(t, "http://127.0.0.1:1", `{"window_runes":200,"window_overlap_runes":20}`, 0.5, "")
 	segments := []string{"short", strings.Repeat("가", 450), "", "tail"}
 	first, second := c.Windows(segments), c.Windows(segments)
-	if !slices.Equal(first, second) || len(first) < 4 || first[0] != "short" {
+	if !slices.Equal(first, second) || len(first) < 3 || !strings.HasPrefix(first[0], "short") {
 		t.Fatalf("windows %d %q", len(first), first[:1])
 	}
 	for _, w := range first {

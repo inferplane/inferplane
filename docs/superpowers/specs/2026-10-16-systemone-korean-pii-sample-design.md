@@ -294,27 +294,30 @@ The `criteria` field is present only when configured.
 
 The common `threshold` field defaults to 0.5 and must lie in (0,1).
 
-**Windowing.** `Windows` cuts all segments, cached or not, in body order:
-- Consecutive segments are packed into one window, joined by a blank line,
-  while the window stays within `window_runes`.
-- A segment whose keyed hash is divisible by 16 ends its window. The hash is
-  seeded randomly per classifier instance, once per generation, so boundary
-  units cannot be computed offline. Edges depend on content, not position:
-  content inserted earlier in a request changes the windows only up to the
-  next edge, and the later windows, with their cache entries, stay identical
-  as a conversation grows.
-- Each packed window starts with the previous packed window's trailing units:
-  always its last unit, plus earlier ones while they total at most
-  `window_overlap_runes`. Any two short units with at most that much text from
-  the first to the second are read together in some window, so no edge,
-  natural or crafted, separates them (second commit security review,
-  2026-10-16).
-- A segment longer than `window_runes` is split. The cut prefers the last
-  newline in the final 20% of the window. Otherwise it falls on a rune
-  boundary, never inside a UTF-8 sequence.
-- Consecutive windows of one split segment overlap by `window_overlap_runes`,
-  so an entity that crosses a cut is read whole in at least one window when it
-  is shorter than the overlap.
+**Windowing.** `Windows` cuts the request text: all segments, cached or not,
+non-empty ones joined by a blank line in body order (amendment 9, after the
+second and third commit security reviews, 2026-10-16):
+- Consecutive windows share exactly `window_overlap_runes` runes, and each
+  window holds at most `window_runes`. Every stretch of at most
+  `window_overlap_runes` runes of the request text therefore lies wholly
+  inside some window: two parts that close together are always read together,
+  whatever the segment sizes and wherever the edges fall, natural or crafted.
+- A window ends, in order of preference: at the end of the first segment
+  whose keyed hash is divisible by 16, once the window holds at least twice
+  the overlap; otherwise at the last segment end that fits with at least
+  twice the overlap; otherwise at the last newline in its final fifth;
+  otherwise at `window_runes`, never inside a UTF-8 sequence.
+- The hash is `hash/maphash`, seeded randomly per classifier instance, once
+  per generation, so boundary segments cannot be computed offline. It is not
+  a cryptographic hash; the overlap guarantee does not depend on it.
+- Edges at boundary segments depend on content, not position: text inserted
+  earlier in a request changes the windows only up to the next such edge, and
+  every window but the last stays identical when a turn is appended, so their
+  cache entries keep hitting.
+- A window ends at a segment only after taking in at least
+  `window_overlap_runes` new runes, so the windows' total text stays within
+  about three times the request text (measured: twice, for 262,144 one-rune
+  boundary segments).
 - When more than `max_windows` uncached windows remain, `Score` reads the
   first `max_windows` and returns Abstain for the rest without sending them.
   A request with unread windows is never Clear (PR-08). The read clear windows
