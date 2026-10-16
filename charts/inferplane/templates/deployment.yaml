@@ -98,10 +98,12 @@ spec:
               command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:{{ .port }}/health', timeout=2)"]
             periodSeconds: 5
             failureThreshold: 60
+            timeoutSeconds: 5
           readinessProbe:
             exec:
               command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:{{ .port }}/health', timeout=2)"]
             periodSeconds: 10
+            timeoutSeconds: 5
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532
