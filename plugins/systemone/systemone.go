@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"net/http"
 	"regexp"
 	"slices"
@@ -50,6 +51,7 @@ type systemone struct {
 	token    string
 	client   *http.Client
 	s        settings
+	seed     maphash.Seed // keys the window-boundary hash; random per instance
 }
 
 // New validates the threshold and options and builds the classifier. The
@@ -70,7 +72,7 @@ func New(cfg classifier.Config) (classifier.Classifier, error) {
 	}
 	tr.Proxy = nil // request text never leaves through an environment proxy
 	client := &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	return &systemone{endpoint: strings.TrimRight(cfg.Endpoint, "/"), token: cfg.BearerToken, client: client, s: s}, nil
+	return &systemone{endpoint: strings.TrimRight(cfg.Endpoint, "/"), token: cfg.BearerToken, client: client, s: s, seed: maphash.MakeSeed()}, nil
 }
 
 func parseOptions(raw map[string]json.RawMessage, threshold float64) (settings, error) {
@@ -179,7 +181,12 @@ func runesIn(s string, low, high int) bool {
 // Windows packs and splits segments into the deterministic windows this
 // classifier reads and the verdict cache stores.
 func (c *systemone) Windows(segments []string) []string {
-	return buildWindows(segments, c.s.windowRunes, c.s.overlapRunes)
+	return buildWindows(segments, c.s.windowRunes, c.s.overlapRunes, c.boundary)
+}
+
+// boundary reports whether unit ends its window, under this instance's seed.
+func (c *systemone) boundary(unit string) bool {
+	return maphash.String(c.seed, unit)%boundaryEvery == 0
 }
 
 // Score reads at most maxWindows windows. Windows past the cap are Abstain

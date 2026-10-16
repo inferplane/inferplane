@@ -297,11 +297,18 @@ The common `threshold` field defaults to 0.5 and must lie in (0,1).
 **Windowing.** `Windows` cuts all segments, cached or not, in body order:
 - Consecutive segments are packed into one window, joined by a blank line,
   while the window stays within `window_runes`.
-- A segment whose FNV-1a hash is divisible by 16 ends its window. Edges
-  therefore depend on content, not position: content inserted earlier in a
-  request changes the windows only up to the next such edge, and the later
-  windows, with their cache entries, stay identical as a conversation grows.
-- Each packed window starts with the previous packed window's last unit when it fits, so every two adjacent short units are read together in some window.
+- A segment whose keyed hash is divisible by 16 ends its window. The hash is
+  seeded randomly per classifier instance, once per generation, so boundary
+  units cannot be computed offline. Edges depend on content, not position:
+  content inserted earlier in a request changes the windows only up to the
+  next edge, and the later windows, with their cache entries, stay identical
+  as a conversation grows.
+- Each packed window starts with the previous packed window's trailing units:
+  always its last unit, plus earlier ones while they total at most
+  `window_overlap_runes`. Any two short units with at most that much text from
+  the first to the second are read together in some window, so no edge,
+  natural or crafted, separates them (second commit security review,
+  2026-10-16).
 - A segment longer than `window_runes` is split. The cut prefers the last
   newline in the final 20% of the window. Otherwise it falls on a rune
   boundary, never inside a UTF-8 sequence.

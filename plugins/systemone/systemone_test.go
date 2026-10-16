@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -317,29 +318,27 @@ func TestOptionValidation(t *testing.T) {
 	}
 }
 
-// The 2026-10-16 review case: a boundary name unit followed by a diagnosis
-// must be judged together through the real windows and the cache.
-func TestRunJudgesAdjacentPartsTogetherThroughRealWindows(t *testing.T) {
-	var name string
-	for _, n := range []string{"서지수", "김민수", "이영희", "박철수", "최유나", "정다은", "한지민", "오세훈", "윤서연", "장도윤", "임하늘", "강민호", "조은비", "신동현", "권나래", "황보람", "송지호", "백승우", "유하린", "문태호"} {
-		if boundary("환자 " + n) {
-			name = "환자 " + n
-			break
-		}
-	}
-	if name == "" {
-		t.Fatal("no boundary fixture among the candidate names")
-	}
+// The 2026-10-16 review cases: a name and a diagnosis, adjacent or with a
+// boundary filler between them, must be judged together through the real
+// windows and the cache.
+func TestRunJudgesNearbyPartsTogetherThroughRealWindows(t *testing.T) {
+	const name, diagnosis = "환자 서지수", "진단: 우울증"
 	srv := batchServer(t, nil, func(states []string) []float64 {
 		out := make([]float64, len(states))
 		for i, s := range states {
-			if strings.Contains(s, name) && strings.Contains(s, "우울증") {
+			if strings.Contains(s, name) && strings.Contains(s, diagnosis) {
 				out[i] = 0.99
 			}
 		}
 		return out
 	})
 	c := newClassifier(t, srv.URL, `{"window_runes":200}`, 0.5, "")
+	var filler string
+	for i := 0; filler == ""; i++ {
+		if f := fmt.Sprintf("참고 %d", i); c.(*systemone).boundary(f) {
+			filler = f
+		}
+	}
 	set, err := classifier.NewSet([]classifier.Entry{{Name: "laya-ko", Mode: classifier.Enforce, Classifier: c, Global: true}}, 5*time.Second, 1<<20, 100, time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -347,10 +346,30 @@ func TestRunJudgesAdjacentPartsTogetherThroughRealWindows(t *testing.T) {
 	run := func(segments ...string) classifier.Outcome {
 		return set.Run(context.Background(), set.Entries, classifier.Request{Team: "kr", Segments: segments})[0].Outcome
 	}
-	if run(name) != classifier.OutcomeClear || run("진단: 우울증") != classifier.OutcomeClear {
-		t.Fatal("each part alone must be clear")
+	for _, part := range []string{name, diagnosis, filler} {
+		if got := run(part); got != classifier.OutcomeClear {
+			t.Fatalf("part %q alone: %s", part, got)
+		}
 	}
-	if got := run(name, "진단: 우울증"); got != classifier.OutcomeFlagged {
-		t.Fatalf("adjacent parts across a boundary edge were not judged together: %s", got)
+	for _, segments := range [][]string{{name, diagnosis}, {name, filler, diagnosis}} {
+		if got := run(segments...); got != classifier.OutcomeFlagged {
+			t.Fatalf("%q were not judged together: %s", segments, got)
+		}
+	}
+}
+
+func TestBoundaryHashIsKeyedPerInstance(t *testing.T) {
+	a := newClassifier(t, "http://127.0.0.1:1", "", 0.5, "").(*systemone)
+	b := newClassifier(t, "http://127.0.0.1:1", "", 0.5, "").(*systemone)
+	differ := false
+	for i := 0; i < 2000; i++ {
+		u := fmt.Sprintf("unit %d", i)
+		if a.boundary(u) != a.boundary(u) {
+			t.Fatal("one instance gave two answers for the same unit")
+		}
+		differ = differ || a.boundary(u) != b.boundary(u)
+	}
+	if !differ {
+		t.Fatal("two instances share boundary decisions; the hash is not keyed")
 	}
 }
