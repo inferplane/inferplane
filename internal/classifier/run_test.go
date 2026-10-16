@@ -344,7 +344,11 @@ func TestCombineCountsOnlyEnforce(t *testing.T) {
 		classified, uninspectable bool
 	}{
 		{[]Result{{Mode: Shadow, Outcome: OutcomeFlagged}}, false, false},
-		{[]Result{{Mode: Enforce, Outcome: OutcomeFlagged}, {Mode: Enforce, Outcome: OutcomeError}}, true, false},
+		// Ruling 23: a flag never hides another Enforce entry's failure.
+		{[]Result{{Mode: Enforce, Outcome: OutcomeFlagged}, {Mode: Enforce, Outcome: OutcomeError}}, true, true},
+		{[]Result{{Mode: Enforce, Outcome: OutcomeAbstain}, {Mode: Enforce, Outcome: OutcomeFlagged}}, true, true},
+		{[]Result{{Mode: Enforce, Outcome: OutcomeFlagged}, {Mode: Shadow, Outcome: OutcomeError}}, true, false},
+		{[]Result{{Mode: Enforce, Outcome: OutcomeFlagged}, {Mode: Enforce, Outcome: OutcomeClear}}, true, false},
 		{[]Result{{Mode: Enforce, Outcome: OutcomeAbstain}}, false, true},
 		{[]Result{{Mode: Enforce, Outcome: OutcomeError}, {Mode: Shadow, Outcome: OutcomeFlagged}}, false, true},
 		{[]Result{{Mode: Enforce, Outcome: OutcomeClear}, {Mode: Enforce, Outcome: OutcomeSkipped}}, false, false},

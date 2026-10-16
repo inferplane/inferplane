@@ -174,8 +174,11 @@ func Failed(entries []Entry) []Result {
 	return results
 }
 
-// Combine applies the Enforce-only rule: any Enforce flagged classifies the
-// request; otherwise any Enforce abstain or error makes it uninspectable.
+// Combine applies the Enforce-only rule and reports its two signals
+// independently: any Enforce flagged classifies the request, and any Enforce
+// abstain or error makes it uninspectable. A flag from one entry never hides
+// another entry's failure; the router applies both, so the stricter action
+// wins, as for the regex triggers.
 func Combine(results []Result) (classified, uninspectable bool) {
 	for _, r := range results {
 		if r.Mode != Enforce {
@@ -187,9 +190,6 @@ func Combine(results []Result) (classified, uninspectable bool) {
 		case OutcomeAbstain, OutcomeError:
 			uninspectable = true
 		}
-	}
-	if classified {
-		uninspectable = false
 	}
 	return classified, uninspectable
 }

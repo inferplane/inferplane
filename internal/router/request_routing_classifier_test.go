@@ -77,6 +77,103 @@ func classifierSetup(t *testing.T, mode string, decide func([]string) (classifie
 	return r, in, f
 }
 
+type fakeEntry struct {
+	name, mode string
+	decide     func([]string) (classifier.Verdict, error)
+}
+
+// multiClassifierSetup configures one fake classifier per entry, in order.
+func multiClassifierSetup(t *testing.T, entries ...fakeEntry) (*Router, RequestRoutingInput, []*routerFake) {
+	t.Helper()
+	cfg := routingConfig()
+	cfg.PIIClassification = &config.PIIClassificationConfig{}
+	fakes := make([]*routerFake, len(entries))
+	for i, e := range entries {
+		fakes[i] = &routerFake{decide: e.decide}
+		routerFakes.Store(e.name, fakes[i])
+		cfg.PIIClassification.Classifiers = append(cfg.PIIClassification.Classifiers, config.ClassifierConfig{
+			Name: e.name, Type: "router-test", Mode: e.mode, Endpoint: "http://127.0.0.1:1", DataBoundary: "internal",
+		})
+	}
+	r, in := routingSetup(t, cfg)
+	return r, in, fakes
+}
+
+// Ruling 23: a flag from one Enforce entry and an error from another apply
+// both obligations, so the stricter one wins, as for the regex triggers.
+func TestClassifierFlagDoesNotHideAnotherEntrysFailure(t *testing.T) {
+	fail := func([]string) (classifier.Verdict, error) { return 0, classifier.ErrTransport }
+	for name, second := range map[string]func([]string) (classifier.Verdict, error){"error": fail, "abstain": always(classifier.Abstain)} {
+		t.Run(name, func(t *testing.T) {
+			r, in, fakes := multiClassifierSetup(t, fakeEntry{"fake-a", "Enforce", always(classifier.Flagged)}, fakeEntry{"fake-b", "Enforce", second})
+			p := privatePolicy("privacy", "private-alias") // onDetected InternalOnly
+			p.Rules[0].SensitiveData.OnUninspectable = v1alpha1.Block
+			installRoutingPolicies(r, p)
+			in.AllowedRegions = []string{"eu"}
+			got, err := r.RouteRequest(context.Background(), in)
+			requireDenied(t, got, err, "sensitive_blocked")
+			if fakes[0].calls() != 1 || fakes[1].calls() != 1 || !slices.Contains(got.Decision.Categories, "model_pii") {
+				t.Fatalf("calls %d/%d, evidence %+v", fakes[0].calls(), fakes[1].calls(), got.Decision)
+			}
+		})
+	}
+	t.Run("both InternalOnly", func(t *testing.T) {
+		r, in, _ := multiClassifierSetup(t, fakeEntry{"fake-a", "Enforce", always(classifier.Flagged)}, fakeEntry{"fake-b", "Enforce", fail})
+		installRoutingPolicies(r, privatePolicy("privacy", "private-alias"))
+		in.AllowedRegions = []string{"eu"}
+		got, err := r.RouteRequest(context.Background(), in)
+		if err != nil || got.Model != "private" || got.Decision.Privacy != "internal_only" {
+			t.Fatalf("%+v %v", got, err)
+		}
+	})
+}
+
+// Only Enforce entries restrict, whatever the other entries say.
+func TestClassifierMixedShadowAndEnforce(t *testing.T) {
+	r0, in0 := routingSetup(t, routingConfig())
+	installRoutingPolicies(r0, privatePolicy("privacy", "private-alias"))
+	unrestricted, err := r0.RouteRequest(context.Background(), in0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("Shadow flag, Enforce clear", func(t *testing.T) {
+		r, in, _ := multiClassifierSetup(t, fakeEntry{"shadow", "Shadow", always(classifier.Flagged)}, fakeEntry{"enforce", "Enforce", always(classifier.Clear)})
+		installRoutingPolicies(r, privatePolicy("privacy", "private-alias"))
+		got, err := r.RouteRequest(context.Background(), in)
+		if err != nil || got.Model != unrestricted.Model || len(got.Chain) != len(unrestricted.Chain) || got.Decision.Privacy != unrestricted.Decision.Privacy || slices.Contains(got.Decision.Categories, "model_pii") {
+			t.Fatalf("a Shadow flag restricted routing: %+v %v", got, err)
+		}
+		want := []ClassifierRef{
+			{Name: "shadow", Boundary: "internal", Mode: "Shadow", Result: "flagged", WouldRestrict: true},
+			{Name: "enforce", Boundary: "internal", Mode: "Enforce", Result: "clear"},
+		}
+		if !reflect.DeepEqual(got.Decision.Classifiers, want) {
+			t.Fatalf("evidence %+v", got.Decision.Classifiers)
+		}
+	})
+	t.Run("Enforce flag, Shadow clear", func(t *testing.T) {
+		r, in, _ := multiClassifierSetup(t, fakeEntry{"shadow", "Shadow", always(classifier.Clear)}, fakeEntry{"enforce", "Enforce", always(classifier.Flagged)})
+		installRoutingPolicies(r, privatePolicy("privacy", "private-alias"))
+		in.AllowedRegions = []string{"eu"}
+		got, err := r.RouteRequest(context.Background(), in)
+		if err != nil || got.Model != "private" || got.Decision.Privacy != "internal_only" || !slices.Contains(got.Decision.Categories, "model_pii") {
+			t.Fatalf("an Enforce flag did not restrict: %+v %v", got, err)
+		}
+		for _, ct := range got.Chain {
+			if ct.DataBoundary != "internal" {
+				t.Fatalf("external target in chain: %+v", ct)
+			}
+		}
+		want := []ClassifierRef{
+			{Name: "shadow", Boundary: "internal", Mode: "Shadow", Result: "clear"},
+			{Name: "enforce", Boundary: "internal", Mode: "Enforce", Result: "flagged"},
+		}
+		if !reflect.DeepEqual(got.Decision.Classifiers, want) {
+			t.Fatalf("evidence %+v", got.Decision.Classifiers)
+		}
+	})
+}
+
 func TestClassifierFlaggedRestrictsToInternalModels(t *testing.T) {
 	r, in, _ := classifierSetup(t, "Enforce", always(classifier.Flagged))
 	installRoutingPolicies(r, privatePolicy("privacy", "private-alias"))
