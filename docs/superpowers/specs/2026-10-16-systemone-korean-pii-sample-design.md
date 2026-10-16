@@ -485,8 +485,13 @@ examples/pii-classifier-ko/
   never published.
 - The image runs as non-root and is compatible with a read-only root
   filesystem (writable `/tmp` only).
-- It starts with `HF_HUB_OFFLINE=1`, so it needs no egress. The plan verifies
-  that the checkpoint loads offline before the image is published.
+- It starts with `HF_HUB_OFFLINE=1`, so it needs no egress. Verified on
+  2026-10-16: `laya-serve` 0.4.6 loaded exactly the publishable file set
+  (`model.safetensors`, `encoder/`, `tokenizer/`, `questions.json`,
+  `rl_agent_config.json`) with an empty Hugging Face cache and the offline
+  flags set. It attempted no download. A Korean positive probe scored 0.991,
+  and a phone-masking function scored 0.004. The plan repeats this check
+  inside the built image.
 - Environment defaults:
   - `LAYA_HOST=127.0.0.1`, `LAYA_PORT=8095`, `LAYA_DEVICE=cpu`;
   - `LAYA_MODELS=multilingual`, `LAYA_DEFAULT_MODEL=multilingual`;
