@@ -13,16 +13,19 @@ import urllib.request
 
 def main() -> None:
     repo, revision, sums, out = sys.argv[1:5]
-    if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", repo):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*", repo):
         sys.exit("HF_REPO must be <org>/<name>")
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         sys.exit("HF_REVISION must be a full 40-character commit")
     with open(sums, encoding="utf-8") as f:
         entries = [line.split(None, 1) for line in f if line.strip()]
     for digest, name in entries:
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            sys.exit(f"bad sha256 digest in SHA256SUMS: {digest}")
+        if name.strip().lstrip("*").startswith("/") or ".." in name.strip().lstrip("*").split("/"):
+            sys.exit(f"unsafe path in SHA256SUMS: {name.strip()}")
+    for digest, name in entries:
         name = name.strip().lstrip("*")
-        if name.startswith("/") or ".." in name.split("/"):
-            sys.exit(f"unsafe path in SHA256SUMS: {name}")
         dest = os.path.join(out, name)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         h = hashlib.sha256()

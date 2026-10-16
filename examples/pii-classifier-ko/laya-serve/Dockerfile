@@ -6,18 +6,18 @@
 ARG WEIGHTS=hf
 ARG PYTHON_IMAGE=python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
-FROM ${PYTHON_IMAGE} AS weights-hf
+FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS weights-hf
 ARG HF_REPO
 ARG HF_REVISION
 COPY SHA256SUMS fetch_weights.py /src/
 RUN python /src/fetch_weights.py "$HF_REPO" "$HF_REVISION" /src/SHA256SUMS /weights
 
-FROM ${PYTHON_IMAGE} AS weights-local
+FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS weights-local
 COPY SHA256SUMS /src/
 COPY --from=localweights . /in/
 # Copy only the listed files: a training directory also holds optimizer state.
 RUN cd /in && sha256sum -c /src/SHA256SUMS \
- && while read -r _ f; do mkdir -p "/weights/$(dirname "$f")" && cp "$f" "/weights/$f"; done < /src/SHA256SUMS
+ && while read -r _ f; do [ -n "$f" ] || continue; f="${f#\*}"; mkdir -p "/weights/$(dirname "$f")" && cp "$f" "/weights/$f"; done < /src/SHA256SUMS
 
 FROM weights-${WEIGHTS} AS weights
 

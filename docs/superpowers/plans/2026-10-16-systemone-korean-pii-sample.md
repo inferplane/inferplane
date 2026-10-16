@@ -5778,16 +5778,19 @@ import urllib.request
 
 def main() -> None:
     repo, revision, sums, out = sys.argv[1:5]
-    if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", repo):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*", repo):
         sys.exit("HF_REPO must be <org>/<name>")
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         sys.exit("HF_REVISION must be a full 40-character commit")
     with open(sums, encoding="utf-8") as f:
         entries = [line.split(None, 1) for line in f if line.strip()]
     for digest, name in entries:
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            sys.exit(f"bad sha256 digest in SHA256SUMS: {digest}")
+        if name.strip().lstrip("*").startswith("/") or ".." in name.strip().lstrip("*").split("/"):
+            sys.exit(f"unsafe path in SHA256SUMS: {name.strip()}")
+    for digest, name in entries:
         name = name.strip().lstrip("*")
-        if name.startswith("/") or ".." in name.split("/"):
-            sys.exit(f"unsafe path in SHA256SUMS: {name}")
         dest = os.path.join(out, name)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         h = hashlib.sha256()
@@ -5843,18 +5846,18 @@ Expected: both files pin `laya==0.4.6`, `torch==2.14.1+cpu` and `transformers==5
 ARG WEIGHTS=hf
 ARG PYTHON_IMAGE=python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
-FROM ${PYTHON_IMAGE} AS weights-hf
+FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS weights-hf
 ARG HF_REPO
 ARG HF_REVISION
 COPY SHA256SUMS fetch_weights.py /src/
 RUN python /src/fetch_weights.py "$HF_REPO" "$HF_REVISION" /src/SHA256SUMS /weights
 
-FROM ${PYTHON_IMAGE} AS weights-local
+FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS weights-local
 COPY SHA256SUMS /src/
 COPY --from=localweights . /in/
 # Copy only the listed files: a training directory also holds optimizer state.
 RUN cd /in && sha256sum -c /src/SHA256SUMS \
- && while read -r _ f; do mkdir -p "/weights/$(dirname "$f")" && cp "$f" "/weights/$f"; done < /src/SHA256SUMS
+ && while read -r _ f; do [ -n "$f" ] || continue; f="${f#\*}"; mkdir -p "/weights/$(dirname "$f")" && cp "$f" "/weights/$f"; done < /src/SHA256SUMS
 
 FROM weights-${WEIGHTS} AS weights
 
@@ -5883,7 +5886,7 @@ docker buildx build --load --platform linux/arm64 --build-arg WEIGHTS=local \
 docker image inspect laya-ko-pii:local --format '{{.Size}} bytes, user {{.Config.User}}'
 docker run -d --rm --name laya-ko-smoke --network none --read-only --tmpfs /tmp:rw,size=512m laya-ko-pii:local
 for i in $(seq 1 30); do docker exec laya-ko-smoke python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8095/health', timeout=2)" 2>/dev/null && break; sleep 2; done
-docker exec laya-ko-smoke python - <<'EOF'
+docker exec -i laya-ko-smoke python - <<'EOF'
 import json, urllib.request
 q = {"pii": {"type": "noul", "instructions": "Does this text contain personal information about a specific person, or a secret credential?"}}
 for text in ["고객 김민수(010-2345-6789)의 배송지는 서울시 마포구 월드컵로 12입니다.", "def mask_phone(p): return p[:3] + '-****-' + p[-4:]"]:
@@ -5921,12 +5924,22 @@ permissions:
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
+      - name: Validate inputs
+        env:
+          HF_REPO: ${{ inputs.hf_repo }}
+          HF_REVISION: ${{ inputs.hf_revision }}
+        run: |
+          [[ "$HF_REPO" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "::error::hf_repo must be <org>/<name>"; exit 1; }
+          [[ "$HF_REVISION" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::hf_revision must be a full 40-character commit"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -5953,7 +5966,7 @@ jobs:
         run: echo "ghcr.io/inferplane/laya-ko-pii@${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
 ```
 
-The inputs reach the build only as build arguments, never as shell text. `fetch_weights.py` validates both inputs.
+A first step validates both inputs through environment variables (anchored patterns, so no newline can add build arguments), the job runs only from `main`, and `fetch_weights.py` validates them again.
 
 - [ ] **Step 6: Keep training artifacts out of git and build contexts**
 
