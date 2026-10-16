@@ -1,4 +1,4 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 827c858b1f12 · generated-at: 2026-10-11 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 81c333af47ec · generated-at: 2026-10-16 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
 > from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
 > per-AI copy).
@@ -117,6 +117,14 @@ credentials, or a real IdP (httptest fakes only).
   still require runtime revalidation and an upgraded producer/consumer/CRD set.
 - Rejected privacy or strict-budget distribution gates affected subjects until
   valid recovery. Count APIs stay local/200 on refusal or unready/stale gates.
+- Opt-in `pii_classification` adds learned signals to the same sensitiveData
+  rules. `internal/classifier` is a stdlib leaf seam; concrete types live in
+  `plugins/<type>` (e.g. `systemone/`, blank-imported). Only Enforce restricts:
+  a flag applies onDetected (Mask escalates to onUninspectable); abstain,
+  timeout and errors apply onUninspectable. Shadow only records. Counts never
+  call a classifier. The verdict cache is per-generation, clear-only, whole-window
+  and HMAC-keyed; only the internal boundary is supported; classifiers never
+  edit bodies, and audit/metrics never carry text, probabilities or endpoints.
 - Audit additions are append-only/omitempty; metric dimensions remain bounded.
   No prompt, detected value, session ID, user or key ID enters new metric labels.
 - Evaluate task success, total settled cost including cold-cache/retries and
