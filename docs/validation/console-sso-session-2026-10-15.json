@@ -27,7 +27,8 @@
     "invalid_grant refusal without retry",
     "absolute expiry",
     "stale code/renewal reply fencing",
-    "manual token never persists"
+    "manual token never persists",
+    "equivalent audience string/array and ordering; malformed or expanded audience refusal"
   ],
   "actual_human_signin_tested": false
 }

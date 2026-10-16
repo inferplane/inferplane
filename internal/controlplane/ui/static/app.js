@@ -1473,6 +1473,17 @@
     }, delay);
   }
 
+  function sameSSOAudience(before, after) {
+    const normalize = value => {
+      const values = typeof value === "string" ? [value] : value;
+      if (!Array.isArray(values) || !values.length
+          || !values.every(item => typeof item === "string" && item.length)) return null;
+      return JSON.stringify([...new Set(values)].sort());
+    };
+    const original = normalize(before), renewed = normalize(after);
+    return original !== null && renewed !== null && original === renewed;
+  }
+
   async function ensureSSOToken(sid) {
     const current = ssoRuntime;
     if (!current || sid !== session) return;
@@ -1507,7 +1518,7 @@
         if (!Number.isSafeInteger(next.exp) || next.exp * 1000 <= Date.now()
             || typeof current.claims.sub !== "string" || !current.claims.sub
             || next.sub !== current.claims.sub || next.iss !== current.claims.iss
-            || JSON.stringify(next.aud) !== JSON.stringify(current.claims.aud)
+            || !sameSSOAudience(current.claims.aud, next.aud)
             || next.token_use !== current.claims.token_use) throw Error("SSO identity changed during renewal.");
         if (sid !== session || ssoRuntime !== current) return;
         token = tokens.id_token;

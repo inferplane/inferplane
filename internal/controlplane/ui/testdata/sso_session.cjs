@@ -55,7 +55,26 @@ const wait = async () => { await new Promise(resolve => setTimeout(resolve, 110)
     assert.equal(rejected.redirects.length, 0);
     assert.equal(saved.has('ip_sso_session'), false);
   }
-  for (const extra of [{ sub: 'other-user' }, { iss: 'https://other-idp.invalid' }, { aud: 'other-client' }]) {
+  // Audience is a set: string/array forms and array ordering are equivalent.
+  for (const [before, after] of [
+    ['fixture-client', ['fixture-client']],
+    [['fixture-client'], 'fixture-client'],
+    [['fixture-client', 'second-client'], ['second-client', 'fixture-client']],
+  ]) {
+    const original = jwt(Math.floor(epoch / 1000) + 90, { aud: before });
+    const replacement = jwt(Math.floor(epoch / 1000) + 3600, { aud: after });
+    const equivalent = boot({ sso: true, now: epoch, idToken: original, refreshedIDToken: replacement,
+      refreshToken: 'fixture-refresh', acceptTokens: [original, replacement] });
+    await wait(); equivalent.advance(31000); await equivalent.runTimers();
+    assert.equal(equivalent.$('workspace-content').hidden, false, 'equivalent audiences locked renewal');
+    await equivalent.$('refresh').fire('click');
+    assert(equivalent.calls.filter(c => c.url.startsWith('/v1alpha1/')).slice(-5)
+      .every(c => c.init.headers.Authorization === 'Bearer ' + replacement));
+    await equivalent.$('disconnect').fire('click');
+  }
+  for (const extra of [{ sub: 'other-user' }, { iss: 'https://other-idp.invalid' }, { aud: 'other-client' },
+    { aud: ['fixture-client', 'other-client'] }, { aud: [] }, { aud: null },
+    { aud: ['fixture-client', 7] }, { aud: { 0: 'fixture-client' } }, { aud: '' }]) {
     const bad = jwt(Math.floor(epoch / 1000) + 3600, extra);
     const rejected = boot({ sso: true, now: epoch, idToken: initial, refreshedIDToken: bad, refreshToken: 'fixture-refresh', acceptTokens: [initial] });
     await wait(); rejected.advance(31000); await rejected.runTimers();
