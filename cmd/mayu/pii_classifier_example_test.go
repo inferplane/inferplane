@@ -96,12 +96,27 @@ func fakeSystemoneCounting(t *testing.T, marker string, calls *atomic.Int64) *ht
 
 func classifierGateway(t *testing.T, endpoint, mode string) (*gateway, string) {
 	t.Helper()
+	return classifierGatewayWith(t, endpoint, mode, nil, 0)
+}
+
+// classifierGatewayWith adds systemone options to {"model": "multilingual"}
+// and sets timeout_ms when it is positive.
+func classifierGatewayWith(t *testing.T, endpoint, mode string, options map[string]any, timeoutMS int) (*gateway, string) {
+	t.Helper()
+	opts := map[string]any{"model": "multilingual"}
+	for k, v := range options {
+		opts[k] = v
+	}
 	doc := routingPrivacyDoc() // team engineering: InternalOnly to "private", Block when uninspectable
 	path := routingAcceptanceConfig(t, &doc, func(cfg map[string]any, _ string) {
-		cfg["pii_classification"] = map[string]any{"classifiers": []map[string]any{{
+		block := map[string]any{"classifiers": []map[string]any{{
 			"name": "laya-ko", "type": "systemone", "mode": mode, "revision": "test",
-			"endpoint": endpoint, "data_boundary": "internal", "options": map[string]any{"model": "multilingual"},
+			"endpoint": endpoint, "data_boundary": "internal", "options": opts,
 		}}}
+		if timeoutMS > 0 {
+			block["timeout_ms"] = timeoutMS
+		}
+		cfg["pii_classification"] = block
 	})
 	return bootRoutingAcceptance(t, path)
 }
