@@ -70,3 +70,71 @@ Responses remote-tool egress cannot be authorized merely by an internal model
 label. Strict budget constraints also gate rejected policy updates and filter
 every subsequent context choice, affinity hit and fallback. Session hints are
 scoped HMAC inputs only; they never become principals or audit dimensions.
+
+### Opt-in PII classifiers (systemone)
+
+`pii_classification` attaches up to four self-hosted classifiers to the existing
+`sensitiveData` rules (specification:
+`docs/superpowers/specs/2026-10-16-systemone-korean-pii-sample-design.md`).
+
+**Input.** A classifier reads every text the regex inspector reads: system
+input, tool schemas, all turns and tool results. Roles and history positions
+are never trusted.
+
+**Restriction.** Only Enforce entries restrict routing.
+- A flag applies `onDetected`. A Mask rule escalates to `onUninspectable`,
+  because a verdict has no spans to redact.
+- Abstain, timeout and errors apply `onUninspectable`, so the classifier fails
+  closed. A flag from one entry and an abstain or error from another apply
+  both actions, so the stricter one wins.
+- Shadow entries are recorded and never change routing.
+- count_tokens never calls a classifier. For a team with an Enforce entry and
+  an applicable `sensitiveData` rule, a count is uninspectable and gets
+  `onUninspectable`; a denied count still returns HTTP 200 with a local
+  estimate.
+
+**Truncation.** A window the server reports as cut is never Clear: it is
+Abstain unless the part that was read flags. laya-serve cuts each window to
+the checkpoint's token budget without an error, about 980 state tokens for
+the sample checkpoint, and reports the cut in `usage`. 1,000 runes are about
+600 tokens of Korean prose, 170 of English prose and 370 of Go code, so
+ordinary coding text fits the default `window_runes`. Lock-file hashes, JSON
+numbers and UUID lists come close (805 to 934 tokens per 1,000 runes); phone
+or resident-number lists (1,035), crafted windows and a larger `window_runes`
+can exceed it, and such windows fail closed. The gateway never estimates
+tokens. Under the default `truncation: "reported"` a result without
+`usage.truncated` is Abstain, so `LAYA_JEV_STRICT` must stay off for
+laya-serve: it strips those fields.
+`truncation: "rejected"` is for a server that refuses over-length input with
+an HTTP error, such as strands-decider `--strict-window`. Under `rejected` the
+gateway trusts that assertion: a server that cuts input silently (for example
+strands-decider without `--strict-window`) gets verdicts on a prefix, which can
+be Clear and cached.
+
+**Boundary.** Only the `internal` boundary is supported. The HTTP client
+ignores proxy environment variables and redirects.
+
+**Verdict cache.** A node-local cache stores only clear verdicts, keyed by an
+HMAC under a per-generation random key over the team, the classifier settings,
+the applicable policy generations and the whole window text, so parts cleared
+separately never clear their combination. It stores no text, and it is
+cleared with every new generation: each reload, UI topology write and
+restart.
+
+**Evidence.** Audit and metrics carry bounded enums plus the declared
+classifier name and revision. They never carry text, windows, probabilities,
+digests or endpoints.
+
+**Known limits.**
+- A name and an attribute in different windows or turns are not read
+  together.
+- Per-key limits do not bound classifier load. Classification runs inside
+  routing, before governance admission, so a key over its rate or budget
+  limit still causes up to `max_windows` sidecar inferences per request
+  before it is refused. Size the sidecar for the request rate of the teams it
+  serves. laya-serve admits `LAYA_MAX_CONCURRENT` requests at once (default
+  16) and answers the rest with 503; it runs one inference at a time, so
+  admitted requests queue. Batch mode sends one sidecar request per gateway
+  request, with up to `max_windows` windows. Saturation fails closed in
+  Enforce (`onUninspectable`) and adds up to `timeout_ms` of latency in
+  Shadow. A cross-request cap on classifier calls is a follow-up.

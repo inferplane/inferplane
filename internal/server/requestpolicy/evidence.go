@@ -48,6 +48,9 @@ func Observe(w http.ResponseWriter, req *http.Request, result router.RequestRout
 			Model:  r.Model, Reason: r.Reason,
 		})
 	}
+	for _, c := range d.Classifiers {
+		ref.Classifiers = append(ref.Classifiers, audit.ClassifierRef{Name: c.Name, Revision: c.Revision, Boundary: c.Boundary, Mode: c.Mode, Result: c.Result, WouldRestrict: c.WouldRestrict})
+	}
 	if len(result.Chain) > 0 {
 		ref.PlannedProvider = result.Chain[0].ProviderName
 		ref.PlannedBoundary = result.Chain[0].DataBoundary

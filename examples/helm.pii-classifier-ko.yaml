@@ -1,0 +1,46 @@
+# Korean PII classifier sample: the Laya sidecar plus a Shadow classifier for
+# team pilot-ko. Merge with your own values and replace the internal provider.
+# Set piiClassifier.laya.image.digest to the published digest
+# (examples/pii-classifier-ko/README.md).
+piiClassifier:
+  laya:
+    enabled: true
+    image:
+      repository: ghcr.io/inferplane/laya-ko-pii
+      digest: ""
+config:
+  policies: ["/etc/inferplane/policies"]
+  providers:
+    private-vllm:
+      type: openai_compatible
+      base_url: http://vllm.inference.svc.cluster.local:8000/v1
+      data_boundary: internal
+  models:
+    private-coder:
+      context_window: 32768
+      capabilities: [tools]
+      targets: [ { provider: private-vllm, model: qwen2.5-coder } ]
+  teams:
+    pilot-ko: { allowed_models: ["claude-sonnet-4-6", "private-coder"] }
+  pii_classification:
+    timeout_ms: 3000
+    classifiers:
+      - name: laya-ko
+        type: systemone
+        mode: Shadow
+        revision: laya-ko-pii-v3s1
+        teams: [pilot-ko]
+        endpoint: http://127.0.0.1:8095
+        data_boundary: internal
+        options: { model: multilingual, max_windows: 4, abstain_band: { low: 0.1, high: 0.9 } }
+policies:
+  pilot-ko-privacy.yaml: |
+    apiVersion: inferplane.dev/v1alpha1
+    kind: GovernancePolicy
+    metadata: { name: pilot-ko-privacy, generation: 1 }
+    spec:
+      subject: { team: pilot-ko }
+      rules:
+        - name: protected-content
+          failurePolicy: FailClosed
+          sensitiveData: { onDetected: InternalOnly, onUninspectable: InternalOnly, internalModels: [private-coder] }

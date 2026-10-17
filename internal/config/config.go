@@ -547,6 +547,9 @@ type Config struct {
 	// policies, budget leases, and rejection reporting flow over one
 	// heartbeat. Mutually exclusive with Policies.
 	ControlPlane *ControlPlaneConfig `json:"control_plane,omitempty"`
+	// PIIClassification opts in to PII classifiers that restrict routing
+	// through sensitiveData rules. Absent means no classifier and no cost.
+	PIIClassification *PIIClassificationConfig `json:"pii_classification,omitempty"`
 	// BudgetTimezone is the IANA zone name the CALENDAR-DAY budget window
 	// anchors its midnight to (e.g. "Asia/Seoul"). Empty = "UTC", which is
 	// byte-for-byte the behavior every budget window had before this key
@@ -730,8 +733,9 @@ func LoadRaw(path string) (*Config, error) {
 		Audit struct {
 			LogBodies map[string]json.RawMessage `json:"log_bodies"`
 		} `json:"audit"`
-		BudgetAlerts map[string]json.RawMessage   `json:"budget_alerts"`
-		VirtualKeys  []map[string]json.RawMessage `json:"virtual_keys"`
+		BudgetAlerts      map[string]json.RawMessage   `json:"budget_alerts"`
+		VirtualKeys       []map[string]json.RawMessage `json:"virtual_keys"`
+		PIIClassification json.RawMessage              `json:"pii_classification"`
 	}
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
@@ -763,6 +767,10 @@ func LoadRaw(path string) (*Config, error) {
 			return nil, fmt.Errorf("config: virtual_keys[%d] has inline key; use key_ref (§7)", i)
 		}
 	}
+	if err := checkPIIClassificationRaw(probe.PIIClassification); err != nil {
+		return nil, err
+	}
+
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
@@ -828,6 +836,9 @@ func LoadRaw(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := validateSharedStores(&cfg); err != nil {
+		return nil, err
+	}
+	if err := validatePIIClassification(cfg.PIIClassification); err != nil {
 		return nil, err
 	}
 	return &cfg, nil

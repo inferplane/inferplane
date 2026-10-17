@@ -97,6 +97,40 @@ resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { memory: 256Mi }
 
+# Opt-in Korean PII classifier sidecar (examples/pii-classifier-ko). It runs
+# laya-serve with the fine-tuned checkpoint baked into the image and listens on
+# 127.0.0.1 inside the pod only: no Service port, no containerPort. Point
+# config.pii_classification at http://127.0.0.1:<port>
+# (examples/helm.pii-classifier-ko.yaml). Off by default.
+# Measured 2026-10-16 on CPU: ready in about 14 s; RSS 2.0 GiB idle, 2.6 GiB
+# peak; about 0.5 s per 1,000-character Korean window (an evaluation profile).
+# Sizing: per-key rate and budget limits do not bound classifier load, because
+# classification runs during routing, before admission; each gateway request
+# can cost up to max_windows inferences. laya-serve admits LAYA_MAX_CONCURRENT
+# requests at once (default 16), answers the rest with 503 and runs one
+# inference at a time. Saturation fails closed in Enforce and adds up to
+# timeout_ms of latency in Shadow.
+# The chart never sets LAYA_JEV_STRICT; keep it unset. It strips the usage
+# truncation fields the gateway reads, and every result would then abstain.
+piiClassifier:
+  laya:
+    enabled: false
+    image:
+      repository: ghcr.io/inferplane/laya-ko-pii
+      digest: ""          # required when enabled: sha256:...
+    port: 8095
+    threads: 2
+    # Optional Secret with key LAYA_API_KEY; the sidecar then requires
+    # "Authorization: Bearer <key>". The gateway container loads every key of
+    # secrets.existingSecret as env (envFrom), so put the same LAYA_API_KEY there
+    # (or name that Secret here) and set api_key_ref: {env: LAYA_API_KEY} on the
+    # classifier in config.pii_classification.
+    apiKeySecret: ""
+    # No CPU limit: throttling adds latency to every classified request.
+    resources:
+      requests: { cpu: "2", memory: 3Gi }
+      limits: { memory: 4Gi }
+
 # GovernancePolicy documents (api/v1alpha1, ADR-033/035): filename → document
 # body (multi-doc YAML allowed). Rendered into a ConfigMap mounted at
 # /etc/inferplane/policies; add `policies: ["/etc/inferplane/policies"]` to

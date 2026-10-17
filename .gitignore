@@ -37,3 +37,9 @@ coverage.out
 # Process core dumps (may contain secrets from process memory)
 /core
 core.[0-9]*
+
+# Korean PII sample: generated data, model files and local environments
+examples/pii-classifier-ko/training/data/
+*.safetensors
+venv/
+.venv/

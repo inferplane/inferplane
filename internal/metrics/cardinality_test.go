@@ -44,6 +44,7 @@ func TestNoMetricCarriesAUserLabel(t *testing.T) {
 	m.IncAnchorFailure()
 	m.IncUsageWindowDropped()
 	m.ObserveRoutingDecision("team-a", "Shadow", "context_shadow")
+	m.ObservePIIClassifier("laya-ko", "r1", "Shadow", "flagged", 0.1, 2, 1, 1)
 
 	mfs, err := m.reg.Gather()
 	if err != nil {

@@ -389,6 +389,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 	}
 	holder := &live.Holder{}
 	holder.Swap(st)
+	m.RetainPIIClassifiers(classifierRevisions(st))
 	if polStore != nil {
 		polStore.SetRoutedAndPriced(holder.RoutedAndPriced)
 		// The initial file load precedes topology construction. Revalidate now,
@@ -1114,6 +1115,18 @@ func modeBAggregatorConfig(mb *config.AnalyticsModeB) (pgstore.AggregatorConfig,
 	return cfg, nil
 }
 
+// classifierRevisions names the PII classifiers of a generation, for metric
+// series retention after a swap.
+func classifierRevisions(st *live.State) map[string]string {
+	out := map[string]string{}
+	if set := st.Classifiers(); set != nil {
+		for _, e := range set.Entries {
+			out[e.Name] = e.Revision
+		}
+	}
+	return out
+}
+
 // buildMasking resolves the configured request-filter plugins into a
 // filter.Masking (ADR-009). Each plugin name must be registered (blank-imported)
 // — an unknown name fails the boot. v1 supports one masking filter; the last
@@ -1211,7 +1224,8 @@ func (g *gateway) reloadLocked() error {
 	if err := validateDurableModels(cfg, st); err != nil {
 		return fmt.Errorf("reload: %w", err)
 	}
-	g.holder.Swap(st)                   // one atomic publish — every reader flips together
+	g.holder.Swap(st) // one atomic publish — every reader flips together
+	g.metrics.RetainPIIClassifiers(classifierRevisions(st))
 	g.router.RetainBreakers(identities) // drop breaker state for removed/re-pointed providers
 	return nil
 }
@@ -1293,6 +1307,7 @@ func (g *gateway) writeMutation(ctx context.Context, persist func(context.Contex
 		return err // e.g. providerstore.ErrNotFound on DELETE → 404; nothing swapped
 	}
 	g.holder.Swap(st)
+	g.metrics.RetainPIIClassifiers(classifierRevisions(st))
 	g.router.RetainBreakers(identities)
 	return nil
 }
