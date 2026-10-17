@@ -1,0 +1,19 @@
+# Korean PII sample. Targets belong to examples/config.pii-classifier-ko.json.
+apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata:
+  name: pilot-ko-privacy
+  generation: 1
+spec:
+  subject:
+    team: pilot-ko
+  rules:
+    - name: protected-content
+      failurePolicy: FailClosed
+      sensitiveData:
+        # A regex detection or an Enforce classifier flag keeps the request on
+        # the internal model. An unreachable, slow or uncertain classifier in
+        # Enforce does the same (fail closed).
+        onDetected: InternalOnly
+        onUninspectable: InternalOnly
+        internalModels: [private-coder]

@@ -1,0 +1,50 @@
+{
+  "_comment": "Korean PII classifier sample (opt-in). Laya listens on 127.0.0.1:8095 next to the gateway (see examples/pii-classifier-ko/README.md). The classifier starts in Shadow for team pilot-ko. Endpoints, model IDs and rates are illustrative: replace and verify before use. Run from the repository root. Boundary labels are operator assertions.",
+  "server": {
+    "listen": "127.0.0.1:8080",
+    "admin_listen": "127.0.0.1:9090",
+    "admin_auth": { "token_refs": [ { "env": "INFERPLANE_ADMIN_TOKEN" } ] }
+  },
+  "key_store": { "type": "sqlite", "path": "/tmp/inferplane-pii-ko-demo/keys.db" },
+  "audit": {
+    "failure_mode": "buffer_then_block",
+    "buffer": { "path": "/tmp/inferplane-pii-ko-demo/audit.wal" },
+    "sinks": [ { "type": "file", "path": "/tmp/inferplane-pii-ko-demo/audit.jsonl" } ]
+  },
+  "policies": [ "examples/pii-classifier-ko/governance.yaml" ],
+  "providers": {
+    "approved-public": { "type": "openai_compatible", "base_url": "https://public-models.example.invalid/v1", "data_boundary": "external", "api_key_ref": { "env": "PII_KO_PUBLIC_KEY" } },
+    "approved-private": { "type": "openai_compatible", "base_url": "http://127.0.0.1:11434/v1", "data_boundary": "internal" }
+  },
+  "models": {
+    "premium-coder": { "context_window": 32768, "capabilities": ["tools"], "targets": [ { "provider": "approved-public", "model": "premium-v1" } ] },
+    "private-coder": { "context_window": 32768, "capabilities": ["tools"], "targets": [ { "provider": "approved-private", "model": "qwen2.5-coder" } ] }
+  },
+  "model_fallback_family": false,
+  "teams": { "pilot-ko": { "allowed_models": [ "premium-coder", "private-coder" ] } },
+  "pricing": {
+    "on_missing": "block",
+    "version": "illustrative-pii-ko-v1",
+    "overrides": {
+      "approved-public": { "premium-v1": { "input_per_mtok": 5, "output_per_mtok": 15 } },
+      "approved-private": { "qwen2.5-coder": { "input_per_mtok": 2, "output_per_mtok": 4 } }
+    }
+  },
+  "pii_classification": {
+    "timeout_ms": 3000,
+    "cache": { "max_entries": 100000, "ttl_seconds": 3600 },
+    "classifiers": [
+      {
+        "name": "laya-ko",
+        "type": "systemone",
+        "mode": "Shadow",
+        "revision": "laya-ko-pii-v3s1",
+        "teams": [ "pilot-ko" ],
+        "endpoint": "http://127.0.0.1:8095",
+        "data_boundary": "internal",
+        "threshold": 0.5,
+        "options": { "model": "multilingual", "max_windows": 4, "abstain_band": { "low": 0.1, "high": 0.9 } }
+      }
+    ]
+  }
+}

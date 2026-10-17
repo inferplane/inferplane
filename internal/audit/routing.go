@@ -25,6 +25,7 @@ type RoutingRef struct {
 	ActualProvider  string                  `json:"actual_provider,omitempty"`
 	ActualBoundary  string                  `json:"actual_boundary,omitempty"`
 	Masked          bool                    `json:"masked,omitempty"`
+	Classifiers     []ClassifierRef         `json:"classifiers,omitempty"`
 }
 
 type RoutingPolicyRef struct {
@@ -39,6 +40,17 @@ type RoutingRecommendation struct {
 	Reason string           `json:"reason"`
 }
 
+// ClassifierRef is the bounded evidence of one PII classifier entry. It never
+// carries text, windows, probabilities, digests, endpoints or tokens.
+type ClassifierRef struct {
+	Name          string `json:"name"`
+	Revision      string `json:"revision,omitempty"`
+	Boundary      string `json:"boundary"`
+	Mode          string `json:"mode"`
+	Result        string `json:"result"`
+	WouldRestrict bool   `json:"would_restrict,omitempty"`
+}
+
 type routingKey struct{}
 
 func cloneRouting(r *RoutingRef) *RoutingRef {
@@ -49,6 +61,7 @@ func cloneRouting(r *RoutingRef) *RoutingRef {
 	c.Categories = slices.Clone(r.Categories)
 	c.Policies = slices.Clone(r.Policies)
 	c.Recommendations = slices.Clone(r.Recommendations)
+	c.Classifiers = slices.Clone(r.Classifiers)
 	return &c
 }
 

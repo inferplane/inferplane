@@ -72,6 +72,51 @@ spec:
               mountPath: /etc/inferplane/policies
               readOnly: true
             {{- end }}
+        {{- with .Values.piiClassifier }}{{- with .laya }}{{- if .enabled }}
+        {{- if not .image.digest }}{{- fail "piiClassifier.laya.image.digest is required when the sidecar is enabled" }}{{- end }}
+        - name: laya-ko-pii
+          image: "{{ .image.repository }}@{{ .image.digest }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LAYA_HOST
+              value: "127.0.0.1"
+            - name: LAYA_PORT
+              value: {{ .port | quote }}
+            - name: LAYA_THREADS
+              value: {{ .threads | quote }}
+            {{- if .apiKeySecret }}
+            - name: LAYA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .apiKeySecret }}
+                  key: LAYA_API_KEY
+            {{- end }}
+          # The server binds 127.0.0.1, so probes run inside the container
+          # rather than from the kubelet against the pod IP.
+          startupProbe:
+            exec:
+              command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:{{ .port }}/health', timeout=2)"]
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:{{ .port }}/health', timeout=2)"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .resources | nindent 12 }}
+          volumeMounts:
+            - name: laya-tmp
+              mountPath: /tmp
+        {{- end }}{{- end }}{{- end }}
       volumes:
         - name: config
           configMap:
@@ -89,6 +134,10 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- end }}
+        {{- if dig "laya" "enabled" false (default dict .Values.piiClassifier) }}
+        - name: laya-tmp
+          emptyDir: {}
         {{- end }}
   {{- if $stateful }}
   volumeClaimTemplates:

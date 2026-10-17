@@ -69,6 +69,8 @@ func TestNilMetricsNoPanic(t *testing.T) {
 	m.IncPricingMiss("p", "m")
 	m.IncAuditFailure("file")
 	m.SetAuditBufferUtilization(0.1)
+	m.ObservePIIClassifier("c", "r", "Shadow", "clear", 0, 1, 1, 1)
+	m.RetainPIIClassifiers(nil)
 	// no panic = pass
 }
 

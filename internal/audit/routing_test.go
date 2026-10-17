@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -91,4 +92,22 @@ func TestRoutingDTOContainsOnlyScalarMetadata(t *testing.T) {
 		}
 	}
 	check(reflect.TypeOf(RoutingRef{}))
+}
+
+func TestRoutingClassifierRefsAreAppendOnlyAndCopied(t *testing.T) {
+	ref := &RoutingRef{RequestedModel: "m", Reason: "unchanged", Inspection: "complete",
+		Classifiers: []ClassifierRef{{Name: "laya-ko", Boundary: "internal", Mode: "Shadow", Result: "flagged", WouldRestrict: true}}}
+	b, err := json.Marshal(ref)
+	if err != nil || !bytes.HasSuffix(b, []byte(`,"classifiers":[{"name":"laya-ko","boundary":"internal","mode":"Shadow","result":"flagged","would_restrict":true}]}`)) {
+		t.Fatalf("%s %v", b, err)
+	}
+	ctx := WithRouting(context.Background(), ref)
+	ref.Classifiers[0].Result = "clear"
+	if RoutingFrom(ctx).Classifiers[0].Result != "flagged" {
+		t.Fatal("classifier refs were not copied")
+	}
+	legacy, _ := json.Marshal(&RoutingRef{RequestedModel: "m", Reason: "unchanged", Inspection: "complete"})
+	if bytes.Contains(legacy, []byte("classifiers")) {
+		t.Fatal("an empty classifier list was serialized")
+	}
 }

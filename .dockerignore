@@ -4,3 +4,6 @@ docs
 charts
 deploy
 *_test.go
+examples/pii-classifier-ko/training/data
+**/venv
+**/.venv

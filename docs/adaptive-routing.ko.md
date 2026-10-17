@@ -1,6 +1,6 @@
 ---
 translation_source: adaptive-routing.md
-translation_source_sha256: ae94c3275ef04db25d20b0de4c3aad031de667be2008657893324a70469e61c9
+translation_source_sha256: 5aef2b04c965ef0c4020b5035229184309dac151c6e4ff6fcaa06c8e08a646eb
 ---
 
 # 적응형 라우팅과 Codex {#adaptive-routing-and-codex}
@@ -17,7 +17,7 @@ translation_source_sha256: ae94c3275ef04db25d20b0de4c3aad031de667be2008657893324
 | --- | --- |
 | 약함·일반·강함 | `simpleModel`·선택적 `normalModel`·`complexModel`. 로컬 크기와 마지막 사용자 키워드 신호 |
 | 잦은 전환 방지 | 명시적 `stability`. 기본 유지 5분·성공 3회·세션 TTL 30분 |
-| 개인정보 전용 모델 | 명시적 승인 모델과 내부 공급자 메타데이터의 `InternalOnly` |
+| 개인정보 전용 모델 | 명시적 승인 모델과 내부 공급자 메타데이터의 `InternalOnly`; 선택적 `pii_classification`(Shadow/Enforce)이 학습 기반 트리거를 더함 |
 | 개인정보 마스킹 | 검사 가능한 탐지 내용에 `Mask`, 외부 호출 전 완전 변환·재검사 |
 | 예산 전환 | `budgetTiers.enforceTargets: true`, 임계값 100 지원. 모든 재시도가 선택 모델 내에 머묾 |
 | 총예산 하드 한도 | 독립적으로 유지. 저비용·내부 모델도 소진 시 거부 |

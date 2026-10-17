@@ -4,7 +4,7 @@
 // reader never observes a mixed generation (ADR-006).
 //
 // It is also the TOPOLOGY-ONLY builder boundary: it imports only config,
-// providers, and pricing — never the stateful constructors (governance,
+// providers, pricing, and the classifier leaf — never the stateful constructors (governance,
 // keystore, audit) or the server packages — so a reload cannot rebuild or
 // reset safety-critical state. An import-guard test enforces this structurally.
 package live
@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/inferplane/inferplane/internal/classifier"
 	"github.com/inferplane/inferplane/internal/config"
 	"github.com/inferplane/inferplane/internal/pricing"
 	"github.com/inferplane/inferplane/providers"
@@ -56,6 +57,9 @@ type State struct {
 	// fallbackFamily enables the same-family default heuristic in FallbackFor
 	// (config.Config.ModelFallbackFamily; default true). Set by BuildState.
 	fallbackFamily bool
+	// classifiers is the opt-in PII classifier Set of this generation, with
+	// its own verdict cache (set by BuildState; nil when not configured).
+	classifiers *classifier.Set
 }
 
 // Providers returns the provider instances by config name. The map is a copy;
@@ -402,6 +406,11 @@ func BuildStateWith(cfg *config.Config, deps Deps) (*State, map[string]string, e
 		st.fallbacks[k] = v
 	}
 	st.fallbackFamily = cfg.FallbackFamilyEnabled()
+	set, err := buildClassifiers(cfg.PIIClassification)
+	if err != nil {
+		return nil, nil, err
+	}
+	st.classifiers = set
 	return st, identities, nil
 }
 
