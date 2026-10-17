@@ -4,9 +4,14 @@ Copyright 2026 The inferplane Authors. Licensed under the Apache License, Versio
 This model is a fine-tune of convaiinnovations/laya (multilingual checkpoint),
 Copyright Convai Innovations, licensed under the Apache License, Version 2.0.
 
-The Laya multilingual checkpoint uses the jhu-clsp/mmBERT-base encoder. That
-repository declares the MIT License in its model card metadata and ships no
-LICENSE file (checked 2026-10-16). The MIT License text:
+The Laya multilingual checkpoint uses the jhu-clsp/mmBERT-base encoder.
+Its license statement is the MIT declaration in the Hugging Face model
+card metadata and README (commit c5955035435e) and in the README of
+github.com/JHU-CLSP/mmBERT; neither repository ships a LICENSE file or
+names a copyright holder (checked 2026-10-17). The model is described in
+"mmBERT: A Modern Multilingual Encoder with Annealed Language Learning"
+(Marone, Weller, Fleshman, Yang, Lawrie, Van Durme, 2025).
+The MIT License text:
 
   Copyright (c) the jhu-clsp/mmBERT-base authors
 

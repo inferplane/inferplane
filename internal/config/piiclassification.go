@@ -115,17 +115,17 @@ func validatePIIClassification(p *PIIClassificationConfig) error {
 		return nil
 	}
 	if p.TimeoutMS < 0 || p.TimeoutMS > 30_000 {
-		return errors.New("config: pii_classification.timeout_ms must be 1-30000")
+		return errors.New("config: pii_classification.timeout_ms must be 1-30000 (0 or unset uses the 500 ms default)")
 	}
 	if p.MaxInputBytes != 0 && (p.MaxInputBytes < 1<<10 || p.MaxInputBytes > 16<<20) {
-		return errors.New("config: pii_classification.max_input_bytes must be 1024-16777216")
+		return errors.New("config: pii_classification.max_input_bytes must be 1024-16777216 (0 or unset uses the 2097152 default)")
 	}
 	if p.Cache != nil {
 		if m := p.Cache.MaxEntries; m != nil && (*m < 0 || *m > 1_000_000) {
 			return errors.New("config: pii_classification.cache.max_entries must be 0-1000000")
 		}
 		if t := p.Cache.TTLSeconds; t != 0 && (t < 60 || t > 86_400) {
-			return errors.New("config: pii_classification.cache.ttl_seconds must be 60-86400")
+			return errors.New("config: pii_classification.cache.ttl_seconds must be 60-86400 (0 or unset uses the 3600 default)")
 		}
 	}
 	if len(p.Classifiers) == 0 {
