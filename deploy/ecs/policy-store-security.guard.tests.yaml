@@ -1,0 +1,33 @@
+- name: A single policy task is reachable through every NLB AZ
+  input:
+    Resources:
+      PolicyTargetGroup:
+        Properties:
+          TargetGroupAttributes:
+            - Key: load_balancing.cross_zone.enabled
+              Value: 'true'
+  expectations:
+    rules:
+      policy_target_cross_zone: PASS
+- name: An explicit disabled setting cannot strand another NLB AZ
+  input:
+    Resources:
+      PolicyTargetGroup:
+        Properties:
+          TargetGroupAttributes:
+            - Key: load_balancing.cross_zone.enabled
+              Value: 'false'
+  expectations:
+    rules:
+      policy_target_cross_zone: FAIL
+- name: Omitting the override must not inherit a disabled load balancer
+  input:
+    Resources:
+      PolicyTargetGroup:
+        Properties:
+          TargetGroupAttributes:
+            - Key: preserve_client_ip.enabled
+              Value: 'false'
+  expectations:
+    rules:
+      policy_target_cross_zone: FAIL
