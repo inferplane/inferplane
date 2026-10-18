@@ -11,6 +11,7 @@ func TestNeedsAdaptiveRewrite(t *testing.T) {
 		"anthropic.claude-fable-5",
 		"global.anthropic.claude-fable-5-1",
 		"global.anthropic.claude-sonnet-5",
+		"global.anthropic.claude-sonnet-5-5",
 		"anthropic.claude-opus-4-7",
 		"anthropic.claude-opus-5",
 		"global.anthropic.claude-opus-5-5",

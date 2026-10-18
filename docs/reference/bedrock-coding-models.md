@@ -1,4 +1,4 @@
-# Bedrock coding models: Kimi K3, Fable 5.1 and Opus 5.5
+# Bedrock coding models: Kimi K3, Fable 5.1, Opus 5.5 and Sonnet 5.5
 
 These opt-in examples extend existing model routing; they do not introduce a
 second Responses ingress or replace the main branch's policy/identity pipeline.
@@ -10,6 +10,7 @@ Do not replace a running production configuration with an example.
 | [Kimi K3](../../examples/config.bedrock-kimi-k3.json) | `kimi-k3` | `global.moonshotai.kimi-k3` | Converse | 1,000,000 |
 | [Fable 5.1](../../examples/config.bedrock-fable-5-1.json) | `global.anthropic.claude-fable-5-1` | Same as public ID | InvokeModel | 1,000,000 |
 | [Opus 5.5](../../examples/config.bedrock-opus-5-5.json) | `global.anthropic.claude-opus-5-5` | Same as public ID | InvokeModel | 1,000,000 |
+| [Sonnet 5.5](../../examples/config.bedrock-sonnet-5-5.json) | `global.anthropic.claude-sonnet-5-5` | Same as public ID | InvokeModel | 1,000,000 |
 
 All examples use Seoul as source region, declare `tools`, and block missing
 pricing. Global profiles may process outside Korea; an endpoint region is not
@@ -19,13 +20,14 @@ credential/profile overrides if the instance role is the intended identity.
 
 ## Pricing and capability boundaries
 
-Standard Global USD per million tokens, checked 2026-09-20 (Opus 5.5: 2026-09-23):
+Standard Global USD per million tokens, checked 2026-09-20 (Opus 5.5: 2026-09-23; Sonnet 5.5: 2026-10-18):
 
 | Model | Input | Output | Cache read | Cache write |
 | --- | --- | --- | --- | --- |
 | Kimi K3 | 3 | 15 | 0.30 | 3.75 |
 | Fable 5.1 | 10 | 50 | 0.25 | 12.50 (5m), 20 (1h) |
 | Opus 5.5 | 4 | 20 | 0.20 | 5 (5m), 8 (1h) |
+| Sonnet 5.5 | 2 | 10 | 0.10 | 2.50 (5m), 4 (1h) |
 
 Prices are keyed to the exact global profile; US CRIS must have its own prices.
 K3 untiered cache writes use the legacy 5m accounting bucket, not a claim of a
@@ -52,6 +54,19 @@ legacy-thinking adapter matches `opus-5` (Opus 5 and 5.5) and rewrites only the
 so an OpenAI or Responses client sending `tool_choice: required` is rejected
 upstream; the gateway does not weaken it to `auto`. No client acceptance has
 been recorded for Opus 5.5.
+
+Sonnet 5.5 has the same prices as Sonnet 5 except cache reads, which cost 0.05x
+input, as for Opus 5.5; its example declares every rate. Seoul offers only the
+`global.` profile; us-east-1 also offers `us.anthropic.claude-sonnet-5-5`, which
+needs its own prices (checked 2026-10-18). Adaptive thinking is on by default
+with effort `high`. `thinking.type: disabled` returns 400; send `between_tools`
+(effort `high` or below) to turn off up-front thinking. The legacy-thinking
+adapter's `sonnet-5` pattern also matches Sonnet 5.5 and rewrites only the
+`budget_tokens` form; `disabled` passes through and fails. Forced `tool_choice`
+(`any`/`tool`) returns 400, as for Opus 5.5. Its thinking blocks are bound to
+the model and conversation: other models drop them, and replaying one after
+editing earlier history can return 400. No client acceptance has been recorded
+for Sonnet 5.5.
 
 ## Client setup and acceptance status
 
@@ -86,4 +101,5 @@ hotfix prevents unsupported-block errors; it does not resolve this later issue.
 
 - [Kimi K3 model card](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-moonshot-ai-kimi-k3.html)
 - [Fable 5.1 model card](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-fable-5-1.html)
+- [What's new in Claude Sonnet 5.5](https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5)
 - [AWS FoundationModels Seoul prices](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/ap-northeast-2/index.json)
