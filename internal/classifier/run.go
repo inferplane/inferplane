@@ -94,7 +94,11 @@ func (s *Set) Run(ctx context.Context, entries []Entry, req Request) []Result {
 		case <-ctx.Done():
 			// A classifier that ignores its context must not hold the request
 			// past the deadline. Its late answer is discarded and, because
-			// nothing is stored for it, never cached.
+			// nothing is stored for it, never cached. Once the deadline has
+			// passed, a later entry still in flight meets this branch too
+			// (select may pick either ready case), so which entries finish
+			// right at the deadline can vary between requests; each such
+			// entry is an Error, which fails closed.
 			results[i].Outcome = OutcomeError
 			results[i].Duration = time.Since(start)
 		}
