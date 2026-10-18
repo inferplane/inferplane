@@ -1,9 +1,9 @@
 ---
 translation_source: reference/bedrock-coding-models.md
-translation_source_sha256: a68b27fe01c34d323e682bc03451d46eddb90c4c37bd3f53987bf6087984ba4f
+translation_source_sha256: 20ce56bec2c16b9358d4fd0f8d6079209412ae3188c618b395c09e3263141f59
 ---
 
-# Bedrock 코딩 모델: Kimi K3, Fable 5.1, Opus 5.5
+# Bedrock 코딩 모델: Kimi K3, Fable 5.1, Opus 5.5, Sonnet 5.5
 
 이 예제는 기존 모델 라우팅을 확장합니다. 별도의 Responses 수신 경로나 main의
 정책·신원 파이프라인 대체 구현을 추가하지 않습니다. 공급자·모델·허용 목록·가격
@@ -14,6 +14,7 @@ translation_source_sha256: a68b27fe01c34d323e682bc03451d46eddb90c4c37bd3f53987bf
 | [Kimi K3](../../examples/config.bedrock-kimi-k3.json) | `kimi-k3` | `global.moonshotai.kimi-k3` | Converse | 1,000,000 |
 | [Fable 5.1](../../examples/config.bedrock-fable-5-1.json) | `global.anthropic.claude-fable-5-1` | 공개 모델명과 동일 | InvokeModel | 1,000,000 |
 | [Opus 5.5](../../examples/config.bedrock-opus-5-5.json) | `global.anthropic.claude-opus-5-5` | 공개 모델명과 동일 | InvokeModel | 1,000,000 |
+| [Sonnet 5.5](../../examples/config.bedrock-sonnet-5-5.json) | `global.anthropic.claude-sonnet-5-5` | 공개 모델명과 동일 | InvokeModel | 1,000,000 |
 
 모든 예제는 서울을 요청 리전으로 사용하고 `tools`를 선언하며 가격 누락 시 차단합니다.
 Global 프로파일은 한국 밖에서 처리할 수 있습니다. 엔드포인트 리전은 데이터
@@ -23,13 +24,14 @@ Global 프로파일은 한국 밖에서 처리할 수 있습니다. 엔드포인
 
 ## 가격과 기능 경계
 
-2026-09-20(Opus 5.5는 2026-09-23) 확인한 Standard Global 가격이며 단위는 100만 토큰당 USD입니다.
+2026-09-20(Opus 5.5는 2026-09-23, Sonnet 5.5는 2026-10-18) 확인한 Standard Global 가격이며 단위는 100만 토큰당 USD입니다.
 
 | 모델 | 입력 | 출력 | 캐시 읽기 | 캐시 쓰기 |
 | --- | --- | --- | --- | --- |
 | Kimi K3 | 3 | 15 | 0.30 | 3.75 |
 | Fable 5.1 | 10 | 50 | 0.25 | 12.50 (5m), 20 (1h) |
 | Opus 5.5 | 4 | 20 | 0.20 | 5 (5m), 8 (1h) |
+| Sonnet 5.5 | 2 | 10 | 0.10 | 2.50 (5m), 4 (1h) |
 
 가격 키는 정확한 global 프로파일입니다. US CRIS에는 별도 가격을 설정해야 합니다.
 K3의 TTL 미분류 쓰기는 기존 5m 회계 버킷을 사용하지만 실제 TTL이 5분이라는 뜻은
@@ -54,6 +56,17 @@ Opus 5.5의 캐시 읽기는 입력의 0.05배이므로 예제는 기본 0.1배 
 강제 `tool_choice`(`any`/`tool`)는 400을 반환하므로 OpenAI·Responses 클라이언트의
 `tool_choice: required`는 업스트림에서 거부됩니다. 게이트웨이는 이를 `auto`로 약화하지
 않습니다. Opus 5.5의 클라이언트 검증 기록은 아직 없습니다.
+
+Sonnet 5.5는 캐시 읽기를 빼면 Sonnet 5와 가격이 같습니다. 캐시 읽기는 Opus 5.5처럼
+입력의 0.05배이며, 예제는 모든 단가를 명시합니다. 서울은 `global.` 프로파일만 제공하고,
+us-east-1은 `us.anthropic.claude-sonnet-5-5`도 제공하므로 별도 가격이 필요합니다
+(2026-10-18 확인). adaptive thinking이 기본으로 켜져 있고 기본 effort는 `high`입니다.
+`thinking.type: disabled`는 400을 반환하므로 사전 thinking을 끄려면 `between_tools`
+(effort `high` 이하)를 보내세요. legacy-thinking 어댑터의 `sonnet-5` 패턴은 Sonnet 5.5에도
+적용되며 `budget_tokens` 형태만 재작성합니다. `disabled`는 그대로 전달돼 실패합니다.
+강제 `tool_choice`(`any`/`tool`)도 Opus 5.5처럼 400을 반환합니다. thinking 블록은
+모델과 대화에 묶여 다른 모델은 이를 버리고, 이전 이력을 수정한 뒤 재전송하면 400이 날 수 있습니다.
+Sonnet 5.5의 클라이언트 검증 기록은 아직 없습니다.
 
 ## 클라이언트 연결과 검증 상태
 
@@ -86,4 +99,5 @@ thinking 핫픽스는 미지원 블록 오류를 막을 뿐 이 후속 문제까
 
 - [Kimi K3 모델 카드](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-moonshot-ai-kimi-k3.html)
 - [Fable 5.1 모델 카드](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-fable-5-1.html)
+- [Claude Sonnet 5.5 새 기능](https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5)
 - [AWS FoundationModels 서울 가격](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/ap-northeast-2/index.json)

@@ -24,7 +24,7 @@ var legacyThinkingBrokenModels = []string{
 	"opus-4-8",
 	"opus-5", // also opus-5-5; "opus-4-5" does not contain it
 	"fable-5",
-	"sonnet-5",
+	"sonnet-5", // also sonnet-5-5; "sonnet-4-5" does not contain it
 	"mythos",
 }
 

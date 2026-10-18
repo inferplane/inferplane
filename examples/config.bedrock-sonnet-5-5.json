@@ -1,0 +1,84 @@
+{
+  "server": {
+    "listen": ":8080",
+    "admin_listen": ":9090",
+    "drain_grace": "10s",
+    "admin_auth": {
+      "token_refs": [
+        {
+          "env": "INFERPLANE_ADMIN_TOKEN"
+        }
+      ]
+    }
+  },
+  "key_store": {
+    "type": "sqlite",
+    "path": "/var/lib/inferplane/keys.db"
+  },
+  "audit": {
+    "failure_mode": "buffer_then_block",
+    "buffer": {
+      "path": "/var/lib/inferplane/audit.wal"
+    },
+    "sinks": [
+      {
+        "type": "stdout"
+      },
+      {
+        "type": "file",
+        "path": "/var/lib/inferplane/audit.jsonl"
+      }
+    ]
+  },
+  "providers": {
+    "bedrock-seoul": {
+      "type": "bedrock",
+      "region": "ap-northeast-2",
+      "auth": {
+        "mode": "irsa"
+      }
+    }
+  },
+  "models": {
+    "global.anthropic.claude-sonnet-5-5": {
+      "context_window": 1000000,
+      "targets": [
+        {
+          "provider": "bedrock-seoul",
+          "model": "global.anthropic.claude-sonnet-5-5",
+          "api": "invoke_model"
+        }
+      ],
+      "capabilities": [
+        "tools"
+      ]
+    }
+  },
+  "teams": {
+    "demo": {
+      "allowed_models": [
+        "global.anthropic.claude-sonnet-5-5"
+      ],
+      "rate_limit": {
+        "requests_per_minute": 120
+      }
+    }
+  },
+  "pricing": {
+    "on_missing": "block",
+    "version": "aws-sonnet-5-5-global-standard-2026-10-12",
+    "overrides": {
+      "bedrock-seoul": {
+        "global.anthropic.claude-sonnet-5-5": {
+          "input_per_mtok": 2,
+          "output_per_mtok": 10,
+          "cache_read_per_mtok": 0.1,
+          "cache_write_5m_per_mtok": 2.5,
+          "cache_write_1h_per_mtok": 4
+        }
+      }
+    }
+  },
+  "_comment_pricing": "Standard Global USD per million tokens from AmazonBedrockFoundationModels ap-northeast-2 (price list published 2026-10-12, checked 2026-10-18). Cache read is 0.05x input, like Opus 5.5, not the derived 0.1x; every rate is declared so the table does not depend on derivation. Exact profile prices prevent inheritance by US CRIS: ap-northeast-2 offers only global.anthropic.claude-sonnet-5-5, while us-east-1 also offers us.anthropic.claude-sonnet-5-5, which needs its own prices (checked 2026-10-18).",
+  "_comment_sonnet": "Uses the EC2 instance role via the default SDK credential chain, not samples. Global routing is not Korean residency. Adaptive thinking is on by default; thinking.type disabled returns 400 (use between_tools, at high effort or below) and enabled+budget_tokens returns 400 (the Bedrock legacy-thinking adapter rewrites only the budget_tokens form). Default effort is high. Forced tool_choice any/tool returns 400, so OpenAI tool_choice required is rejected upstream."
+}
