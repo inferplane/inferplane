@@ -278,7 +278,10 @@ func (r *Router) RouteRequest(ctx context.Context, in RequestRoutingInput) (Requ
 		internal := false
 		classifiedAction := sd.OnDetected
 		if classifiedAction == v1alpha1.Mask {
-			classifiedAction = sd.OnUninspectable // a verdict gives Mask nothing to redact
+			// A verdict gives Mask nothing to redact. Should onUninspectable
+			// also be Mask (policy compilation rejects it), the loop below
+			// still blocks: only the regex trigger (index 0) may require masking.
+			classifiedAction = sd.OnUninspectable
 		}
 		for index, trigger := range []struct {
 			active bool

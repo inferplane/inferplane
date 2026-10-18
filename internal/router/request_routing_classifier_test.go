@@ -267,6 +267,19 @@ func TestClassifierFlaggedUnderMaskRuleUsesOnUninspectable(t *testing.T) {
 	}
 }
 
+// Policy compilation only admits InternalOnly or Block for onUninspectable
+// (policy.go), but the router must not depend on that: a classifier flag under
+// a rule whose two actions are both Mask has nothing to redact and blocks.
+func TestClassifierFlaggedUnderDoubleMaskRuleBlocks(t *testing.T) {
+	r, in, _ := classifierSetup(t, "Enforce", always(classifier.Flagged))
+	p := maskPolicy()
+	p.Rules[0].SensitiveData.OnUninspectable = v1alpha1.Mask
+	installRoutingPolicies(r, p)
+	setAdaptiveRedactor(t, r, func(_ context.Context, _ string, raw []byte) ([]byte, error) { return raw, nil })
+	got, err := r.RouteRequest(context.Background(), in)
+	requireDenied(t, got, err, "sensitive_blocked")
+}
+
 // Review Focus 5: no call, no latency outside the classifier's scope.
 func TestClassifierNotCalledOutsideScope(t *testing.T) {
 	t.Run("other team", func(t *testing.T) {
