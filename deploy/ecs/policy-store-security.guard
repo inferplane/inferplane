@@ -30,3 +30,10 @@ rule database_network_and_tls {
   }
   Resources.DatabaseParameters.Properties.Parameters.'rds.force_ssl' == '1'
 }
+let policy_cross_zone = Resources.PolicyTargetGroup.Properties.TargetGroupAttributes[
+  Key == 'load_balancing.cross_zone.enabled'
+]
+rule policy_target_cross_zone {
+  %policy_cross_zone !empty
+  %policy_cross_zone[*].Value == 'true'
+}
