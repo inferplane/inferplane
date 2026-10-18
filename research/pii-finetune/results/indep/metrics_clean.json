@@ -1,0 +1,222 @@
+{
+  "regex": {
+    "n": 1679,
+    "errors": 0,
+    "accuracy": 0.5533055390113163,
+    "precision": 0.5098280098280098,
+    "recall": 0.54177545691906,
+    "f1": 0.5253164556962024,
+    "fpr": 0.4370208105147864,
+    "auroc": 0.5523773232021368,
+    "brier": 0.44669446098868376,
+    "ece": 0.44669446098868376,
+    "abstain_rate": 0.0,
+    "decided_accuracy": 0.5533055390113163,
+    "decided_recall": 0.54177545691906,
+    "decided_fpr": 0.4370208105147864,
+    "recall_by_category": {
+      "address": 0.821,
+      "bank_account": 0.791,
+      "birthdate": 0.359,
+      "card": 1.0,
+      "credential": 0.66,
+      "driver_license": 0.829,
+      "email": 0.938,
+      "employee": 0.429,
+      "financial": 0.267,
+      "health": 0.301,
+      "passport": 0.867,
+      "phone": 0.843,
+      "rrn": 0.891,
+      "vehicle": 0.327
+    },
+    "fpr_by_negative_kind": {
+      "neg_handling": 0.311,
+      "neg_lookalike": 0.692,
+      "neg_name_only": 0.371,
+      "pair": 0.339
+    },
+    "accuracy_by_lang": {
+      "en": 0.561,
+      "ko": 0.552
+    },
+    "latency_ms_p50": 0.12,
+    "latency_ms_p95": 0.28
+  },
+  "laya_base": {
+    "n": 1679,
+    "errors": 0,
+    "accuracy": 0.4973198332340679,
+    "precision": 0.4627862595419847,
+    "recall": 0.6331592689295039,
+    "f1": 0.5347298787210584,
+    "fpr": 0.6166484118291348,
+    "auroc": 0.5497727916174548,
+    "brier": 0.4627533653543776,
+    "ece": 0.4535254913639071,
+    "abstain_rate": 0.15902322811197145,
+    "decided_accuracy": 0.5,
+    "decided_recall": 0.5639686684073107,
+    "decided_fpr": 0.5136911281489595,
+    "recall_by_category": {
+      "address": 0.718,
+      "bank_account": 0.806,
+      "birthdate": 0.496,
+      "card": 0.778,
+      "credential": 0.886,
+      "driver_license": 0.683,
+      "email": 0.856,
+      "employee": 0.565,
+      "financial": 0.446,
+      "health": 0.441,
+      "passport": 0.833,
+      "phone": 0.731,
+      "rrn": 0.733,
+      "vehicle": 0.495
+    },
+    "fpr_by_negative_kind": {
+      "neg_handling": 0.843,
+      "neg_lookalike": 0.644,
+      "neg_name_only": 0.392,
+      "pair": 0.59
+    },
+    "accuracy_by_lang": {
+      "en": 0.602,
+      "ko": 0.479
+    },
+    "latency_ms_p50": 249.43,
+    "latency_ms_p95": 419.61
+  },
+  "laya_v2_softce_s2": {
+    "n": 1679,
+    "errors": 0,
+    "accuracy": 0.961882072662299,
+    "precision": 0.9511568123393316,
+    "recall": 0.9660574412532638,
+    "f1": 0.9585492227979274,
+    "fpr": 0.0416210295728368,
+    "auroc": 0.9936734833947707,
+    "brier": 0.03450723387730792,
+    "ece": 0.029984157236450253,
+    "abstain_rate": 0.024419297200714674,
+    "decided_accuracy": 0.9706959706959707,
+    "decided_recall": 0.9477806788511749,
+    "decided_fpr": 0.03285870755750274,
+    "recall_by_category": {
+      "address": 0.987,
+      "bank_account": 0.977,
+      "birthdate": 0.985,
+      "card": 0.984,
+      "credential": 0.99,
+      "driver_license": 1.0,
+      "email": 0.986,
+      "employee": 0.961,
+      "financial": 1.0,
+      "health": 0.871,
+      "passport": 0.933,
+      "phone": 0.979,
+      "rrn": 0.96,
+      "vehicle": 0.98
+    },
+    "fpr_by_negative_kind": {
+      "neg_handling": 0.004,
+      "neg_lookalike": 0.012,
+      "neg_name_only": 0.122,
+      "pair": 0.022
+    },
+    "accuracy_by_lang": {
+      "en": 0.955,
+      "ko": 0.963
+    },
+    "latency_ms_p50": 217.73,
+    "latency_ms_p95": 393.3
+  },
+  "laya_v2_softce_s3": {
+    "n": 1679,
+    "errors": 0,
+    "accuracy": 0.9475878499106611,
+    "precision": 0.9605978260869565,
+    "recall": 0.922976501305483,
+    "f1": 0.9414114513981358,
+    "fpr": 0.03176341730558598,
+    "auroc": 0.9898378226888089,
+    "brier": 0.04878830217391304,
+    "ece": 0.04790881477069686,
+    "abstain_rate": 0.015485407980941002,
+    "decided_accuracy": 0.9546279491833031,
+    "decided_recall": 0.912532637075718,
+    "decided_fpr": 0.02628696604600219,
+    "recall_by_category": {
+      "address": 0.981,
+      "bank_account": 0.969,
+      "birthdate": 0.931,
+      "card": 0.921,
+      "credential": 0.993,
+      "driver_license": 0.976,
+      "email": 0.99,
+      "employee": 0.89,
+      "financial": 0.921,
+      "health": 0.785,
+      "passport": 0.967,
+      "phone": 0.967,
+      "rrn": 0.98,
+      "vehicle": 0.901
+    },
+    "fpr_by_negative_kind": {
+      "neg_handling": 0.004,
+      "neg_lookalike": 0.012,
+      "neg_name_only": 0.098,
+      "pair": 0.005
+    },
+    "accuracy_by_lang": {
+      "en": 0.947,
+      "ko": 0.948
+    },
+    "latency_ms_p50": 232.47,
+    "latency_ms_p95": 390.75
+  },
+  "strands_v1": {
+    "n": 1679,
+    "errors": 0,
+    "accuracy": 0.9660512209648601,
+    "precision": 0.9658344283837057,
+    "recall": 0.9595300261096605,
+    "f1": 0.962671905697446,
+    "fpr": 0.028477546549835708,
+    "auroc": 0.9923601360104553,
+    "brier": 0.029674425497319832,
+    "ece": 0.026866289458010725,
+    "abstain_rate": 0.026801667659321016,
+    "decided_accuracy": 0.9761321909424725,
+    "decided_recall": 0.9360313315926893,
+    "decided_fpr": 0.019715224534501644,
+    "recall_by_category": {
+      "address": 0.987,
+      "bank_account": 0.984,
+      "birthdate": 0.977,
+      "card": 0.952,
+      "credential": 1.0,
+      "driver_license": 0.976,
+      "email": 0.995,
+      "employee": 0.942,
+      "financial": 0.97,
+      "health": 0.892,
+      "passport": 1.0,
+      "phone": 0.988,
+      "rrn": 0.98,
+      "vehicle": 0.98
+    },
+    "fpr_by_negative_kind": {
+      "neg_handling": 0.0,
+      "neg_lookalike": 0.0,
+      "neg_name_only": 0.082,
+      "pair": 0.033
+    },
+    "accuracy_by_lang": {
+      "en": 0.951,
+      "ko": 0.969
+    },
+    "latency_ms_p50": 2140.06,
+    "latency_ms_p95": 3356.58
+  }
+}
