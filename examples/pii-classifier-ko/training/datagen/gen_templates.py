@@ -18,9 +18,6 @@ import re
 import threading
 import time
 
-import boto3
-from botocore.config import Config
-
 from kr_values import NEGATIVE_SLOTS, POSITIVE_SLOTS, SLOTS
 
 GENRES = {
@@ -48,6 +45,8 @@ GENRES = {
     "insurance_claim": ("ko", "Korean insurance claim forms and adjuster notes"),
     "terminal_output": ("ko", "terminal sessions: shell commands and their output, psql/kubectl/aws CLI"),
     "kakao_message": ("ko", "KakaoTalk-style personal messages exported as text"),
+    "chat_turn": ("ko", "single turns from Korean messenger chats, customer chat and community comment threads, casual spoken style"),
+    "form_input": ("ko", "values typed into Korean web forms, sign-up fields, delivery requests and one-line support requests"),
     "english_code": ("en", "source code with English comments and fixtures"),
     "english_chat": ("en", "English developer chat or support messages"),
 }
@@ -57,6 +56,7 @@ ATTR = [s for s in POSITIVE_SLOTS if not SLOTS[s][2] and s != "NAME"]
 
 KINDS = {
     "pos_direct": f"Each document must contain at least one direct-identifier slot from {DIRECT}. It may also use ⟦NAME⟧, attribute slots {ATTR} and lookalike slots {NEGATIVE_SLOTS}.",
+    "pos_direct_anon": f"Each document must contain at least one direct-identifier slot from {DIRECT} and must NOT use ⟦NAME⟧. Refer to people only as 저, 제, 고객님, 담당자, 기사님, 친구 or not at all: a value on its own, a value the writer gives as their own, or a value in a form field. Lookalike slots {NEGATIVE_SLOTS} are allowed.",
     "pos_attr": f"Each document must mention a specific person with ⟦NAME⟧ together with at least one attribute slot from {ATTR}. Do NOT use any of {DIRECT}. Lookalike slots {NEGATIVE_SLOTS} are allowed.",
     "pos_cred": "Each document must contain at least one ⟦CREDENTIAL⟧ slot used as a real secret value (password, API key, token) in code, config, logs or chat. Lookalike slots are allowed.",
     "neg_name_only": f"Each document may mention people only by ⟦NAME⟧ (e.g. authors, reviewers, assignees, greetings) with NO other information about them, and must NOT use any of {DIRECT + ATTR + ['CREDENTIAL']}. Lookalike slots {NEGATIVE_SLOTS} are allowed.",
@@ -70,8 +70,13 @@ SYSTEM = """You write realistic synthetic documents for training a personal-data
 Never write any concrete personal value (no names, phone numbers, emails, addresses, ID numbers, account or card numbers, secrets).
 Wherever a value would appear, write a slot marker from the allowed list instead, exactly like ⟦PHONE⟧ (U+27E6 and U+27E7 brackets).
 Allowed slot markers: {slots}.
-Vary length (40 to 300 words), structure, tone and domain. Make documents look like real {lang} working material, not tutorials about slots.
+{length} Make documents look like real {lang} working material, not tutorials about slots.
 Return ONLY a JSON array of strings, one string per document, with no commentary."""
+
+LENGTHS = {
+    "doc": "Vary length (40 to 300 words), structure, tone and domain.",
+    "short": "Write short texts: one to three sentences, 5 to 40 words each, like a single chat turn, a form field or a one-line request. Vary tone and domain.",
+}
 
 SLOT_RE = re.compile(r"⟦([A-Z_]+)⟧")
 
@@ -83,6 +88,8 @@ def validate(kind: str, text: str) -> bool:
     present = set(slots)
     if kind == "pos_direct":
         return bool(present & set(DIRECT))
+    if kind == "pos_direct_anon":
+        return "NAME" not in present and bool(present & set(DIRECT))
     if kind == "pos_attr":
         return "NAME" in present and bool(present & set(ATTR)) and not present & set(DIRECT)
     if kind == "pos_cred":
@@ -97,7 +104,25 @@ def validate(kind: str, text: str) -> bool:
     return not present & set(POSITIVE_SLOTS)
 
 
+def job_id(genre: str, kind: str, idx: int, length: str) -> str:
+    base = f"{genre}/{kind}/{idx}"
+    return base if length == "doc" else f"{base}/{length}"
+
+
+def prompt_for(genre: str, kind: str, idx: int, per_call: int, length: str) -> tuple[str, str]:
+    lang, desc = GENRES[genre]
+    allowed = ", ".join(f"⟦{s}⟧" for s in SLOTS)
+    system = SYSTEM.format(slots=allowed, lang="Korean" if lang == "ko" else "English", length=LENGTHS[length])
+    user = (f"Genre: {desc}.\nRequirement: {KINDS[kind]}\n"
+            f"Write {per_call} different documents in {'Korean (English technical terms are fine)' if lang == 'ko' else 'English'}. "
+            f"Variation seed {idx}: pick a different company, product and situation for each document.")
+    return system, user
+
+
 def main() -> None:
+    import boto3
+    from botocore.config import Config
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--calls", type=int, default=4, help="calls per (genre, kind)")
@@ -107,6 +132,8 @@ def main() -> None:
     ap.add_argument("--region", default="us-east-1")
     ap.add_argument("--workers", type=int, default=12)
     ap.add_argument("--kinds", help="comma-separated subset of KINDS")
+    ap.add_argument("--genres", help="comma-separated subset of GENRES")
+    ap.add_argument("--length", choices=sorted(LENGTHS), default="doc")
     args = ap.parse_args()
 
     session = boto3.Session(profile_name=args.profile, region_name=args.region)
@@ -119,17 +146,15 @@ def main() -> None:
                 done.add(json.loads(line)["job"])
     lock = threading.Lock()
     kinds = args.kinds.split(",") if args.kinds else list(KINDS)
-    jobs = [(g, k, i) for g in GENRES for k in kinds for i in range(args.calls) if f"{g}/{k}/{i}" not in done]
+    genres = args.genres.split(",") if args.genres else list(GENRES)
+    jobs = [(g, k, i) for g in genres for k in kinds for i in range(args.calls) if job_id(g, k, i, args.length) not in done]
     print(f"{len(jobs)} jobs to run ({len(done)} already done)", flush=True)
 
     def run(job: tuple[str, str, int]) -> tuple[int, int]:
         genre, kind, idx = job
-        lang, desc = GENRES[genre]
-        allowed = ", ".join(f"⟦{s}⟧" for s in SLOTS)
-        system = SYSTEM.format(slots=allowed, lang="Korean" if lang == "ko" else "English")
-        prompt = (f"Genre: {desc}.\nRequirement: {KINDS[kind]}\n"
-                  f"Write {args.per_call} different documents in {'Korean (English technical terms are fine)' if lang == 'ko' else 'English'}. "
-                  f"Variation seed {idx}: pick a different company, product and situation for each document.")
+        lang = GENRES[genre][0]
+        jid = job_id(genre, kind, idx, args.length)
+        system, prompt = prompt_for(genre, kind, idx, args.per_call, args.length)
         for attempt in range(3):
             try:
                 resp = client.converse(modelId=args.model, system=[{"text": system}],
@@ -148,10 +173,11 @@ def main() -> None:
         good = [d for d in docs if isinstance(d, str) and validate(kind, d)]
         with lock, open(args.out, "a", encoding="utf-8") as f:
             for j, d in enumerate(good):
-                f.write(json.dumps({"job": f"{genre}/{kind}/{idx}", "template_id": f"{genre}/{kind}/{idx}/{j}",
-                                    "genre": genre, "kind": kind, "lang": lang, "text": d}, ensure_ascii=False) + "\n")
+                f.write(json.dumps({"job": jid, "template_id": f"{jid}/{j}", "genre": genre, "kind": kind, "lang": lang,
+                                    "length": args.length, "text": d}, ensure_ascii=False) + "\n")
             if not good:  # record the job so a resume does not loop on it
-                f.write(json.dumps({"job": f"{genre}/{kind}/{idx}", "template_id": None, "genre": genre, "kind": kind, "lang": lang, "text": None}, ensure_ascii=False) + "\n")
+                f.write(json.dumps({"job": jid, "template_id": None, "genre": genre, "kind": kind, "lang": lang,
+                                    "length": args.length, "text": None}, ensure_ascii=False) + "\n")
         return len(good), len(docs)
 
     kept = total = 0
