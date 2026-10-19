@@ -9,8 +9,9 @@ gateway code and does not implement the `systemone` classifier plugin from
 > **Published form (2026-10-18).** The research scripts ship, without account
 > IDs, profiles or bucket names, as `examples/pii-classifier-ko/training/`.
 > `research/pii-finetune/` keeps only its README and the result files. The
-> published checkpoint is Laya v3 seed 1, which trained on `ml.g6.2xlarge`
+> reference checkpoint is Laya v3 seed 1, which trained on `ml.g6.2xlarge`
 > (one NVIDIA L4) in about 43 minutes; see `examples/pii-classifier-ko/model-card.md`.
+> It is not distributed (2026-10-19): the sample shares the recipe only.
 
 ## Goal
 

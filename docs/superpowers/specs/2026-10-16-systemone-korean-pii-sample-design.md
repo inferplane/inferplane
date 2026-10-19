@@ -27,15 +27,16 @@ Interpretation, confirmed through the decisions below:
 - inferplane gains a `systemone` classifier type. It sends the protected
   request content to a self-hosted `/v1/systemone` server and turns the answer
   into a routing restriction through the existing `sensitiveData` rules.
-- The repository ships a Korean sample: a fine-tuned Laya checkpoint published
-  as weights and as a container image, a Helm sidecar, an example config and
-  policy, a model card, and the training recipe that produced the checkpoint.
+- The repository ships a Korean sample: the training recipe, an image recipe
+  that bakes the operator's checkpoint in, a Helm sidecar, an example config
+  and policy, and the card of the reference checkpoint. No weights or image
+  are published (decision of 2026-10-19).
 - Everything is off by default. Without `pii_classification` in the config the
   gateway behaves, and costs, exactly as today.
 
 Success means three things. First, the gateway path is implemented and tested,
-including the PR-08 completion conditions. Second, the sample deploys from the
-published artifacts and records Shadow evidence. Third, an operator can promote
+including the PR-08 completion conditions. Second, the sample deploys from an
+image the operator builds with the recipe and records Shadow evidence. Third, an operator can promote
 the classifier to Enforce on the rollout gates in this document. Accuracy on
 real traffic is not something this change can establish. It is measured in
 Shadow after deployment.
@@ -46,12 +47,12 @@ Shadow after deployment.
 |---|---|---|
 | What "PII removal" means | Routing protection. A detection restricts the route (InternalOnly or Block). The classifier never edits the body. | User, 2026-10-15 |
 | First scope | The `systemone` type only, internal boundary only, file config only. | User, 2026-10-16 |
-| Weights | Publish the fine-tuned weights. | User, 2026-10-16 |
-| Distribution | A container image with the weights baked in, plus a Hugging Face model repository holding the same weights and the model card. | User, 2026-10-16 |
+| Weights | Not published; share the training recipe only. (2026-10-16: publish the weights.) | User, 2026-10-19 |
+| Distribution | No image and no Hugging Face repository. The Dockerfile bakes the operator's checkpoint in, and the operator keeps the image in a private registry. (2026-10-16: an image plus a Hugging Face repository.) | User, 2026-10-19 |
 | Inspection scope | All protected content actually retransmitted, as PR-08 requires. A node-local verdict cache makes long sessions practical. | User, 2026-10-16 |
-| Published checkpoint | Laya v3 seed 1 only. strands-decider stays a documented alternative in the recipe. | Proposed here |
+| Reference checkpoint | Laya v3 seed 1, evaluated and not distributed. strands-decider stays a documented alternative in the recipe. | Proposed here |
 | Shadow execution | Synchronous, inside `RouteRequest`, like Enforce. | Proposed here |
-| Image variants | One CPU image (linux/amd64 and linux/arm64). A GPU build is documented, not published. | Proposed here |
+| Image variants | One CPU Dockerfile (linux/amd64 and linux/arm64). A GPU build is documented. | Proposed here |
 
 The three "proposed here" rows are this spec's choices and are open to review.
 The reasons are given in the sections that follow.
@@ -109,7 +110,7 @@ GPU-backed endpoint.
 - routing integration (Shadow and Enforce, fail-closed);
 - audit and metrics;
 - the `pii_classification` file config with SIGHUP reload;
-- the Korean sample package, its publication, and the docs.
+- the Korean sample package (recipes only) and the docs.
 
 **Deferred to later sub-projects, each with its own spec and plan:**
 - `presidio` and `generic` plugins;
@@ -550,10 +551,10 @@ examples/pii-classifier-ko/
   README.md, README.ko.md     rollout steps, CPU and GPU profiles, evidence, limits
   governance.yaml             GovernancePolicy: sensitiveData InternalOnly
                               to a self-hosted internal model, onUninspectable InternalOnly
-  laya-serve/Dockerfile       the published CPU image
+  laya-serve/Dockerfile       the CPU image recipe
   laya-serve/requirements.txt hash-pinned
-  laya-serve/SHA256SUMS       digests of the published weight files
-  model-card.md               source of the Hugging Face model card
+  laya-serve/weights.txt      the checkpoint files the image copies
+  model-card.md               card of the reference checkpoint
   training/                   data generation, SageMaker launch, evaluation
 ```
 
@@ -561,17 +562,17 @@ examples/pii-classifier-ko/
 - Python 3.12 slim base, pinned by digest.
 - Dependencies installed with `--require-hashes`: `laya[serve]==0.4.6` and
   CPU torch wheels for both architectures.
-- A build stage fetches the weights from the Hugging Face repository at a
-  pinned commit (`WEIGHTS=hf`) or takes them from a local build context
-  (`WEIGHTS=local`, for acceptance before publication). Both verify them
-  against `SHA256SUMS` (amendment 6).
-- Only safetensors, tokenizer and config files are copied into
-  `/models/laya-ko-pii`. The optimizer state (`checkpoint_latest`, 647 MB) is
-  never published.
+- A build stage takes the weights from a local build context
+  (`localweights`) and fails when a file in `weights.txt` is missing.
+  (Until 2026-10-19 it could also fetch them from Hugging Face and verified
+  both paths against `SHA256SUMS`, amendment 6.)
+- Only the safetensors, tokenizer and config files listed in `weights.txt`
+  are copied into `/models/laya-ko-pii`. The optimizer state
+  (`checkpoint_latest`, 647 MB) never enters the image.
 - The image runs as non-root and is compatible with a read-only root
   filesystem (writable `/tmp` only).
 - It starts with `HF_HUB_OFFLINE=1`, so it needs no egress. Verified on
-  2026-10-16: `laya-serve` 0.4.6 loaded exactly the publishable file set
+  2026-10-16: `laya-serve` 0.4.6 loaded exactly the file set the image copies
   (`model.safetensors`, `encoder/`, `tokenizer/`, `questions.json`,
   `rl_agent_config.json`) with an empty Hugging Face cache and the offline
   flags set. It attempted no download. A Korean positive probe scored 0.991,
@@ -581,12 +582,10 @@ examples/pii-classifier-ko/
   - `LAYA_HOST=127.0.0.1`, `LAYA_PORT=8095`, `LAYA_DEVICE=cpu`;
   - `LAYA_MODELS=multilingual`, `LAYA_DEFAULT_MODEL=multilingual`;
   - `LAYA_EXTRA_MODELS={"multilingual": "/models/laya-ko-pii"}`.
-- Published as `ghcr.io/<org>/laya-ko-pii:v3s1-laya0.4.6` for linux/amd64 and
-  linux/arm64, and referenced by digest. The weights and card go to
-  `<org>/laya-ko-pii` on Hugging Face. `<org>` is confirmed at publication
-  gate 4.
-- A GPU variant is documented as a build argument (CUDA torch, amd64). It is
-  not published.
+- Not published. The operator builds it for linux/amd64 and linux/arm64,
+  pushes it to a private registry and references it by digest; the chart
+  requires both `image.repository` and `image.digest`.
+- A GPU variant is documented as a build argument (CUDA torch, amd64).
 
 **Helm:**
 - New values `piiClassifier.laya.enabled` (default `false`), plus
@@ -606,7 +605,8 @@ examples/pii-classifier-ko/
   LoadBalancer or a public endpoint. Its suggested settings are
   `max_windows: 64` and `timeout_ms` above the measured p95.
 
-**Model card** (`model-card.md`, published to Hugging Face). It covers:
+**Model card** (`model-card.md`, the reference checkpoint's card and the
+starting point for an operator's own). It covers:
 - **Lineage and licenses.** `jhu-clsp/mmBERT-base` (MIT) →
   `convaiinnovations/laya` multilingual (Apache-2.0) → this checkpoint
   (Apache-2.0, with a NOTICE that keeps the MIT attribution).
@@ -632,7 +632,9 @@ and evaluation scripts from the experiment, with these changes:
 The README gives the steps, the label policy and the measured GPU time. Laya
 seed 1 trained in about 43 minutes on `ml.g6.2xlarge` (one NVIDIA L4).
 
-**Publication gates.** Each one must pass before the first push to Hugging
+**Publication gates.** Superseded on 2026-10-19: nothing is published, so
+these gates no longer apply. They are kept as the record of what publication
+would have required. Each one had to pass before the first push to Hugging
 Face or GHCR:
 1. The organization completes its own review of the generation-model terms for
    training data produced with Claude Sonnet 5.5 on Amazon Bedrock.
@@ -735,7 +737,7 @@ Face or GHCR:
   - A chart render test shows the sidecar off by default, `127.0.0.1` binding
     when on, and no Service port.
 - **Acceptance (manual, recorded in the PR).**
-  - Run the published image next to `mayu` locally.
+  - Run an image built from the recipe next to `mayu` locally.
   - Send a multi-turn Korean conversation as the pilot team. Confirm that the
     audit record shows `ClassifierRef`, that the cache hit metric rises on
     later turns, and that the window histogram moves.

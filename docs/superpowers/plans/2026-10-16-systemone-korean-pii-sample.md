@@ -6894,6 +6894,11 @@ git commit -s -m "test(classifier): live acceptance and wrapped-body evaluation 
 
 ### Task 15: Final verification, publication and PR (each external step needs explicit user confirmation)
 
+> **Superseded (2026-10-19).** The user chose to share only the recipe: no
+> Hugging Face weights and no GHCR image. Steps 3, 5 and 6 are cancelled. The
+> image workflow, `fetch_weights.py` and `SHA256SUMS` were removed; operators
+> build the image from their own checkpoint (`examples/pii-classifier-ko/README.md`).
+
 **Files:**
 - Modify (after publication):
   - `examples/pii-classifier-ko/README.md`, `README.ko.md`;

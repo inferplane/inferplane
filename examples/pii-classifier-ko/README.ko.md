@@ -1,25 +1,46 @@
 # 한국어 PII 분류기 샘플 (옵트인)
 
 이 샘플은 inferplane의 `sensitiveData` 규칙에 학습 기반 한국어 PII 신호를
-더합니다. 미세조정한 Laya 체크포인트를 게이트웨이 옆에서 실행하고,
-`systemone` 분류기가 요청에 개인정보가 있는지 묻습니다. 분류기는 라우팅만
-제한합니다. Enforce에서 탐지되면 요청을 내부 모델에만 보내고, 요청 본문은
-바꾸지 않습니다.
+더합니다. 포함된 레시피로 직접 미세조정한 Laya 체크포인트를 게이트웨이 옆에서
+실행하고, `systemone` 분류기가 요청에 개인정보가 있는지 묻습니다. 분류기는
+라우팅만 제한합니다. Enforce에서 탐지되면 요청을 내부 모델에만 보내고, 요청
+본문은 바꾸지 않습니다.
+
+inferplane은 이 샘플의 가중치와 이미지를 배포하지 않고 레시피만 제공합니다.
+체크포인트를 직접 학습해 이미지에 굽고, 둘 다 자체 비공개 저장소와
+레지스트리에 보관하세요.
 
 | 파일 | 용도 |
 |---|---|
 | `../config.pii-classifier-ko.json` | 전체 게이트웨이 설정: `pilot-ko` 팀에 Shadow로 적용한 분류기 |
 | `governance.yaml` | 개인정보 규칙: 탐지되거나 검사할 수 없으면 `private-coder`로만 `InternalOnly` |
 | `../helm.pii-classifier-ko.yaml` | Helm 값: Laya 사이드카와 같은 분류기 설정 |
-| `laya-serve/` | 이미지: 체크포인트를 구운 CPU용 Laya 0.4.6, 오프라인, non-root |
-| `model-card.md` | 가중치와 함께 공개하는 모델 카드 |
-| `training/` | 체크포인트를 만든 학습 레시피 |
+| `laya-serve/` | 이미지 레시피: 직접 학습한 체크포인트를 구운 CPU용 Laya 0.4.6, 오프라인, non-root |
+| `model-card.md` | 이 레시피로 만든 기준 체크포인트의 모델 카드(배포하지 않음) |
+| `training/` | 체크포인트를 학습하는 레시피 |
+
+## 분류기 이미지 빌드
+
+1. [`training/README.md`](training/README.md)로 체크포인트를 학습합니다.
+   런처가 출력하는 작업의 모델 아티팩트에 `laya-ko-pii/`가 들어 있습니다.
+2. 아티팩트를 받아 이미지에 굽습니다. `laya-serve/weights.txt`에 적힌 파일만
+   복사하며, 하나라도 없으면 빌드가 실패합니다.
+
+```bash
+aws s3 cp s3://<bucket>/jobs/<job>/output/model.tar.gz .
+tar xzf model.tar.gz laya-ko-pii
+docker build --build-context localweights=laya-ko-pii \
+  -t laya-ko-pii:local examples/pii-classifier-ko/laya-serve
+```
+
+쓰기 전에 체크포인트를 자체 독립 평가셋(`training/indep/`)으로 채점하세요.
+새로 학습하면 기준 체크포인트의 수치가 그대로 재현되지 않습니다.
 
 ## 로컬 실행
 
 ```bash
 docker run -d --rm --name laya-ko -p 127.0.0.1:8095:8095 -e LAYA_HOST=0.0.0.0 \
-  ghcr.io/inferplane/laya-ko-pii@<digest>
+  laya-ko-pii:local
 INFERPLANE_ADMIN_TOKEN=<admin token> PII_KO_PUBLIC_KEY=<provider key> \
   go run ./cmd/mayu serve --config examples/config.pii-classifier-ko.json
 ```
@@ -29,10 +50,19 @@ INFERPLANE_ADMIN_TOKEN=<admin token> PII_KO_PUBLIC_KEY=<provider key> \
 
 ## Kubernetes
 
+클러스터가 이미지를 받을 수 있는 비공개 레지스트리에 푸시하고(노드
+아키텍처가 섞여 있으면 두 아키텍처 모두), 그 digest로 설치합니다.
+
 ```bash
+docker buildx build --platform linux/amd64,linux/arm64 --push \
+  --build-context localweights=laya-ko-pii \
+  -t <registry>/laya-ko-pii:<revision> examples/pii-classifier-ko/laya-serve
 helm install inferplane charts/inferplane -f examples/helm.pii-classifier-ko.yaml \
+  --set piiClassifier.laya.image.repository=<registry>/laya-ko-pii \
   --set piiClassifier.laya.image.digest=<digest>
 ```
+
+두 값이 모두 없으면 차트는 사이드카를 렌더링하지 않습니다.
 
 사이드카는 게이트웨이 파드 안의 `127.0.0.1`에서만 수신합니다. Service 포트가
 없고, 프로브도 컨테이너 안에서 실행합니다.
@@ -46,7 +76,7 @@ helm install inferplane charts/inferplane -f examples/helm.pii-classifier-ko.yam
 
 ## 프로필
 
-- **CPU(기본 제공).** 1,000자 한국어 윈도마다 약 0.5초가 걸리고, 준비까지 약
+- **CPU(Dockerfile 그대로).** 1,000자 한국어 윈도마다 약 0.5초가 걸리고, 준비까지 약
   7~14초가 걸립니다. 그래서 샘플은 `max_windows: 4`, `timeout_ms: 3000`, Shadow
   모드로 파일럿 팀 하나에만 적용합니다. 캐시되지 않은 윈도가 그보다 많은
   요청은 처음 4개만 읽고 나머지를 `abstain`으로 셉니다. 그래서 Clear가 되지
@@ -59,8 +89,8 @@ helm install inferplane charts/inferplane -f examples/helm.pii-classifier-ko.yam
 
 ## 토큰 예산과 잘림
 
-laya-serve는 윈도마다 약 980토큰(이 체크포인트의 `max_len` 1024에서 질문 몫을
-뺀 값)을 읽고, 나머지는 오류 없이 잘라 낸 뒤 응답의 `usage`에 그 사실을
+laya-serve는 윈도마다 약 980토큰(이 레시피로 학습한 체크포인트의 `max_len`
+1024에서 질문 몫을 뺀 값)을 읽고, 나머지는 오류 없이 잘라 낸 뒤 응답의 `usage`에 그 사실을
 보고합니다. 게이트웨이는 토큰 수를 추정하지 않습니다. 서버가 잘랐다고 보고한
 윈도는 읽은 부분에서 탐지되지 않으면 `abstain`이므로 Clear가 되지 않습니다.
 2026-10-16에 체크포인트 토크나이저로 잰 1,000자당 토큰 수:
@@ -92,10 +122,15 @@ strands-decider)는 앞부분만 보고 판정하므로, 그 판정이 Clear로 
 
 ## 근거
 
-- **문서 단위.** 독립 합성 한국어 평가셋 2,236행에서 F1 0.953, FPR 0.036,
-  AUROC 0.993입니다. 같은 셋에서 게이트웨이 정규식 탐지기는 F1 0.478입니다.
-  자세한 내용은 `model-card.md`를 보세요.
-- **코딩 어시스턴트 요청 안에서**(2026-10-16, `SHA256SUMS`의 가중치로 `laya-serve/`에서 빌드한 이미지로 측정):
+아래 수치는 이 레시피로 만든 기준 체크포인트(Laya v3 seed 1, revision
+`laya-ko-pii-v3s1`)의 결과이며, 이 체크포인트는 배포하지 않습니다. 직접 학습한
+체크포인트는 결과가 다릅니다. 같은 레시피의 다른 두 seed는 F1 0.934와 0.939를
+기록했습니다.
+
+- **문서 단위.** 기준 체크포인트는 독립 합성 한국어 평가셋 2,236행에서 F1
+  0.953, FPR 0.036, AUROC 0.993입니다. 같은 셋에서 게이트웨이 정규식 탐지기는
+  F1 0.478입니다. 자세한 내용은 `model-card.md`를 보세요.
+- **코딩 어시스턴트 요청 안에서**(2026-10-16, 기준 체크포인트로 `laya-serve/`에서 빌드한 이미지로 측정):
   감싼 본문 F1 `0.952`, FPR `0.035`, abstain 또는 오류 `1`건.
 
 평가 데이터는 모두 합성입니다. 실제 트래픽에서의 정확도는 Shadow로 측정하기
@@ -133,4 +168,5 @@ strands-decider)는 앞부분만 보고 판정하므로, 그 판정이 Clear로 
 - 분류기 탐지에는 구간 마스킹이 없습니다. Mask 규칙은 대신 `onUninspectable` 동작을 적용합니다(정규식 탐지는 그대로 마스킹합니다).
 - 내부 자체 호스팅 분류기만 지원합니다.
 
-가중치: Hugging Face의 `<namespace>/laya-ko-pii`, revision `<revision>` (Apache-2.0).
+이 레시피로 학습한 체크포인트는 Laya(Apache-2.0)와 mmBERT-base(MIT)에서
+파생되므로 `NOTICE`를 함께 보관하세요.

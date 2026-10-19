@@ -98,8 +98,9 @@ resources:
   limits: { memory: 256Mi }
 
 # Opt-in Korean PII classifier sidecar (examples/pii-classifier-ko). It runs
-# laya-serve with the fine-tuned checkpoint baked into the image and listens on
-# 127.0.0.1 inside the pod only: no Service port, no containerPort. Point
+# laya-serve with a checkpoint you fine-tune and bake into your own image (none
+# is published; build it from examples/pii-classifier-ko/laya-serve) and listens
+# on 127.0.0.1 inside the pod only: no Service port, no containerPort. Point
 # config.pii_classification at http://127.0.0.1:<port>
 # (examples/helm.pii-classifier-ko.yaml). Off by default.
 # Measured 2026-10-16 on CPU: ready in about 14 s; RSS 2.0 GiB idle, 2.6 GiB
@@ -116,7 +117,7 @@ piiClassifier:
   laya:
     enabled: false
     image:
-      repository: ghcr.io/inferplane/laya-ko-pii
+      repository: ""      # required when enabled: your private registry
       digest: ""          # required when enabled: sha256:...
     port: 8095
     threads: 2

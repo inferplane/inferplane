@@ -1,12 +1,13 @@
 # Korean PII classifier sample: the Laya sidecar plus a Shadow classifier for
 # team pilot-ko. Merge with your own values and replace the internal provider.
-# Set piiClassifier.laya.image.digest to the published digest
-# (examples/pii-classifier-ko/README.md).
+# No image is published: build one from examples/pii-classifier-ko/laya-serve,
+# push it to your private registry and set piiClassifier.laya.image.repository
+# and .digest (examples/pii-classifier-ko/README.md).
 piiClassifier:
   laya:
     enabled: true
     image:
-      repository: ghcr.io/inferplane/laya-ko-pii
+      repository: ""
       digest: ""
 config:
   policies: ["/etc/inferplane/policies"]

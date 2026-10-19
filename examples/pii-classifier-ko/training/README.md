@@ -1,10 +1,11 @@
 # Training recipe: Korean PII classifier for `systemone`
 
-This recipe produced the `laya-ko-pii-v3s1` checkpoint that the sample image
-serves. It needs an AWS account with Amazon Bedrock model access, one private
-S3 bucket and a SageMaker execution role scoped to that bucket. It creates no
-instance, public IP or security group: training runs as SageMaker training jobs
-that end on completion.
+This recipe produced the reference `laya-ko-pii-v3s1` checkpoint, which is
+not distributed: train your own and bake it into the sidecar image with
+`../laya-serve/` (see `../README.md`). It needs an AWS account with Amazon
+Bedrock model access, one private S3 bucket and a SageMaker execution role
+scoped to that bucket. It creates no instance, public IP or security group:
+training runs as SageMaker training jobs that end on completion.
 
 ## Label policy
 
@@ -40,7 +41,9 @@ It is false for:
 4. Upload `data/` to `s3://<bucket>/data/`, then run:
    `python3 sagemaker/launch.py --backend laya --instance ml.g6.2xlarge --bucket <bucket> --role-arn <role> --hp laya_args="--loss soft-ce --grad-accum 2" --hp epochs=8 --hp seed=1`.
    Laya seed 1 trained in about 43 minutes on `ml.g6.2xlarge` (one NVIDIA L4).
-   Each job writes its source bundle and outputs under `s3://<bucket>/jobs/`.
+   Each job writes its source bundle and outputs under `s3://<bucket>/jobs/`;
+   the launcher prints the model artifact, whose `laya-ko-pii/` directory is
+   the checkpoint to bake into the image.
 5. `indep/gen.py`, `indep/build.py` and `indep/audit.py`: build an independent
    evaluation set with other generator models, unseen genres and value formats,
    and audit its labels. Score it with `indep/score_one.sh` and
