@@ -73,6 +73,7 @@ spec:
               readOnly: true
             {{- end }}
         {{- with .Values.piiClassifier }}{{- with .laya }}{{- if .enabled }}
+        {{- if not .image.repository }}{{- fail "piiClassifier.laya.image.repository is required when the sidecar is enabled: no image is published, build one from examples/pii-classifier-ko/laya-serve" }}{{- end }}
         {{- if not .image.digest }}{{- fail "piiClassifier.laya.image.digest is required when the sidecar is enabled" }}{{- end }}
         - name: laya-ko-pii
           image: "{{ .image.repository }}@{{ .image.digest }}"

@@ -1,25 +1,18 @@
 # syntax=docker/dockerfile:1
-# laya-serve on CPU with the fine-tuned Korean PII checkpoint baked in. It binds
+# laya-serve on CPU with your fine-tuned Korean PII checkpoint baked in. It binds
 # 127.0.0.1:8095, runs as uid 65532, needs no egress and only a writable /tmp.
-#   published:  --build-arg WEIGHTS=hf --build-arg HF_REPO=<org>/laya-ko-pii --build-arg HF_REVISION=<commit>
-#   local test: --build-arg WEIGHTS=local --build-context localweights=<checkpoint dir>
-ARG WEIGHTS=hf
+# No weights or image are distributed: train a checkpoint with ../training/, then
+#   docker build --build-context localweights=<checkpoint dir> -t laya-ko-pii:local .
 ARG PYTHON_IMAGE=python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
-FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS weights-hf
-ARG HF_REPO
-ARG HF_REVISION
-COPY SHA256SUMS fetch_weights.py /src/
-RUN python /src/fetch_weights.py "$HF_REPO" "$HF_REVISION" /src/SHA256SUMS /weights
-
-FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS weights-local
-COPY SHA256SUMS /src/
+FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS weights
+COPY weights.txt /src/
 COPY --from=localweights . /in/
-# Copy only the listed files: a training directory also holds optimizer state.
-RUN cd /in && sha256sum -c /src/SHA256SUMS \
- && while read -r _ f; do [ -n "$f" ] || continue; f="${f#\*}"; mkdir -p "/weights/$(dirname "$f")" && cp "$f" "/weights/$f"; done < /src/SHA256SUMS
-
-FROM weights-${WEIGHTS} AS weights
+# A SHA256SUMS in the checkpoint directory is verified first (README: record it
+# when you fetch the artifact). Copy only the listed files: a training directory
+# also holds optimizer state.
+RUN cd /in && { [ ! -f SHA256SUMS ] || sha256sum -c SHA256SUMS; } \
+ && while read -r f; do [ -n "$f" ] || continue; mkdir -p "/weights/$(dirname "$f")" && cp "$f" "/weights/$f" || exit 1; done < /src/weights.txt
 
 FROM ${PYTHON_IMAGE}
 ARG TARGETARCH

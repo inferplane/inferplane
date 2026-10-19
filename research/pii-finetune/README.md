@@ -14,7 +14,8 @@ run them from there. This directory keeps only the result files.
 | `results/metrics_{test,ood}.json`, `results/table_{test,ood}.md` | Same-generator test and held-out-genre (OOD) metrics for the v1 and v2 rounds. |
 | `results/indep/metrics_{full,clean}.json`, `results/indep/disputed_ids.txt` | The v1 independent set, before and after excluding audited disputed labels. |
 
-The v3 results, including the published checkpoint (Laya v3 seed 1) on the
+The v3 results, including the reference checkpoint (Laya v3 seed 1, not
+distributed) on the
 2,236-row independent set v3, are in the plan's results section.
 
 ## Request settings that change the answer

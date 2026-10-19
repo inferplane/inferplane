@@ -1,13 +1,8 @@
----
-license: apache-2.0
-language: [ko, en]
-base_model: convaiinnovations/laya
-library_name: laya
-pipeline_tag: text-classification
-tags: [pii, korean, privacy, typed-decision, inferplane]
----
-
 # laya-ko-pii (revision laya-ko-pii-v3s1)
+
+This card describes the reference checkpoint that the recipe in `training/`
+produced. The checkpoint is not distributed. A checkpoint you train with the
+recipe needs its own revision, evaluation and card; start from this one.
 
 A fine-tune of the Laya multilingual typed-decision checkpoint that answers one
 yes/no question: does this text contain personal information about a specific
@@ -37,8 +32,8 @@ The answer is `answers.pii.noul`, the probability of "yes". The response's
 text was read (see Limitations).
 
 Without `"model": "multilingual"`, Laya routes Latin-script text to its stock
-English checkpoint. The image `ghcr.io/inferplane/laya-ko-pii` contains this
-revision and the right settings.
+English checkpoint. An image built from `laya-serve/` has the matching server
+settings.
 
 ## Label policy
 

@@ -9,7 +9,11 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-const testDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+const (
+	testDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	// No image is published, so the chart has no default repository.
+	testRepository = "registry.example.com/laya-ko-pii"
+)
 
 // chartPod renders the chart and returns the Deployment's containers and
 // volumes and the rendered gateway config. It fails on any non-data/admin
@@ -77,16 +81,19 @@ func TestChartLayaSidecarIsOptInAndPodLocal(t *testing.T) {
 		t.Fatalf("the default chart renders %d containers", len(off))
 	}
 	helm, _ := exec.LookPath("helm")
-	if out, err := exec.Command(helm, "template", "test", "../../charts/inferplane", "--set", "piiClassifier.laya.enabled=true").CombinedOutput(); err == nil || !strings.Contains(string(out), "digest is required") {
+	if out, err := exec.Command(helm, "template", "test", "../../charts/inferplane", "--set", "piiClassifier.laya.enabled=true", "--set", "piiClassifier.laya.image.digest="+testDigest).CombinedOutput(); err == nil || !strings.Contains(string(out), "repository is required") {
+		t.Fatalf("a sidecar without a repository rendered: %s", out)
+	}
+	if out, err := exec.Command(helm, "template", "test", "../../charts/inferplane", "--set", "piiClassifier.laya.enabled=true", "--set", "piiClassifier.laya.image.repository="+testRepository).CombinedOutput(); err == nil || !strings.Contains(string(out), "digest is required") {
 		t.Fatalf("an undigested sidecar rendered: %s", out)
 	}
-	on, volumes, _ := chartPod(t, "--set", "piiClassifier.laya.enabled=true", "--set", "piiClassifier.laya.image.digest="+testDigest)
+	on, volumes, _ := chartPod(t, "--set", "piiClassifier.laya.enabled=true", "--set", "piiClassifier.laya.image.repository="+testRepository, "--set", "piiClassifier.laya.image.digest="+testDigest)
 	if len(on) != 2 || on[0]["name"] != "inferplane" || on[1]["name"] != "laya-ko-pii" {
 		t.Fatalf("containers %v", on)
 	}
 	side := on[1]
-	if !strings.HasSuffix(side["image"].(string), "@"+testDigest) {
-		t.Fatalf("image %v is not digest-pinned", side["image"])
+	if side["image"] != testRepository+"@"+testDigest {
+		t.Fatalf("image %v is not the digest-pinned operator image", side["image"])
 	}
 	if _, exposed := side["ports"]; exposed {
 		t.Fatal("the sidecar declares a containerPort")
@@ -111,7 +118,7 @@ func TestChartLayaSidecarIsOptInAndPodLocal(t *testing.T) {
 }
 
 func TestChartPIIClassifierExampleValuesAgree(t *testing.T) {
-	on, _, cfg := chartPod(t, "-f", "../../examples/helm.pii-classifier-ko.yaml", "--set", "piiClassifier.laya.image.digest="+testDigest)
+	on, _, cfg := chartPod(t, "-f", "../../examples/helm.pii-classifier-ko.yaml", "--set", "piiClassifier.laya.image.repository="+testRepository, "--set", "piiClassifier.laya.image.digest="+testDigest)
 	if len(on) != 2 || cfg == nil || cfg.PIIClassification == nil || len(cfg.PIIClassification.Classifiers) != 1 {
 		t.Fatalf("example render: %d containers, cfg %+v", len(on), cfg)
 	}

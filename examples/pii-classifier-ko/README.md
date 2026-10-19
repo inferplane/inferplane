@@ -1,25 +1,51 @@
 # Korean PII classifier sample (opt-in)
 
 This sample adds a learned Korean PII signal to inferplane's `sensitiveData`
-rules. A fine-tuned Laya checkpoint runs next to the gateway, and the
-`systemone` classifier asks it whether a request contains personal data. The
-classifier only restricts routing: an Enforce flag keeps the request on an
-internal model, and it never edits the request.
+rules. A Laya checkpoint that you fine-tune with the included recipe runs next
+to the gateway, and the `systemone` classifier asks it whether a request
+contains personal data. The classifier only restricts routing: an Enforce flag
+keeps the request on an internal model, and it never edits the request.
+
+inferplane distributes no weights and no image for this sample. It ships the
+recipe: you train the checkpoint, bake it into the image and keep both in your
+own private storage and registry.
 
 | File | Purpose |
 |---|---|
 | `../config.pii-classifier-ko.json` | A complete gateway config: classifier in Shadow for team `pilot-ko` |
 | `governance.yaml` | The privacy rule: `InternalOnly` to `private-coder` on detection or when uninspectable |
 | `../helm.pii-classifier-ko.yaml` | Helm values: the Laya sidecar and the same classifier |
-| `laya-serve/` | The image: Laya 0.4.6 on CPU with the checkpoint baked in, offline, non-root |
-| `model-card.md` | The model card published with the weights |
-| `training/` | The recipe that produced the checkpoint |
+| `laya-serve/` | The image recipe: Laya 0.4.6 on CPU with your checkpoint baked in, offline, non-root |
+| `model-card.md` | The card of the reference checkpoint this recipe produced (not distributed) |
+| `training/` | The recipe that trains the checkpoint |
+
+## Build the classifier image
+
+1. Train a checkpoint with [`training/README.md`](training/README.md). The
+   launcher prints the job's model artifact, which holds `laya-ko-pii/`.
+2. Fetch it, record its digests once, and keep `SHA256SUMS` with that
+   revision. Every build verifies a `SHA256SUMS` it finds in the checkpoint
+   directory, so a corrupted or swapped checkpoint fails the build.
+3. Bake it into the image. Only the files listed in `laya-serve/weights.txt`
+   are copied; the build fails if one is missing.
+
+```bash
+aws s3 cp s3://<bucket>/jobs/<job>/output/model.tar.gz .
+tar xzf model.tar.gz laya-ko-pii
+(cd laya-ko-pii && sha256sum $(cat ../examples/pii-classifier-ko/laya-serve/weights.txt) > SHA256SUMS)
+docker build --build-context localweights=laya-ko-pii \
+  -t laya-ko-pii:local examples/pii-classifier-ko/laya-serve
+```
+
+Score the checkpoint on your independent set (`training/indep/`) before you
+use it: a new training run does not reproduce the reference checkpoint's
+numbers exactly.
 
 ## Run it locally
 
 ```bash
 docker run -d --rm --name laya-ko -p 127.0.0.1:8095:8095 -e LAYA_HOST=0.0.0.0 \
-  ghcr.io/inferplane/laya-ko-pii@<digest>
+  laya-ko-pii:local
 INFERPLANE_ADMIN_TOKEN=<admin token> PII_KO_PUBLIC_KEY=<provider key> \
   go run ./cmd/mayu serve --config examples/config.pii-classifier-ko.json
 ```
@@ -29,10 +55,19 @@ illustrative providers in the config first.
 
 ## Kubernetes
 
+Push the image to a private registry your cluster pulls from, for both
+architectures if your nodes mix them, and install with its digest:
+
 ```bash
+docker buildx build --platform linux/amd64,linux/arm64 --push \
+  --build-context localweights=laya-ko-pii \
+  -t <registry>/laya-ko-pii:<revision> examples/pii-classifier-ko/laya-serve
 helm install inferplane charts/inferplane -f examples/helm.pii-classifier-ko.yaml \
+  --set piiClassifier.laya.image.repository=<registry>/laya-ko-pii \
   --set piiClassifier.laya.image.digest=<digest>
 ```
+
+The chart refuses to render the sidecar without both values.
 
 The sidecar listens on `127.0.0.1` inside the gateway pod. It has no Service
 port, and its probes run inside the container.
@@ -46,7 +81,7 @@ add `api_key_ref: {env: LAYA_API_KEY}` to the classifier entry.
 
 ## Profiles
 
-- **CPU (as shipped).** About 0.5 s per 1,000-character Korean window, and a
+- **CPU (the Dockerfile as written).** About 0.5 s per 1,000-character Korean window, and a
   ready time of about 7 to 14 s. The sample therefore sets `max_windows: 4`,
   `timeout_ms: 3000` and Shadow mode for one pilot team. A request with more
   uncached windows than that reads the first four and counts the rest as
@@ -60,8 +95,8 @@ add `api_key_ref: {env: LAYA_API_KEY}` to the classifier entry.
 
 ## Token budget and truncation
 
-laya-serve reads about 980 tokens of each window (`max_len` 1024 for this
-checkpoint, less the question) and cuts the rest without an error, reporting
+laya-serve reads about 980 tokens of each window (`max_len` 1024 for a
+checkpoint trained with this recipe, less the question) and cuts the rest without an error, reporting
 the cut in the response's `usage`. The gateway never estimates tokens: a
 window the server reports as cut is `abstain` unless the part it read flags,
 so it is never Clear. Tokens per 1,000 characters, measured with the
@@ -93,10 +128,16 @@ server that cuts input silently (for example strands-decider without
 
 ## Evidence
 
-- **Document level.** The checkpoint scores F1 0.953, FPR 0.036 and AUROC
-  0.993 on an independent synthetic Korean set of 2,236 rows; the gateway's
-  regex detectors score F1 0.478 on the same set. See `model-card.md`.
-- **Inside a coding-assistant request** (measured 2026-10-16 against the image built from `laya-serve/` with the weights in `SHA256SUMS`):
+These numbers belong to the reference checkpoint the recipe produced (Laya
+v3 seed 1, revision `laya-ko-pii-v3s1`), which is not distributed. A
+checkpoint you train will differ: two other seeds of the same recipe scored
+F1 0.934 and 0.939.
+
+- **Document level.** The reference checkpoint scores F1 0.953, FPR 0.036 and
+  AUROC 0.993 on an independent synthetic Korean set of 2,236 rows; the
+  gateway's regex detectors score F1 0.478 on the same set. See
+  `model-card.md`.
+- **Inside a coding-assistant request** (measured 2026-10-16 against an image built from `laya-serve/` with the reference checkpoint):
   wrapped-body F1 `0.952`, FPR `0.035`, abstain or error `1`.
 
 All evaluation data is synthetic. Accuracy on your traffic is unknown until
@@ -136,4 +177,5 @@ you measure it in Shadow.
 - No span masking for classifier flags: a Mask rule applies its `onUninspectable` action instead (regex detections still mask).
 - Only internal, self-hosted classifiers are supported.
 
-Weights: `<namespace>/laya-ko-pii` at revision `<revision>` on Hugging Face (Apache-2.0).
+A checkpoint trained with this recipe derives from Laya (Apache-2.0) and
+mmBERT-base (MIT); keep `NOTICE` with it.
