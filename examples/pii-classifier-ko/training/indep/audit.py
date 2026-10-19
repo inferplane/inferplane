@@ -16,26 +16,32 @@ import json
 import os
 import threading
 
-import boto3
-from botocore.config import Config
 
 POLICY = """Label the text 1 or 0 under this policy.
 1 (contains personal information or a secret) when the text contains ANY of:
 - a direct identifier value of a specific person: resident or foreigner registration number, phone number,
   email address of a person (work addresses included), postal/street address of a person, bank account number,
   card number, passport number, driver's license number;
-- a specific person's name TOGETHER WITH an attribute of that person: birth date, diagnosis or health condition,
-  salary or personal finances, employee ID, vehicle plate number;
+- a specific person's name TOGETHER WITH an attribute of that person: birth date or age, diagnosis, health condition
+  or body measurements (blood type, height, weight), religion, salary or personal finances, employee ID,
+  vehicle plate number;
 - a secret credential value: password, API key, access token, private key, connection string containing a password.
 - an internal linking identifier of a person (employee ID, vehicle plate) TOGETHER WITH that person's health condition or
   salary, even when the name is absent or masked.
 0 otherwise, including:
-- names alone (authors, assignees, reviewers, greetings) with no other information about the person;
+- names alone (authors, assignees, reviewers, greetings) with no other information about the person, including a name
+  with only an employer, team, job title or school;
 - code, schemas, validation rules or policy text that handle personal-data fields without containing real values;
 - masked or placeholder values (010-****-1234, 김OO, 홍길동, user@example.com, ${API_KEY}, <redacted>);
 - organisation identifiers and system values: business registration numbers, 1588/1577 switchboard numbers,
   order IDs, UUIDs, hashes, versions, timestamps, private IP addresses, base64 blobs that are not credentials.
 Answer with JSON only: {"label": 0 or 1, "reason": "<one short sentence>"}"""
+
+
+def record(r: dict, judge: int | None, reason: str | None) -> dict:
+    """One audit line; KDPII rows carry no generator."""
+    return {"id": r["id"], "label": r["label"], "judge": judge, "reason": reason,
+            "kind": r["kind"], "source": r["source"], "generator": r.get("generator")}
 
 
 def main() -> None:
@@ -47,6 +53,9 @@ def main() -> None:
     ap.add_argument("--region", default="us-east-1")
     ap.add_argument("--workers", type=int, default=16)
     args = ap.parse_args()
+
+    import boto3
+    from botocore.config import Config
 
     client = boto3.Session(profile_name=args.profile, region_name=args.region).client(
         "bedrock-runtime", config=Config(read_timeout=300, retries={"max_attempts": 8, "mode": "adaptive"}))
@@ -72,9 +81,7 @@ def main() -> None:
             except Exception as e:  # noqa: BLE001 - retried, then recorded
                 reason = f"error: {type(e).__name__}: {str(e)[:150]}"
         with lock, open(args.out, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"id": r["id"], "label": r["label"], "judge": judge, "reason": reason,
-                                "kind": r["kind"], "source": r["source"], "generator": r["generator"]},
-                               ensure_ascii=False) + "\n")
+            f.write(json.dumps(record(r, judge, reason), ensure_ascii=False) + "\n")
 
     with cf.ThreadPoolExecutor(args.workers) as ex:
         list(ex.map(run, rows))

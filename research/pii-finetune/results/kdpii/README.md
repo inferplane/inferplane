@@ -15,10 +15,11 @@ doi:10.5281/zenodo.16759166), CC BY 4.0. `PII_dataset_V3.json`, md5
   - direct identifiers count on their own;
   - switchboard numbers (`15xx` to `19xx`) do not count;
   - an address counts on its own only with a number;
-  - attributes count only next to `PS_NAME`;
+  - the policy's personal attributes (birth date or age, health or body measurements, religion) count only next to `PS_NAME`;
+  - a name with only an employer, team, job title or school does not count, matching the synthetic negatives;
 - writes one row per sentence and one row per window of consecutive sentences of at most 1,000 characters.
 
-The test split has 492 dialogues, 5,207 sentence rows (485 positive) and 492 window rows (299 positive). The labels have not been audited yet (plan Task 6).
+The test split has 492 dialogues, 5,207 sentence rows (447 positive) and 492 window rows (286 positive). The labels have not been audited yet (plan Task 6).
 
 **Files.**
 
@@ -30,12 +31,12 @@ The test split has 492 dialogues, 5,207 sentence rows (485 positive) and 492 win
 
 | Rows | n | Accuracy | Recall | FPR | Precision | F1 |
 |---|---|---|---|---|---|---|
-| Sentences | 5,207 | 0.9312 | 0.5959 | 0.0343 | 0.6408 | 0.6175 |
-| Windows | 492 | 0.7785 | 0.8428 | 0.3212 | 0.8025 | 0.8222 |
+| Sentences | 5,207 | 0.9359 | 0.6309 | 0.0355 | 0.6253 | 0.6281 |
+| Windows | 492 | 0.7886 | 0.8671 | 0.3204 | 0.7898 | 0.8267 |
 
 On sentences:
 - anonymous direct identifiers: recall 0.605 (n 392);
-- named positives: recall 0.559 (n 93), with name plus workplace or position at 0.091 (n 33);
+- named positives: recall 0.818 (n 55);
 - name-only negatives: flagged 0.158 (n 184);
 - sentences without any entity: flagged 0.007 (n 3,353).
 

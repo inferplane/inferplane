@@ -30,19 +30,21 @@ DIRECT = {
     "QT_DRIVER_NUMBER": "driver_license", "QT_MOBILE": "phone", "TMI_EMAIL": "email",
     "QT_ACCOUNT_NUMBER": "bank_account", "QT_CARD_NUMBER": "card",
 }
-# Positive only next to a person's name in the same text.
+# Positive only next to a person's name in the same text: the policy's personal
+# attributes. Employer, team, job title and school are not among them; the
+# synthetic negatives teach "담당자 ⟦NAME⟧ (결제팀)" as 0, and KDPII must agree.
 ATTR = {
-    "DT_BIRTH": "birthdate", "QT_AGE": "age", "TM_BLOOD_TYPE": "health", "QT_WEIGHT": "health",
-    "QT_LENGTH": "health", "OGG_RELIGION": "religion", "OG_WORKPLACE": "employee", "OG_DEPARTMENT": "employee",
-    "CV_POSITION": "employee", "OGG_EDUCATION": "education", "FD_MAJOR": "education", "QT_GRADE": "education",
-    "CV_MILITARY_CAMP": "military",
+    "DT_BIRTH": "birthdate", "QT_AGE": "birthdate", "TM_BLOOD_TYPE": "health", "QT_WEIGHT": "health",
+    "QT_LENGTH": "health", "OGG_RELIGION": "religion",
 }
 NAMEISH = {"PS_NAME", "PS_NICKNAME"}
 DIRECT_CATS = set(DIRECT.values()) | {"phone", "address"}
 SWITCHBOARD = re.compile(r"^\s*1[5-9]\d{2}[-. ]?\d{4}\s*$")
 HAS_DIGIT = re.compile(r"\d")
 # Everything else (PS_ID, PS_NICKNAME, QT_IP, QT_PLATE_NUMBER, TMI_SITE, LC_PLACE,
-# LCP_COUNTRY, OGG_CLUB, CV_SEX) is negative on its own and is not an attribute.
+# LCP_COUNTRY, OGG_CLUB, CV_SEX, OG_WORKPLACE, OG_DEPARTMENT, CV_POSITION,
+# OGG_EDUCATION, FD_MAJOR, QT_GRADE, CV_MILITARY_CAMP) is negative on its own and
+# is not an attribute.
 
 
 def pne_label(spans: list[tuple[str, str]]) -> tuple[int, list[str]]:

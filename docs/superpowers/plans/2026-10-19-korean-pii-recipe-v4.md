@@ -253,12 +253,12 @@ DIRECT = {
     "QT_DRIVER_NUMBER": "driver_license", "QT_MOBILE": "phone", "TMI_EMAIL": "email",
     "QT_ACCOUNT_NUMBER": "bank_account", "QT_CARD_NUMBER": "card",
 }
-# Positive only next to a person's name in the same text.
+# Positive only next to a person's name in the same text: the policy's personal
+# attributes. Employer, team, job title and school are not among them; the
+# synthetic negatives teach "담당자 ⟦NAME⟧ (결제팀)" as 0, and KDPII must agree.
 ATTR = {
-    "DT_BIRTH": "birthdate", "QT_AGE": "age", "TM_BLOOD_TYPE": "health", "QT_WEIGHT": "health",
-    "QT_LENGTH": "health", "OGG_RELIGION": "religion", "OG_WORKPLACE": "employee", "OG_DEPARTMENT": "employee",
-    "CV_POSITION": "employee", "OGG_EDUCATION": "education", "FD_MAJOR": "education", "QT_GRADE": "education",
-    "CV_MILITARY_CAMP": "military",
+    "DT_BIRTH": "birthdate", "QT_AGE": "birthdate", "TM_BLOOD_TYPE": "health", "QT_WEIGHT": "health",
+    "QT_LENGTH": "health", "OGG_RELIGION": "religion",
 }
 NAMEISH = {"PS_NAME", "PS_NICKNAME"}
 DIRECT_CATS = set(DIRECT.values()) | {"phone", "address"}
@@ -1160,8 +1160,10 @@ git commit -s -m "feat(examples): KDPII group metrics and probe gate; record the
 
 The entity-to-policy mapping is a rule. Audit it the way the v3 independent set was audited, before any gate reads it.
 
+> **Executed with two fixes (2026-10-19, ledger rulings).** `indep/audit.py` read `r["generator"]`, which KDPII rows lack, so it gains `record()` and reads the field with `.get`. Its policy text and `kdpii.ATTR` were aligned: name plus birth date or age, health or body measurements, or religion is positive; name plus only an employer, team, job title or school is negative, as in the synthetic `neg_name_only` templates. Tests: `tests/test_audit.py` and two new cases in `tests/test_kdpii.py`.
+
 **Files:**
-- Uses: `indep/audit.py` (no change)
+- Modify: `indep/audit.py` (see the note above)
 - Create (results): repo `research/pii-finetune/results/kdpii/disputed_test.txt`, `research/pii-finetune/results/kdpii/disputed_val.txt`
 
 - [ ] **Step 1: Ask the user to approve the audit run**

@@ -46,6 +46,15 @@ class PneLabel(unittest.TestCase):
         self.assertEqual(kdpii.pne_label([("OGG_RELIGION", "교회")]), (0, []))
         self.assertEqual(kdpii.pne_label([("PS_NAME", "김민수"), ("OGG_RELIGION", "교회")]), (1, ["religion"]))
 
+    def test_name_with_employer_team_title_or_school_is_negative(self):
+        # Synthetic negatives teach "담당자 ⟦NAME⟧ (결제팀)" as 0; KDPII must agree.
+        for lab in ("OG_WORKPLACE", "OG_DEPARTMENT", "CV_POSITION", "OGG_EDUCATION", "FD_MAJOR", "QT_GRADE", "CV_MILITARY_CAMP"):
+            self.assertEqual(kdpii.pne_label([("PS_NAME", "김민수"), (lab, "x")]), (0, []), lab)
+
+    def test_name_with_age_or_body_is_positive(self):
+        self.assertEqual(kdpii.pne_label([("PS_NAME", "김민수"), ("QT_AGE", "32살")]), (1, ["birthdate"]))
+        self.assertEqual(kdpii.pne_label([("PS_NAME", "김민수"), ("TM_BLOOD_TYPE", "B형")]), (1, ["health"]))
+
     def test_unmapped_labels_are_negative(self):
         for lab in ("PS_ID", "QT_IP", "QT_PLATE_NUMBER", "TMI_SITE", "LC_PLACE", "OGG_CLUB", "CV_SEX"):
             self.assertEqual(kdpii.pne_label([(lab, "x")]), (0, []), lab)
