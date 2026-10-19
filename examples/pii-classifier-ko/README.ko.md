@@ -23,12 +23,16 @@ inferplane은 이 샘플의 가중치와 이미지를 배포하지 않고 레시
 
 1. [`training/README.md`](training/README.md)로 체크포인트를 학습합니다.
    런처가 출력하는 작업의 모델 아티팩트에 `laya-ko-pii/`가 들어 있습니다.
-2. 아티팩트를 받아 이미지에 굽습니다. `laya-serve/weights.txt`에 적힌 파일만
-   복사하며, 하나라도 없으면 빌드가 실패합니다.
+2. 아티팩트를 받으면 digest를 한 번 기록하고, `SHA256SUMS`를 그 revision과
+   함께 보관합니다. 빌드는 체크포인트 디렉터리에 `SHA256SUMS`가 있으면 먼저
+   검증하므로, 손상되거나 바뀐 체크포인트는 빌드가 실패합니다.
+3. 이미지에 굽습니다. `laya-serve/weights.txt`에 적힌 파일만 복사하며, 하나라도
+   없으면 빌드가 실패합니다.
 
 ```bash
 aws s3 cp s3://<bucket>/jobs/<job>/output/model.tar.gz .
 tar xzf model.tar.gz laya-ko-pii
+(cd laya-ko-pii && sha256sum $(cat ../examples/pii-classifier-ko/laya-serve/weights.txt) > SHA256SUMS)
 docker build --build-context localweights=laya-ko-pii \
   -t laya-ko-pii:local examples/pii-classifier-ko/laya-serve
 ```

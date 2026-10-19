@@ -8,8 +8,11 @@ ARG PYTHON_IMAGE=python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c6032
 FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS weights
 COPY weights.txt /src/
 COPY --from=localweights . /in/
-# Copy only the listed files: a training directory also holds optimizer state.
-RUN cd /in && while read -r f; do [ -n "$f" ] || continue; mkdir -p "/weights/$(dirname "$f")" && cp "$f" "/weights/$f" || exit 1; done < /src/weights.txt
+# A SHA256SUMS in the checkpoint directory is verified first (README: record it
+# when you fetch the artifact). Copy only the listed files: a training directory
+# also holds optimizer state.
+RUN cd /in && { [ ! -f SHA256SUMS ] || sha256sum -c SHA256SUMS; } \
+ && while read -r f; do [ -n "$f" ] || continue; mkdir -p "/weights/$(dirname "$f")" && cp "$f" "/weights/$f" || exit 1; done < /src/weights.txt
 
 FROM ${PYTHON_IMAGE}
 ARG TARGETARCH

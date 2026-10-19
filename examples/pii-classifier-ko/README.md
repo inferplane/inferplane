@@ -23,12 +23,16 @@ own private storage and registry.
 
 1. Train a checkpoint with [`training/README.md`](training/README.md). The
    launcher prints the job's model artifact, which holds `laya-ko-pii/`.
-2. Fetch it and bake it into the image. Only the files listed in
-   `laya-serve/weights.txt` are copied; the build fails if one is missing.
+2. Fetch it, record its digests once, and keep `SHA256SUMS` with that
+   revision. Every build verifies a `SHA256SUMS` it finds in the checkpoint
+   directory, so a corrupted or swapped checkpoint fails the build.
+3. Bake it into the image. Only the files listed in `laya-serve/weights.txt`
+   are copied; the build fails if one is missing.
 
 ```bash
 aws s3 cp s3://<bucket>/jobs/<job>/output/model.tar.gz .
 tar xzf model.tar.gz laya-ko-pii
+(cd laya-ko-pii && sha256sum $(cat ../examples/pii-classifier-ko/laya-serve/weights.txt) > SHA256SUMS)
 docker build --build-context localweights=laya-ko-pii \
   -t laya-ko-pii:local examples/pii-classifier-ko/laya-serve
 ```
