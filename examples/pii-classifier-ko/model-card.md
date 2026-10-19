@@ -74,6 +74,8 @@ whose labels predate rule B.
 - Known errors:
   - one-sided rule-B documents flagged: 14.5%;
   - name-only documents flagged: 3.3%;
+  - direct identifiers without a name in short dialogue: KDPII anonymous-direct
+    recall 0.605 (test sentence rows, labels not yet audited);
   - name-plus-attribute recall: 0.87.
 - Seed variance: two other seeds of the same recipe scored F1 0.934 and 0.939.
   This seed was selected on the same set, so 0.953 is optimistic.

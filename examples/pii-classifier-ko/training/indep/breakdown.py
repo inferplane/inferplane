@@ -1,4 +1,4 @@
-"""Accuracy, recall and FPR of each prediction file split by generator, value format and kind.
+"""Accuracy, recall and FPR of each prediction file split by generator, value format, kind, language and genre.
 
 Usage: python3 breakdown.py --rows ../data/indep/rows.jsonl name=preds.jsonl [...] [--exclude ids.txt]
 """
@@ -33,7 +33,7 @@ def main() -> None:
                 m = meta[p["id"]]
                 y, yhat = bool(p["label"]), p["p"] >= 0.5
                 idx = (0 if y else 1) if yhat else (2 if y else 3)
-                for key in ("all", f"gen:{m['generator']}", f"fmt:{m['fmt']}", f"kind:{m['source'] if m['source'].startswith('pair') else m['kind']}", f"lang:{m['lang']}"):
+                for key in ("all", f"gen:{m['generator']}", f"fmt:{m['fmt']}", f"kind:{m['source'] if m['source'].startswith('pair') else m['kind']}", f"lang:{m['lang']}", f"genre:{m['genre']}"):
                     groups[key][idx] += 1
         print(f"\n{name}")
         print(f"  {'group':<44} {'n':>5} {'acc':>6} {'recall':>7} {'fpr':>6}")

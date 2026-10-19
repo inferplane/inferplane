@@ -139,6 +139,14 @@ F1 0.934 and 0.939.
   `model-card.md`.
 - **Inside a coding-assistant request** (measured 2026-10-16 against an image built from `laya-serve/` with the reference checkpoint):
   wrapped-body F1 `0.952`, FPR `0.035`, abstain or error `1`.
+- **Real Korean dialogue (KDPII test dialogues, scored 2026-10-19).** Sentence
+  recall 0.596 and FPR 0.034; whole-dialogue windows recall 0.843 and FPR
+  0.321. The reference checkpoint misses about 40% of the direct identifiers
+  that appear without a person's name (recall 0.605), such as a phone number
+  in a chat turn, and most name-plus-workplace or position pairs. The regex
+  detectors catch some of the identifiers. The labels map KDPII entities onto
+  this recipe's policy and are not yet audited. See
+  `research/pii-finetune/results/kdpii/`.
 
 All evaluation data is synthetic. Accuracy on your traffic is unknown until
 you measure it in Shadow.
