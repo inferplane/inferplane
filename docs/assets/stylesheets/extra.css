@@ -13,6 +13,7 @@
 [data-md-color-scheme="slate"] {
   --md-default-bg-color: #111b1b;
   --md-accent-fg-color: #6ee7b7;
+  --md-typeset-a-color: #6ee7b7;
 }
 .md-header { box-shadow: none; }
 .md-banner { background: #162a24; font-size: .65rem; }
