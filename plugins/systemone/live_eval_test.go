@@ -109,7 +109,7 @@ func TestLiveWrappedBodies(t *testing.T) {
 	}
 	f1 := 2 * float64(tp) / float64(2*tp+fp+fn)
 	fpr := float64(fp) / float64(fp+tn)
-	t.Logf("wrapped bodies: n=%d F1=%.3f FPR=%.3f abstain/error=%d (document-level reference: F1 0.953, FPR 0.036)", tp+fp+fn+tn, f1, fpr, abstain)
+	t.Logf("wrapped bodies: n=%d F1=%.3f FPR=%.3f abstain/error=%d (document-level reference, laya-ko-pii-v4s2: F1 0.962, FPR 0.048)", tp+fp+fn+tn, f1, fpr, abstain)
 	if f1 < 0.90 || fpr > 0.08 {
 		t.Fatalf("wrapped-body accuracy below the sanity floor: F1 %.3f FPR %.3f", f1, fpr)
 	}

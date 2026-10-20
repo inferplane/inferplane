@@ -1,0 +1,92 @@
+{
+  "laya-ko-pii-v3s1": {
+    "n": 2236,
+    "errors": 0,
+    "accuracy": 0.9588550983899821,
+    "precision": 0.9527720739219713,
+    "recall": 0.9527720739219713,
+    "f1": 0.9527720739219713,
+    "fpr": 0.03645007923930269,
+    "auroc": 0.9928627679411124,
+    "brier": 0.035681992880143114,
+    "ece": 0.03083228980322007,
+    "abstain_rate": 0.023255813953488413,
+    "decided_accuracy": 0.9688644688644689,
+    "decided_recall": 0.9373716632443532,
+    "decided_fpr": 0.0277337559429477,
+    "recall_by_category": {
+      "address": 0.987,
+      "bank_account": 0.969,
+      "birthdate": 0.932,
+      "card": 0.952,
+      "credential": 0.997,
+      "driver_license": 0.976,
+      "email": 0.99,
+      "employee": 0.978,
+      "financial": 0.978,
+      "health": 0.951,
+      "passport": 1.0,
+      "phone": 0.975,
+      "rrn": 0.98,
+      "vehicle": 0.951
+    },
+    "fpr_by_negative_kind": {
+      "neg_handling": 0.013,
+      "neg_linked_partial": 0.145,
+      "neg_lookalike": 0.004,
+      "neg_name_only": 0.033,
+      "pair": 0.003
+    },
+    "accuracy_by_lang": {
+      "en": 0.965,
+      "ko": 0.958
+    },
+    "latency_ms_p50": 368.86,
+    "latency_ms_p95": 805.04
+  },
+  "laya-ko-pii-v4s2": {
+    "n": 2236,
+    "errors": 0,
+    "accuracy": 0.9664579606440071,
+    "precision": 0.940254652301665,
+    "recall": 0.9856262833675564,
+    "f1": 0.962406015037594,
+    "fpr": 0.04833597464342314,
+    "auroc": 0.9921130860372864,
+    "brier": 0.02973835111806798,
+    "ece": 0.026135330948121645,
+    "abstain_rate": 0.018336314847942736,
+    "decided_accuracy": 0.9763097949886105,
+    "decided_recall": 0.9722792607802875,
+    "decided_fpr": 0.03169572107765452,
+    "recall_by_category": {
+      "address": 0.994,
+      "bank_account": 1.0,
+      "birthdate": 0.992,
+      "card": 1.0,
+      "credential": 1.0,
+      "driver_license": 1.0,
+      "email": 0.995,
+      "employee": 0.994,
+      "financial": 0.996,
+      "health": 0.963,
+      "passport": 1.0,
+      "phone": 0.996,
+      "rrn": 0.99,
+      "vehicle": 0.989
+    },
+    "fpr_by_negative_kind": {
+      "neg_handling": 0.009,
+      "neg_linked_partial": 0.206,
+      "neg_lookalike": 0.02,
+      "neg_name_only": 0.02,
+      "pair": 0.007
+    },
+    "accuracy_by_lang": {
+      "en": 0.981,
+      "ko": 0.964
+    },
+    "latency_ms_p50": 212.96,
+    "latency_ms_p95": 349.33
+  }
+}

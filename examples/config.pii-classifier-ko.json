@@ -38,7 +38,7 @@
         "name": "laya-ko",
         "type": "systemone",
         "mode": "Shadow",
-        "revision": "laya-ko-pii-v3s1",
+        "revision": "laya-ko-pii-v4s2",
         "teams": [ "pilot-ko" ],
         "endpoint": "http://127.0.0.1:8095",
         "data_boundary": "internal",

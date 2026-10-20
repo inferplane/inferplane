@@ -31,7 +31,9 @@ Both rates are 1.6%, the same as for the v3 independent set. Those rows are list
 
 | File | What |
 |---|---|
-| `groups_v3s1.json` | `eval/groups.py` on the test sentence rows, disputes excluded, for the reference checkpoint `laya-ko-pii-v3s1` |
+| `groups_v3s1.json` | `eval/groups.py` on the test sentence rows, disputes excluded, for the earlier reference checkpoint `laya-ko-pii-v3s1` |
+| `groups_v4.json` | The same for the v4 reference checkpoint `laya-ko-pii-v4s2` |
+| `../indep/metrics_v3set.json` | `eval/metrics.py` on independent set v3 (36 disputes excluded) for both checkpoints |
 | `disputed_test.txt`, `disputed_val.txt` | Row ids left out after the audit |
 
 **v3s1 on the test split (2026-10-19, CPU, recipe image, threshold 0.5).**
@@ -48,3 +50,34 @@ On sentences:
 - sentences without any entity: flagged 0.007 (n 3,351).
 
 Probes (`eval/probes.py`): 12 of 18 pass. All six failures are direct identifiers without a name.
+
+**v4s2 (2026-10-20, CPU, recipe image, threshold 0.5).** The v4 recipe trains on
+14,555 KDPII training rows next to 14,555 synthetic rows. Three seeds scored
+KDPII val sentence F1 0.9893, 0.9953 and 0.9881, and seed 2 was selected
+before any test or independent-set number was read. Every gate then ran once:
+
+| Rows | n | Accuracy | Recall | FPR | Precision | F1 |
+|---|---|---|---|---|---|---|
+| Sentences | 5,152 | 0.9981 | 0.9877 | 0.0011 | 0.9877 | 0.9877 |
+| Windows | 447 | 0.9843 | 0.9846 | 0.0160 | 0.9884 | 0.9865 |
+
+On sentences:
+- anonymous direct identifiers: recall 0.997 (n 356);
+- named positives: recall 0.922 (n 51);
+- name-only negatives: flagged 0.005 (n 183);
+- sentences without any entity: flagged 0.000 (n 3,351).
+
+| Gate | Threshold | v3s1 | v4s2 |
+|---|---|---|---|
+| G1 KDPII test sentences: recall, FPR | ≥ 0.90, ≤ 0.02 | 0.661, 0.034 | 0.988, 0.001 |
+| G2 anonymous direct recall, name-only flagged | ≥ 0.90, ≤ 0.10 | 0.638, 0.153 | 0.997, 0.005 |
+| G3 independent set v3: F1, FPR | ≥ 0.94, ≤ 0.05 | 0.953, 0.036 | 0.962, 0.048 |
+| G4 independent set code genres (CI pipeline, notebook output, issue tracker, incident postmortem): FPR | ≤ 0.02 | 0.011 (4/367) | 0.014 (5/367) |
+| G5 probes | all 18 | 12 | 18 |
+| G6 KDPII test windows: recall | ≥ 0.90 | 0.919 | 0.985 |
+
+The test dialogues are unseen, but they come from the dataset v4 trains on, so
+the KDPII numbers are in-distribution. On the independent set, v4s2 raises
+recall from 0.953 to 0.986 and FPR from 0.036 to 0.048: one-sided rule-B
+documents are flagged 0.206 (v3s1 0.145), and civil-complaint and
+community-post texts 0.105 and 0.095.
