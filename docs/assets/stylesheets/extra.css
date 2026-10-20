@@ -57,3 +57,11 @@ html[lang="ko"] .md-typeset pre { word-break: normal; overflow-wrap: normal; }
   .md-banner a { display: block; margin-left: 0; }
   .md-typeset .grid.cards { grid-template-columns: 1fr; }
 }
+
+.ip-performance-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; margin: 1rem 0 .5rem; }
+.ip-performance-controls label { font-weight: 650; }
+.ip-performance-controls input { min-width: 0; width: 16rem; max-width: 100%; padding: .55rem .65rem; border: 1px solid var(--md-default-fg-color--light); border-radius: .3rem; background: var(--md-default-bg-color); color: var(--md-default-fg-color); font: inherit; }
+.ip-performance-controls output { font-size: .7rem; }
+.ip-performance-table tr[hidden] { display: none; }
+.ip-performance-table td:first-child { min-width: 10rem; font-weight: 600; }
+.ip-performance-table :focus-visible { outline: 2px solid var(--md-accent-fg-color); outline-offset: 3px; }

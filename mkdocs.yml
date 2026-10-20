@@ -9,6 +9,7 @@ strict: true
 exclude_docs: |
   /superpowers/
   /specs/
+  /benchmarks/
   /customer-issue-analysis.md
   /overrides/
 hooks:
@@ -84,6 +85,9 @@ plugins:
             Choose a deployment profile: 배포 프로파일 선택
             Connect clients: 클라이언트 연결
             Feature support: 기능 지원 범위
+            Performance: 성능
+            Performance results: 성능 결과
+            Model performance: 모델별 성능
             Guides: 사용 가이드
             Model routing & privacy: 모델 라우팅과 개인정보 보호
             Adaptive coding workflows: 적응형 코딩 워크플로
@@ -136,6 +140,8 @@ markdown_extensions:
   - pymdownx.superfences
 extra_css:
   - assets/stylesheets/extra.css
+extra_javascript:
+  - assets/javascripts/performance.js
 extra:
   generator: false
 nav:
@@ -146,6 +152,9 @@ nav:
       - Choose a deployment profile: getting-started/deployment-profiles.md
       - Connect clients: getting-started/clients.md
       - Feature support: getting-started/support-matrix.md
+  - Performance:
+      - Performance results: performance/index.md
+      - Model performance: performance/models.md
   - Guides:
       - Model routing & privacy: policy-routing.md
       - Adaptive coding workflows: adaptive-routing.md

@@ -1,6 +1,6 @@
 ---
 translation_source: index.md
-translation_source_sha256: 01b4a5a5b06981a8d759b9aaaadd1dfc641244fe1900bfffa167637b8ed1d964
+translation_source_sha256: 2786a53a73760d4cc6e514b365f4a790adc75933489a7e679bf46205993d91a5
 title: 정책을 정하면 요청마다 자동 집행합니다
 description: 정책 관리와 추론 경로를 분리하고 모델 접근, 예산 전환, PII 라우팅과 감사를 자동 집행하세요.
 hide:
@@ -22,6 +22,7 @@ hide:
 
 [첫 요청 보내기](getting-started/quickstart.md){ .md-button .md-button--primary }
 [inferplane의 강점](why-inferplane.md){ .md-button }
+[성능 결과](performance/index.md){ .md-button }
 
 </div>
 </div>
@@ -85,6 +86,7 @@ hide:
 | 다음 목표 | 시작 문서 |
 | --- | --- |
 | 게이트웨이 하나로 실제 요청 평가 | [로컬 빠른 시작](getting-started/quickstart.md) |
+| 실측 지연·컨텍스트 용량·비용 확인 | [성능 결과](performance/index.md) |
 | 관리되는 개발자 장비 전체의 금전 예산 집행 | [노드별 영속 예산](durable-budgets.md) |
 | 여러 게이트웨이에서 키·요청률·토큰 할당량·예산 공유 | [공유 Postgres 거버넌스](shared-governance.md) |
 | 운영 환경 요구 사항 충족 여부 판단 | [상용화 준비도](operations/production-readiness.md) |

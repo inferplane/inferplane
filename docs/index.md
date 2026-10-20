@@ -20,6 +20,7 @@ A dedicated control plane manages policy and budget authority. Each `mayu` data 
 
 [Make your first request](getting-started/quickstart.md){ .md-button .md-button--primary }
 [Why inferplane](why-inferplane.md){ .md-button }
+[Performance results](performance/index.md){ .md-button }
 
 </div>
 </div>
@@ -83,6 +84,7 @@ For example, the supplied adaptive policy routes detected PII to an approved int
 | Your next step | Start here |
 | --- | --- |
 | Evaluate one gateway and make a real request | [Local quickstart](getting-started/quickstart.md) |
+| Inspect measured latency, context capacity and cost | [Performance results](performance/index.md) |
 | Govern money across managed developer machines | [Durable node-local budgets](durable-budgets.md) |
 | Share keys, rates, token quotas, and money across gateways | [Shared Postgres governance](shared-governance.md) |
 | Decide whether this meets a production requirement | [Readiness assessment](operations/production-readiness.md) |
