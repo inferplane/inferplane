@@ -22,6 +22,8 @@ def load(path: str) -> list[dict]:
 
 def check(probes: list[dict], scores: list[float], threshold: float) -> list[dict]:
     """A probe expecting 1 needs p >= threshold; a probe expecting 0 needs p < threshold."""
+    if len(scores) != len(probes):
+        raise ValueError(f"{len(scores)} scores for {len(probes)} probes")
     return [dict(p, p=s) for p, s in zip(probes, scores) if (s >= threshold) != bool(p["expect"])]
 
 

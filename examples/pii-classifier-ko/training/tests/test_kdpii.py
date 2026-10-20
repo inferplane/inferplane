@@ -28,13 +28,13 @@ def ids_for(split):
 
 class PneLabel(unittest.TestCase):
     def test_direct_identifier_alone_is_positive(self):
-        self.assertEqual(kdpii.pne_label([("QT_MOBILE", "010-4056-6702")]), (1, ["phone"]))
-        self.assertEqual(kdpii.pne_label([("TMI_EMAIL", "laze1@naver.com")]), (1, ["email"]))
+        self.assertEqual(kdpii.pne_label([("QT_MOBILE", "010-5821-3307")]), (1, ["phone"]))
+        self.assertEqual(kdpii.pne_label([("TMI_EMAIL", "haneul.j21@naver.com")]), (1, ["email"]))
         self.assertEqual(kdpii.pne_label([("QT_RESIDENT_NUMBER", "900101-1234567")]), (1, ["rrn"]))
 
     def test_switchboard_number_is_negative(self):
-        self.assertEqual(kdpii.pne_label([("QT_PHONE", "1661-6420")]), (0, []))
-        self.assertEqual(kdpii.pne_label([("QT_PHONE", "063-5093-4840")]), (1, ["phone"]))
+        self.assertEqual(kdpii.pne_label([("QT_PHONE", "1661-2085")]), (0, []))
+        self.assertEqual(kdpii.pne_label([("QT_PHONE", "063-271-9054")]), (1, ["phone"]))
 
     def test_address_needs_a_number_to_be_direct(self):
         self.assertEqual(kdpii.pne_label([("LC_ADDRESS", "종로구")]), (0, []))
@@ -62,7 +62,7 @@ class PneLabel(unittest.TestCase):
 
 class Rows(unittest.TestCase):
     def test_anon_direct_flag(self):
-        rows = kdpii.dialogue_rows(dialogue("Data1.1", sent(1, "010-4056-6702로 문자 주세요", ("QT_MOBILE", "010-4056-6702")),
+        rows = kdpii.dialogue_rows(dialogue("Data1.1", sent(1, "010-5821-3307로 문자 주세요", ("QT_MOBILE", "010-5821-3307")),
                                             sent(2, "김민수 010-1111-2222", ("PS_NAME", "김민수"), ("QT_MOBILE", "010-1111-2222"))))
         s = [r for r in rows if r["kind"] == "kdpii_sentence"]
         self.assertTrue(s[0]["anon_direct"])
@@ -91,10 +91,10 @@ class Rows(unittest.TestCase):
 
     def test_build_drops_cross_split_duplicates(self):
         train_id, test_id = ids_for("train")[0], ids_for("test")[0]
-        shared = "제 번호 010-4056-6702요"
+        shared = "제 번호 010-5821-3307요"
         out = kdpii.build([
-            dialogue(train_id, sent(1, shared, ("QT_MOBILE", "010-4056-6702")), sent(2, "네")),
-            dialogue(test_id, sent(1, shared, ("QT_MOBILE", "010-4056-6702")), sent(2, "다른 문장")),
+            dialogue(train_id, sent(1, shared, ("QT_MOBILE", "010-5821-3307")), sent(2, "네")),
+            dialogue(test_id, sent(1, shared, ("QT_MOBILE", "010-5821-3307")), sent(2, "다른 문장")),
         ])
         self.assertIn(shared, {r["text"] for r in out["train"]})
         self.assertNotIn(shared, {r["text"] for r in out["test"]})

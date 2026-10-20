@@ -9,7 +9,7 @@ import audit  # noqa: E402
 
 class Record(unittest.TestCase):
     def test_kdpii_rows_have_no_generator(self):
-        r = {"id": "a1", "label": 1, "kind": "kdpii_sentence", "source": "kdpii", "text": "010-4056-6702로 문자 주세요"}
+        r = {"id": "a1", "label": 1, "kind": "kdpii_sentence", "source": "kdpii", "text": "010-5821-3307로 문자 주세요"}
         self.assertEqual(audit.record(r, 1, "phone"), {"id": "a1", "label": 1, "judge": 1, "reason": "phone",
                                                        "kind": "kdpii_sentence", "source": "kdpii", "generator": None})
 

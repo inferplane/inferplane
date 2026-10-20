@@ -13,12 +13,12 @@ class Obfuscate(unittest.TestCase):
     def test_every_style_keeps_the_digits_recoverable(self):
         seen = set()
         for seed in range(30):
-            out = fill.obfuscate("010-4056-6702", random.Random(seed))
+            out = fill.obfuscate("010-5821-3307", random.Random(seed))
             seen.add(out)
-            self.assertNotEqual(out, "010-4056-6702")
-        self.assertIn("０１０－４０５６－６７０２", seen)
-        self.assertIn("0 1 0 - 4 0 5 6 - 6 7 0 2", seen)
-        self.assertIn("공일공-사공오육-육칠공이", seen)
+            self.assertNotEqual(out, "010-5821-3307")
+        self.assertIn("０１０－５８２１－３３０７", seen)
+        self.assertIn("0 1 0 - 5 8 2 1 - 3 3 0 7", seen)
+        self.assertIn("공일공-오팔이일-삼삼공칠", seen)
 
     def test_rate_one_obfuscates_and_keeps_the_label(self):
         text, present = fill.fill("연락처 ⟦PHONE⟧", Values(random.Random(3)), obf_rate=1.0)

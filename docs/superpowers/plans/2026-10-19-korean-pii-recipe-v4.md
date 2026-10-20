@@ -33,12 +33,12 @@ The gateway code does not change. The classifier keeps the same instruction stri
   - regex plus v3s1: recall 52.6%;
   - Notion model 3: 98.45% accuracy, recall 94.4%, FPR 0.74%, on its own 4,891-sentence split.
 - Under a mapping that approximates this recipe's own policy, v3s1 recall is 53.1%, so most of the gap is the model, not the policy.
-- Probes show name dependence:
-  - `김민수 010-4056-6702` scores 0.990;
-  - `010-4056-6702로 문자 하나만 넣어주세요.` scores 0.073;
-  - `고객 연락처: 010-4056-6702` scores 0.116;
+- Probes show name dependence (values taken from KDPII then, elided here):
+  - `김민수 <mobile>` scores 0.990;
+  - `<mobile>로 문자 하나만 넣어주세요.` scores 0.073;
+  - `고객 연락처: <mobile>` scores 0.116;
   - a bare resident number scores 0.107;
-  - `제 이메일은 laze1@naver.com 입니다.` scores 0.073.
+  - `제 이메일은 <email> 입니다.` scores 0.073.
 - Root cause in the recipe: `gen_templates.py` fixes document length at 40 to 300 words, and `pos_direct` templates may use `⟦NAME⟧`. In the v3 independent set, 288 of the 321 `pos_direct` rows have a name slot, and the shortest row is 150 characters. `kr_values.label` already makes a direct identifier positive on its own; the data never taught it.
 - What v3s1 does well, and must keep: FPR 1.1% (4/367) on the independent set's code genres, and 0.8% on KDPII sentences without any entity.
 
@@ -144,13 +144,13 @@ def ids_for(split):
 
 class PneLabel(unittest.TestCase):
     def test_direct_identifier_alone_is_positive(self):
-        self.assertEqual(kdpii.pne_label([("QT_MOBILE", "010-4056-6702")]), (1, ["phone"]))
-        self.assertEqual(kdpii.pne_label([("TMI_EMAIL", "laze1@naver.com")]), (1, ["email"]))
+        self.assertEqual(kdpii.pne_label([("QT_MOBILE", "010-5821-3307")]), (1, ["phone"]))
+        self.assertEqual(kdpii.pne_label([("TMI_EMAIL", "haneul.j21@naver.com")]), (1, ["email"]))
         self.assertEqual(kdpii.pne_label([("QT_RESIDENT_NUMBER", "900101-1234567")]), (1, ["rrn"]))
 
     def test_switchboard_number_is_negative(self):
-        self.assertEqual(kdpii.pne_label([("QT_PHONE", "1661-6420")]), (0, []))
-        self.assertEqual(kdpii.pne_label([("QT_PHONE", "063-5093-4840")]), (1, ["phone"]))
+        self.assertEqual(kdpii.pne_label([("QT_PHONE", "1661-2085")]), (0, []))
+        self.assertEqual(kdpii.pne_label([("QT_PHONE", "063-271-9054")]), (1, ["phone"]))
 
     def test_address_needs_a_number_to_be_direct(self):
         self.assertEqual(kdpii.pne_label([("LC_ADDRESS", "종로구")]), (0, []))
@@ -169,7 +169,7 @@ class PneLabel(unittest.TestCase):
 
 class Rows(unittest.TestCase):
     def test_anon_direct_flag(self):
-        rows = kdpii.dialogue_rows(dialogue("Data1.1", sent(1, "010-4056-6702로 문자 주세요", ("QT_MOBILE", "010-4056-6702")),
+        rows = kdpii.dialogue_rows(dialogue("Data1.1", sent(1, "010-5821-3307로 문자 주세요", ("QT_MOBILE", "010-5821-3307")),
                                             sent(2, "김민수 010-1111-2222", ("PS_NAME", "김민수"), ("QT_MOBILE", "010-1111-2222"))))
         s = [r for r in rows if r["kind"] == "kdpii_sentence"]
         self.assertTrue(s[0]["anon_direct"])
@@ -198,10 +198,10 @@ class Rows(unittest.TestCase):
 
     def test_build_drops_cross_split_duplicates(self):
         train_id, test_id = ids_for("train")[0], ids_for("test")[0]
-        shared = "제 번호 010-4056-6702요"
+        shared = "제 번호 010-5821-3307요"
         out = kdpii.build([
-            dialogue(train_id, sent(1, shared, ("QT_MOBILE", "010-4056-6702")), sent(2, "네")),
-            dialogue(test_id, sent(1, shared, ("QT_MOBILE", "010-4056-6702")), sent(2, "다른 문장")),
+            dialogue(train_id, sent(1, shared, ("QT_MOBILE", "010-5821-3307")), sent(2, "네")),
+            dialogue(test_id, sent(1, shared, ("QT_MOBILE", "010-5821-3307")), sent(2, "다른 문장")),
         ])
         self.assertIn(shared, {r["text"] for r in out["train"]})
         self.assertNotIn(shared, {r["text"] for r in out["test"]})
@@ -586,12 +586,12 @@ class Obfuscate(unittest.TestCase):
     def test_every_style_keeps_the_digits_recoverable(self):
         seen = set()
         for seed in range(30):
-            out = fill.obfuscate("010-4056-6702", random.Random(seed))
+            out = fill.obfuscate("010-5821-3307", random.Random(seed))
             seen.add(out)
-            self.assertNotEqual(out, "010-4056-6702")
-        self.assertIn("０１０－４０５６－６７０２", seen)
-        self.assertIn("0 1 0 - 4 0 5 6 - 6 7 0 2", seen)
-        self.assertIn("공일공-사공오육-육칠공이", seen)
+            self.assertNotEqual(out, "010-5821-3307")
+        self.assertIn("０１０－５８２１－３３０７", seen)
+        self.assertIn("0 1 0 - 5 8 2 1 - 3 3 0 7", seen)
+        self.assertIn("공일공-오팔이일-삼삼공칠", seen)
 
     def test_rate_one_obfuscates_and_keeps_the_label(self):
         text, present = fill.fill("연락처 ⟦PHONE⟧", Values(random.Random(3)), obf_rate=1.0)
@@ -1015,24 +1015,24 @@ if __name__ == "__main__":
 All values below are synthetic.
 
 ```jsonl
-{"text": "010-4056-6702로 문자 하나만 넣어주세요.", "expect": 1, "why": "mobile without a name"}
-{"text": "고객 연락처: 010-4056-6702", "expect": 1, "why": "mobile in a field, no name"}
-{"text": "900101-1234567", "expect": 1, "why": "bare resident number"}
-{"text": "제 이메일은 laze1@naver.com 입니다.", "expect": 1, "why": "own email, no name"}
-{"text": "응, laze1@naver.com 이걸로 보낸다?", "expect": 1, "why": "email in casual chat"}
-{"text": "기업은행 223-583353-76-703로 입금해 주세요.", "expect": 1, "why": "bank account without a name"}
-{"text": "카드 4721-7567-9276-9051 결제가 안 돼요", "expect": 1, "why": "card number without a name"}
-{"text": "여권번호 M12345678 맞는지 봐주세요", "expect": 1, "why": "passport number"}
-{"text": "서울 마포구 월드컵북로 123, 래미안 104동 1203호로 보내 주세요", "expect": 1, "why": "home address with a number"}
-{"text": "김민수 010-4056-6702", "expect": 1, "why": "named mobile (v3 already passes)"}
-{"text": "고객센터 1661-6420으로 전화 주세요.", "expect": 0, "why": "switchboard number"}
-{"text": "주문번호 INV5321895252 배송 조회 부탁드려요", "expect": 0, "why": "order id"}
+{"text": "010-7392-1846로 문자 하나만 넣어주세요.", "expect": 1, "why": "mobile without a name"}
+{"text": "고객 연락처: 010-7392-1846", "expect": 1, "why": "mobile in a field, no name"}
+{"text": "850317-2048613", "expect": 1, "why": "bare resident number"}
+{"text": "제 이메일은 minji.k0412@daum.net 입니다.", "expect": 1, "why": "own email, no name"}
+{"text": "응, sora_77q@kakao.com 이걸로 보낼게?", "expect": 1, "why": "email in casual chat"}
+{"text": "농협 351-2287-4401-63으로 입금해 주세요.", "expect": 1, "why": "bank account without a name"}
+{"text": "카드 5412-8830-1947-2265 결제가 안 돼요", "expect": 1, "why": "card number without a name"}
+{"text": "여권번호 M58203917 맞는지 봐주세요", "expect": 1, "why": "passport number"}
+{"text": "부산 해운대구 센텀중앙로 78, 센텀파크 203동 1501호로 보내 주세요", "expect": 1, "why": "home address with a number"}
+{"text": "이서준 010-2281-5937", "expect": 1, "why": "named mobile (v3 already passes)"}
+{"text": "고객센터 1644-3071로 전화 주세요.", "expect": 0, "why": "switchboard number"}
+{"text": "주문번호 INV7710283346 배송 조회 부탁드려요", "expect": 0, "why": "order id"}
 {"text": "phone = '010-****-****'", "expect": 0, "why": "masked value"}
 {"text": "def mask_phone(s): return re.sub(r'\\d{4}$', '****', s)", "expect": 0, "why": "masking code"}
 {"text": "담당자 김민수님께 전달했습니다.", "expect": 0, "why": "name only"}
 {"text": "request_id = '550e8400-e29b-41d4-a716-446655440000'", "expect": 0, "why": "uuid"}
 {"text": "api_key = os.environ['API_KEY']", "expect": 0, "why": "secret reference, no value"}
-{"text": "종로구 접수되었고, 하나는요?", "expect": 0, "why": "district without a house number"}
+{"text": "성동구 쪽으로 접수했고, 나머지는요?", "expect": 0, "why": "district without a house number"}
 ```
 
 ```python

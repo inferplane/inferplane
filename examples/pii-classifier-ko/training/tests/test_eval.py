@@ -1,5 +1,7 @@
+import glob
 import json
 import os
+import re
 import sys
 import unittest
 
@@ -42,12 +44,40 @@ class Probes(unittest.TestCase):
         self.assertEqual(probes.check(ps, [0.9, 0.1], 0.5), [])
         self.assertEqual([f["text"] for f in probes.check(ps, [0.4, 0.6], 0.5)], ["a", "b"])
 
+    def test_check_rejects_a_short_score_list(self):
+        # A missing score must fail the gate, not drop the probe from it.
+        ps = [{"text": "a", "expect": 1, "why": "x"}, {"text": "b", "expect": 0, "why": "y"}]
+        with self.assertRaises(ValueError):
+            probes.check(ps, [0.9], 0.5)
+
     def test_probe_file_is_well_formed(self):
         with open(os.path.join(HERE, "..", "eval", "probes.jsonl"), encoding="utf-8") as f:
             ps = [json.loads(l) for l in f if l.strip()]
         self.assertGreaterEqual(len(ps), 16)
         self.assertEqual({p["expect"] for p in ps}, {0, 1})
         self.assertTrue(all(p["text"] and p["why"] for p in ps))
+
+    def test_probes_share_no_text_or_value_with_kdpii(self):
+        # The probes test generalization, so no probe may repeat a KDPII sentence or value.
+        paths = [p for p in glob.glob(os.path.join(HERE, "..", "data", "kdpii", "*.jsonl")) if "audit" not in p]
+        if not paths:
+            self.skipTest("KDPII rows not built (datagen/kdpii.py build)")
+        sentences, texts = set(), []
+        for path in paths:
+            with open(path, encoding="utf-8") as f:
+                for l in f:
+                    r = json.loads(l)
+                    texts.append(r["text"])
+                    if r["kind"] == "kdpii_sentence":
+                        sentences.add(r["text"])
+        blob = "\n".join(texts)
+        value = re.compile(r"[\w.+-]+@[\w.-]+\.\w+|[A-Z]?\d[\d-]{4,}\d")
+        with open(os.path.join(HERE, "..", "eval", "probes.jsonl"), encoding="utf-8") as f:
+            ps = [json.loads(l) for l in f if l.strip()]
+        for p in ps:
+            self.assertNotIn(p["text"], sentences)
+            for v in value.findall(p["text"]):
+                self.assertFalse(v in blob, f"{v} occurs in KDPII: {p['text']}")
 
 
 if __name__ == "__main__":
