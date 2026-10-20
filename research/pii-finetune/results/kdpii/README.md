@@ -25,7 +25,7 @@ The test split has 492 dialogues, 5,207 sentence rows and 492 window rows.
 - Test: 93 disagreements and 7 unparsable answers out of 5,699 rows.
 - Val: 93 and 6 out of 5,674.
 
-Both rates are 1.6%, the same as for the v3 independent set. Those rows are listed in `disputed_test.txt` and `disputed_val.txt` and are left out of every metric here. The most common disagreement is a business landline the judge reads as not personal (41 test rows). After exclusion, test has 5,152 sentence rows (407 positive) and 447 window rows (260 positive).
+Both rates are 1.6%, the same as for the v3 independent set, but the disagreements cluster by entity type. 41 of the 93 test disagreements are rows positive only through a landline that the judge reads as a business or office number. Among test sentences positive only through a landline, it disagreed on 25 of 66; training holds 514 such sentences. Those rows are listed in `disputed_test.txt` and `disputed_val.txt` and are left out of every metric here. The most common disagreement is a business landline the judge reads as not personal (41 test rows). After exclusion, test has 5,152 sentence rows (407 positive) and 447 window rows (260 positive).
 
 **Files.**
 
@@ -49,7 +49,7 @@ On sentences:
 - name-only negatives: flagged 0.153 (n 183);
 - sentences without any entity: flagged 0.007 (n 3,351).
 
-Probes (`eval/probes.py`): 12 of 18 pass. All six failures are direct identifiers without a name.
+Probes (`eval/probes.py`): 16 of 18 pass; both failures are mobile numbers without a name. The probe values were regenerated on 2026-10-20 so that none occurs in KDPII. With the earlier values, which came from KDPII, 12 of 18 passed.
 
 **v4s2 (2026-10-20, CPU, recipe image, threshold 0.5).** The v4 recipe trains on
 14,555 KDPII training rows next to 14,555 synthetic rows. Three seeds scored
@@ -73,11 +73,12 @@ On sentences:
 | G2 anonymous direct recall, name-only flagged | ≥ 0.90, ≤ 0.10 | 0.638, 0.153 | 0.997, 0.005 |
 | G3 independent set v3: F1, FPR | ≥ 0.94, ≤ 0.05 | 0.953, 0.036 | 0.962, 0.048 |
 | G4 independent set code genres (CI pipeline, notebook output, issue tracker, incident postmortem): FPR | ≤ 0.02 | 0.011 (4/367) | 0.014 (5/367) |
-| G5 probes | all 18 | 12 | 18 |
+| G5 probes | all 18 | 16 | 18 |
 | G6 KDPII test windows: recall | ≥ 0.90 | 0.919 | 0.985 |
 
 The test dialogues are unseen, but they come from the dataset v4 trains on, so
 the KDPII numbers are in-distribution. On the independent set, v4s2 raises
 recall from 0.953 to 0.986 and FPR from 0.036 to 0.048: one-sided rule-B
-documents are flagged 0.206 (v3s1 0.145), and civil-complaint and
-community-post texts 0.105 and 0.095.
+documents are flagged 0.206 (v3s1 0.145), lookalike-only documents 5 of 250
+(v3s1 1 of 250), and civil-complaint and community-post texts 0.105 and 0.095.
+On the 41 disputed landline rows, v4s2 flags all 41 and v3s1 flagged 7.

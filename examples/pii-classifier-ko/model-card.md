@@ -85,7 +85,7 @@ disputed are left out of both.
 | G2 | KDPII test sentences: direct identifier without a name recall, name-only flagged | ≥ 0.90, ≤ 0.10 | 0.638, 0.153 | 0.997, 0.005 |
 | G3 | Independent set: F1, FPR | ≥ 0.94, ≤ 0.05 | 0.953, 0.036 | 0.962, 0.048 |
 | G4 | Independent set, four code genres: FPR | ≤ 0.02 | 0.011 | 0.014 |
-| G5 | 18 fixed probes | all pass | 12 | 18 |
+| G5 | 18 fixed probes | all pass | 16 | 18 |
 | G6 | KDPII test windows: recall | ≥ 0.90 | 0.919 | 0.985 |
 
 On the independent set:
@@ -104,11 +104,23 @@ whose labels predate rule B.
 - Abstain rate with a 0.1 < p < 0.9 band: 1.8%.
 - Known errors, on the independent set:
   - one-sided rule-B documents flagged: 20.6% (v3s1 14.5%);
+  - documents with only lookalike tokens (order ids, UUIDs, hashes, masked
+    values) flagged: 2.0%, 5 of 250 (v3s1 0.4%); two of them score above 0.99;
   - name-only documents flagged: 2.0%;
   - name-plus-attribute recall: 0.95;
-  - FPR above 0.09 in two genres: civil complaints 0.105 and community posts 0.095.
+  - FPR above 0.09 in two genres: civil complaints 0.105 and community posts
+    0.095. It roughly doubled in delivery-app texts (0.033 to 0.078) and
+    call-center transcripts (0.037 to 0.074).
+- Known errors, on KDPII: a shop's or an office's landline is flagged. KDPII
+  labels every landline as a phone number, and the audit judge disagreed on 25
+  of the 66 test sentences that are positive only through a landline, reading
+  them as not personal (for example a shop's or a department's number). Those
+  rows are left out of the metrics. On the 41
+  disputed test rows of this kind, v4s2 flags all 41 and v3s1 flagged 7.
 - v4 trades precision for recall: independent-set FPR rose from 0.036 to
   0.048, close to the gate.
+- v4s2 was selected on KDPII val, not on the independent set. v3s1 was
+  selected on the independent set, so its 0.953 there is optimistic.
 - Value formats on the independent set: standard formats recall 0.986, FPR
   0.043; unseen formats recall 0.985, FPR 0.054. KDPII brings spaced card
   numbers and lot-number addresses into training, so the second half is no

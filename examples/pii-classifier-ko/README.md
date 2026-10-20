@@ -139,7 +139,7 @@ checkpoint you train will differ: the three v4 seeds scored KDPII val F1
   regex detectors score F1 0.478 on the same set. See `model-card.md`.
 - **Inside a coding-assistant request** (measured 2026-10-20 against an image built from `laya-serve/` with the reference checkpoint):
   wrapped-body F1 `0.968`, FPR `0.030`, abstain or error `1`.
-- **Korean dialogue (KDPII test dialogues, scored 2026-10-20).**
+- **Korean dialogue (KDPII test dialogues; v3s1 scored 2026-10-19, v4s2 2026-10-20).**
 
   | Revision | Sentence recall | Sentence FPR | Direct identifier without a name, recall | Window recall | Window FPR |
   |---|---|---|---|---|---|
@@ -149,7 +149,9 @@ checkpoint you train will differ: the three v4 seeds scored KDPII val F1
   v4 trains on other dialogues of the same dataset, so these numbers are
   in-distribution. The labels map KDPII entities onto this recipe's policy; a
   Claude Sonnet 5.5 audit disagreed on 1.6% of them, which are left out. See
-  `research/pii-finetune/results/kdpii/`.
+  `research/pii-finetune/results/kdpii/`. v4 also flags a shop's or an office's
+  landline, which the label policy cannot tell apart from a person's; see
+  `model-card.md`.
 
 The independent set is synthetic, and KDPII is not coding-assistant traffic.
 Accuracy on your traffic is unknown until you measure it in Shadow.
