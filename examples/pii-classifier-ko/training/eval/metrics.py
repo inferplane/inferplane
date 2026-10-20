@@ -1,6 +1,6 @@
 """Metrics over prediction files written by score_http.py or regexbaseline.
 
-Usage: python3 metrics.py name=preds.jsonl [name=preds.jsonl ...] [--json out.json] [--threshold 0.5]
+Usage: python3 metrics.py name=preds.jsonl [name=preds.jsonl ...] [--json out.json] [--threshold 0.5] [--exclude ids.txt]
 """
 
 from __future__ import annotations
@@ -94,14 +94,19 @@ def main() -> None:
     ap.add_argument("preds", nargs="+", help="name=path")
     ap.add_argument("--threshold", type=float, default=0.5)
     ap.add_argument("--band", default="0.1,0.9")
+    ap.add_argument("--exclude", help="file of row ids to leave out (label disputes)")
     ap.add_argument("--json")
     a = ap.parse_args()
     band = tuple(float(x) for x in a.band.split(","))
+    skip: set[str] = set()
+    if a.exclude:
+        with open(a.exclude, encoding="utf-8") as f:
+            skip = set(f.read().split())
     results = {}
     for spec in a.preds:
         name, path = spec.split("=", 1)
         with open(path, encoding="utf-8") as f:
-            results[name] = summarize([json.loads(l) for l in f], a.threshold, band)
+            results[name] = summarize([r for r in map(json.loads, f) if r["id"] not in skip], a.threshold, band)
     cols = ["n", "accuracy", "precision", "recall", "f1", "fpr", "auroc", "brier", "ece", "abstain_rate", "decided_accuracy", "latency_ms_p50", "latency_ms_p95"]
     print("| model | " + " | ".join(cols) + " |")
     print("|" + "---|" * (len(cols) + 1))
@@ -111,6 +116,7 @@ def main() -> None:
     if a.json:
         with open(a.json, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
+            f.write("\n")
 
 
 if __name__ == "__main__":

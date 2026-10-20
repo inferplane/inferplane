@@ -37,6 +37,20 @@ MASKS = {
     "PLATE": lambda v: v.r.choice(["12가 ****", "***허 ****", "(차량번호 가림)"]),
 }
 
+OBFUSCATE = ("PHONE", "RRN", "FRN", "ACCOUNT", "CARD")
+FULLWIDTH = str.maketrans("0123456789-", "０１２３４５６７８９－")
+KO_DIGITS = dict(zip("0123456789", "공일이삼사오육칠팔구"))
+
+
+def obfuscate(value: str, rng: random.Random) -> str:
+    """Write a value the way people dodge filters: full-width, spaced out, or as Korean digit words."""
+    style = rng.choice(("fullwidth", "spaced", "korean"))
+    if style == "fullwidth":
+        return value.translate(FULLWIDTH)
+    if style == "spaced":
+        return " ".join(value.replace(" ", ""))
+    return "".join(KO_DIGITS.get(c, c) for c in value)
+
 
 def split_of(template_id: str, genre: str) -> str:
     if genre in OOD_GENRES:
@@ -45,7 +59,7 @@ def split_of(template_id: str, genre: str) -> str:
     return "train" if h < 80 else ("val" if h < 90 else "test")
 
 
-def fill(text: str, v: Values, masked: bool | str = False) -> tuple[str, list[str]]:
+def fill(text: str, v: Values, masked: bool | str = False, obf_rate: float = 0.0) -> tuple[str, list[str]]:
     """masked: False (no masking), True or "all" (every slot in MASKS), "name" (NAME only)."""
     mask = set(MASKS) if masked in (True, "all") else ({"NAME"} if masked == "name" else set())
     cache: dict[str, str] = {}
@@ -58,12 +72,15 @@ def fill(text: str, v: Values, masked: bool | str = False) -> tuple[str, list[st
             return MASKS[slot](v)
         present.append(slot)
         if slot in cache and v.r.random() < 0.5:
-            return cache[slot]
-        method = getattr(v, SLOTS[slot][0])
-        val = method(first_name[0]) if slot == "EMAIL" and first_name and v.r.random() < 0.6 else method()
-        if slot == "NAME" and not first_name:
-            first_name.append(val)
-        cache[slot] = val
+            val = cache[slot]
+        else:
+            method = getattr(v, SLOTS[slot][0])
+            val = method(first_name[0]) if slot == "EMAIL" and first_name and v.r.random() < 0.6 else method()
+            if slot == "NAME" and not first_name:
+                first_name.append(val)
+            cache[slot] = val
+        if obf_rate and slot in OBFUSCATE and v.r.random() < obf_rate:
+            return obfuscate(val, v.r)
         return val
 
     return SLOT_RE.sub(sub, text), present
@@ -97,6 +114,7 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--pair-rate", type=float, default=0.35)
+    ap.add_argument("--obf-rate", type=float, default=0.0, help="share of phone, RRN, account and card values to obfuscate")
     args = ap.parse_args()
 
     v = Values(random.Random(args.seed))
@@ -111,7 +129,7 @@ def main() -> None:
         sp = split_of(t["template_id"], t["genre"])
         variants = [(False, i) for i in range(FILLS[sp])] + [(m, 0) for m in pair_modes(t["text"], v.r, args.pair_rate)]
         for masked, i in variants:
-            text, present = fill(t["text"], v, masked=masked)
+            text, present = fill(t["text"], v, masked=masked, obf_rate=args.obf_rate)
             if text in seen:
                 continue
             seen.add(text)

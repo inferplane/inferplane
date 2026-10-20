@@ -1,0 +1,18 @@
+{"text": "010-7392-1846로 문자 하나만 넣어주세요.", "expect": 1, "why": "mobile without a name"}
+{"text": "고객 연락처: 010-7392-1846", "expect": 1, "why": "mobile in a field, no name"}
+{"text": "850317-2048613", "expect": 1, "why": "bare resident number"}
+{"text": "제 이메일은 minji.k0412@daum.net 입니다.", "expect": 1, "why": "own email, no name"}
+{"text": "응, sora_77q@kakao.com 이걸로 보낼게?", "expect": 1, "why": "email in casual chat"}
+{"text": "농협 351-2287-4401-63으로 입금해 주세요.", "expect": 1, "why": "bank account without a name"}
+{"text": "카드 5412-8830-1947-2265 결제가 안 돼요", "expect": 1, "why": "card number without a name"}
+{"text": "여권번호 M58203917 맞는지 봐주세요", "expect": 1, "why": "passport number"}
+{"text": "부산 해운대구 센텀중앙로 78, 센텀파크 203동 1501호로 보내 주세요", "expect": 1, "why": "home address with a number"}
+{"text": "이서준 010-2281-5937", "expect": 1, "why": "named mobile (v3 already passes)"}
+{"text": "고객센터 1644-3071로 전화 주세요.", "expect": 0, "why": "switchboard number"}
+{"text": "주문번호 INV7710283346 배송 조회 부탁드려요", "expect": 0, "why": "order id"}
+{"text": "phone = '010-****-****'", "expect": 0, "why": "masked value"}
+{"text": "def mask_phone(s): return re.sub(r'\\d{4}$', '****', s)", "expect": 0, "why": "masking code"}
+{"text": "담당자 김민수님께 전달했습니다.", "expect": 0, "why": "name only"}
+{"text": "request_id = '550e8400-e29b-41d4-a716-446655440000'", "expect": 0, "why": "uuid"}
+{"text": "api_key = os.environ['API_KEY']", "expect": 0, "why": "secret reference, no value"}
+{"text": "성동구 쪽으로 접수했고, 나머지는요?", "expect": 0, "why": "district without a house number"}

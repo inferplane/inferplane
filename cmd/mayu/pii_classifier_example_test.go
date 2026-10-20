@@ -32,7 +32,7 @@ func TestPIIClassifierKoExampleLoads(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := st.Classifiers().For("pilot-ko")
-	if len(entries) != 1 || entries[0].Name != "laya-ko" || entries[0].Mode != classifier.Shadow || entries[0].Revision != "laya-ko-pii-v3s1" || len(st.Classifiers().For("other")) != 0 {
+	if len(entries) != 1 || entries[0].Name != "laya-ko" || entries[0].Mode != classifier.Shadow || entries[0].Revision != "laya-ko-pii-v4s2" || len(st.Classifiers().For("other")) != 0 {
 		t.Fatalf("sample classifier scope: %+v", entries)
 	}
 	h := &live.Holder{}

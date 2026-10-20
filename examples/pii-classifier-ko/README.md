@@ -129,19 +129,32 @@ server that cuts input silently (for example strands-decider without
 ## Evidence
 
 These numbers belong to the reference checkpoint the recipe produced (Laya
-v3 seed 1, revision `laya-ko-pii-v3s1`), which is not distributed. A
-checkpoint you train will differ: two other seeds of the same recipe scored
-F1 0.934 and 0.939.
+v4 seed 2, revision `laya-ko-pii-v4s2`), which is not distributed. A
+checkpoint you train will differ: the three v4 seeds scored KDPII val F1
+0.989, 0.995 and 0.988, and seed 2 was selected on that score.
 
-- **Document level.** The reference checkpoint scores F1 0.953, FPR 0.036 and
-  AUROC 0.993 on an independent synthetic Korean set of 2,236 rows; the
-  gateway's regex detectors score F1 0.478 on the same set. See
+- **Document level.** The reference checkpoint scores F1 0.962, FPR 0.048 and
+  AUROC 0.992 on an independent synthetic Korean set of 2,236 rows (the
+  previous reference, `laya-ko-pii-v3s1`: F1 0.953, FPR 0.036). The gateway's
+  regex detectors score F1 0.478 on the same set. See `model-card.md`.
+- **Inside a coding-assistant request** (measured 2026-10-20 against an image built from `laya-serve/` with the reference checkpoint):
+  wrapped-body F1 `0.968`, FPR `0.030`, abstain or error `1`.
+- **Korean dialogue (KDPII test dialogues; v3s1 scored 2026-10-19, v4s2 2026-10-20).**
+
+  | Revision | Sentence recall | Sentence FPR | Direct identifier without a name, recall | Window recall | Window FPR |
+  |---|---|---|---|---|---|
+  | `laya-ko-pii-v3s1` | 0.661 | 0.034 | 0.638 | 0.919 | 0.305 |
+  | `laya-ko-pii-v4s2` | 0.988 | 0.001 | 0.997 | 0.985 | 0.016 |
+
+  v4 trains on other dialogues of the same dataset, so these numbers are
+  in-distribution. The labels map KDPII entities onto this recipe's policy; a
+  Claude Sonnet 5.5 audit disagreed on 1.6% of them, which are left out. See
+  `research/pii-finetune/results/kdpii/`. v4 also flags a shop's or an office's
+  landline, which the label policy cannot tell apart from a person's; see
   `model-card.md`.
-- **Inside a coding-assistant request** (measured 2026-10-16 against an image built from `laya-serve/` with the reference checkpoint):
-  wrapped-body F1 `0.952`, FPR `0.035`, abstain or error `1`.
 
-All evaluation data is synthetic. Accuracy on your traffic is unknown until
-you measure it in Shadow.
+The independent set is synthetic, and KDPII is not coding-assistant traffic.
+Accuracy on your traffic is unknown until you measure it in Shadow.
 
 ## Rollout
 

@@ -15,6 +15,7 @@ coverage.out
 .env.*
 !.env.example
 *.jsonl
+!examples/pii-classifier-ko/training/eval/probes.jsonl
 *.wal
 *.pem
 *.key
