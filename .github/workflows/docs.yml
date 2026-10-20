@@ -30,6 +30,8 @@ jobs:
         run: python -B -m unittest discover -s tests/docs -v
       - name: Require complete and current translations
         run: python scripts/check_docs_translations.py
+      - name: Verify published performance data
+        run: python scripts/build_performance_docs.py --check
       - name: Build with strict link validation
         run: python -m mkdocs build --strict
       - name: Check rendered internal links and assets

@@ -8,7 +8,7 @@ import sys
 from docs_hooks import adr_indexes
 
 
-ARCHIVES = {"decisions", "specs", "superpowers", "overrides"}
+ARCHIVES = {"decisions", "specs", "superpowers", "overrides", "benchmarks"}
 EXCLUDED = {"customer-issue-analysis.md"}
 FENCES = re.compile(r"(?ms)^([ \t]*)(`{3,}|~{3,})[^\n]*\n.*?^\1\2[ \t]*(?:\n|$)")
 

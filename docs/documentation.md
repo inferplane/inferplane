@@ -29,6 +29,17 @@ New behavior must link to its reference and decision. New operational procedures
 
 `mkdocs.yml` owns navigation. Historical specifications/plans and customer analysis remain in GitHub; they are excluded from site navigation and search. ADRs remain searchable with their original status. The hook rewrites links to repository-only files/directories into GitHub source links. After adding or renaming an ADR, run `python scripts/docs_hooks.py` to regenerate the committed English/Korean ADR indexes; validation rejects a stale index.
 
+## Performance measurements
+
+The [performance pages](performance/index.md) use the reviewed, sanitized snapshot
+in `docs/assets/data/performance.json`. Run `python scripts/build_performance_docs.py`
+to regenerate tables, then `--check` to verify their committed output. CI does not
+need private recordings or model access. The explicit `--import-recordings` option
+refreshes the public snapshot from local recordings after review; raw prompts,
+responses, error bodies and credentials must remain outside the published data.
+Review both languages when updating a snapshot. Development-build measurements
+must be labeled separately from functionality available in main.
+
 ## Korean and English
 
 English stays at the existing root URL; Korean is under `/ko/`. The language

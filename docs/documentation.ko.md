@@ -1,6 +1,6 @@
 ---
 translation_source: documentation.md
-translation_source_sha256: b57db677dd76bd3e26b4ea602e4715e9b75742ae8d55704fd1b13b791d258f45
+translation_source_sha256: 12aedeff015c08f9b0df9e27faca7f36bbedb8ec5e06e43f8a2e5e1843e040f1
 ---
 
 # 문서 관리 {#maintain-the-documentation}
@@ -33,6 +33,17 @@ MkDocs가 출력하는 루프백 URL을 여세요. CI와 같은 검사는 다음
 새 동작은 레퍼런스·설계 결정에 연결합니다. 운영 절차는 자격 증명, 신원 이력, 감사 증거, 미해결 권한을 보존해야 합니다. 예제를 현재 모델 가용성·가격 보장으로 바꾸지 마세요.
 
 탐색은 `mkdocs.yml`에서 관리합니다. 과거 사양·계획·고객 분석은 GitHub에만 남기고 사이트 검색에서 제외합니다. ADR은 원래 상태로 검색할 수 있습니다. 훅은 저장소 전용 링크를 GitHub로 바꿉니다. ADR 추가·이름 변경 후 `python scripts/docs_hooks.py`로 커밋되는 한영 색인을 재생성하세요. 검증은 오래된 색인을 거부합니다.
+
+## 성능 측정 자료 {#performance-measurements}
+
+[성능 문서](performance/index.md)는 검토·정제한
+`docs/assets/data/performance.json` 스냅샷을 사용합니다.
+`python scripts/build_performance_docs.py`로 표를 생성하고 `--check`로 커밋된
+출력을 검증합니다. CI에는 비공개 원시 기록이나 모델 접근이 필요하지 않습니다.
+명시적인 `--import-recordings` 옵션은 검토 후 로컬 기록에서 공개 스냅샷을
+갱신합니다. 원시 프롬프트·응답·오류 본문·자격 증명은 공개 데이터에 포함하면
+안 됩니다. 스냅샷을 바꿀 때 양쪽 언어를 검토하고, 개발 빌드의 측정과 main에서
+사용 가능한 기능을 구분하세요.
 
 ## 한국어와 영어 {#korean-and-english}
 
