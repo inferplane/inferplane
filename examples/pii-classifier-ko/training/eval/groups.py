@@ -59,7 +59,10 @@ def main() -> None:
     a = ap.parse_args()
     with open(a.rows, encoding="utf-8") as f:
         rows = [r for r in map(json.loads, f) if not a.kind or r["kind"] == a.kind]
-    skip = set(open(a.exclude).read().split()) if a.exclude else set()
+    skip: set[str] = set()
+    if a.exclude:
+        with open(a.exclude, encoding="utf-8") as f:
+            skip = set(f.read().split())
     report = {}
     for spec in a.preds:
         name, path = spec.split("=", 1)

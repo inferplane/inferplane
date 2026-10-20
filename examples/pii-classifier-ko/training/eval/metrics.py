@@ -98,7 +98,10 @@ def main() -> None:
     ap.add_argument("--json")
     a = ap.parse_args()
     band = tuple(float(x) for x in a.band.split(","))
-    skip = set(open(a.exclude).read().split()) if a.exclude else set()
+    skip: set[str] = set()
+    if a.exclude:
+        with open(a.exclude, encoding="utf-8") as f:
+            skip = set(f.read().split())
     results = {}
     for spec in a.preds:
         name, path = spec.split("=", 1)
@@ -113,6 +116,7 @@ def main() -> None:
     if a.json:
         with open(a.json, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
+            f.write("\n")
 
 
 if __name__ == "__main__":
