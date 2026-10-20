@@ -35,5 +35,24 @@ class Prompt(unittest.TestCase):
         self.assertEqual(g.job_id("dev_chat", "pos_direct", 2, "short"), "dev_chat/pos_direct/2/short")
 
 
+class Plan(unittest.TestCase):
+    def test_default_plan_is_the_v3_job_set(self):
+        # The v3 command line must keep scheduling the v3 jobs: 25 genres x 8 kinds x 4 calls.
+        jobs = g.plan(None, None, 4, "doc", set())
+        self.assertEqual(len(jobs), 800)
+        self.assertFalse({"chat_turn", "form_input", "pos_direct_anon"} & {x for job in jobs for x in job[:2]})
+
+    def test_all_names_every_genre(self):
+        self.assertEqual(len(g.plan("pos_direct_anon", "all", 4, "doc", set())), 27 * 4)
+        self.assertEqual(len(g.plan("all", "chat_turn", 1, "short", set())), len(g.KINDS))
+
+    def test_done_jobs_are_skipped(self):
+        self.assertEqual(g.plan("pos_direct", "dev_chat", 2, "doc", {"dev_chat/pos_direct/0"}), [("dev_chat", "pos_direct", 1)])
+
+    def test_unknown_name_is_rejected(self):
+        with self.assertRaises(ValueError):
+            g.plan("pos_direct", "chat_turns", 1, "doc", set())
+
+
 if __name__ == "__main__":
     unittest.main()

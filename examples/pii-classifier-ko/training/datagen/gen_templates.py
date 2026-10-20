@@ -5,6 +5,9 @@ values; fill.py replaces markers with synthetic values locally, so labels are
 exact and the model cannot leak or invent a real person's data.
 
 Usage: python3 gen_templates.py --out data/templates.jsonl [--calls 4] [--per-call 6]
+         [--kinds k1,k2|all] [--genres g1,g2|all] [--length doc|short]
+Without --kinds and --genres it schedules the v3 job set; the genres and kinds
+added in v4 run only when named (or with "all").
 Credentials: the default AWS credential chain, or --profile.
 """
 
@@ -66,6 +69,9 @@ KINDS = {
     "neg_lookalike": f"Each document is a business or system artifact with identifiers that look like personal data but are not: use several of {NEGATIVE_SLOTS} (order ids, UUIDs, hashes, business registration numbers, 1588 switchboard numbers, masked values, example.com emails, versions, timestamps, private IPs). Use NO positive slots and no person names.",
 }
 
+# Added in v4. They run only when named, so the v3 command line keeps its job set.
+OPT_IN = {"chat_turn", "form_input", "pos_direct_anon"}
+
 SYSTEM = """You write realistic synthetic documents for training a personal-data detector.
 Never write any concrete personal value (no names, phone numbers, emails, addresses, ID numbers, account or card numbers, secrets).
 Wherever a value would appear, write a slot marker from the allowed list instead, exactly like ⟦PHONE⟧ (U+27E6 and U+27E7 brackets).
@@ -109,6 +115,23 @@ def job_id(genre: str, kind: str, idx: int, length: str) -> str:
     return base if length == "doc" else f"{base}/{length}"
 
 
+def plan(kinds: str | None, genres: str | None, calls: int, length: str, done: set[str]) -> list[tuple[str, str, int]]:
+    """The (genre, kind, call) jobs still to run. Names are comma-separated, or "all"."""
+    def pick(arg: str | None, names: dict) -> list[str]:
+        if arg == "all":
+            return list(names)
+        if not arg:
+            return [n for n in names if n not in OPT_IN]
+        picked = arg.split(",")
+        unknown = [n for n in picked if n not in names]
+        if unknown:
+            raise ValueError(f"unknown names: {unknown}")
+        return picked
+
+    ks, gs = pick(kinds, KINDS), pick(genres, GENRES)
+    return [(g, k, i) for g in gs for k in ks for i in range(calls) if job_id(g, k, i, length) not in done]
+
+
 def prompt_for(genre: str, kind: str, idx: int, per_call: int, length: str) -> tuple[str, str]:
     lang, desc = GENRES[genre]
     allowed = ", ".join(f"⟦{s}⟧" for s in SLOTS)
@@ -131,8 +154,8 @@ def main() -> None:
     ap.add_argument("--profile", default=None)
     ap.add_argument("--region", default="us-east-1")
     ap.add_argument("--workers", type=int, default=12)
-    ap.add_argument("--kinds", help="comma-separated subset of KINDS")
-    ap.add_argument("--genres", help="comma-separated subset of GENRES")
+    ap.add_argument("--kinds", help="comma-separated subset of KINDS, or all; default: the v3 kinds")
+    ap.add_argument("--genres", help="comma-separated subset of GENRES, or all; default: the v3 genres")
     ap.add_argument("--length", choices=sorted(LENGTHS), default="doc")
     args = ap.parse_args()
 
@@ -145,9 +168,7 @@ def main() -> None:
             for line in f:
                 done.add(json.loads(line)["job"])
     lock = threading.Lock()
-    kinds = args.kinds.split(",") if args.kinds else list(KINDS)
-    genres = args.genres.split(",") if args.genres else list(GENRES)
-    jobs = [(g, k, i) for g in genres for k in kinds for i in range(args.calls) if job_id(g, k, i, args.length) not in done]
+    jobs = plan(args.kinds, args.genres, args.calls, args.length, done)
     print(f"{len(jobs)} jobs to run ({len(done)} already done)", flush=True)
 
     def run(job: tuple[str, str, int]) -> tuple[int, int]:
