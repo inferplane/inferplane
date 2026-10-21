@@ -10,7 +10,7 @@
 
 **Spec:** [P1 설계](../specs/2026-10-21-p1-request-outcomes-cost-evidence-design.md)
 
-**Status:** 2026-10-21 사용자 승인(“네 구현”). implemented; final review pending. builder check 완료: `nothing important left`. Tasks 1–5 구현·검사와 전체 diff 독립 리뷰 완료. 최종 리뷰의 I1–I3/M1–M2 수정 구현·통합 재검사 완료이며, 범위 한정 독립 재리뷰는 컨트롤러 담당으로 PENDING이다.
+**Status:** 2026-10-21 사용자 승인(“네 구현”). 구현·검증·독립 최종 리뷰 완료. Tasks 1–5와 최종 리뷰 I1–I3/M1–M2 수정이 모두 완료됐고, 수정 범위 독립 재리뷰에서 열린 항목과 새 결함이 없음을 확인했다. 통합 방식 선택 대기.
 
 ## Global Constraints
 
@@ -166,18 +166,18 @@ python3 -B -m unittest discover -s tests/docs -v
 
 기존 MkDocs venv로 `mkdocs build --strict --site-dir "$TMPDIR/inferplane-p1-site"`를 실행한다. PostgreSQL integration suite는 별도 일회용 DB에서 실제 실행 기록을 남긴다. gofmt 출력은 비어야 하고 다른 명령은 exit=0이어야 한다. 검증 명령과 수정 대상 문서 경로는 기준 worktree에서 확인했다.
 
-- [ ] **Step 4: 독립 전체 diff 리뷰.** 별도 reviewer에게 스펙/계획/전체 diff/테스트 결과를 넘긴다. 경계 위반, 원문 노출, 금융 의미 변경, migration/rollback, repeated replay, partial no-retry를 집중 검토한다. SDD의 제한된 fix/review 규칙을 따른다.
+- [x] **Step 4: 독립 전체 diff 리뷰.** 별도 reviewer에게 스펙/계획/전체 diff/테스트 결과를 넘긴다. 경계 위반, 원문 노출, 금융 의미 변경, migration/rollback, repeated replay, partial no-retry를 집중 검토한다. SDD의 제한된 fix/review 규칙을 따른다.
 - [x] **Step 5: 문서 커밋 및 완료 보고.** `git commit -s -m "docs: explain outcome and cost evidence operations"`. 구현/로컬 검사/실제 DB 검사/미실행 rollout을 구분해 보고한다. Pages 배포 시 content-review 점수 85 이상과 기존 docs 배포 CI를 적용한다.
 
 ## 구현·검증 기록 (2026-10-21)
 
-- Tasks 1–4의 RED/GREEN·커밋은 `.superpowers/sdd/2026-10-21-p1-request-outcomes-cost-evidence/task-{1,2,3,4}-report.md`로 확인했다. 커밋은 순서대로 `0ff6354`, `9c9374e`, `79f4db1`, `b0b8cea`이다. 각 작업 구현·검사 단계 체크를 갱신했다.
+- Tasks 1–4의 RED/GREEN·커밋은 작업별 보고서 아카이브 `~/.tmp/inferplane-p1-20261021/sdd-archive/task-{1,2,3,4}-report.md`로 확인했다. 커밋은 순서대로 `0ff6354`, `9c9374e`, `79f4db1`, `b0b8cea`이다. 각 작업 구현·검사 단계 체크를 갱신했다.
 - Task 5는 ADR-053, 한영 API/운영/UX 문서와 수락 기준↔행동 테스트 연결을 구현했다. 변경은 문서와 승인된 계획/스펙 bookkeeping으로 한정했다.
 - 최종 통합 검사: 두 static build, 기본 `go test ./... -race`(변경 없는 product package는 Go cache 사용), vet, 빈 gofmt, harness 모두 exit=0. 한영 47쌍·ADR index, 생성 성능/클라이언트 문서, docs unittest 31건, strict MkDocs 모두 exit=0.
 - 일회용 PostgreSQL 17에서 pgstore `-race -count=1 -v` 24/24와 ModeB end-to-end 1/1이 실제 실행되어 통과했다. DB 검사는 순차 실행, skip=0. 기본 DSN 없는 suite는 PG 실제 실행 증거로 세지 않는다.
 - Harness의 top-level 70/70에는 installed-Codex opt-in nested skip 12건과 보수적 16384-token fallback 진단이 포함된다. Task 4의 합성 browser 54 screenshot은 변경 없는 UI라 반복하지 않았다.
-- Task 4 Minor M1은 최종 리뷰 M1에 합쳐 I1–I3/M1–M2와 한 번의 수정 단계에 포함했다. 새 PG/JS 회귀는 RED→GREEN이며 최종 통합 검사 결과는 `final-fix-report.md`에 기록했다. Task 5 Step 4는 미체크이고 컨트롤러의 범위 한정 독립 재리뷰는 PENDING이다.
-- 최종 수정 검증: 실제 PG 25/25(23 DB-backed + 2 기존 source/interface), ModeB 1/1, adminui 29/29, shipped JS와 합성 browser 58 screenshot, 기본 race 62 packages(58 cache), 두 static build, vet, 빈 gofmt, harness 70/70, docs 47쌍·31 tests·strict en/ko MkDocs가 모두 통과했다. Harness nested skip 12건과 예상 fallback 진단은 동일하게 구분한다. 범위 한정 독립 재리뷰는 **PENDING**이다.
+- Task 4 Minor M1은 최종 리뷰 M1에 합쳐 I1–I3/M1–M2와 한 번의 수정 단계에 포함했다. 새 PG/JS 회귀는 RED→GREEN이며 최종 통합 검사 결과는 `final-fix-report.md`에 기록했다. Task 5 Step 4와 범위 한정 독립 재리뷰가 완료됐다. I1–I3/M1–M2 모두 ADDRESSED이며 새 결함과 열린 항목은 없다.
+- 최종 수정 검증: 실제 PG 25/25(23 DB-backed + 2 기존 source/interface), ModeB 1/1, adminui 29/29, shipped JS와 합성 browser 58 screenshot, 기본 race 62 packages(58 cache), 두 static build, vet, 빈 gofmt, harness 70/70, docs 47쌍·31 tests·strict en/ko MkDocs가 모두 통과했다. Harness nested skip 12건과 예상 fallback 진단은 동일하게 구분한다. 범위 한정 독립 재리뷰에서 다섯 수정 모두 승인됐다.
 - live DB rebuild, 운영 배포, push, 유료 모델/실제 IdP 시험은 실행하지 않았다. 정확한 명령·결과·로그·문서 커밋은 Task 5 보고서에 기록한다.
 
 ## 계획 자체 검토
