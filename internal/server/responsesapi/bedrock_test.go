@@ -25,6 +25,8 @@ func TestBedrockBridgeAdmissionRequiresPortableRequest(t *testing.T) {
 		name, body string
 		want       bool
 	}{
+		{"no-tool compaction", `{"model":"grok","input":"summarize","tools":[],"parallel_tool_calls":false,"reasoning":{"effort":"none"}}`, true},
+		{"serialized tool execution", `{"model":"grok","input":"hello","parallel_tool_calls":false,"tools":[{"type":"function","name":"read","strict":false,"parameters":{"type":"object"}}]}`, false},
 		{"text", `{"model":"grok","input":"hello"}`, true},
 		{"tools", `{"model":"grok","input":"hello","tools":[{"type":"function","name":"read","strict":false,"parameters":{"type":"object"}}]}`, true},
 		{"strict", `{"model":"grok","input":"hello","tools":[{"type":"function","name":"read","strict":true,"parameters":{"type":"object"}}]}`, false},

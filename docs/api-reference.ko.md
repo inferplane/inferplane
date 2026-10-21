@@ -1,6 +1,6 @@
 ---
 translation_source: api-reference.md
-translation_source_sha256: 64b7068a985a79efec68a739101f7641d09ccb6d9d95cf9a56f0032a7ec5265f
+translation_source_sha256: 48b635c9ea53464dca34acf17a7eacbc2be082899aa29f3c422df9fb1efaf47d
 ---
 
 # API 레퍼런스 {#api-reference}
@@ -133,6 +133,8 @@ Messages, Chat Completions, 네이티브 Bedrock 생성은 같은 개인정보 �
 `x-inferplane-routing-reason`은 제한된 사유, `x-inferplane-routed-model`은 적용된 개인정보·컨텍스트 선택입니다. Shadow에서도 개인정보를 집행합니다. 앞선 예산의 `x-inferplane-substituted-model`과 최종 모델은 다를 수 있습니다. 감사 `request.routing`은 요청(해석된 티어 전 모델), 선택, 제안, 실제 시도와 공급자·경계를 구분합니다. 활성화 전에 [스키마·업그레이드·한계](policy-routing.md)를 확인하세요.
 
 ## Responses와 적응형 라우팅 · ADR-044 {#responses-and-adaptive-routing-adr-044}
+
+도구 없는 Codex 압축 요청은 `parallel_tool_calls: false`를 보낼 수 있습니다. 무상태 브리지는 `tools`가 없거나 null 또는 빈 배열인 경우에만 이 중립 설정을 허용합니다. 도구가 하나라도 선언되면 직렬 실행 요구는 계속 미지원으로 거절합니다. 원격 대화 상태나 암호화된 압축 항목을 지원하도록 확장하는 변경은 아닙니다. [클라이언트 호환성 측정](performance/clients.md)을 참고하세요.
 
 `POST /v1/responses`는 인증된 HTTP Responses를 받습니다. 네이티브 openai_responses는 전송 형식을 유지하고 지원되는 무상태 텍스트·도구는 정규 어댑터를 사용합니다. Responses 이벤트 수명주기로 스트리밍하며 중단된 스트림도 관측 사용량을 정산합니다. 미지원 교차 프로토콜 상태는 외부 호출 전에 거부합니다. 본문·준비 상태·RBAC·리전·개인정보·엄격 예산·총승인 조건을 공유합니다.
 

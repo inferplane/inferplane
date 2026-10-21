@@ -7,6 +7,8 @@ description: Context occupancy, generation throughput, response failures and mea
 
 **Measurement date: October 19, 2026 · 49 models · direct Bedrock access.** These model measurements inform inferplane configuration; they do not measure gateway overhead or establish native Converse compatibility for every model. The recorded transport is model-dependent: Bedrock Runtime or Mantle. See [gateway and administrator results](index.md) for inferplane measurements.
 
+See [repeated calls and Claude Code/Codex compatibility](clients.md) for repeated task outcomes, actual coding tasks and client context settings.
+
 ## Context capacity and request cost
 
 Each row selects that model's **largest successfully retrieved input at or below 100% of its declared window**. The reported input includes cache tokens once. A success must retrieve all three planted values at approximately 10%, 50% and 90% of the input. It does not require strict output ordering or JSON formatting.

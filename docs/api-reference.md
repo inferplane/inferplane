@@ -151,6 +151,8 @@ limits](policy-routing.md) before enabling rules.
 
 ## Responses and adaptive routing (ADR-044)
 
+Tool-free Codex compaction requests may set `parallel_tool_calls: false`. The stateless bridge accepts this neutral preference only when `tools` is absent, null or an empty array. With any offered tool, serialized execution remains unsupported and the request is rejected. This does not add support for remote conversation state or encrypted compaction items. See [measured client compatibility](performance/clients.md).
+
 `POST /v1/responses` accepts authenticated HTTP Responses requests. Native
 openai_responses targets retain their wire; supported stateless text/tool
 requests can use canonical adapters. Streaming emits the Responses event

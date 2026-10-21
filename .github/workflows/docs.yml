@@ -32,6 +32,8 @@ jobs:
         run: python scripts/check_docs_translations.py
       - name: Verify published performance data
         run: python scripts/build_performance_docs.py --check
+      - name: Verify published client compatibility data
+        run: python scripts/build_client_compat_docs.py --check
       - name: Build with strict link validation
         run: python -m mkdocs build --strict
       - name: Check rendered internal links and assets
