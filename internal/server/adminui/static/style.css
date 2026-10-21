@@ -63,3 +63,18 @@ dialog { width:min(660px,calc(100% - 32px)); max-height:calc(100dvh - 48px); bor
 @media(max-width:1000px) { .cards { grid-template-columns:repeat(2,minmax(0,1fr)); } .twocol { grid-template-columns:1fr; } #topbar { align-items:start; } .top-right { justify-content:end; } }
 @media(max-width:800px) { #side { position:static; width:100%; padding:16px; gap:16px; } .workspace-label,.side-foot .led-row { display:none; } #side nav { display:flex; overflow-x:auto; gap:5px; } button.nav { white-space:nowrap; padding:10px 12px; font-size:12px; } #side .wordmark { padding:0; } .side-foot { flex-direction:row; justify-content:end; gap:8px; margin:0; } .side-foot select { width:120px; } #main { margin-left:0; padding:24px 20px; } #topbar { gap:12px; } }
 @media(max-width:540px) { .lock-card { padding:26px; } .card { padding:18px; } .cards { gap:10px; } .card.stat { padding:16px; } .cards .card { margin-bottom:10px; } .table-heading { flex-direction:column; align-items:start; } .table-heading>.form-field { width:100%; } .grid-form,#create-form,#team-form { grid-template-columns:1fr; } .top-right button { padding:8px; font-size:11px; } .top-right .led-row { width:100%; justify-content:end; } .top-right { max-width:50%; } .setup-actions { display:grid; width:100%; } #topbar h1 { font-size:24px; } table.data { min-width:460px; } #usage-totals { min-width:0; } .snippet-head { flex-wrap:wrap; } .target-row select { width:100%; } }
+
+/* Evidence remains readable while wide breakdown tables scroll inside cards. */
+.table-scroll { max-width: 100%; }
+.evidence-table { min-width: 850px; }
+.evidence-table td { vertical-align: top; white-space: normal; min-width: 105px; }
+.evidence-table td:nth-child(3), .evidence-table td:nth-child(4) { min-width: 190px; }
+table.data.evidence-totals { min-width: 0; }
+.evidence-totals td { white-space: normal; overflow-wrap: anywhere; }
+.evidence-card { margin: 16px 0; }
+table.data td.outcome { min-width: 155px; overflow-wrap: normal; }
+.outcome.warn { color: var(--red); font-weight: 600; }
+#logs-table td:first-child { white-space: nowrap; }
+#logs-table td:nth-child(3), #logs-table td:nth-child(4) { min-width: 105px; }
+#logs-table td:nth-child(6) { min-width: 50px; }
+#logs-table td:last-child { min-width: 0; }

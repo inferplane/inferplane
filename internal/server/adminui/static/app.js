@@ -196,34 +196,88 @@ function analyticsRange() {
 }
 function analyticsSummaryPath() { return "/admin/analytics/summary?" + new URLSearchParams(analyticsRange()); }
 
+// Counts and money stay integer until the final, bounded display conversion.
+function operationRateText(operations) {
+  if (!operations || ["completed", "failed", "partial"].some(k => operations[k] == null)) return "—";
+  const completed = moneyInteger(operations.completed);
+  if (completed <= 0n) return "—";
+  const affected = moneyInteger(operations.failed) + moneyInteger(operations.partial);
+  const tenths = (affected * 1000n + completed / 2n) / completed;
+  return affected + "/" + completed + " (" + tenths / 10n + "." + tenths % 10n + "%)";
+}
+function evidenceCount(operations, key) { return operations[key] == null ? "—" : String(operations[key]); }
+function operationOutcomeText(operations) {
+  if (!operations) return msg("evidence.legacy");
+  return ["succeeded", "failed", "partial", "unknown"].map(k => msg("evidence." + k) + ": " + evidenceCount(operations, k)).join(" · ")
+    + " · " + msg("evidence.rate") + ": " + operationRateText(operations)
+    + (operations.unknown != null && moneyInteger(operations.unknown) > 0n ? " · " + msg("evidence.incompleteOutcomes") : "");
+}
+function operationCostText(operations) {
+  if (!operations) return msg("evidence.legacy");
+  return ["estimated", "uncertain", "unpriced", "unavailable", "legacy_unknown"].map(k => msg("evidence." + k) + ": " + evidenceCount(operations, k + "_requests")).join(" · ")
+    + " · " + msg("evidence.legacyProjection") + ": " + evidenceCount(operations, "legacy_projection_records");
+}
+function costEvidenceText(event) {
+  const amount = event.cost_micros == null || event.has_cost === false ? "—" : usd(event.cost_micros);
+  switch (event.cost_state) {
+    case "estimated": return amount + " · " + msg("evidence.estimated");
+    case "uncertain": return msg("evidence.recorded") + ": " + amount + " · " + msg("evidence.incompleteCost");
+    case "legacy_unknown": return msg("evidence.recorded") + ": " + amount + " · " + msg("evidence.missingCost");
+    case "unpriced": return msg("evidence.unpriced");
+    case "unavailable": return msg("evidence.unavailable");
+    default: return msg("evidence.legacy") + (event.cost_micros == null ? "" : " · " + msg("evidence.recorded") + ": " + amount);
+  }
+}
+// Only documented codes reach the DOM; an unexpected API value cannot reveal raw errors.
+const EVIDENCE_ERROR_CODES = new Set(["context_length_exceeded", "invalid_encrypted_content", "request_canceled", "upstream_timeout", "stream_incomplete", "response_incompatible", "usage_missing", "client_write_failed", "upstream_error"]);
+function outcomeEvidenceText(event) {
+  const state = event.partial ? "partial" : event.outcome_state;
+  const outcome = ["succeeded", "failed", "partial", "unknown"].includes(state) ? msg("evidence." + state) : msg("evidence.legacy");
+  return outcome + (event.error_code ? " · " + (EVIDENCE_ERROR_CODES.has(event.error_code) ? event.error_code : "upstream_error") : "");
+}
+function renderEvidenceTotals(table, totals) {
+  const body = table.querySelector("tbody"); body.replaceChildren();
+  const line = (label, value) => { const row = document.createElement("tr"); row.append(td(label), td(value)); body.append(row); };
+  const o = totals.operations;
+  line(msg("evidence.completed"), o ? evidenceCount(o, "completed") : "—");
+  line(msg("evidence.outcomes"), operationOutcomeText(o));
+  line(msg("evidence.costStates"), operationCostText(o));
+  line(msg("evidence.estimatedCost"), o && o.estimated_cost_micros != null ? usd(o.estimated_cost_micros) : "—");
+  line(msg("evidence.incompleteAmount"), o && o.uncertain_recorded_cost_micros != null ? usd(o.uncertain_recorded_cost_micros) : "—");
+  line(msg("evidence.recorded"), totals.cost_micros == null ? "—" : usd(totals.cost_micros));
+}
+function renderEvidenceRows(id, rows, nameKey) {
+  const body = $(id).querySelector("tbody"); body.replaceChildren();
+  for (const row of rows || []) {
+    const o = row.operations, tr = document.createElement("tr");
+    tr.append(td(row[nameKey] || "—"), td(o ? evidenceCount(o, "completed") : "—"), td(operationOutcomeText(o)), td(operationCostText(o)),
+      td(o && o.estimated_cost_micros != null ? usd(o.estimated_cost_micros) : "—"),
+      td(o ? (o.uncertain_recorded_cost_micros == null ? "—" : usd(o.uncertain_recorded_cost_micros))
+        : msg("evidence.recorded") + ": " + (row.cost_micros == null ? "—" : usd(row.cost_micros))));
+    body.append(tr);
+  }
+}
 async function refreshUsageView() {
   const content = $("usage-content");
   if (!capOn("analytics_index")) { content.hidden = true; return; }
   content.hidden = true; // old totals are not a fresh response after a failure
-  const s = await api("GET", analyticsSummaryPath(), null, true); // inclusive UTC days, including today
-  if (!s || s === DISABLED) { content.hidden = true; return; }
+  const s = await api("GET", analyticsSummaryPath(), null, true);
+  if (!s || s === DISABLED) return;
+  renderEvidenceTotals($("usage-totals"), s.totals);
+  const body = $("usage-totals").querySelector("tbody");
+  for (const [key, label] of [["input_tokens", "evidence.inputTokens"], ["output_tokens", "evidence.outputTokens"], ["cache_read_tokens", "evidence.cacheRead"]]) {
+    const row = document.createElement("tr"); row.append(td(msg(label)), td(s.totals[key] == null ? "—" : String(s.totals[key]))); body.append(row);
+  }
+  renderEvidenceRows("usage-by-team", s.by_team, "team");
+  renderEvidenceRows("usage-by-model", s.by_model, "model");
+  $("usage-by-day").querySelector("tbody").replaceChildren();
   content.hidden = false;
-
-  const totals = $("usage-totals").querySelector("tbody");
-  totals.replaceChildren();
-  const tline = (k, v) => { const tr = document.createElement("tr"); tr.append(td(k), td(v)); totals.append(tr); };
-  tline("requests", String(s.totals.requests));
-  tline("input tokens", String(s.totals.input_tokens));
-  tline("output tokens", String(s.totals.output_tokens));
-  tline("cache read", String(s.totals.cache_read_tokens));
-  tline("spend", usd(s.totals.cost_micros));
-
-  const fill = (id, rows, nameKey) => {
-    const tb = $(id).querySelector("tbody");
-    tb.replaceChildren();
-    (rows || []).forEach((r) => {
-      const tr = document.createElement("tr");
-      tr.append(td(r[nameKey] || "—"), td(String(r.requests)), td(usd(r.cost_micros)));
-      tb.append(tr);
-    });
-  };
-  fill("usage-by-team", s.by_team, "team");
-  fill("usage-by-model", s.by_model, "model");
+  try {
+    const series = await api("GET", "/admin/analytics/timeseries?days=30", null, true);
+    if (Array.isArray(series)) renderEvidenceRows("usage-by-day", series, "day");
+  } catch {
+    $("usage-by-day").querySelector("tbody").append(emptyRow(6, msg("common.failedToLoad")));
+  }
 }
 
 /* ---------- sparkline (hand-rolled inline SVG; no vendored chart lib, §10) ---------- */
@@ -285,24 +339,33 @@ function parseMetrics(text) {
 }
 
 async function refreshOverview() {
-  // The metrics USD counter is approximate and process-cumulative. Show
-  // settled analytics for its explicit reporting period, or unavailable.
+  // Analytics counts completed audit records over an explicit reporting period.
+  $("stat-requests").textContent = "—";
+  $("stat-requests-sub").textContent = msg("evidence.unavailable");
+  $("overview-evidence").querySelector("tbody").replaceChildren();
+  $("stat-spend-label").textContent = msg("evidence.estimatedCost");
   $("stat-spend").textContent = "—"; $("stat-spend-spark").replaceChildren();
   $("stat-spend-sub").textContent = msg("ux.spendUnavailable");
   if (capOn("analytics_index")) {
     try {
       const summary = await api("GET", analyticsSummaryPath(), null, true);
       if (summary && summary !== DISABLED && summary.totals) {
-        $("stat-spend").textContent = usd(summary.totals.cost_micros);
+        const o = summary.totals.operations;
+        $("stat-requests").textContent = o ? evidenceCount(o, "completed") : "—";
+        $("stat-requests-sub").textContent = operationOutcomeText(o);
+        renderEvidenceTotals($("overview-evidence"), summary.totals);
+        $("stat-spend-label").textContent = o ? msg("evidence.estimatedCost") : msg("evidence.recorded");
+        const amount = o ? o.estimated_cost_micros : summary.totals.cost_micros;
+        $("stat-spend").textContent = amount == null ? "—" : usd(amount);
         const range = analyticsRange();
-        $("stat-spend-sub").textContent = msg("ux.spendPeriod") + " · " + range.since + " → " + range.until + " UTC";
+        $("stat-spend-sub").textContent = (o ? msg("evidence.estimatedCost") : msg("evidence.recorded")) + " · " + msg("ux.spendPeriod") + " · " + range.since + " → " + range.until + " UTC";
       }
     } catch { /* unavailable is distinct from zero settled spend */ }
     try {
       const series = await api("GET", "/admin/analytics/timeseries?days=30", null, true);
       if (Array.isArray(series)) {
         const range = analyticsRange();
-        renderSparkline($("stat-spend-spark"), series.filter(p => p.day >= range.since && p.day <= range.until).sort((a, b) => a.day.localeCompare(b.day)).map(p => p.cost_micros));
+        renderSparkline($("stat-spend-spark"), series.filter(p => p.day >= range.since && p.day <= range.until).sort((a, b) => a.day.localeCompare(b.day)).map(p => (p.operations ? p.operations.estimated_cost_micros : p.cost_micros)).filter(v => v != null));
       }
     } catch { /* trend is independent; no points are fabricated */ }
   }
@@ -333,8 +396,6 @@ async function refreshOverview() {
   try {
     const text = await (await fetch("/metrics")).text();
     const { rows } = parseMetrics(text);
-    const total = rows.reduce((n, r) => n + r.count, 0);
-    $("stat-requests").textContent = String(total);
     const teams = new Set(rows.map((r) => r.team));
     $("stat-teams").textContent = String(teams.size);
     $("stat-teams-sub").textContent = teams.size ? [...teams].slice(0, 4).join(", ") : msg("ov.acrossTraffic");
@@ -360,7 +421,7 @@ async function refreshOverview() {
       }
     }
   } catch {
-    $("stat-requests-sub").textContent = msg("ov.metricsUnreachable");
+    $("traffic-table").querySelector("tbody").replaceChildren(emptyRow(4, msg("ov.metricsUnreachable")));
   }
 }
 
@@ -1282,16 +1343,11 @@ async function refreshLogsView() {
 
 async function loadLogsPage(before, reset) {
   const tbody = $("logs-table").querySelector("tbody");
-  let out;
-  try {
-    const qs = before ? ("?before=" + encodeURIComponent(before)) : "";
-    out = await api("GET", "/admin/logs" + qs, null, true);
-  } catch {
-    return;
-  }
+  if (reset) tbody.replaceChildren();
+  const qs = before ? ("?before=" + encodeURIComponent(before)) : "";
+  const out = await api("GET", "/admin/logs" + qs, null, true);
   if (!out || out === DISABLED) return;
   const events = out.events || [];
-  if (reset) tbody.textContent = "";
   if (!events.length) {
     if (reset) tbody.appendChild(emptyRow(8, msg("logs.noRequestsLogged")));
     $("logs-load-more").hidden = true;
@@ -1303,9 +1359,11 @@ async function loadLogsPage(before, reset) {
     tr.appendChild(td(e.team || ""));
     tr.appendChild(td(e.model || ""));
     tr.appendChild(td(e.provider || ""));
-    tr.appendChild(td(String(e.status || "")));
-    tr.appendChild(td(String((e.input_tokens || 0) + (e.output_tokens || 0))));
-    tr.appendChild(td(usd(e.cost_micros || 0)));
+    const outcome = td((e.status ? "HTTP " + String(e.status) + " · " : "") + outcomeEvidenceText(e));
+    outcome.className = e.partial || e.outcome_state !== "succeeded" ? "outcome warn" : "outcome";
+    tr.appendChild(outcome);
+    tr.appendChild(td(e.input_tokens == null || e.output_tokens == null ? "—" : String(moneyInteger(e.input_tokens) + moneyInteger(e.output_tokens))));
+    tr.appendChild(td(costEvidenceText(e)));
     const cell = document.createElement("td");
     if (e.body_ref) {
       const btn = document.createElement("button");
@@ -1323,7 +1381,13 @@ async function loadLogsPage(before, reset) {
   $("logs-load-more").hidden = false;
 }
 
-$("logs-load-more").addEventListener("click", () => loadLogsPage(logsCursor, false));
+$("logs-load-more").addEventListener("click", async () => {
+  try { await loadLogsPage(logsCursor, false); }
+  catch (err) {
+    $("workspace-error").hidden = false;
+    $("workspace-error").textContent = msg("common.failedToLoad") + ": " + String(err.message || err);
+  }
+});
 
 async function openBodyDrawer(ref) {
   const drawer = $("body-drawer");

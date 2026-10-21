@@ -1,6 +1,7 @@
 package analyticsapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -75,3 +76,45 @@ func (q *recordingLogsQ) Recent(limit int, before string) ([]analytics.Event, er
 	}
 	return q.fakeQ.Recent(limit, before)
 }
+
+func TestLogsEvidenceSerialization(t *testing.T) {
+	rec := httptest.NewRecorder()
+	LogsHandler(evidenceIndex(t)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/logs", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Events []map[string]json.RawMessage `json:"events"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Events) != 8 {
+		t.Fatalf("logs=%d want=8", len(body.Events))
+	}
+	want := map[string][3]string{"A": {"succeeded", "estimated", "true"}, "B": {"failed", "unavailable", "false"}, "C": {"partial", "uncertain", "true"}, "D": {"succeeded", "unpriced", "true"}, "E": {"succeeded", "legacy_unknown", "true"}, "F": {"succeeded", "estimated", "true"}, "G": {"unknown", "unavailable", "false"}, "H": {"failed", "estimated", "true"}}
+	for _, e := range body.Events {
+		var id, outcome, cost string
+		json.Unmarshal(e["id"], &id)
+		json.Unmarshal(e["outcome_state"], &outcome)
+		json.Unmarshal(e["cost_state"], &cost)
+		w, ok := want[id]
+		if !ok {
+			t.Fatalf("unexpected id=%q", id)
+		}
+		if outcome != w[0] || cost != w[1] || string(e["has_cost"]) != w[2] {
+			t.Errorf("%s evidence=%s", id, mustJSON(e))
+		}
+		if string(e["projection_version"]) != "1" {
+			t.Errorf("%s projection=%s", id, e["projection_version"])
+		}
+		if id == "C" {
+			if string(e["partial"]) != "true" || string(e["status"]) != "200" || string(e["error_code"]) != `"stream_incomplete"` {
+				t.Errorf("partial evidence=%s", mustJSON(e))
+			}
+		} else if string(e["partial"]) != "false" {
+			t.Errorf("%s partial=%s", id, e["partial"])
+		}
+	}
+}
+func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }

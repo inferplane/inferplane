@@ -77,9 +77,9 @@
         </div>
         <div class="cards">
           <div class="card stat">
-            <div class="microlabel" data-i18n="ov.reqTotal">requests · total</div>
+            <div class="microlabel" data-i18n="evidence.completed">Observed completed records</div>
             <div class="big" id="stat-requests">—</div>
-            <div class="sub" id="stat-requests-sub">from /metrics</div>
+            <div class="sub" id="stat-requests-sub">—</div>
           </div>
           <div class="card stat">
             <div class="microlabel" data-i18n="ov.activeKeys">active keys</div>
@@ -92,11 +92,17 @@
             <div class="sub" id="stat-teams-sub">across traffic</div>
           </div>
           <div class="card stat">
-            <div class="microlabel" data-i18n="ov.budgetSpend">budget spend</div>
+            <div class="microlabel" id="stat-spend-label">Estimable cost</div>
             <div class="big" id="stat-spend">—</div>
-            <div class="sub" id="stat-spend-sub">Reported settlements · last 30 days</div>
+            <div class="sub" id="stat-spend-sub">Last 30 days</div>
             <div class="sparkhold" id="stat-spend-spark"></div>
           </div>
+        </div>
+
+        <div class="card evidence-card">
+          <div class="microlabel" data-i18n="evidence.costStates">Cost evidence states</div>
+          <table class="data evidence-totals" id="overview-evidence"><tbody></tbody></table>
+          <p class="hint" data-i18n="evidence.limits"></p>
         </div>
 
         <div class="twocol">
@@ -133,13 +139,18 @@
           <div class="twocol">
             <div class="card">
               <div class="microlabel" data-i18n="usage.byTeam">spend by team</div>
-              <table class="data" id="usage-by-team"><thead><tr><th data-i18n="th.team">team</th><th class="num" data-i18n="th.req">req</th><th class="num" data-i18n="th.usd">USD</th></tr></thead><tbody></tbody></table>
+              <table class="data evidence-table" id="usage-by-team"><thead><tr><th data-i18n="th.team">team</th><th data-i18n="evidence.completed">Observed completed records</th><th data-i18n="evidence.outcomes">Outcomes</th><th data-i18n="evidence.costStates">Cost evidence states</th><th data-i18n="evidence.estimatedCost">Estimable cost</th><th data-i18n="evidence.incompleteAmount">Recorded amount with incomplete evidence</th></tr></thead><tbody></tbody></table>
             </div>
             <div class="card">
               <div class="microlabel" data-i18n="usage.byModel">spend by model</div>
-              <table class="data" id="usage-by-model"><thead><tr><th data-i18n="th.model">model</th><th class="num" data-i18n="th.req">req</th><th class="num" data-i18n="th.usd">USD</th></tr></thead><tbody></tbody></table>
+              <table class="data evidence-table" id="usage-by-model"><thead><tr><th data-i18n="th.model">model</th><th data-i18n="evidence.completed">Observed completed records</th><th data-i18n="evidence.outcomes">Outcomes</th><th data-i18n="evidence.costStates">Cost evidence states</th><th data-i18n="evidence.estimatedCost">Estimable cost</th><th data-i18n="evidence.incompleteAmount">Recorded amount with incomplete evidence</th></tr></thead><tbody></tbody></table>
             </div>
           </div>
+          <div class="card">
+            <div class="microlabel" data-i18n="evidence.byDay">Daily outcomes and cost evidence</div>
+            <table class="data evidence-table" id="usage-by-day"><thead><tr><th data-i18n="th.time">time</th><th data-i18n="evidence.completed">Observed completed records</th><th data-i18n="evidence.outcomes">Outcomes</th><th data-i18n="evidence.costStates">Cost evidence states</th><th data-i18n="evidence.estimatedCost">Estimable cost</th><th data-i18n="evidence.incompleteAmount">Recorded amount with incomplete evidence</th></tr></thead><tbody></tbody></table>
+          </div>
+          <p class="hint" data-i18n="evidence.limits"></p>
         </div>
       </section>
 
@@ -156,8 +167,8 @@
             <p class="hint"><span data-i18n="logs.bodyHint1">📄 marks a request whose body was captured (opt-in </span>
               <code>audit.log_bodies</code><span data-i18n="logs.bodyHint2">, D4/ADR-018). A streaming response is
               never captured — request only.</span></p>
-            <table class="data" id="logs-table">
-              <thead><tr><th data-i18n="th.time">time</th><th data-i18n="th.team">team</th><th data-i18n="th.model">model</th><th data-i18n="th.provider">provider</th><th data-i18n="th.status">status</th><th class="num" data-i18n="th.tokens">tokens</th><th class="num" data-i18n="th.cost">cost</th><th></th></tr></thead>
+            <table class="data evidence-table" id="logs-table">
+              <thead><tr><th data-i18n="th.time">time</th><th data-i18n="th.team">team</th><th data-i18n="th.model">model</th><th data-i18n="th.provider">provider</th><th data-i18n="evidence.status">HTTP / outcome</th><th class="num" data-i18n="th.tokens">tokens</th><th class="num" data-i18n="th.cost">cost</th><th></th></tr></thead>
               <tbody></tbody>
             </table>
             <button id="logs-load-more" type="button" class="ghost" hidden data-i18n="logs.loadMore">LOAD MORE</button>

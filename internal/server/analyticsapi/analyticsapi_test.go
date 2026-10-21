@@ -2,12 +2,16 @@ package analyticsapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inferplane/inferplane/internal/analytics"
+	"github.com/inferplane/inferplane/internal/audit"
 )
 
 type fakeQ struct {
@@ -146,5 +150,104 @@ func TestRebuildHandler_500OnRebuildError(t *testing.T) {
 	RebuildHandler(q).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/analytics/rebuild", nil))
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status %d, want 500", rec.Code)
+	}
+}
+
+// A–H goes through the real SQLite projection and HTTP serialization boundary.
+func evidenceIndex(t *testing.T) *analytics.Index {
+	t.Helper()
+	ix, err := analytics.OpenSQLite(filepath.Join(t.TempDir(), "evidence.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ix.Close() })
+	amounts := []int64{1000, 0, 2000, 0, 50, 0, 0, 300}
+	for n, id := range []string{"A", "B", "C", "D", "E", "F", "G", "H"} {
+		r := audit.Record{ID: id, TS: time.Now().UTC().Format(time.RFC3339), Event: "request_completed",
+			Principal: audit.PrincipalRef{Team: "fixture-team"}, Request: audit.RequestRef{ModelResolved: "fixture-model"},
+			Outcome: &audit.OutcomeRef{Status: 200}, Cost: &audit.CostRef{AmountUSDMicros: amounts[n]},
+			Usage: &audit.UsageRef{Evidence: &audit.UsageEvidence{InputKnown: true, OutputKnown: true, InputTotalKnown: true, CacheWriteTTLKnown: true}}}
+		switch id {
+		case "B":
+			r.Outcome.Status = 502
+			r.Cost = nil
+		case "C":
+			code := "stream_incomplete"
+			r.Outcome.Partial = true
+			r.Outcome.Error = &code
+		case "D":
+			r.Cost.PricingMissing = true
+		case "E":
+			r.Usage.Evidence = nil
+		case "G":
+			r.Outcome = nil
+			r.Cost = nil
+		case "H":
+			r.Outcome.Status = 400
+		}
+		if err := ix.Ingest(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return ix
+}
+
+func TestAnalyticsEvidenceSerialization(t *testing.T) {
+	ix := evidenceIndex(t)
+	rec := httptest.NewRecorder()
+	SummaryHandler(ix).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/analytics/summary", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Totals struct {
+			Requests   int64            `json:"requests"`
+			CostMicros int64            `json:"cost_micros"`
+			Operations map[string]int64 `json:"operations"`
+		} `json:"totals"`
+		ByTeam []struct {
+			Operations map[string]int64 `json:"operations"`
+		} `json:"by_team"`
+		ByModel []struct {
+			Operations map[string]int64 `json:"operations"`
+		} `json:"by_model"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int64{"completed": 8, "succeeded": 4, "failed": 2, "partial": 1, "unknown": 1, "estimated_requests": 3, "uncertain_requests": 1, "unpriced_requests": 1, "unavailable_requests": 2, "legacy_unknown_requests": 1, "estimated_cost_micros": 1300, "uncertain_recorded_cost_micros": 2050, "legacy_projection_records": 0}
+	if body.Totals.Requests != 6 || body.Totals.CostMicros != 3350 {
+		t.Fatalf("legacy totals=%+v", body.Totals)
+	}
+	if len(body.ByTeam) != 1 || len(body.ByModel) != 1 {
+		t.Fatalf("missing group rows: %s", rec.Body.String())
+	}
+	for _, o := range []map[string]int64{body.Totals.Operations, body.ByTeam[0].Operations, body.ByModel[0].Operations} {
+		for key, value := range want {
+			got, ok := o[key]
+			if !ok || got != value {
+				t.Errorf("operations.%s=%d present=%v want=%d", key, got, ok, value)
+			}
+		}
+	}
+	rec = httptest.NewRecorder()
+	TimeSeriesHandler(ix).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/analytics/timeseries?days=30", nil))
+	var days []struct {
+		Operations map[string]int64 `json:"operations"`
+	}
+	if rec.Code != 200 {
+		t.Fatalf("timeseries=%d %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &days); err != nil {
+		t.Fatal(err)
+	}
+	if len(days) != 1 {
+		t.Fatalf("days=%d", len(days))
+	}
+	for key, value := range want {
+		got, ok := days[0].Operations[key]
+		if !ok || got != value {
+			t.Errorf("daily operations.%s=%d present=%v want=%d", key, got, ok, value)
+		}
 	}
 }
