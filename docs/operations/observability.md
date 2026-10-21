@@ -47,6 +47,59 @@ Choose thresholds from measured traffic and the selected profile. Prometheus spe
 | Missing model in Codex | Explicit tool/Responses capability, native catalog mapping, installed client version |
 | Lower cache hit rate | Protocol conversion, masking, model switching, changed request bytes |
 
+## Read outcome and cost evidence
+
+The gateway Overview, Usage and Logs use observed completion records (ADR-053).
+They include costless failures previously absent from analytics. The denominator
+is `request_completed`, not all received traffic or unique requests/sessions.
+`request_started` refusals, unauthenticated 401s, admin events and client-local
+failures are excluded; retries/fallbacks may have different recording granularity
+across ingresses. A succeeded record describes transport, not model answer quality
+or completion of the user's task.
+
+Investigate `(failed + partial) / completed` with its numerator, denominator and
+unknown count. Partial takes precedence even with HTTP 200; missing/invalid
+outcomes remain unknown. With no completions the ratio is `—`. Unknown outcomes
+make the observed proportion incomplete, rather than successful. Metrics traffic
+and this denominator are separate observations.
+
+Read cost state before amount: `estimated` is a usage/rate-based estimate (zero
+is valid), `uncertain` is a recorded amount with incomplete evidence,
+`legacy_unknown` lacks usage evidence, `unpriced` lacks pricing and `unavailable`
+has no Cost record. Unpriced/unavailable numeric zeros are not known dollar
+amounts. Estimated totals and uncertain/legacy recorded totals are separate;
+the existing Cost-present financial totals remain unchanged. No state is a
+supplier invoice or permission to refund retained liability.
+
+For Responses streams the bounded reasons are `context_length_exceeded`,
+`invalid_encrypted_content`, `request_canceled`, `upstream_timeout`,
+`stream_incomplete`, `response_incompatible`, `usage_missing`,
+`client_write_failed` and `upstream_error`. Known provider codes require typed
+provider evidence. Cancellation/deadline and gateway reasons require explicit
+runtime evidence; raw error text and native provider-owned frames are not parsed
+to guess a code. Unknown nonempty analytics codes become `upstream_error`.
+
+Before streaming commits, existing HTTP/retry rules apply. After commit, the
+response retains HTTP 200 with partial=true and the same bounded code in audit
+and a gateway-generated SSE error when writable; it is not retried. Client-write
+failure records `client_write_failed` without forcing another SSE write. Native
+success bytes remain intact. Observed usage still follows the existing exactly-once
+finish/settlement path; missing usage is not fabricated as zero.
+
+Check `legacy_projection_records`, `/admin/analytics/health`, queue diagnostics
+and retained source segments together. Version 0 means source evidence has not
+been replayed; version 1 can still be `legacy_unknown` if the original lacked
+usage evidence. Zero legacy rows does not prove full historical collection.
+Retention gaps, the local nonblocking 4096-entry queue's drops, collection lag,
+truncated JSONL tails and requests with only `request_started` limit coverage.
+Missing fields from old APIs require an evidence-unavailable notice.
+
+Use the [API examples](../api-reference.md#analytics-outcome-and-cost-evidence-adr-053)
+and [recovery procedure](recovery.md#recover-analytics-evidence). This projection
+adds no metric labels, raw prompts/errors, key/session identifiers or financial
+authority. Default/local, node-local authority and shared-governance dependency
+contracts retain their existing profile-specific limits.
+
 ## Verify records
 
 ```bash

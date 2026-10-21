@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: d964c31c7f99eae791ff4b705e395780ec613732f1e0494a3af8aa0b8d2f51e3
+translation_source_sha256: b68cbd6697f093aac649d6c0c7dd4f76114efc46ba5e8a41782cab9231cdf793
 ---
 
 # API 구현 {#api}
@@ -117,3 +117,24 @@ key_store.type과 governance_store.type을 postgres로 설정하면 키 공유·
 스트림의 중단 처리는 바뀌지 않습니다.
 
 Responses의 컨텍스트 사전 검사 거부도 HTTP 400과 `error.code="context_length_exceeded"`를 반환합니다. 기존 검사 기준과 인증 순서는 유지합니다.
+
+## 분석 근거 (ADR-053) {#analytics-evidence-adr-053}
+
+`internal/server/analyticsapi/`는 full-admin summary·timeseries·logs·health와
+기존 Mode-B rebuild 경로를 제공합니다. `internal/analytics/evidence.go`는
+SQLite와 PostgreSQL 투영이 공유하는 분류기입니다. Summary `Totals`, 팀/모델 행,
+일별 지점에 `operations`를 추가하고, 이벤트에는 `has_cost`, `outcome_state`,
+`cost_state`, `partial`, 제한된 `error_code`, `projection_version`을 추가합니다.
+경로·메서드·권한 등급은 바뀌지 않습니다.
+
+`operations.completed`는 Cost=nil도 포함한 관측 `request_completed` 기록 수입니다.
+기존 requests·토큰·금액은 Cost가 있는 기록만 포함합니다. 결과 네 가지와 비용 상태
+다섯 가지는 각 분류 안에서 배타적이며 전송 성공과 비용 근거는 독립적입니다.
+API의 정수 산정액은 청구서·작업 품질 지표·승인 크레딧이 아닙니다.
+
+[필드 계약과 추가 예제](../api-reference.md#analytics-outcome-and-cost-evidence-adr-053),
+[운영 분모](../operations/observability.md#read-outcome-and-cost-evidence),
+[원본 복구](../operations/recovery.md#recover-analytics-evidence)를 확인하세요.
+Mode-B 마이그레이션·backfill은 트랜잭션으로 수행하지만 기존 checkpoint 이후
+건너뛴 원본을 재생하지는 않습니다. 과거 투영 건수 0도 완전한 이력을 증명하지
+않습니다. 어느 프로파일에서도 분석 변경은 금전 권한을 변경하지 않습니다.

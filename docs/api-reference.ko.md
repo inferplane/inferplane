@@ -1,6 +1,6 @@
 ---
 translation_source: api-reference.md
-translation_source_sha256: 48b635c9ea53464dca34acf17a7eacbc2be082899aa29f3c422df9fb1efaf47d
+translation_source_sha256: e316787e371adb10f8e9af29b323a29af6b24334c6b63751c9f740c4b1e97d32
 ---
 
 # API 레퍼런스 {#api-reference}
@@ -91,6 +91,108 @@ POST   /admin/keys        # issue a virtual key (plaintext returned once)
 GET    /admin/keys        # list key metadata (never plaintext)
 DELETE /admin/keys/{id}   # revoke a key
 ```
+
+### 분석 결과와 비용 근거 (ADR-053) {#analytics-outcome-and-cost-evidence-adr-053}
+
+기존 경로는 **full-admin** 권한이 필요합니다. 토큰이 없으면 401, 인증된 팀
+매핑 일반 관리자는 403을 받습니다. 정적 콘솔은 데이터 없이 공개됩니다.
+분석을 비활성화하면 이 경로를 사용할 수 없습니다.
+
+```text
+GET  /admin/analytics/summary?since=2026-10-21&until=2026-10-21
+GET  /admin/analytics/timeseries?since=2026-10-21&until=2026-10-21
+GET  /admin/logs?limit=200&before=<event-id>
+GET  /admin/analytics/health
+POST /admin/analytics/rebuild
+```
+
+Summary와 timeseries는 양 끝을 포함한 UTC 날짜를 사용하고 기본 기간은 최근
+30일입니다. 잘못된 날짜·역순 기간·366일 초과를 거부합니다. Logs의 최신 ID 우선
+키셋 순서와 페이지 최대 200건은 유지하며, Cost가 없는 기록도 포함한 모든
+관측 `request_completed`를 반환합니다. Rebuild는 PostgreSQL Mode B에서
+지원합니다. 204는 파생 상태 초기화의 응답이며, 이후 수집기가 보관 원본을
+재생합니다. Mode A는 405입니다. [복구 절차](operations/recovery.md#recover-analytics-evidence)를 확인하세요.
+
+`operations`는 summary 합계·팀/모델 행·일별 지점에 추가됩니다. 단위는
+**관측 완료 기록**이며 전체 트래픽·고유 사용자 요청·세션·모델의 작업 품질이
+아닙니다. `request_started` 거부, 미인증 401, 관리자 이벤트, 클라이언트가
+전송하지 못한 요청은 제외됩니다. 재시도/폴백 기록 단위는 ingress마다 다를 수 있습니다.
+
+결과 우선순위는 Partial=true → `partial`, Outcome 없음 또는 status가 200–599
+밖이면 `unknown`, 유효한 status에서 Outcome.Error가 비어 있지 않거나 status≥300이면
+`failed`, 나머지 2xx는 `succeeded`입니다. Partial은 failed에 중복 가산하지
+않습니다. 관측 실패 비율은 `(failed + partial) / completed`입니다. completed=0이면
+`—`를 표시하고 결과 미확정 건수를 비율 옆에 표시합니다.
+
+| 비용 상태 (우선순위 순) | 의미 |
+| --- | --- |
+| `unavailable` | Cost=nil. 구버전의 비용 없는 원본도 포함하며 금액은 알 수 없음 |
+| `unpriced` | Cost.PricingMissing. 숫자 0은 무료 산정액이 아님 |
+| `legacy_unknown` | Cost는 있으나 Usage 또는 Usage.Evidence가 없음 |
+| `uncertain` | Partial, Usage.Estimated, InputKnown/OutputKnown/InputTotalKnown/CacheWriteTTLKnown 중 false, AccountingUncertain 또는 음수 금액 |
+| `estimated` | 나머지 사용량·가격 근거가 있는 기록. 산정액 0도 유효함 |
+
+비용 상태는 결과와 독립적이므로 HTTP 400도 산정액을 가질 수 있습니다.
+`estimated`도 단가 기반 산정액이지 공급자 최종 청구액이 아닙니다.
+`estimated_cost_micros`는 estimated 합계,
+`uncertain_recorded_cost_micros`는 uncertain + legacy_unknown의 기록 금액 합계입니다.
+금액은 모두 정수 microUSD입니다. 기존 `requests`·토큰·`cost_micros` 합계는
+Cost 존재(`has_cost=true`) 조건과 계산법을 유지합니다. 새 관측 건수는 비용 배분이나
+예산 정산을 재정의하지 않습니다.
+
+8개 기록의 수락 fixture는 아래 합계 발췌와 같습니다. 동일한 `operations`가
+하나의 팀 행·모델 행·일별 지점에 나타납니다.
+
+```json
+{
+  "requests": 6,
+  "cost_micros": 3350,
+  "operations": {
+    "completed": 8,
+    "succeeded": 4,
+    "failed": 2,
+    "partial": 1,
+    "unknown": 1,
+    "estimated_requests": 3,
+    "uncertain_requests": 1,
+    "unpriced_requests": 1,
+    "unavailable_requests": 2,
+    "legacy_unknown_requests": 1,
+    "estimated_cost_micros": 1300,
+    "uncertain_recorded_cost_micros": 2050,
+    "legacy_projection_records": 0
+  }
+}
+```
+
+`completed`는 결과 네 가지 합계 및 비용 상태 다섯 가지 합계와 같습니다.
+비용 없는 기록만 있는 팀/모델/날짜는 기존 requests와 금액이 0이어도 operations는
+0이 아닐 수 있습니다. `legacy_projection_records`는 원본 재생을 기다리는
+version-0 행 수입니다. 0도 모든 과거 기록 수집을 증명하지 않습니다. 보관 기간,
+큐 drop, 수집 지연, 완료 기록 누락은 계속 범위를 제한합니다.
+
+`GET /admin/logs`는 `{"events":[...]}`를 반환합니다. 기존 필드 이름은 유지하고
+`has_cost`, `outcome_state`, `cost_state`, `partial`, `error_code`,
+`projection_version`을 추가합니다. 빈 `error_code`는 생략됩니다. 아래 이벤트
+발췌는 HTTP-200 부분 응답입니다.
+
+```json
+{
+  "status": 200,
+  "cost_micros": 2000,
+  "has_cost": true,
+  "outcome_state": "partial",
+  "cost_state": "uncertain",
+  "partial": true,
+  "error_code": "stream_incomplete",
+  "projection_version": 1
+}
+```
+
+unavailable/unpriced에서 숫자 0을 알려진 달러 금액으로 표시하지 마세요.
+구버전 API에 `operations` 또는 `cost_state`가 없으면 근거 정보 없음이지 성공·비용 0이
+아닙니다. 제한된 스트림 원인과 [관측 한계](operations/observability.md#read-outcome-and-cost-evidence)를
+적용하며 원문 오류 텍스트는 이 API에 추가하지 않습니다.
 
 ## 오류 코드 {#error-codes}
 

@@ -1,7 +1,7 @@
 # P1: 요청 결과·비용 근거·스트리밍 오류 가시성 스펙
 
 - 작성일: 2026-10-21
-- 상태: 검토용 설계. 제품 구현은 사용자 설계·계획 리뷰 후 시작한다.
+- 상태: 2026-10-21 사용자 설계·계획 승인(“네 구현”). implemented; final review pending. Tasks 1–5 구현·검사 완료, 전체 diff 독립 리뷰 및 Task 4 Minor M1 최종 분류 대기.
 - 기준: `origin/main` `77ad9239aa444d950abb02c06e62fc839b3082c3`.
 - 실행 방식: Superpowers의 스펙 → builder check → 작업계획 → 사용자 리뷰 → 담당별 TDD 구현 → 독립 리뷰.
 - 사용자 요구: inferplane의 오류율·호환성·비용 가시성 문제를 개선하고 관리자 UI에서 확인한다.

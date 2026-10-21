@@ -145,3 +145,25 @@ and `tokenQuota` day/month rules require this profile. `GET /v1/usage` returns
 `enforcement_mode: shared` and subject-scoped `shared_limits`. Key CLI commands
 accept `--config`; `keys import --sqlite ... --config ...` preserves raw identities
 and revocation tombstones. See [shared governance](../shared-governance.md).
+
+## Analytics evidence (ADR-053)
+
+`internal/server/analyticsapi/` serves full-admin summary, timeseries, logs,
+health and the existing Mode-B rebuild route. `internal/analytics/evidence.go`
+is the shared classifier for SQLite and PostgreSQL projections. Summary
+`Totals`, team/model rows and day points add `operations`; events add
+`has_cost`, `outcome_state`, `cost_state`, `partial`, bounded `error_code`
+and `projection_version`. No route, method or authorization tier changes.
+
+`operations.completed` counts observed `request_completed` records, including
+Cost=nil. Legacy requests/tokens/amounts still include only Cost-present records.
+The four outcome states and five cost states are exclusive within each class;
+transport success is independent of cost evidence. The API's integer estimates
+are not invoices, task-quality measures or admission credit.
+
+Read the [field contract and additive examples](../api-reference.md#analytics-outcome-and-cost-evidence-adr-053),
+[operational denominator](../operations/observability.md#read-outcome-and-cost-evidence)
+and [source recovery](../operations/recovery.md#recover-analytics-evidence).
+Mode-B migration/backfill is transactional; it does not replay source records
+skipped beyond old checkpoints. A zero legacy-projection count does not attest
+complete history. Neither profile's analytics changes financial authority.

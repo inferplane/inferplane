@@ -10,7 +10,7 @@
 
 **Spec:** [P1 설계](../specs/2026-10-21-p1-request-outcomes-cost-evidence-design.md)
 
-**Status:** 구현 전 사용자 리뷰 대기. 설계와 실행 계획을 함께 요청한 사용자에게 검토 가능한 계획 초안으로 제공한다. 설계·계획 승인을 추정하지 않는다. builder check 완료: `nothing important left`.
+**Status:** 2026-10-21 사용자 승인(“네 구현”). implemented; final review pending. builder check 완료: `nothing important left`. Tasks 1–5 구현·검사 완료, 전체 diff 독립 리뷰와 Task 4 Minor M1 최종 분류는 컨트롤러 담당으로 남긴다.
 
 ## Global Constraints
 
@@ -63,7 +63,7 @@
 - `CostState` 값: `estimated`, `uncertain`, `unpriced`, `unavailable`, `legacy_unknown`.
 - `OperationTotals`와 JSON 필드는 스펙 §4.3 표 그대로 사용한다. `Billable`의 의미/서명은 그대로 둔다.
 
-- [ ] **Step 1: 실패할 분류·집계 테스트 작성.** `TestEvidenceClassification`에서 스펙 §4.1/4.2 우선순위 전체를 table test로 고정한다. `TestObservableProjectionContract`의 A–H fixture는 스펙 §8의 아래 값을 검증한다.
+- [x] **Step 1: 실패할 분류·집계 테스트 작성.** `TestEvidenceClassification`에서 스펙 §4.1/4.2 우선순위 전체를 table test로 고정한다. `TestObservableProjectionContract`의 A–H fixture는 스펙 §8의 아래 값을 검증한다.
 
 ```text
 operations: completed=8, succeeded=4, failed=2, partial=1, unknown=1
@@ -73,11 +73,11 @@ legacy requests=6, cost_micros=3350
 Recent length=8; costless records present; started/admin events absent
 ```
 
-- [ ] **Step 2: RED 확인.** `go test ./internal/analytics -run 'Test(EvidenceClassification|ObservableProjectionContract)' -count=1`. 새 타입/함수가 없거나 새 관측 수치 불일치로 실패해야 한다.
-- [ ] **Step 3: 순수 분류와 저장소 변경 구현.** `EvidenceOf`에 스펙의 우선순위 적용, `index.go`에 additive 열/OperationTotals scan 및 기존 필드의 has_cost 조건, `sink.go`의 필터에 Observable 적용. 새 projection_version=1, 구버전 기본값=0. SQLite conflict update는 version=0일 때만 적용한다.
-- [ ] **Step 4: 경로별 실패 테스트 추가.** `TestSinkIncludesCostlessCompletion`, `TestReplayUpgradesLegacyProjectionOnce`, `TestReplayKeepsTruncatedTailOut`, `TestUnknownErrorCodeIsBounded`, `TestZeroCostRequiresEvidence`. migration 전 행 1개는 unknown/legacy_unknown/legacy_projection_records=1이며 실제 JSONL 재생 후 근거 기반 상태와 version=1로 바뀐다. 동일 ID 재생 후 건수/금액 불변. 없는 원본 행은 계속 version=0이다. 큐는 비차단이고 Close는 drain한다.
-- [ ] **Step 5: GREEN 확인.** `go test ./internal/analytics -race -count=1`; 기존 Billable/model/day/금액 테스트도 함께 통과해야 한다.
-- [ ] **Step 6: 작업 커밋.** 위 소유 파일만 stage하고 `git commit -s -m "feat(analytics): project completed outcomes and cost evidence"`.
+- [x] **Step 2: RED 확인.** `go test ./internal/analytics -run 'Test(EvidenceClassification|ObservableProjectionContract)' -count=1`. 새 타입/함수가 없거나 새 관측 수치 불일치로 실패해야 한다.
+- [x] **Step 3: 순수 분류와 저장소 변경 구현.** `EvidenceOf`에 스펙의 우선순위 적용, `index.go`에 additive 열/OperationTotals scan 및 기존 필드의 has_cost 조건, `sink.go`의 필터에 Observable 적용. 새 projection_version=1, 구버전 기본값=0. SQLite conflict update는 version=0일 때만 적용한다.
+- [x] **Step 4: 경로별 실패 테스트 추가.** `TestSinkIncludesCostlessCompletion`, `TestReplayUpgradesLegacyProjectionOnce`, `TestReplayKeepsTruncatedTailOut`, `TestUnknownErrorCodeIsBounded`, `TestZeroCostRequiresEvidence`. migration 전 행 1개는 unknown/legacy_unknown/legacy_projection_records=1이며 실제 JSONL 재생 후 근거 기반 상태와 version=1로 바뀐다. 동일 ID 재생 후 건수/금액 불변. 없는 원본 행은 계속 version=0이다. 큐는 비차단이고 Close는 drain한다.
+- [x] **Step 5: GREEN 확인.** `go test ./internal/analytics -race -count=1`; 기존 Billable/model/day/금액 테스트도 함께 통과해야 한다.
+- [x] **Step 6: 작업 커밋.** 위 소유 파일만 stage하고 `git commit -s -m "feat(analytics): project completed outcomes and cost evidence"`.
 
 ### Task 2: Postgres 동일 계약과 migration/rebuild
 
@@ -90,12 +90,12 @@ Recent length=8; costless records present; started/admin events absent
 - Produces: 같은 Summary/TimeSeries/Recent JSON 계약, 동일 lease-fenced `Rebuild(context.Context) error`. 공개 Store 서명은 변경하지 않는다.
 - Correction 시 이전 key 조회는 같은 fenced transaction에서 수행하며 새/옛 key 모두 recompute한다. 빈 그룹은 rollup에서 제거한다.
 
-- [ ] **Step 1: 테스트 DB 준비 및 RED 테스트 작성.** 저장소 CI의 일회용 PG 서비스 규약을 사용한다. `INFERPLANE_TEST_PG_DSN`은 이 작업용 DB만 가리키며 기존 사용 중인 DSN을 재사용하지 않는다. `TestPGObservableProjectionContract`는 Task 1의 A–H 기대값을 동일하게 검사한다. 테스트 prerequisite가 없으면 skip을 PASS로 기록하지 않는다.
-- [ ] **Step 2: RED 확인.** 테스트 전용 DSN으로 `go test ./internal/analytics/pgstore -run TestPGObservableProjectionContract -count=1`. 기존 필터 때문에 completed=8 계약이 실패해야 한다.
-- [ ] **Step 3: migration/ingestion/queries 구현.** events/rollup additive 열을 같은 advisory-lock migration transaction에 넣고 모든 기존 events에서 rollup을 다시 생성한다. ingestBatch는 Observable을 포함하고 순수 EvidenceOf를 쓴다. checkpoint와 epoch fence는 변경하지 않는다. 기존 aggregate 필드는 has_cost만 계산한다.
-- [ ] **Step 4: 이행과 correction 테스트 작성.** `TestPGProjectionMigrationPreservesLegacyTotals`는 예전 events/rollup을 만든 뒤 migration 2회 실행해 숫자 불변과 legacy_unknown을 검사한다. `TestPGCorrectionRecomputesBothKeys`는 같은 ID를 다른 팀/모델/날짜로 correction한 뒤 옛 그룹 제거와 총액 1회 반영을 검사한다. `TestPGRebuildRecoversCostlessHistory`는 이전 checkpoint가 지나간 비용 없는 JSONL이 명시적 rebuild 후 회복되는지 검사한다. 기존 stale-epoch 테스트가 새 관측 열에도 rollback을 검증하도록 확장한다.
-- [ ] **Step 5: GREEN 확인.** `go test ./internal/analytics/pgstore -race -count=1`와 `go test ./cmd/mayu -run AnalyticsModeB -count=1`. 일회용 DB integration 테스트가 실제 실행됐는지 결과를 기록한다.
-- [ ] **Step 6: 작업 커밋.** `git commit -s -m "feat(analytics): preserve outcome evidence in Postgres rollups"`.
+- [x] **Step 1: 테스트 DB 준비 및 RED 테스트 작성.** 저장소 CI의 일회용 PG 서비스 규약을 사용한다. `INFERPLANE_TEST_PG_DSN`은 이 작업용 DB만 가리키며 기존 사용 중인 DSN을 재사용하지 않는다. `TestPGObservableProjectionContract`는 Task 1의 A–H 기대값을 동일하게 검사한다. 테스트 prerequisite가 없으면 skip을 PASS로 기록하지 않는다.
+- [x] **Step 2: RED 확인.** 테스트 전용 DSN으로 `go test ./internal/analytics/pgstore -run TestPGObservableProjectionContract -count=1`. 기존 필터 때문에 completed=8 계약이 실패해야 한다.
+- [x] **Step 3: migration/ingestion/queries 구현.** events/rollup additive 열을 같은 advisory-lock migration transaction에 넣고 모든 기존 events에서 rollup을 다시 생성한다. ingestBatch는 Observable을 포함하고 순수 EvidenceOf를 쓴다. checkpoint와 epoch fence는 변경하지 않는다. 기존 aggregate 필드는 has_cost만 계산한다.
+- [x] **Step 4: 이행과 correction 테스트 작성.** `TestPGProjectionMigrationPreservesLegacyTotals`는 예전 events/rollup을 만든 뒤 migration 2회 실행해 숫자 불변과 legacy_unknown을 검사한다. `TestPGCorrectionRecomputesBothKeys`는 같은 ID를 다른 팀/모델/날짜로 correction한 뒤 옛 그룹 제거와 총액 1회 반영을 검사한다. `TestPGRebuildRecoversCostlessHistory`는 이전 checkpoint가 지나간 비용 없는 JSONL이 명시적 rebuild 후 회복되는지 검사한다. 기존 stale-epoch 테스트가 새 관측 열에도 rollback을 검증하도록 확장한다.
+- [x] **Step 5: GREEN 확인.** `go test ./internal/analytics/pgstore -race -count=1`와 `go test ./cmd/mayu -run AnalyticsModeB -count=1`. 일회용 DB integration 테스트가 실제 실행됐는지 결과를 기록한다.
+- [x] **Step 6: 작업 커밋.** `git commit -s -m "feat(analytics): preserve outcome evidence in Postgres rollups"`.
 
 ### Task 3: Responses 오류 사유와 partial 기록 보존
 
@@ -109,12 +109,12 @@ Recent length=8; costless records present; started/admin events absent
 - Produces: `streamFailureCode(cause error) string`, 기존 `attempt.stream(http.ResponseWriter, bool) bool`의 bounded audit/SSE error code.
 - Private sentinel: `errStreamIncomplete`, `errResponseIncompatible`, `errUsageMissing`, `errClientWriteFailed`; 각각 스펙의 해당 code로 매핑한다. provider 문구를 sentinel로 분류하지 않는다.
 
-- [ ] **Step 1: RED stream fixture 작성.** fake provider가 첫 chunk 후 `*providers.UpstreamError{StatusCode:400, Body:...context_length_exceeded...}`를 반환하게 한다. `TestCommittedStreamPreservesTypedFailure`는 HTTP 200, SSE code=context_length_exceeded, audit.partial=true, audit.error 동일, provider attempts=1, completed/settlement 각 1회를 검사한다. usage 있는/없는 경우를 모두 실행한다.
-- [ ] **Step 2: RED 확인.** `go test ./internal/server/responsesapi -run TestCommittedStreamPreservesTypedFailure -count=1`. 현재 generic code/비어 있는 audit error 때문에 실패해야 한다.
-- [ ] **Step 3: 오류 mapping 구현.** `streamFailureCode`는 허용 upstream code → errors.Is(context.Canceled/DeadlineExceeded) → sentinel → upstream_error 순서다. `fail`이 commit 여부 분기 전에 a.errorCode를 설정하게 한다. gateway SSE envelope는 JSON encoding을 사용한다. write error는 후속 write 없이 client_write_failed를 남긴다. no-usage와 renderer 실패 지점은 명시적 sentinel로 표시한다.
-- [ ] **Step 4: 적대적·회귀 테스트 작성.** `TestStreamFailureDoesNotClassifyRawText`에서 원문에 알려진 code·가짜 키·프롬프트를 넣고 출력/감사에 미노출을 확인한다. `TestCommittedStreamNeverRetries`, `TestClientDisconnectFinishesOnce`, `TestStreamDeadlineCode`, `TestNativeStreamBytesRemainUnchanged`, `TestIncompleteStreamKeepsObservedUsage`를 추가한다. precommit 429/5xx retry, nonretryable 400, 기존 compaction 회귀를 유지한다.
-- [ ] **Step 5: GREEN 확인.** `go test ./internal/server/responsesapi ./internal/responses ./internal/server/requestpolicy -race -count=1`. Cost nil에서도 완료 감사 이벤트가 남는지 확인한다.
-- [ ] **Step 6: 작업 커밋.** `git commit -s -m "fix(responses): retain bounded failures after stream commit"`.
+- [x] **Step 1: RED stream fixture 작성.** fake provider가 첫 chunk 후 `*providers.UpstreamError{StatusCode:400, Body:...context_length_exceeded...}`를 반환하게 한다. `TestCommittedStreamPreservesTypedFailure`는 HTTP 200, SSE code=context_length_exceeded, audit.partial=true, audit.error 동일, provider attempts=1, completed/settlement 각 1회를 검사한다. usage 있는/없는 경우를 모두 실행한다.
+- [x] **Step 2: RED 확인.** `go test ./internal/server/responsesapi -run TestCommittedStreamPreservesTypedFailure -count=1`. 현재 generic code/비어 있는 audit error 때문에 실패해야 한다.
+- [x] **Step 3: 오류 mapping 구현.** `streamFailureCode`는 허용 upstream code → errors.Is(context.Canceled/DeadlineExceeded) → sentinel → upstream_error 순서다. `fail`이 commit 여부 분기 전에 a.errorCode를 설정하게 한다. gateway SSE envelope는 JSON encoding을 사용한다. write error는 후속 write 없이 client_write_failed를 남긴다. no-usage와 renderer 실패 지점은 명시적 sentinel로 표시한다.
+- [x] **Step 4: 적대적·회귀 테스트 작성.** `TestStreamFailureDoesNotClassifyRawText`에서 원문에 알려진 code·가짜 키·프롬프트를 넣고 출력/감사에 미노출을 확인한다. `TestCommittedStreamNeverRetries`, `TestClientDisconnectFinishesOnce`, `TestStreamDeadlineCode`, `TestNativeStreamBytesRemainUnchanged`, `TestIncompleteStreamKeepsObservedUsage`를 추가한다. precommit 429/5xx retry, nonretryable 400, 기존 compaction 회귀를 유지한다.
+- [x] **Step 5: GREEN 확인.** `go test ./internal/server/responsesapi ./internal/responses ./internal/server/requestpolicy -race -count=1`. Cost nil에서도 완료 감사 이벤트가 남는지 확인한다.
+- [x] **Step 6: 작업 커밋.** `git commit -s -m "fix(responses): retain bounded failures after stream commit"`.
 
 ### Task 4: 관리자 API와 비용·결과 표시
 
@@ -129,12 +129,12 @@ Recent length=8; costless records present; started/admin events absent
 - Produces: `costEvidenceText(event) -> string`, `outcomeEvidenceText(event) -> string`, `operationRateText(operations) -> string`; 기존 `usd(value)`/정수 JSON parser를 사용한다.
 - `costEvidenceText`는 스펙 §7 상태별 표시를 따른다. `operationRateText`는 `(failed+partial)/completed`의 백분율과 정확한 분자/분모를 표시하며 분모 0 또는 누락이면 `—`다. BigInt를 먼저 유지하고 퍼센트 표시만 소수 1자리로 만든다.
 
-- [ ] **Step 1: RED API/JS 행동 테스트 작성.** 새 cjs는 실제 app.js/i18n.js를 Node vm + 작은 DOM/fetch fixture로 실행한다. A–H JSON으로 새 fields 직렬화, Logs 8행, Usage completed=8와 3/8 (37.5%), unknown=1을 검사한다. 하드코딩된 source 문자열 검사가 아니라 DOM 출력/실제 handler 동작을 검증한다.
-- [ ] **Step 2: RED 확인.** `go test ./internal/server/analyticsapi ./internal/server/adminui -run 'Test.*Evidence' -count=1`. 현재 모든 cost를 usd로 표시하는 동작과 새 지표 없음 때문에 실패해야 한다.
-- [ ] **Step 3: 화면 연결 구현.** Usage·Overview·모델/팀·날짜 표에 관측 건수와 결과 breakdown, 산정 가능한 비용, 근거 불완전 기록 금액을 연결한다. Logs에 HTTP status + outcome + cost state + bounded error code를 표시한다. 기존 raw cost를 남기는 곳은 ‘기록된 금액’으로 이름을 명확히 한다. 모든 신규 문구에 en/ko 키를 넣는다.
-- [ ] **Step 4: 상태/하위호환 회귀 추가.** `TestAnalyticsEvidenceBehavior`에서 estimated zero와 unavailable/unpriced zero의 화면 차이, partial HTTP200의 경고, missing operations/cost_state의 구버전 안내, legacy_projection_records 표시를 검사한다. 금액 `9007199254740993`의 문자열 정밀도와 empty denominator, HTML처럼 생긴 unknown 오류의 escape를 검사한다. 기존 full-admin 권한 테스트에 새로운 응답 필드가 401/403으로 차단되는지 포함한다.
-- [ ] **Step 5: GREEN 확인.** `go test ./internal/server/analyticsapi ./internal/server/adminui ./internal/server -race -count=1`와 `node internal/server/adminui/testdata/analytics_evidence.cjs`. 로컬 fake-data UI로 한국어/영어 렌더링·폭 좁은 화면·네트워크 실패 상태를 확인하고 screenshot은 ~/.tmp에 둔다. 외부 모델 호출은 없다.
-- [ ] **Step 6: 작업 커밋.** `git commit -s -m "feat(admin): distinguish request outcomes and uncertain cost"`.
+- [x] **Step 1: RED API/JS 행동 테스트 작성.** 새 cjs는 실제 app.js/i18n.js를 Node vm + 작은 DOM/fetch fixture로 실행한다. A–H JSON으로 새 fields 직렬화, Logs 8행, Usage completed=8와 3/8 (37.5%), unknown=1을 검사한다. 하드코딩된 source 문자열 검사가 아니라 DOM 출력/실제 handler 동작을 검증한다.
+- [x] **Step 2: RED 확인.** `go test ./internal/server/analyticsapi ./internal/server/adminui -run 'Test.*Evidence' -count=1`. 현재 모든 cost를 usd로 표시하는 동작과 새 지표 없음 때문에 실패해야 한다.
+- [x] **Step 3: 화면 연결 구현.** Usage·Overview·모델/팀·날짜 표에 관측 건수와 결과 breakdown, 산정 가능한 비용, 근거 불완전 기록 금액을 연결한다. Logs에 HTTP status + outcome + cost state + bounded error code를 표시한다. 기존 raw cost를 남기는 곳은 ‘기록된 금액’으로 이름을 명확히 한다. 모든 신규 문구에 en/ko 키를 넣는다.
+- [x] **Step 4: 상태/하위호환 회귀 추가.** `TestAnalyticsEvidenceBehavior`에서 estimated zero와 unavailable/unpriced zero의 화면 차이, partial HTTP200의 경고, missing operations/cost_state의 구버전 안내, legacy_projection_records 표시를 검사한다. 금액 `9007199254740993`의 문자열 정밀도와 empty denominator, HTML처럼 생긴 unknown 오류의 escape를 검사한다. 기존 full-admin 권한 테스트에 새로운 응답 필드가 401/403으로 차단되는지 포함한다.
+- [x] **Step 5: GREEN 확인.** `go test ./internal/server/analyticsapi ./internal/server/adminui ./internal/server -race -count=1`와 `node internal/server/adminui/testdata/analytics_evidence.cjs`. 로컬 fake-data UI로 한국어/영어 렌더링·폭 좁은 화면·네트워크 실패 상태를 확인하고 screenshot은 ~/.tmp에 둔다. 외부 모델 호출은 없다.
+- [x] **Step 6: 작업 커밋.** `git commit -s -m "feat(admin): distinguish request outcomes and uncertain cost"`.
 
 ### Task 5: 운영 문서와 통합 검증
 
@@ -146,9 +146,9 @@ Recent length=8; costless records present; started/admin events absent
 - Consumes: Tasks 1–4의 최종 API/SQL/UI 동작과 검사 결과.
 - Produces: ADR, 필드/분모/미확정 의미, SQLite 재생과 PG 명시적 rebuild 절차, 혼합 버전 rollout 한계, 실제 검증 결과. 신규 API나 runtime interface는 추가하지 않는다.
 
-- [ ] **Step 1: 최종 동작과 문서 대조.** 스펙 수락 기준마다 담당 테스트와 실제 PASS를 연결한다. 구버전 Cost nil, 보관 원본 없음, PG checkpoint, 오류 분모 제외 항목을 문서 예제에 포함한다. 신규 부가 필드를 기존 API 예제에 추가한다.
-- [ ] **Step 2: ADR/한영 문서 갱신.** 왜 기존 금융 합계와 운영 관측 분모를 나누었는지, 비용이 청구서 확정액이 아닌지, runtime failure code 허용 집합을 명시한다. live DB rebuild나 재배포를 검증 없이 완료로 쓰지 않는다.
-- [ ] **Step 3: 필수 검사.** 아래를 모두 실행하며 임시/빌드 결과는 ~/.tmp에 둔다.
+- [x] **Step 1: 최종 동작과 문서 대조.** 스펙 수락 기준마다 담당 테스트와 실제 PASS를 연결한다. 구버전 Cost nil, 보관 원본 없음, PG checkpoint, 오류 분모 제외 항목을 문서 예제에 포함한다. 신규 부가 필드를 기존 API 예제에 추가한다.
+- [x] **Step 2: ADR/한영 문서 갱신.** 왜 기존 금융 합계와 운영 관측 분모를 나누었는지, 비용이 청구서 확정액이 아닌지, runtime failure code 허용 집합을 명시한다. live DB rebuild나 재배포를 검증 없이 완료로 쓰지 않는다.
+- [x] **Step 3: 필수 검사.** 아래를 모두 실행하며 임시/빌드 결과는 ~/.tmp에 둔다.
 
 ```bash
 export TMPDIR="$HOME/.tmp"
@@ -167,7 +167,17 @@ python3 -B -m unittest discover -s tests/docs -v
 기존 MkDocs venv로 `mkdocs build --strict --site-dir "$TMPDIR/inferplane-p1-site"`를 실행한다. PostgreSQL integration suite는 별도 일회용 DB에서 실제 실행 기록을 남긴다. gofmt 출력은 비어야 하고 다른 명령은 exit=0이어야 한다. 검증 명령과 수정 대상 문서 경로는 기준 worktree에서 확인했다.
 
 - [ ] **Step 4: 독립 전체 diff 리뷰.** 별도 reviewer에게 스펙/계획/전체 diff/테스트 결과를 넘긴다. 경계 위반, 원문 노출, 금융 의미 변경, migration/rollback, repeated replay, partial no-retry를 집중 검토한다. SDD의 제한된 fix/review 규칙을 따른다.
-- [ ] **Step 5: 문서 커밋 및 완료 보고.** `git commit -s -m "docs: explain outcome and cost evidence operations"`. 구현/로컬 검사/실제 DB 검사/미실행 rollout을 구분해 보고한다. Pages 배포 시 content-review 점수 85 이상과 기존 docs 배포 CI를 적용한다.
+- [x] **Step 5: 문서 커밋 및 완료 보고.** `git commit -s -m "docs: explain outcome and cost evidence operations"`. 구현/로컬 검사/실제 DB 검사/미실행 rollout을 구분해 보고한다. Pages 배포 시 content-review 점수 85 이상과 기존 docs 배포 CI를 적용한다.
+
+## 구현·검증 기록 (2026-10-21)
+
+- Tasks 1–4의 RED/GREEN·커밋은 `.superpowers/sdd/2026-10-21-p1-request-outcomes-cost-evidence/task-{1,2,3,4}-report.md`로 확인했다. 커밋은 순서대로 `0ff6354`, `9c9374e`, `79f4db1`, `b0b8cea`이다. 각 작업 구현·검사 단계 체크를 갱신했다.
+- Task 5는 ADR-053, 한영 API/운영/UX 문서와 수락 기준↔행동 테스트 연결을 구현했다. 변경은 문서와 승인된 계획/스펙 bookkeeping으로 한정했다.
+- 최종 통합 검사: 두 static build, 기본 `go test ./... -race`(변경 없는 product package는 Go cache 사용), vet, 빈 gofmt, harness 모두 exit=0. 한영 47쌍·ADR index, 생성 성능/클라이언트 문서, docs unittest 31건, strict MkDocs 모두 exit=0.
+- 일회용 PostgreSQL 17에서 pgstore `-race -count=1 -v` 24/24와 ModeB end-to-end 1/1이 실제 실행되어 통과했다. DB 검사는 순차 실행, skip=0. 기본 DSN 없는 suite는 PG 실제 실행 증거로 세지 않는다.
+- Harness의 top-level 70/70에는 installed-Codex opt-in nested skip 12건과 보수적 16384-token fallback 진단이 포함된다. Task 4의 합성 browser 54 screenshot은 변경 없는 UI라 반복하지 않았다.
+- Task 4 Minor M1(페이지 재시도 성공 후 이전 workspace 오류가 유지됨)은 전체 리뷰에서 분류/수정할 미결 항목이다. 모든 이슈 해결을 주장하지 않는다. Task 5 Step 4는 미체크이며 컨트롤러의 최종 gate가 남는다.
+- live DB rebuild, 운영 배포, push, 유료 모델/실제 IdP 시험은 실행하지 않았다. 정확한 명령·결과·로그·문서 커밋은 Task 5 보고서에 기록한다.
 
 ## 계획 자체 검토
 

@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: 795de3931a2d34e0b22ededc32f89ebe52e8dce979edf1bd2d7dcb68b71e359d
+translation_source_sha256: c102a93f640ed5f1804e7e71a7b580068451da81e7cca3bd9c8a1129e415f2f5
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -51,6 +51,53 @@ translation_source_sha256: 795de3931a2d34e0b22ededc32f89ebe52e8dce979edf1bd2d7dc
 | 생성은 거부되는데 계산 값이 0 | 계산은 로컬/200 유지. 준비 상태·키 저장소 확인 |
 | Codex 모델 누락 | 도구·Responses 기능 선언, 네이티브 카탈로그 매핑, 클라이언트 버전 |
 | 캐시 적중 감소 | 프로토콜 변환, 마스킹, 모델 전환, 요청 바이트 변경 |
+
+## 결과와 비용 근거 읽기 {#read-outcome-and-cost-evidence}
+
+게이트웨이 Overview·Usage·Logs는 관측 완료 기록을 사용합니다(ADR-053).
+이전 분석에서 빠졌던 비용 없는 실패도 포함합니다. 분모는 `request_completed`이며
+전체 수신 트래픽이나 고유 요청/세션이 아닙니다. `request_started` 거부,
+미인증 401, 관리자 이벤트, 클라이언트 내부 실패는 제외합니다. 재시도/폴백의
+기록 단위는 ingress마다 다를 수 있습니다. succeeded는 전송 결과이지 모델 답변
+품질이나 사용자의 작업 완수 증명이 아닙니다.
+
+`(failed + partial) / completed`는 분자·분모·unknown 건수와 함께 조사합니다.
+HTTP 200이어도 partial이 우선하고, 없거나 유효하지 않은 결과는 unknown입니다.
+완료 기록이 없으면 비율은 `—`입니다. unknown은 성공이 아니라 관측 비율의
+불완전성을 뜻합니다. 메트릭 트래픽과 이 분모는 서로 다른 관측입니다.
+
+금액 전에 비용 상태를 읽습니다. `estimated`는 사용량·단가 기반 산정액(0도 유효),
+`uncertain`은 근거 불완전 기록 금액, `legacy_unknown`은 사용량 근거 없음,
+`unpriced`는 가격 없음, `unavailable`은 Cost 기록 없음입니다. unpriced/unavailable의
+숫자 0은 알려진 달러 금액이 아닙니다. 산정액과 uncertain/legacy 기록 금액은
+분리하며 기존 Cost-present 금융 합계는 유지합니다. 어느 상태도 공급자 청구서나
+미확정 의무의 환급 허가가 아닙니다.
+
+Responses 스트림의 제한된 원인은 `context_length_exceeded`,
+`invalid_encrypted_content`, `request_canceled`, `upstream_timeout`,
+`stream_incomplete`, `response_incompatible`, `usage_missing`,
+`client_write_failed`, `upstream_error`입니다. 공급자 코드는 타입으로 검증한 근거가
+필요합니다. 취소·기한·게이트웨이 원인은 명시적 runtime 근거가 필요하며,
+원문 오류나 native 공급자 소유 프레임에서 코드를 추측하지 않습니다. 알 수 없는
+비어 있지 않은 분석 코드는 `upstream_error`로 제한합니다.
+
+스트림 commit 전에는 기존 HTTP·재시도 규칙을 적용합니다. 이후에는 HTTP 200과
+partial=true를 유지하고 감사 및 쓰기 가능한 게이트웨이 SSE 오류에 같은 코드를
+남기며 재시도하지 않습니다. 클라이언트 쓰기 실패는 추가 SSE 쓰기 없이
+`client_write_failed`로 기록합니다. Native 성공 바이트는 보존합니다. 관측 사용량은
+기존의 정확히 한 번 finish·정산 경로를 따르며 누락 사용량을 0으로 만들지 않습니다.
+
+`legacy_projection_records`, `/admin/analytics/health`, 큐 진단, 보관 원본을 함께
+확인합니다. Version 0은 원본 근거 재생 전을 뜻하며 원본에 사용량 근거가 없으면
+version 1도 `legacy_unknown`일 수 있습니다. 과거 행 0은 전체 수집 증거가 아닙니다.
+보관 공백, 로컬 비차단 4096-entry 큐 drop, 수집 지연, 불완전 JSONL 마지막 줄,
+`request_started`만 있는 요청은 범위를 제한합니다. 구버전 API의 필드 누락은
+근거 정보 없음으로 표시해야 합니다.
+
+[API 예제](../api-reference.md#analytics-outcome-and-cost-evidence-adr-053)와
+[복구 절차](recovery.md#recover-analytics-evidence)를 확인하세요. 이 투영은 메트릭
+라벨·원문 프롬프트/오류·키/세션 식별자·금전 권한을 추가하지 않습니다. 기본/로컬,
+노드 로컬 권한, 공유 거버넌스의 기존 프로파일별 의존성과 한계를 유지합니다.
 
 ## 기록 검증 {#verify-records}
 
