@@ -10,7 +10,7 @@
 
 **Spec:** [P1 설계](../specs/2026-10-21-p1-request-outcomes-cost-evidence-design.md)
 
-**Status:** 2026-10-21 사용자 승인(“네 구현”). implemented; final review pending. builder check 완료: `nothing important left`. Tasks 1–5 구현·검사 완료, 전체 diff 독립 리뷰와 Task 4 Minor M1 최종 분류는 컨트롤러 담당으로 남긴다.
+**Status:** 2026-10-21 사용자 승인(“네 구현”). implemented; final review pending. builder check 완료: `nothing important left`. Tasks 1–5 구현·검사와 전체 diff 독립 리뷰 완료. 최종 리뷰의 I1–I3/M1–M2 수정 구현·통합 재검사 완료이며, 범위 한정 독립 재리뷰는 컨트롤러 담당으로 PENDING이다.
 
 ## Global Constraints
 
@@ -92,7 +92,7 @@ Recent length=8; costless records present; started/admin events absent
 
 - [x] **Step 1: 테스트 DB 준비 및 RED 테스트 작성.** 저장소 CI의 일회용 PG 서비스 규약을 사용한다. `INFERPLANE_TEST_PG_DSN`은 이 작업용 DB만 가리키며 기존 사용 중인 DSN을 재사용하지 않는다. `TestPGObservableProjectionContract`는 Task 1의 A–H 기대값을 동일하게 검사한다. 테스트 prerequisite가 없으면 skip을 PASS로 기록하지 않는다.
 - [x] **Step 2: RED 확인.** 테스트 전용 DSN으로 `go test ./internal/analytics/pgstore -run TestPGObservableProjectionContract -count=1`. 기존 필터 때문에 completed=8 계약이 실패해야 한다.
-- [x] **Step 3: migration/ingestion/queries 구현.** events/rollup additive 열을 같은 advisory-lock migration transaction에 넣고 모든 기존 events에서 rollup을 다시 생성한다. ingestBatch는 Observable을 포함하고 순수 EvidenceOf를 쓴다. checkpoint와 epoch fence는 변경하지 않는다. 기존 aggregate 필드는 has_cost만 계산한다.
+- [x] **Step 3: migration/ingestion/queries 구현.** 최초 업그레이드에서 events/rollup additive 열과 영속 마이그레이션 마커를 같은 advisory-lock migration transaction에 넣고 모든 기존 events에서 rollup을 다시 생성한다. 현재 스키마 재오픈은 마커를 확인해 재작성을 건너뛴다. ingestBatch는 Observable을 포함하고 순수 EvidenceOf를 쓴다. checkpoint와 epoch fence는 변경하지 않는다. 기존 aggregate 필드는 has_cost만 계산한다.
 - [x] **Step 4: 이행과 correction 테스트 작성.** `TestPGProjectionMigrationPreservesLegacyTotals`는 예전 events/rollup을 만든 뒤 migration 2회 실행해 숫자 불변과 legacy_unknown을 검사한다. `TestPGCorrectionRecomputesBothKeys`는 같은 ID를 다른 팀/모델/날짜로 correction한 뒤 옛 그룹 제거와 총액 1회 반영을 검사한다. `TestPGRebuildRecoversCostlessHistory`는 이전 checkpoint가 지나간 비용 없는 JSONL이 명시적 rebuild 후 회복되는지 검사한다. 기존 stale-epoch 테스트가 새 관측 열에도 rollback을 검증하도록 확장한다.
 - [x] **Step 5: GREEN 확인.** `go test ./internal/analytics/pgstore -race -count=1`와 `go test ./cmd/mayu -run AnalyticsModeB -count=1`. 일회용 DB integration 테스트가 실제 실행됐는지 결과를 기록한다.
 - [x] **Step 6: 작업 커밋.** `git commit -s -m "feat(analytics): preserve outcome evidence in Postgres rollups"`.
@@ -176,7 +176,8 @@ python3 -B -m unittest discover -s tests/docs -v
 - 최종 통합 검사: 두 static build, 기본 `go test ./... -race`(변경 없는 product package는 Go cache 사용), vet, 빈 gofmt, harness 모두 exit=0. 한영 47쌍·ADR index, 생성 성능/클라이언트 문서, docs unittest 31건, strict MkDocs 모두 exit=0.
 - 일회용 PostgreSQL 17에서 pgstore `-race -count=1 -v` 24/24와 ModeB end-to-end 1/1이 실제 실행되어 통과했다. DB 검사는 순차 실행, skip=0. 기본 DSN 없는 suite는 PG 실제 실행 증거로 세지 않는다.
 - Harness의 top-level 70/70에는 installed-Codex opt-in nested skip 12건과 보수적 16384-token fallback 진단이 포함된다. Task 4의 합성 browser 54 screenshot은 변경 없는 UI라 반복하지 않았다.
-- Task 4 Minor M1(페이지 재시도 성공 후 이전 workspace 오류가 유지됨)은 전체 리뷰에서 분류/수정할 미결 항목이다. 모든 이슈 해결을 주장하지 않는다. Task 5 Step 4는 미체크이며 컨트롤러의 최종 gate가 남는다.
+- Task 4 Minor M1은 최종 리뷰 M1에 합쳐 I1–I3/M1–M2와 한 번의 수정 단계에 포함했다. 새 PG/JS 회귀는 RED→GREEN이며 최종 통합 검사 결과는 `final-fix-report.md`에 기록했다. Task 5 Step 4는 미체크이고 컨트롤러의 범위 한정 독립 재리뷰는 PENDING이다.
+- 최종 수정 검증: 실제 PG 25/25(23 DB-backed + 2 기존 source/interface), ModeB 1/1, adminui 29/29, shipped JS와 합성 browser 58 screenshot, 기본 race 62 packages(58 cache), 두 static build, vet, 빈 gofmt, harness 70/70, docs 47쌍·31 tests·strict en/ko MkDocs가 모두 통과했다. Harness nested skip 12건과 예상 fallback 진단은 동일하게 구분한다. 범위 한정 독립 재리뷰는 **PENDING**이다.
 - live DB rebuild, 운영 배포, push, 유료 모델/실제 IdP 시험은 실행하지 않았다. 정확한 명령·결과·로그·문서 커밋은 Task 5 보고서에 기록한다.
 
 ## 계획 자체 검토

@@ -15,7 +15,7 @@ import (
 func legacyProjectionStore(t *testing.T) *Store {
 	t.Helper()
 	s := &Store{db: rawPool(t)}
-	_, err := s.db.Exec(context.Background(), `DROP TABLE IF EXISTS events, rollup_day;
+	_, err := s.db.Exec(context.Background(), `DROP TABLE IF EXISTS events, rollup_day, analytics_schema_migrations;
  CREATE TABLE events (
  id TEXT PRIMARY KEY, day TEXT NOT NULL DEFAULT '', team TEXT NOT NULL DEFAULT '',
  model TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT '', status INTEGER NOT NULL DEFAULT 0,
@@ -93,6 +93,45 @@ func TestPGProjectionMigrationPreservesLegacyTotals(t *testing.T) {
 	}
 }
 
+// Opening current schemas must not rewrite a derived row, even when replicas
+// start together. xmin exposes a replacement that identical totals would hide.
+func TestPGCurrentSchemaOpenDoesNotRewriteRollups(t *testing.T) {
+	s := legacyProjectionStore(t)
+	ctx := context.Background()
+	if err := s.ensureSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var before string
+	if err := s.db.QueryRow(ctx, `SELECT xmin::text FROM rollup_day`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	dsn := testDSN(t)
+	for round := 0; round < 2; round++ {
+		results := make(chan error, 3)
+		for replica := 0; replica < 3; replica++ {
+			go func() {
+				opened, err := New(ctx, dsn)
+				if opened != nil {
+					opened.Close()
+				}
+				results <- err
+			}()
+		}
+		for replica := 0; replica < 3; replica++ {
+			if err := <-results; err != nil {
+				t.Fatal(err)
+			}
+		}
+		var after string
+		if err := s.db.QueryRow(ctx, `SELECT xmin::text FROM rollup_day`).Scan(&after); err != nil {
+			t.Fatal(err)
+		}
+		if after != before {
+			t.Fatalf("current-schema open rewrote rollup: xmin %s -> %s", before, after)
+		}
+	}
+}
+
 func TestPGProjectionMigrationRollsBackColumnsAndBackfill(t *testing.T) {
 	s := legacyProjectionStore(t)
 	ctx := context.Background()
@@ -109,6 +148,13 @@ func TestPGProjectionMigrationRollsBackColumnsAndBackfill(t *testing.T) {
 	err := s.ensureSchema(ctx)
 	if err == nil {
 		t.Fatal("migration must fail when regenerated rollup violates constraint")
+	}
+	var markerAbsent bool
+	if err := s.db.QueryRow(ctx, `SELECT to_regclass('analytics_schema_migrations') IS NULL`).Scan(&markerAbsent); err != nil {
+		t.Fatal(err)
+	}
+	if !markerAbsent {
+		t.Fatal("failed first migration must roll back its durable marker table")
 	}
 	var columns int
 	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND ((table_name='events' AND column_name IN ('projection_version','has_cost','outcome_state','cost_state','partial','error_code')) OR (table_name='rollup_day' AND column_name='completed'))`).Scan(&columns); err != nil {
@@ -140,6 +186,13 @@ func TestPGProjectionMigrationRollsBackColumnsAndBackfill(t *testing.T) {
 	sum, err := s.Summary(analytics.SummaryQuery{})
 	if err != nil || sum.Totals.Requests != 2 || sum.Totals.CostMicros != 800 || sum.Totals.Operations.Completed != 2 {
 		t.Fatalf("retry migration=%+v err=%v", sum.Totals, err)
+	}
+	var markers int
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM analytics_schema_migrations WHERE version=1`).Scan(&markers); err != nil {
+		t.Fatal(err)
+	}
+	if markers != 1 {
+		t.Fatalf("successful retry markers=%d, want 1", markers)
 	}
 }
 

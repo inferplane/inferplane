@@ -211,15 +211,31 @@ func (s *Store) ensureSchema(ctx context.Context) (retErr error) {
 		return fmt.Errorf("begin analytics schema migration: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, schema); err != nil {
-		return fmt.Errorf("create analytics schema: %w", err)
+	// The marker shares the advisory lock and transaction with the first
+	// projection upgrade. Current schemas avoid both ALTER locks and a full
+	// retained-history rewrite; an explicit Rebuild remains independent.
+	if _, err := tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS analytics_schema_migrations (
+  version INTEGER PRIMARY KEY
+)`); err != nil {
+		return fmt.Errorf("create analytics migration markers: %w", err)
 	}
-	// Backfill is in the same migration transaction as every additive column.
-	// Old rows retain conservative version-0 defaults; only source replay can
-	// provide evidence. Repeating migration also preserves version-1 rows.
-	if _, err := tx.Exec(ctx, `DELETE FROM rollup_day; INSERT INTO rollup_day (`+
-		rollupColumns+`) `+eventRollupSelect+` GROUP BY day, team, model`); err != nil {
-		return fmt.Errorf("backfill analytics projection rollups: %w", err)
+	var projectionInstalled bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM analytics_schema_migrations WHERE version = 1)`).Scan(&projectionInstalled); err != nil {
+		return fmt.Errorf("read analytics projection migration marker: %w", err)
+	}
+	if !projectionInstalled {
+		if _, err := tx.Exec(ctx, schema); err != nil {
+			return fmt.Errorf("create analytics schema: %w", err)
+		}
+		// Old rows retain conservative version-0 defaults; only source replay
+		// can provide evidence. Failure rolls back columns, rollups and marker.
+		if _, err := tx.Exec(ctx, `DELETE FROM rollup_day; INSERT INTO rollup_day (`+
+			rollupColumns+`) `+eventRollupSelect+` GROUP BY day, team, model`); err != nil {
+			return fmt.Errorf("backfill analytics projection rollups: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO analytics_schema_migrations(version) VALUES (1)`); err != nil {
+			return fmt.Errorf("record analytics projection migration: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit analytics schema migration: %w", err)

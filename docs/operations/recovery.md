@@ -81,9 +81,11 @@ missing costless history cannot be reconstructed.
 ### PostgreSQL Mode B
 
 Startup migration uses one connection, an advisory lock and one transaction to
-add event/rollup columns and regenerate rollups from retained derived events.
-Failure rolls back columns and backfill together; statement timeout is restored.
-This can take schema locks and scan retained events. It does **not** recover
+add event/rollup columns and regenerate rollups from retained derived events
+on the first upgrade. A durable migration marker commits in that transaction;
+current-schema opens do not rewrite rollups. Failure rolls back columns, backfill
+and marker together so the upgrade can retry; statement timeout is restored.
+The first upgrade can take schema locks and scan retained events. It does **not** recover
 Cost=nil originals that an older aggregator skipped before an advanced checkpoint.
 Retain those source segments and the checkpoint backup.
 

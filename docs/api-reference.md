@@ -106,16 +106,32 @@ data-free and public. When analytics is disabled, these routes are unavailable.
 
 ```text
 GET  /admin/analytics/summary?since=2026-10-21&until=2026-10-21
-GET  /admin/analytics/timeseries?since=2026-10-21&until=2026-10-21
+GET  /admin/analytics/timeseries?days=30
 GET  /admin/logs?limit=200&before=<event-id>
 GET  /admin/analytics/health
 POST /admin/analytics/rebuild
 ```
 
-Summary and timeseries use inclusive UTC days, default to the last 30 days and
-reject invalid/reversed ranges or windows longer than 366 days. Logs keep the
-existing newest-first ID keyset order and maximum page size of 200. They now
-include every observed `request_completed`, including records with no Cost.
+Summary accepts inclusive `since`/`until` dates in `YYYY-MM-DD` form. Invalid
+or reversed dates and endpoint differences greater than 366 days return 400;
+a difference of 366 days includes 367 dates. Omitted `since` defaults to UTC
+today minus 30 days, which includes 31 dates through today. When `until` is
+omitted, validation uses UTC today but the store receives an empty upper bound,
+so **no upper date cutoff is applied**. Supply both dates for a reproducible
+bounded report; for 30 included dates ending 2026-10-21, use
+`since=2026-09-22&until=2026-10-21`.
+
+Timeseries reads only `days`; `since` and `until` are ignored. Missing, invalid
+or nonpositive `days` defaults to 30; values above 366 are clamped to 366.
+It applies an inclusive cutoff of today minus `days`, orders existing dates
+newest first, and returns at most `days` rows. There is no upper date cutoff
+or zero-filling: sparse history can include the extra cutoff date. Mode A's
+cutoff uses UTC; Mode B uses database `current_date`, whose date depends on
+the database session timezone. `days=30` therefore does not promise exactly
+the same period as an explicit 30-date summary.
+
+Logs keep the existing newest-first ID keyset order and maximum page size of 200.
+They now include every observed `request_completed`, including records with no Cost.
 Rebuild is supported in PostgreSQL Mode B: 204 acknowledges the derived-state
 reset; the aggregator then replays retained source segments. Mode A returns 405.
 See [recovery procedures](operations/recovery.md#recover-analytics-evidence).

@@ -1,7 +1,7 @@
 # P1: 요청 결과·비용 근거·스트리밍 오류 가시성 스펙
 
 - 작성일: 2026-10-21
-- 상태: 2026-10-21 사용자 설계·계획 승인(“네 구현”). implemented; final review pending. Tasks 1–5 구현·검사 완료, 전체 diff 독립 리뷰 및 Task 4 Minor M1 최종 분류 대기.
+- 상태: 2026-10-21 사용자 설계·계획 승인(“네 구현”). implemented; final review pending. Tasks 1–5 구현·검사와 전체 diff 독립 리뷰 완료. I1–I3/M1–M2 수정 구현·통합 재검사 완료이며 컨트롤러의 범위 한정 독립 재리뷰는 PENDING.
 - 기준: `origin/main` `77ad9239aa444d950abb02c06e62fc839b3082c3`.
 - 실행 방식: Superpowers의 스펙 → builder check → 작업계획 → 사용자 리뷰 → 담당별 TDD 구현 → 독립 리뷰.
 - 사용자 요구: inferplane의 오류율·호환성·비용 가시성 문제를 개선하고 관리자 UI에서 확인한다.
@@ -116,7 +116,7 @@ Cost가 존재한다고 공급자 청구서의 확정 금액이 되는 것은 �
 
 SQLite `sink.Write`, `Ingest`, `Replay`, freshness 갱신 조건을 모두 Observable로 바꾼다. 큐 용량 4096, 비차단 drop, 재생 복구, close drain은 유지한다. 불완전한 마지막 JSONL 줄은 계속 건너뛴다. 소실된 원본을 만들어 복구했다고 주장하지 않는다.
 
-Postgres `rollup_day`에 모든 OperationTotals 대응 열을 추가하고, 같은 schema migration transaction 안에서 기존 events를 근거로 rollup을 다시 계산한다. 기존 request_count/금액/토큰 열은 has_cost 조건을 적용한다. advisory lock, 단일 connection, statement timeout 복원은 유지한다. 중간 상태를 정상 집계로 노출하지 않는다.
+Postgres `rollup_day`에 모든 OperationTotals 대응 열을 추가하고, 최초 업그레이드의 같은 schema migration transaction 안에서 기존 events를 근거로 rollup을 다시 계산하고 영속 마이그레이션 마커를 함께 커밋한다. 현재 스키마를 다시 열 때는 마커를 확인해 재계산을 건너뛰며, 실패하면 열·backfill·마커를 함께 롤백해 재시도한다. 기존 request_count/금액/토큰 열은 has_cost 조건을 적용한다. advisory lock, 단일 connection, statement timeout 복원은 유지한다. 중간 상태를 정상 집계로 노출하지 않는다.
 
 Postgres의 checkpoint가 이미 지나간 비용 없는 기록은 additive migration만으로 복구되지 않는다. 운영자가 기존 `POST /admin/analytics/rebuild`를 실행하면 epoch fencing 후 보관된 감사 원본을 재생한다. 이 작업은 derived events/rollup/checkpoint에만 작용하며 권한·금전 테이블을 건드리지 않는다. 자동 rebuild는 하지 않는다. 롤아웃은 모든 analytics writer 업그레이드 후 재생 순서로 문서화한다. 혼합 버전 writer 구간의 완전성은 보장하지 않는다.
 

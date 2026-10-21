@@ -1,6 +1,6 @@
 ---
 translation_source: operations/recovery.md
-translation_source_sha256: d8261981e2ad337927fb5f86de701c5047f07204e9e247b293545320ec05def5
+translation_source_sha256: 59fd0e646e97a83070465245a22ff96e0c51544f425814462d34250f95c7012f
 ---
 
 # 업그레이드와 복구 {#upgrade-and-recover}
@@ -80,10 +80,12 @@ Cost가 있으나 사용량 근거가 없는 원본은 version 1에서도 legacy
 
 ### PostgreSQL Mode B {#postgresql-mode-b}
 
-시작 마이그레이션은 단일 연결·advisory lock·한 트랜잭션으로 이벤트/rollup 열을
-추가하고 보관 파생 이벤트에서 rollup을 재생성합니다. 실패하면 열과 backfill을 함께
-롤백하고 statement timeout을 복원합니다. 스키마 잠금과 보관 이벤트 스캔이 필요할
-수 있습니다. 이미 전진한 checkpoint 전에 구버전 수집기가 건너뛴 Cost=nil 원본은
+최초 업그레이드의 시작 마이그레이션은 단일 연결·advisory lock·한 트랜잭션으로
+이벤트/rollup 열을 추가하고 보관 파생 이벤트에서 rollup을 재생성합니다.
+영속 마이그레이션 마커도 같은 트랜잭션에서 커밋하므로 현재 스키마를 다시 열 때는
+rollup을 재작성하지 않습니다. 실패하면 열·backfill·마커를 함께 롤백해 재시도할 수
+있으며 statement timeout을 복원합니다. 최초 업그레이드에는 스키마 잠금과
+보관 이벤트 스캔이 필요할 수 있습니다. 이미 전진한 checkpoint 전에 구버전 수집기가 건너뛴 Cost=nil 원본은
 복구하지 **않습니다**. 원본 구간과 checkpoint 백업을 보존하세요.
 
 모든 writer 업그레이드 후 권한 있는 full admin이 기존 `POST /admin/analytics/rebuild`를

@@ -84,8 +84,10 @@ recovered, truncated final JSONL lines are skipped, and lost source cannot be
 manufactured. The nonblocking 4096-entry queue, drops and close-drain contract remain.
 
 Mode B adds event and all operational rollup columns and regenerates rollups in
-one advisory-locked, single-connection schema transaction. Failure rolls back
-columns and backfill; timeout restoration is retained. Backfill scans retained
+one advisory-locked, single-connection schema transaction on first upgrade.
+A durable migration marker commits atomically with the columns and backfill;
+current-schema opens skip that work. Failure rolls back all three, allowing retry;
+timeout restoration is retained. The first backfill scans retained
 derived events and can take schema locks. Corrected-record upserts recompute both
 old and new team/model/day keys. Existing lease/checkpoint semantics remain.
 

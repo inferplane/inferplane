@@ -97,6 +97,18 @@ const VIEWS = {
 
 let activeView = "overview"; // tracked so a language switch can re-render the current view
 let viewGeneration = 0;
+let workspaceErrorVersion = 0;
+
+function clearWorkspaceError() {
+  workspaceErrorVersion++;
+  $("workspace-error").hidden = true; $("workspace-error").textContent = "";
+}
+function showWorkspaceError(err) {
+  const version = ++workspaceErrorVersion;
+  $("workspace-error").hidden = false;
+  $("workspace-error").textContent = msg("common.failedToLoad") + ": " + String(err.message || err);
+  return version;
+}
 
 function showView(name) {
   if (!Object.hasOwn(VIEWS, name)) return;
@@ -108,12 +120,12 @@ function showView(name) {
     if (b.dataset.view === name) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   });
   $("view-title").textContent = msg(VIEWS[name]);
-  $("workspace-error").hidden = true; $("workspace-error").textContent = "";
+  clearWorkspaceError();
   const refreshers = { overview: refreshOverview, usage: refreshUsageView, logs: refreshLogsView,
     teams: refreshTeamsView, providers: refreshProviders, governance: refreshGovernance };
   if (refreshers[name]) refreshers[name]().catch(err => {
     if (generation !== viewGeneration) return;
-    $("workspace-error").hidden = false; $("workspace-error").textContent = msg("common.failedToLoad") + ": " + String(err.message || err);
+    showWorkspaceError(err);
   });
 }
 
@@ -194,7 +206,7 @@ function analyticsRange() {
   start.setUTCDate(start.getUTCDate() - 29);
   return { since: start.toISOString().slice(0, 10), until: end.toISOString().slice(0, 10) };
 }
-function analyticsSummaryPath() { return "/admin/analytics/summary?" + new URLSearchParams(analyticsRange()); }
+function analyticsSummaryPath(range = analyticsRange()) { return "/admin/analytics/summary?" + new URLSearchParams(range); }
 
 // Counts and money stay integer until the final, bounded display conversion.
 function operationRateText(operations) {
@@ -261,7 +273,8 @@ async function refreshUsageView() {
   const content = $("usage-content");
   if (!capOn("analytics_index")) { content.hidden = true; return; }
   content.hidden = true; // old totals are not a fresh response after a failure
-  const s = await api("GET", analyticsSummaryPath(), null, true);
+  const range = analyticsRange();
+  const s = await api("GET", analyticsSummaryPath(range), null, true);
   if (!s || s === DISABLED) return;
   renderEvidenceTotals($("usage-totals"), s.totals);
   const body = $("usage-totals").querySelector("tbody");
@@ -274,7 +287,7 @@ async function refreshUsageView() {
   content.hidden = false;
   try {
     const series = await api("GET", "/admin/analytics/timeseries?days=30", null, true);
-    if (Array.isArray(series)) renderEvidenceRows("usage-by-day", series, "day");
+    if (Array.isArray(series)) renderEvidenceRows("usage-by-day", series.filter(p => p.day >= range.since && p.day <= range.until), "day");
   } catch {
     $("usage-by-day").querySelector("tbody").append(emptyRow(6, msg("common.failedToLoad")));
   }
@@ -1381,11 +1394,18 @@ async function loadLogsPage(before, reset) {
   $("logs-load-more").hidden = false;
 }
 
+let logsPaginationErrorVersion = null;
 $("logs-load-more").addEventListener("click", async () => {
-  try { await loadLogsPage(logsCursor, false); }
-  catch (err) {
-    $("workspace-error").hidden = false;
-    $("workspace-error").textContent = msg("common.failedToLoad") + ": " + String(err.message || err);
+  const priorError = logsPaginationErrorVersion;
+  try {
+    await loadLogsPage(logsCursor, false);
+    // A newer pagination or view failure owns the alert after it replaces ours.
+    if (priorError !== null && workspaceErrorVersion === priorError) {
+      clearWorkspaceError();
+      logsPaginationErrorVersion = null;
+    }
+  } catch (err) {
+    logsPaginationErrorVersion = showWorkspaceError(err);
   }
 });
 

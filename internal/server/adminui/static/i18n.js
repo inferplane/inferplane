@@ -84,9 +84,9 @@ const MSG = {
   "ux.visible": { en: "Visible / loaded", ko: "표시 / 조회", zh: "可见 / 已加载", ja: "表示 / 取得" },
   "ux.quotaAction": { en: "When quota is exceeded", ko: "쿼터 초과 시", zh: "配额超出时", ja: "クォータ超過時" },
   "ux.budgetAction": { en: "When budget is exceeded", ko: "예산 초과 시", zh: "预算超出时", ja: "予算超過時" },
-  "ux.spendPeriod": { en: "Last 30 days", ko: "최근 30일", zh: "报告的结算支出 · 过去30天", ja: "報告された確定支出 · 過去30日" },
-  "ux.spendTrend": { en: "Daily estimable or legacy recorded amounts over the last 30 days", ko: "최근 30일간 일별 산정 가능 비용 또는 구버전 기록 금액", zh: "过去30天报告的每日支出", ja: "過去30日の報告された日別支出" },
-  "ux.spendUnavailable": { en: "Cost evidence unavailable · analytics required", ko: "비용 근거 조회 불가 · 분석 스토어 필요", zh: "结算支出不可用 · 需要分析存储", ja: "確定支出の取得不可 · 分析ストアが必要" },
+  "ux.spendPeriod": { en: "Last 30 days", ko: "최근 30일" },
+  "ux.spendTrend": { en: "Daily estimable or legacy recorded amounts over the last 30 days", ko: "최근 30일간 일별 산정 가능 비용 또는 구버전 기록 금액" },
+  "ux.spendUnavailable": { en: "Cost evidence unavailable · analytics required", ko: "비용 근거 조회 불가 · 분석 스토어 필요" },
   "err.moneyInvalid": { en: "Invalid integer money value.", ko: "금액은 정수 단위여야 합니다.", zh: "金额必须为整数单位。", ja: "金額は整数単位で指定してください。" },
   "err.budgetPrecision": { en: "Enter a nonnegative USD amount with up to six decimal places. Exponent notation is not supported.", ko: "0 이상의 USD 금액을 소수점 6자리까지 입력하세요. 지수 표기는 사용할 수 없습니다.", zh: "请输入非负美元金额，最多六位小数，不支持指数形式。", ja: "0以上のUSD金額を小数点以下6桁まで入力してください。指数表記は使えません。" },
   // nav (sidebar + view-title h1 reuse the same word, no glyph)

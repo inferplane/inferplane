@@ -1,6 +1,6 @@
 ---
 translation_source: api-reference.md
-translation_source_sha256: e316787e371adb10f8e9af29b323a29af6b24334c6b63751c9f740c4b1e97d32
+translation_source_sha256: bee3e2f539626b8bd4149316880d6f81af70bfca83d61c024700413f9a040761
 ---
 
 # API 레퍼런스 {#api-reference}
@@ -100,16 +100,30 @@ DELETE /admin/keys/{id}   # revoke a key
 
 ```text
 GET  /admin/analytics/summary?since=2026-10-21&until=2026-10-21
-GET  /admin/analytics/timeseries?since=2026-10-21&until=2026-10-21
+GET  /admin/analytics/timeseries?days=30
 GET  /admin/logs?limit=200&before=<event-id>
 GET  /admin/analytics/health
 POST /admin/analytics/rebuild
 ```
 
-Summary와 timeseries는 양 끝을 포함한 UTC 날짜를 사용하고 기본 기간은 최근
-30일입니다. 잘못된 날짜·역순 기간·366일 초과를 거부합니다. Logs의 최신 ID 우선
-키셋 순서와 페이지 최대 200건은 유지하며, Cost가 없는 기록도 포함한 모든
-관측 `request_completed`를 반환합니다. Rebuild는 PostgreSQL Mode B에서
+Summary는 `YYYY-MM-DD` 형식의 `since`/`until` 날짜 양 끝을 포함합니다.
+잘못된 날짜·역순 기간·양 끝의 차이가 366일을 초과하는 기간은 400을 반환합니다.
+차이가 366일이면 포함되는 날짜는 367개입니다. `since`를 생략하면 UTC 오늘에서
+30일 전이 기본값이므로 오늘까지 포함하면 31개 날짜입니다. `until`을 생략하면
+검증에는 UTC 오늘을 쓰지만 저장소에는 빈 상한을 전달하므로 **실제 날짜 상한은
+적용하지 않습니다**. 재현 가능한 기간 보고서에는 두 날짜를 모두 지정하세요.
+2026-10-21까지 30개 날짜를 포함하려면 `since=2026-09-22&until=2026-10-21`을 씁니다.
+
+Timeseries는 `days`만 읽고 `since`와 `until`은 무시합니다. `days`가 없거나
+잘못된 값 또는 0 이하이면 기본값 30을 쓰고, 366보다 크면 366으로 제한합니다.
+오늘에서 `days`일 전인 하한 날짜를 포함하고, 존재하는 날짜를 최신순으로 정렬해
+최대 `days`개 행을 반환합니다. 날짜 상한이나 빈 날짜의 0 채움은 없으므로 기록이
+드문 경우 추가 하한 날짜가 포함될 수 있습니다. Mode A의 하한은 UTC 기준이며,
+Mode B는 데이터베이스 세션 시간대에 따라 달라지는 `current_date`를 사용합니다.
+따라서 `days=30`은 명시적으로 30개 날짜를 지정한 summary와 같은 기간을 보장하지 않습니다.
+
+Logs의 최신 ID 우선 키셋 순서와 페이지 최대 200건은 유지하며, Cost가 없는 기록도
+포함한 모든 관측 `request_completed`를 반환합니다. Rebuild는 PostgreSQL Mode B에서
 지원합니다. 204는 파생 상태 초기화의 응답이며, 이후 수집기가 보관 원본을
 재생합니다. Mode A는 405입니다. [복구 절차](operations/recovery.md#recover-analytics-evidence)를 확인하세요.
 

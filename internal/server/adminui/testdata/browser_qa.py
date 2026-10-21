@@ -98,7 +98,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/admin/analytics/timeseries':
             now = datetime.now(timezone.utc)
             if STATE['evidence']:
-                self.respond(200, [{'day': now.date().isoformat(), 'requests': 6, 'cost_micros': 3350, 'operations': OPERATIONS}])
+                self.respond(200, [{'day': now.date().isoformat(), 'requests': 6, 'cost_micros': 3350, 'operations': OPERATIONS}, {'day': (now - timedelta(days=30)).date().isoformat(), 'requests': 6, 'cost_micros': 3350, 'operations': OPERATIONS}])
             else:
                 self.respond(200, [{'day': now.date().isoformat(), 'cost_micros': 9007199254740993}, {'day': (now - timedelta(days=1)).date().isoformat(), 'cost_micros': 5}])
         elif path == '/admin/teams':
@@ -223,6 +223,7 @@ def main():
             assert 'Observed completed records' in page.locator('#usage-totals').inner_text()
             assert '$0.001300' in page.locator('#usage-by-model').inner_text()
             assert '$0.002050' in page.locator('#usage-by-day').inner_text()
+            assert page.locator('#usage-by-day tbody tr').count() == 1, 'sparse cutoff-day row escaped summary period'
             page.locator('button.nav[data-view="logs"]').click()
             page.wait_for_function("() => document.querySelectorAll('#logs-table tbody tr').length === 8")
             rows = page.locator('#logs-table tbody tr')
@@ -231,6 +232,20 @@ def main():
             assert '$' not in rows.nth(1).inner_text() and '$' not in rows.nth(3).inner_text()
             assert '$0.000000' in rows.nth(5).inner_text()
             assert 'Recorded amount' in rows.nth(4).inner_text() and 'Evidence missing' in rows.nth(4).inner_text()
+            for language in ('zh', 'ja'):
+                page.locator('#lang-select').select_option(language)
+                page.locator('button.nav[data-view="overview"]').click()
+                page.wait_for_function("() => document.getElementById('stat-spend-sub').textContent.includes('Last 30 days')")
+                assert '结算' not in page.locator('#stat-spend-sub').inner_text()
+                assert '確定支出' not in page.locator('#stat-spend-sub').inner_text()
+                if args.screenshots:
+                    page.screenshot(path=str(args.screenshots / f'evidence-overview-{language}.png'), full_page=True)
+                STATE['summary_status'] = 503
+                page.locator('button.nav[data-view="overview"]').click()
+                page.wait_for_function("() => document.getElementById('stat-spend-sub').textContent === 'Cost evidence unavailable · analytics required'")
+                STATE['summary_status'] = 200
+                if args.screenshots:
+                    page.screenshot(path=str(args.screenshots / f'evidence-overview-unavailable-{language}.png'), full_page=True)
             for language in ('en', 'ko'):
                 page.locator('#lang-select').select_option(language)
                 for theme in ('light', 'dark'):
@@ -280,6 +295,12 @@ def main():
             page.locator('#logs-load-more').click()
             page.locator('#workspace-error').wait_for(state='visible')
             assert page.locator('#logs-table tbody tr').count() == 8, 'failed pagination lost loaded rows'
+            STATE['logs_status'] = 200
+            page.locator('#logs-load-more').click()
+            page.locator('#workspace-error').wait_for(state='hidden')
+            assert page.locator('#logs-table tbody tr').count() == 16, 'pagination recovery did not append rows'
+            assert page.locator('#workspace-error').inner_text() == ''
+            STATE['logs_status'] = 503
             page.locator('button.nav[data-view="logs"]').click()
             page.locator('#workspace-error').wait_for(state='visible')
             assert page.locator('#logs-table tbody tr').count() == 0, 'failed refresh retained stale log rows'
