@@ -44,8 +44,8 @@ func (s *sink) Write(line []byte) error {
 	if json.Unmarshal(line, &rec) != nil {
 		return nil // malformed → skip, never error the chain
 	}
-	if !billable(rec) {
-		return nil // don't spend queue slots on non-billable events
+	if !Observable(rec) {
+		return nil // don't spend queue slots on started/admin events
 	}
 	// Non-blocking enqueue: drop rather than block the audit fan-out goroutine.
 	select {

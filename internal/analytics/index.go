@@ -2,8 +2,8 @@
 // for the console's Usage analytics (design spec §4). The audit chain is the
 // source of truth; this index is disposable — losing it never affects the data
 // plane, and Replay() reconstructs it from the audit JSONL. Mode A (single
-// local SQLite); Mode B (shared HA store) is a later phase. Ingestion is
-// idempotent by record ULID, so replay/double-delivery is a no-op.
+// local SQLite) and Mode B (shared HA Postgres). Ingestion is idempotent by
+// record ULID after an original record upgrades a legacy projection.
 package analytics
 
 import (
@@ -21,10 +21,8 @@ import (
 	_ "modernc.org/sqlite" // pure-Go driver (CGO_ENABLED=0), registered as "sqlite"
 )
 
-// TEXT/INTEGER only, Postgres-portable (mirrors internal/providerstore). ts
-// and body_ref (D4, ADR-018) are included here for a FRESH database; an
-// existing database gets them via the ALTER-if-missing migration below
-// (SQLite has no "ADD COLUMN IF NOT EXISTS").
+// Fresh and existing databases use the same additive columns and conservative
+// defaults. A legacy row has cost, but no reconstructed outcome/usage evidence.
 const schema = `
 CREATE TABLE IF NOT EXISTS events (
   id             TEXT PRIMARY KEY,
@@ -39,24 +37,33 @@ CREATE TABLE IF NOT EXISTS events (
   cache_creation INTEGER NOT NULL DEFAULT 0,
   cost_micros    INTEGER NOT NULL DEFAULT 0,
   ts             TEXT NOT NULL DEFAULT '',
-  body_ref       TEXT NOT NULL DEFAULT ''
+  body_ref       TEXT NOT NULL DEFAULT '',
+  projection_version INTEGER NOT NULL DEFAULT 0,
+  has_cost       INTEGER NOT NULL DEFAULT 1,
+  outcome_state  TEXT NOT NULL DEFAULT 'unknown',
+  cost_state     TEXT NOT NULL DEFAULT 'legacy_unknown',
+  partial        INTEGER NOT NULL DEFAULT 0,
+  error_code     TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS events_day ON events(day);
 CREATE INDEX IF NOT EXISTS events_team ON events(team);`
 
-// eventsMigrationColumns are added to a pre-existing "events" table that
-// predates them (D4, ADR-018's ts/body_ref) — mirrors keystore.sqlite.go's
-// ALTER-if-missing pattern for the "keys" table, at 1/10th the size since
-// there's no legacy-column-name mapping to worry about here.
+// eventsMigrationColumns are added without inferring completeness from old
+// status codes or replacing the original audit records.
 var eventsMigrationColumns = []string{
 	`ALTER TABLE events ADD COLUMN ts TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE events ADD COLUMN body_ref TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE events ADD COLUMN projection_version INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE events ADD COLUMN has_cost INTEGER NOT NULL DEFAULT 1`,
+	`ALTER TABLE events ADD COLUMN outcome_state TEXT NOT NULL DEFAULT 'unknown'`,
+	`ALTER TABLE events ADD COLUMN cost_state TEXT NOT NULL DEFAULT 'legacy_unknown'`,
+	`ALTER TABLE events ADD COLUMN partial INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE events ADD COLUMN error_code TEXT NOT NULL DEFAULT ''`,
 }
 
 // migrateEventsColumns adds any of eventsMigrationColumns not already
-// present, so a pre-D4 database (created before ts/body_ref existed) gets
-// them without losing its rows. A fresh database already has them from the
-// CREATE TABLE above, so this is a no-op there.
+// present without losing existing rows. A fresh database already has them
+// from the CREATE TABLE above, so this is a no-op there.
 func migrateEventsColumns(db *sql.DB) error {
 	rows, err := db.Query(`PRAGMA table_info(events)`)
 	if err != nil {
@@ -155,7 +162,7 @@ type execer interface {
 }
 
 func ingest(e execer, r audit.Record) error {
-	if !Billable(r) {
+	if !Observable(r) {
 		return nil
 	}
 	var in, out, cacheRead, cacheCreate int64
@@ -171,21 +178,35 @@ func ingest(e execer, r audit.Record) error {
 	if r.BodyRef != nil {
 		bodyRef = *r.BodyRef
 	}
+	var cost int64
+	if r.Cost != nil {
+		cost = r.Cost.AmountUSDMicros
+	}
+	evidence := EvidenceOf(r)
 	_, err := e.Exec(
-		`INSERT OR IGNORE INTO events(id,day,team,model,provider,status,input_tokens,output_tokens,cache_read,cache_creation,cost_micros,ts,body_ref)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO events(id,day,team,model,provider,status,input_tokens,output_tokens,cache_read,cache_creation,cost_micros,ts,body_ref,
+		 projection_version,has_cost,outcome_state,cost_state,partial,error_code)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)
+		 ON CONFLICT(id) DO UPDATE SET
+		 day=excluded.day,team=excluded.team,model=excluded.model,provider=excluded.provider,status=excluded.status,
+		 input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,cache_read=excluded.cache_read,
+		 cache_creation=excluded.cache_creation,cost_micros=excluded.cost_micros,ts=excluded.ts,body_ref=excluded.body_ref,
+		 projection_version=excluded.projection_version,has_cost=excluded.has_cost,outcome_state=excluded.outcome_state,
+		 cost_state=excluded.cost_state,partial=excluded.partial,error_code=excluded.error_code
+		 WHERE events.projection_version=0`,
 		r.ID, DayOf(r.TS), r.Principal.Team, ModelOf(r), r.Request.Provider, status,
-		in, out, cacheRead, cacheCreate, r.Cost.AmountUSDMicros, r.TS, bodyRef)
+		in, out, cacheRead, cacheCreate, cost, r.TS, bodyRef,
+		evidence.HasCost, evidence.OutcomeState, evidence.CostState, evidence.Partial, evidence.ErrorCode)
 	return err
 }
 
-// Ingest upserts one billable record; non-billable records are ignored. PK=ULID
-// with INSERT OR IGNORE makes re-ingestion of the same record a no-op.
+// Ingest projects one completed record. An original may upgrade a legacy
+// version=0 row; version=1 keeps the first-write-wins contract for its ULID.
 func (ix *Index) Ingest(r audit.Record) error {
 	if err := ingest(ix.db, r); err != nil {
 		return err
 	}
-	if Billable(r) {
+	if Observable(r) {
 		ix.markIngest(time.Now().UTC())
 	}
 	return nil
@@ -216,12 +237,12 @@ func (ix *Index) Health() (Health, error) {
 	return h, nil
 }
 
-// Replay scans a JSONL audit stream and ingests every billable, newline-
+// Replay scans a JSONL audit stream and ingests every observable, newline-
 // terminated line inside ONE transaction (so a large boot replay does not pay
 // an fsync per row). It reads only complete lines (ReadString), dropping an
 // unterminated final remainder exactly as cmd/mayu/report.go does — so a
 // crash-truncated last record is never half-ingested. Malformed lines are
-// skipped. Idempotent. The returned count is billable lines SEEN (duplicates
+// skipped. Idempotent. The returned count is observable lines SEEN (duplicates
 // already present count as seen) — only for a boot log line.
 func (ix *Index) Replay(r io.Reader) (int, error) {
 	tx, err := ix.db.Begin()
@@ -236,7 +257,7 @@ func (ix *Index) Replay(r io.Reader) (int, error) {
 		line, readErr := br.ReadString('\n')
 		if len(line) > 0 && line[len(line)-1] == '\n' { // complete line only
 			var rec audit.Record
-			if json.Unmarshal([]byte(line), &rec) == nil && Billable(rec) {
+			if json.Unmarshal([]byte(line), &rec) == nil && Observable(rec) {
 				if e := ingest(tx, rec); e != nil {
 					return n, e
 				}
@@ -263,22 +284,25 @@ type SummaryQuery struct{ SinceDay, UntilDay string }
 type TimeSeriesQuery struct{ Days int }
 
 type Totals struct {
-	Requests            int64 `json:"requests"`
-	InputTokens         int64 `json:"input_tokens"`
-	OutputTokens        int64 `json:"output_tokens"`
-	CacheReadTokens     int64 `json:"cache_read_tokens"`
-	CacheCreationTokens int64 `json:"cache_creation_tokens"`
-	CostMicros          int64 `json:"cost_micros"`
+	Requests            int64           `json:"requests"`
+	InputTokens         int64           `json:"input_tokens"`
+	OutputTokens        int64           `json:"output_tokens"`
+	CacheReadTokens     int64           `json:"cache_read_tokens"`
+	CacheCreationTokens int64           `json:"cache_creation_tokens"`
+	CostMicros          int64           `json:"cost_micros"`
+	Operations          OperationTotals `json:"operations"`
 }
 type TeamRow struct {
-	Team       string `json:"team"`
-	Requests   int64  `json:"requests"`
-	CostMicros int64  `json:"cost_micros"`
+	Team       string          `json:"team"`
+	Requests   int64           `json:"requests"`
+	CostMicros int64           `json:"cost_micros"`
+	Operations OperationTotals `json:"operations"`
 }
 type ModelRow struct {
-	Model      string `json:"model"`
-	Requests   int64  `json:"requests"`
-	CostMicros int64  `json:"cost_micros"`
+	Model      string          `json:"model"`
+	Requests   int64           `json:"requests"`
+	CostMicros int64           `json:"cost_micros"`
+	Operations OperationTotals `json:"operations"`
 }
 type Summary struct {
 	Totals  Totals     `json:"totals"`
@@ -286,27 +310,34 @@ type Summary struct {
 	ByModel []ModelRow `json:"by_model"`
 }
 type DayPoint struct {
-	Day          string `json:"day"`
-	Requests     int64  `json:"requests"`
-	CostMicros   int64  `json:"cost_micros"`
-	InputTokens  int64  `json:"input_tokens"`
-	OutputTokens int64  `json:"output_tokens"`
+	Day          string          `json:"day"`
+	Requests     int64           `json:"requests"`
+	CostMicros   int64           `json:"cost_micros"`
+	InputTokens  int64           `json:"input_tokens"`
+	OutputTokens int64           `json:"output_tokens"`
+	Operations   OperationTotals `json:"operations"`
 }
 
 // Event is one row from Recent — the console's Logs list (D4, ADR-018).
 // BodyRef is "" when the request wasn't captured (log_bodies off, an error
 // response, or a streaming response — request-only capture there).
 type Event struct {
-	ID           string `json:"id"`
-	TS           string `json:"ts"`
-	Team         string `json:"team"`
-	Model        string `json:"model"`
-	Provider     string `json:"provider"`
-	Status       int    `json:"status"`
-	InputTokens  int64  `json:"input_tokens"`
-	OutputTokens int64  `json:"output_tokens"`
-	CostMicros   int64  `json:"cost_micros"`
-	BodyRef      string `json:"body_ref,omitempty"`
+	ID                string       `json:"id"`
+	TS                string       `json:"ts"`
+	Team              string       `json:"team"`
+	Model             string       `json:"model"`
+	Provider          string       `json:"provider"`
+	Status            int          `json:"status"`
+	InputTokens       int64        `json:"input_tokens"`
+	OutputTokens      int64        `json:"output_tokens"`
+	CostMicros        int64        `json:"cost_micros"`
+	BodyRef           string       `json:"body_ref,omitempty"`
+	HasCost           bool         `json:"has_cost"`
+	OutcomeState      OutcomeState `json:"outcome_state"`
+	CostState         CostState    `json:"cost_state"`
+	Partial           bool         `json:"partial"`
+	ErrorCode         string       `json:"error_code,omitempty"`
+	ProjectionVersion int          `json:"projection_version"`
 }
 
 // recentEventsLimit bounds a single Recent page — the console paginates via
@@ -322,7 +353,8 @@ func (ix *Index) Recent(limit int, before string) ([]Event, error) {
 	if limit <= 0 || limit > recentEventsLimit {
 		limit = recentEventsLimit
 	}
-	query := `SELECT id, ts, team, model, provider, status, input_tokens, output_tokens, cost_micros, body_ref FROM events`
+	query := `SELECT id, ts, team, model, provider, status, input_tokens, output_tokens, cost_micros, body_ref,
+		has_cost, outcome_state, cost_state, partial, error_code, projection_version FROM events`
 	args := []any{}
 	if before != "" {
 		query += ` WHERE id < ?`
@@ -340,7 +372,8 @@ func (ix *Index) Recent(limit int, before string) ([]Event, error) {
 	for rows.Next() {
 		var e Event
 		if err := rows.Scan(&e.ID, &e.TS, &e.Team, &e.Model, &e.Provider, &e.Status,
-			&e.InputTokens, &e.OutputTokens, &e.CostMicros, &e.BodyRef); err != nil {
+			&e.InputTokens, &e.OutputTokens, &e.CostMicros, &e.BodyRef,
+			&e.HasCost, &e.OutcomeState, &e.CostState, &e.Partial, &e.ErrorCode, &e.ProjectionVersion); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -361,26 +394,53 @@ func dayWhere(since, until string) (string, []any) {
 	return clause, args
 }
 
+// Every completion contributes once to each mutually exclusive state family.
+const operationTotalsSQL = `COUNT(*),
+	COALESCE(SUM(CASE WHEN outcome_state='succeeded' THEN 1 ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN outcome_state='failed' THEN 1 ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN outcome_state='partial' THEN 1 ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN outcome_state='unknown' THEN 1 ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN cost_state='estimated' THEN 1 ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN cost_state='uncertain' THEN 1 ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN cost_state='unpriced' THEN 1 ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN cost_state='unavailable' THEN 1 ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN cost_state='legacy_unknown' THEN 1 ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN cost_state='estimated' THEN cost_micros ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN cost_state IN ('uncertain','legacy_unknown') THEN cost_micros ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN projection_version=0 THEN 1 ELSE 0 END),0)`
+
+const legacyRequestsSQL = `COALESCE(SUM(CASE WHEN has_cost=1 THEN 1 ELSE 0 END),0)`
+const legacyCostSQL = `COALESCE(SUM(CASE WHEN has_cost=1 THEN cost_micros ELSE 0 END),0)`
+
+func operationScanTargets(o *OperationTotals) []any {
+	return []any{&o.Completed, &o.Succeeded, &o.Failed, &o.Partial, &o.Unknown,
+		&o.EstimatedRequests, &o.UncertainRequests, &o.UnpricedRequests, &o.UnavailableRequests, &o.LegacyUnknownRequests,
+		&o.EstimatedCostMicros, &o.UncertainRecordedCostMicros, &o.LegacyProjectionRecords}
+}
+
 func (ix *Index) Summary(q SummaryQuery) (Summary, error) {
 	s := Summary{ByTeam: []TeamRow{}, ByModel: []ModelRow{}}
 	where, args := dayWhere(q.SinceDay, q.UntilDay)
 
-	row := ix.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
-		COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_creation),0), COALESCE(SUM(cost_micros),0)
+	row := ix.db.QueryRow(`SELECT `+legacyRequestsSQL+`,
+		COALESCE(SUM(CASE WHEN has_cost=1 THEN input_tokens ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN has_cost=1 THEN output_tokens ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN has_cost=1 THEN cache_read ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN has_cost=1 THEN cache_creation ELSE 0 END),0),`+legacyCostSQL+`,`+operationTotalsSQL+`
 		FROM events WHERE 1=1`+where, args...)
-	if err := row.Scan(&s.Totals.Requests, &s.Totals.InputTokens, &s.Totals.OutputTokens,
-		&s.Totals.CacheReadTokens, &s.Totals.CacheCreationTokens, &s.Totals.CostMicros); err != nil {
+	if err := row.Scan(append([]any{&s.Totals.Requests, &s.Totals.InputTokens, &s.Totals.OutputTokens,
+		&s.Totals.CacheReadTokens, &s.Totals.CacheCreationTokens, &s.Totals.CostMicros}, operationScanTargets(&s.Totals.Operations)...)...); err != nil {
 		return s, err
 	}
 
-	teamRows, err := ix.db.Query(`SELECT team, COUNT(*), COALESCE(SUM(cost_micros),0) FROM events
-		WHERE 1=1`+where+` GROUP BY team ORDER BY SUM(cost_micros) DESC`, args...)
+	teamRows, err := ix.db.Query(`SELECT team, `+legacyRequestsSQL+`,`+legacyCostSQL+`,`+operationTotalsSQL+` FROM events
+		WHERE 1=1`+where+` GROUP BY team ORDER BY `+legacyCostSQL+` DESC`, args...)
 	if err != nil {
 		return s, err
 	}
 	for teamRows.Next() {
 		var r TeamRow
-		if err := teamRows.Scan(&r.Team, &r.Requests, &r.CostMicros); err != nil {
+		if err := teamRows.Scan(append([]any{&r.Team, &r.Requests, &r.CostMicros}, operationScanTargets(&r.Operations)...)...); err != nil {
 			teamRows.Close()
 			return s, err
 		}
@@ -392,15 +452,15 @@ func (ix *Index) Summary(q SummaryQuery) (Summary, error) {
 	}
 	teamRows.Close()
 
-	modelRows, err := ix.db.Query(`SELECT model, COUNT(*), COALESCE(SUM(cost_micros),0) FROM events
-		WHERE 1=1`+where+` GROUP BY model ORDER BY SUM(cost_micros) DESC`, args...)
+	modelRows, err := ix.db.Query(`SELECT model, `+legacyRequestsSQL+`,`+legacyCostSQL+`,`+operationTotalsSQL+` FROM events
+		WHERE 1=1`+where+` GROUP BY model ORDER BY `+legacyCostSQL+` DESC`, args...)
 	if err != nil {
 		return s, err
 	}
 	defer modelRows.Close()
 	for modelRows.Next() {
 		var r ModelRow
-		if err := modelRows.Scan(&r.Model, &r.Requests, &r.CostMicros); err != nil {
+		if err := modelRows.Scan(append([]any{&r.Model, &r.Requests, &r.CostMicros}, operationScanTargets(&r.Operations)...)...); err != nil {
 			return s, err
 		}
 		s.ByModel = append(s.ByModel, r)
@@ -419,8 +479,9 @@ func (ix *Index) TimeSeries(q TimeSeriesQuery) ([]DayPoint, error) {
 	// Bound the SCAN by day (uses the events_day index), not just the result
 	// LIMIT — otherwise SQLite would group the entire history before limiting.
 	// date('now', ...) is UTC and returns 'YYYY-MM-DD', matching the day column.
-	rows, err := ix.db.Query(`SELECT day, COUNT(*), COALESCE(SUM(cost_micros),0),
-		COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0)
+	rows, err := ix.db.Query(`SELECT day, `+legacyRequestsSQL+`,`+legacyCostSQL+`,
+		COALESCE(SUM(CASE WHEN has_cost=1 THEN input_tokens ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN has_cost=1 THEN output_tokens ELSE 0 END),0),`+operationTotalsSQL+`
 		FROM events WHERE day >= date('now', ?) GROUP BY day ORDER BY day DESC LIMIT ?`,
 		fmt.Sprintf("-%d days", days), days)
 	if err != nil {
@@ -430,7 +491,8 @@ func (ix *Index) TimeSeries(q TimeSeriesQuery) ([]DayPoint, error) {
 	out := []DayPoint{}
 	for rows.Next() {
 		var p DayPoint
-		if err := rows.Scan(&p.Day, &p.Requests, &p.CostMicros, &p.InputTokens, &p.OutputTokens); err != nil {
+		if err := rows.Scan(append([]any{&p.Day, &p.Requests, &p.CostMicros, &p.InputTokens, &p.OutputTokens},
+			operationScanTargets(&p.Operations)...)...); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

@@ -33,7 +33,7 @@ func TestIngest_idempotentAndAggregates(t *testing.T) {
 			t.Fatalf("ingest: %v", err)
 		}
 	}
-	// Non-billable records are ignored.
+	// Started records are ignored; costless completions add observable groups.
 	if err := ix.Ingest(audit.Record{Event: "request_started", ID: "01C", TS: r1.TS}); err != nil {
 		t.Fatalf("ingest started: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestIngest_idempotentAndAggregates(t *testing.T) {
 		t.Fatal(err)
 	}
 	if s.Totals.Requests != 2 {
-		t.Fatalf("requests = %d, want 2 (dup + started + unsettled ignored)", s.Totals.Requests)
+		t.Fatalf("requests = %d, want 2 (legacy totals include only records with cost)", s.Totals.Requests)
 	}
 	if s.Totals.CostMicros != 6_000 {
 		t.Fatalf("cost = %d, want 6000", s.Totals.CostMicros)
@@ -54,8 +54,11 @@ func TestIngest_idempotentAndAggregates(t *testing.T) {
 	if s.Totals.CacheCreationTokens != 10 {
 		t.Fatalf("cache_creation = %d, want 10", s.Totals.CacheCreationTokens)
 	}
-	if len(s.ByModel) != 2 || len(s.ByTeam) != 1 {
-		t.Fatalf("by-model=%d by-team=%d, want 2/1", len(s.ByModel), len(s.ByTeam))
+	if len(s.ByModel) != 3 || len(s.ByTeam) != 2 {
+		t.Fatalf("by-model=%d by-team=%d, want 3/2 including the costless completion", len(s.ByModel), len(s.ByTeam))
+	}
+	if s.Totals.Operations.Completed != 3 || s.Totals.Operations.UnavailableRequests != 1 {
+		t.Fatalf("operations = %+v, want 3 completed/1 unavailable", s.Totals.Operations)
 	}
 }
 
