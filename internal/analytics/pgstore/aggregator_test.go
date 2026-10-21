@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -180,9 +181,21 @@ func TestTickRacingRebuildIsFenced(t *testing.T) {
 	// The tick's ingest, still using the pre-rebuild epoch, must be fenced —
 	// not silently write a stale checkpoint into the freshly truncated table.
 	content, _ := os.ReadFile(filepath.Join(dir, "seg-a.jsonl"))
-	err = s.ingestBatch(ctx, ag.instanceID, epoch, []audit.Record{completedRecord("01A", "2026-07-07T10:00:00Z", "alpha", "m1", 1, 1, 100)}, map[string]int64{"seg-a.jsonl": int64(len(content))})
-	if err == nil {
-		t.Fatal("post-rebuild ingestBatch with the pre-rebuild epoch must fail (errFenced)")
+	costless := completedRecord("01COSTLESS", "2026-07-07T10:00:00Z", "alpha", "m1", 2, 2, 0)
+	costless.Cost = nil
+	err = s.ingestBatch(ctx, ag.instanceID, epoch, []audit.Record{completedRecord("01A", "2026-07-07T10:00:00Z", "alpha", "m1", 1, 1, 100), costless}, map[string]int64{"seg-a.jsonl": int64(len(content))})
+	if !errors.Is(err, errFenced) {
+		t.Fatalf("post-rebuild ingestBatch with the pre-rebuild epoch = %v, want errFenced", err)
+	}
+	sum, err := s.Summary(analytics.SummaryQuery{})
+	if err != nil || sum.Totals.Operations != (analytics.OperationTotals{}) || sum.Totals.Requests != 0 {
+		t.Fatalf("stale-epoch totals = %+v, err=%v", sum.Totals, err)
+	}
+	for _, table := range []string{"events", "rollup_day", "checkpoints"} {
+		var count int
+		if err := s.db.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("stale-epoch %s rows=%d, err=%v", table, count, err)
+		}
 	}
 }
 

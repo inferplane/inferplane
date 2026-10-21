@@ -177,8 +177,12 @@ func TestSummaryTimeSeriesReadFromRollupNotLiveEvents(t *testing.T) {
 	pool := rawPool(t)
 	// Seed rollup_day directly with a value events-alone wouldn't produce —
 	// proves the query reads rollup_day, not a live GROUP BY over events.
-	_, err := pool.Exec(ctx, `INSERT INTO rollup_day(day,team,model,input_tokens,output_tokens,cost_micros,request_count)
-		VALUES('2026-07-07','planted','m',0,0,999999,7)`)
+	_, err := pool.Exec(ctx, `INSERT INTO rollup_day(day,team,model,input_tokens,output_tokens,cost_micros,request_count,
+  completed,succeeded,failed,partial,unknown,estimated_requests,uncertain_requests,
+  unpriced_requests,unavailable_requests,legacy_unknown_requests,estimated_cost_micros,
+  uncertain_recorded_cost_micros,legacy_projection_records)
+  VALUES(to_char(current_date,'YYYY-MM-DD'),'planted','m',0,0,999999,7,
+  9,4,2,1,2,3,2,1,2,1,100000,899999,1)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,6 +192,18 @@ func TestSummaryTimeSeriesReadFromRollupNotLiveEvents(t *testing.T) {
 	}
 	if sum.Totals.CostMicros != 999999 || sum.Totals.Requests != 7 {
 		t.Fatalf("Summary = %+v, want the planted rollup_day row reflected (proves rollup-backed, not live events GROUP BY)", sum.Totals)
+	}
+	want := analytics.OperationTotals{Completed: 9, Succeeded: 4, Failed: 2, Partial: 1, Unknown: 2,
+		EstimatedRequests: 3, UncertainRequests: 2, UnpricedRequests: 1, UnavailableRequests: 2,
+		LegacyUnknownRequests: 1, EstimatedCostMicros: 100000, UncertainRecordedCostMicros: 899999,
+		LegacyProjectionRecords: 1}
+	if sum.Totals.Operations != want || len(sum.ByTeam) != 1 || sum.ByTeam[0].Operations != want ||
+		len(sum.ByModel) != 1 || sum.ByModel[0].Operations != want {
+		t.Fatalf("Summary operations = %+v, want planted rollup operations %+v", sum, want)
+	}
+	points, err := s.TimeSeries(analytics.TimeSeriesQuery{Days: 1})
+	if err != nil || len(points) != 1 || points[0].Operations != want || points[0].Requests != 7 || points[0].CostMicros != 999999 {
+		t.Fatalf("TimeSeries = %+v, err=%v, want planted rollup totals", points, err)
 	}
 }
 
