@@ -88,6 +88,7 @@ plugins:
             Performance: 성능
             Performance results: 성능 결과
             Model performance: 모델별 성능
+            Repeated calls and CLI compatibility: 반복 호출과 CLI 호환성
             Guides: 사용 가이드
             Model routing & privacy: 모델 라우팅과 개인정보 보호
             Adaptive coding workflows: 적응형 코딩 워크플로
@@ -155,6 +156,7 @@ nav:
   - Performance:
       - Performance results: performance/index.md
       - Model performance: performance/models.md
+      - Repeated calls and CLI compatibility: performance/clients.md
   - Guides:
       - Model routing & privacy: policy-routing.md
       - Adaptive coding workflows: adaptive-routing.md

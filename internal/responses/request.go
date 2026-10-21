@@ -296,7 +296,17 @@ func ValidateConversion(raw []byte) error {
 		}
 	}
 	if present(m["parallel_tool_calls"]) && string(m["parallel_tool_calls"]) != "true" {
-		return ErrUnsupported
+		// Codex compaction sends false with no offered tools. In that case
+		// there is no tool-execution ordering to preserve across protocols.
+		// With any tool declaration, serialization remains a requirement the
+		// portable bridge cannot enforce, so keep rejecting the request.
+		if string(m["parallel_tool_calls"]) != "false" {
+			return ErrUnsupported
+		}
+		var tools []json.RawMessage
+		if present(m["tools"]) && (json.Unmarshal(m["tools"], &tools) != nil || len(tools) != 0) {
+			return ErrUnsupported
+		}
 	}
 	if present(m["client_metadata"]) {
 		if _, err := object(m["client_metadata"]); err != nil {

@@ -155,7 +155,7 @@ func TestCustomToolResponseRestoration(t *testing.T) {
 
 func TestConversionRejectsToolExecutionSemantics(t *testing.T) {
 	for _, extra := range []string{
-		`"parallel_tool_calls":false`,
+		`"parallel_tool_calls":false,"tools":[{"type":"function","name":"f","strict":false,"parameters":{"type":"object"}}]`,
 		`"input":[{"type":"function_call","name":"f","call_id":"c","arguments":"{}","namespace":"remote"}]`,
 		`"input":[{"type":"custom_tool_call","name":"f","call_id":"c","input":"x","async":true}]`,
 		`"tools":[{"type":"function","name":"f","parameters":null}]`,

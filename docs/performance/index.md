@@ -5,7 +5,7 @@ description: Measured inferplane latency, throughput, cache cost and native Conv
 
 # Performance results
 
-**As of October 20, 2026.** This page presents the latest saved measurements. Native Converse/UI results below belong to an unmerged development implementation; they do not describe functionality available in the published main branch. Gateway and broad model measurements are from October 19; native Converse and administrator UI measurements are from October 20. These are bounded observations, not a production SLA.
+**As of October 21, 2026.** This page presents the latest saved measurements. Native Converse/UI results below belong to an unmerged development implementation; they do not describe functionality available in the published main branch. Gateway and broad model measurements are from October 19; native Converse and administrator UI measurements are from October 20. Repeated calls, CLI compatibility and automatic-compaction validation were added on October 20–21. These are bounded observations, not a production SLA.
 
 <div class="grid cards" markdown>
 
@@ -13,9 +13,9 @@ description: Measured inferplane latency, throughput, cache cost and native Conv
 
     42 models completed at least one task through direct Bedrock access. Coverage includes Anthropic, OpenAI, xAI/Grok, Qwen, DeepSeek, Moonshot/Kimi, MiniMax and GLM.
 
--   **26 models at 95–100% input occupancy**
+-   **26 models retrieved values near full input**
 
-    Successfully retrieved all three planted values near the declared context limit. This measures synthetic retrieval, not coding or document understanding.
+    In the October 19 trial, all three values were retrieved with inputs occupying 95–100% of the declared window. That percentage describes input size, not success rate. The CLI compatibility page below adds repeated observations.
 
 -   **48/48 native Invoke requests completed**
 
@@ -28,7 +28,10 @@ description: Measured inferplane latency, throughput, cache cost and native Conv
 </div>
 
 [Explore all model results](models.md){ .md-button .md-button--primary }
+[CLI compatibility and errors](clients.md){ .md-button }
 [Download measurement data](../assets/data/performance.json){ .md-button download="inferplane-performance.json" }
+
+See [repeated calls and Claude Code/Codex compatibility](clients.md) for repeated task outcomes, actual coding tasks and client context settings.
 
 ## Gateway latency
 

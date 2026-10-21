@@ -1,6 +1,6 @@
 ---
 translation_source: performance/models.md
-translation_source_sha256: 0522ef6bcdf550a4111b5f09e80f9f98f56b9c833e5b275fff942b039f2802e7
+translation_source_sha256: cf7a6a08bb7cfabcacef3e03f05444572a5c2de4a40c784dfc39e1098314914d
 title: 모델별 성능
 description: Bedrock 모델 49개의 컨텍스트 점유율, 생성 처리량, 응답 실패와 요청 비용 실측.
 ---
@@ -8,6 +8,8 @@ description: Bedrock 모델 49개의 컨텍스트 점유율, 생성 처리량, �
 # 모델별 성능 {#model-performance}
 
 **측정일: 2026년 10월 19일 · 49개 모델 · Bedrock 직접 호출.** inferplane의 모델 설정에 참고할 수 있는 자료이며, 게이트웨이 오버헤드나 모든 모델의 네이티브 Converse 호환성을 입증하지 않습니다. 기록된 전송 경로는 모델에 따라 Bedrock Runtime 또는 Mantle입니다. inferplane 측정은 [게이트웨이·관리자 결과](index.md)를 참고하세요.
+
+[반복 호출과 Claude Code·Codex 호환성](clients.md)에서 모델별 반복 성공률, 실제 코딩 과제와 클라이언트 창 설정을 확인할 수 있습니다.
 
 ## 컨텍스트 용량과 요청 비용 {#context-capacity-and-request-cost}
 

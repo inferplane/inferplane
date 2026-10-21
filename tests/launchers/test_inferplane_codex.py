@@ -182,6 +182,7 @@ class LauncherTests(unittest.TestCase):
         self.status = 200
         self.requests = []
         self.response_requests = []
+        self.response_input_tokens = []
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -205,6 +206,7 @@ class LauncherTests(unittest.TestCase):
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
                 sequence = len(owner.response_requests)
+                input_tokens = owner.response_input_tokens.pop(0) if owner.response_input_tokens else 5
                 item = {
                     "id": "msg_offline_{}".format(sequence), "type": "message", "role": "assistant",
                     "content": [{"type": "output_text", "text": "offline ok"}],
@@ -215,7 +217,7 @@ class LauncherTests(unittest.TestCase):
                     {"type": "response.completed", "response": {
                         "id": "resp_offline_{}".format(sequence),
                         "status": "completed", "output": [item],
-                        "usage": {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+                        "usage": {"input_tokens": input_tokens, "output_tokens": 2, "total_tokens": input_tokens + 2},
                     }},
                 ]
                 for event in events:
@@ -828,6 +830,28 @@ class InstalledCodexTests(unittest.TestCase):
         self.assertFalse(any(
             item.get("type") in {"reasoning", "additional_tools", "context_compaction"}
             for item in body.get("input", [])
+        ))
+
+    def test_automatic_compaction_sends_nonparallel_request_without_tools(self):
+        (self.home / "config.toml").write_text("model_auto_compact_token_limit=180000\n")
+        self.fixture.response_input_tokens = [200005, 100, 100]
+        client = AppServerClient(self.fixture, "test.grok")
+        self.addCleanup(client.close)
+        client.initialize()
+        thread = client.call("thread/start", {
+            "cwd": str(self.fixture.directory), "ephemeral": True, "sandbox": "read-only",
+        })["thread"]["id"]
+        client.turn(thread, "Reply offline ok. Do not use tools.")
+        client.turn(thread, "Reply offline ok again. Do not use tools.")
+        compactions = [body for _, _, body in self.fixture.response_requests
+                       if body.get("parallel_tool_calls") is False]
+        self.assertEqual(len(compactions), 1)
+        self.assertEqual(compactions[0].get("tools"), [])
+        self.assertEqual(compactions[0].get("reasoning", {}).get("effort"), "none")
+        self.assertTrue(any(
+            event.get("method") == "item/completed"
+            and event.get("params", {}).get("item", {}).get("type") == "contextCompaction"
+            for event in client.events
         ))
 
     def test_bridge_overrides_inherited_xhigh_in_codex_0154(self):

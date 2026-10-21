@@ -26,7 +26,7 @@
           row.hidden = !row.cells[0].textContent.toLocaleLowerCase().includes(query);
           if (!row.hidden) visible += 1;
         });
-        count.textContent = ko ? `${visible} / ${rows.length}개 모델` : `${visible} / ${rows.length} models`;
+        count.textContent = ko ? `${visible} / ${rows.length}개 행` : `${visible} / ${rows.length} rows`;
       });
       controls.append(label, input, count);
       section.prepend(controls);

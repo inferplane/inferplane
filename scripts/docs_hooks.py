@@ -84,6 +84,25 @@ def on_page_markdown(markdown, page, config, files):
     return "".join(chunks)
 
 
+def on_post_page(output, page, config):
+    """Keep language mappings in the i18n sitemap and static selector links.
+
+    Material 9.7 treats head alternate links as language-site roots and fetches
+    sitemap.xml below each one. Static-i18n supplies exact-page links instead,
+    which causes nested sitemap 404s and unnecessary click interception. Its
+    sitemap already contains reciprocal hreflang mappings, so omit only this
+    redundant head metadata. Canonical, feed and language-selector links stay.
+    """
+    head, separator, body = output.partition("</head>")
+    if not separator:
+        return output
+    return re.sub(
+        r'<link\b(?=[^>]*\brel="alternate")(?=[^>]*\bhreflang=)[^>]*>\s*',
+        "",
+        head,
+    ) + separator + body
+
+
 if __name__ == "__main__":
     docs = Path(__file__).resolve().parents[1] / "docs"
     for path, content in adr_indexes(docs).items():

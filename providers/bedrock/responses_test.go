@@ -290,7 +290,7 @@ func TestResponsesBridgeRejectsBeforeDispatch(t *testing.T) {
 		`{"model":"public","input":[{"type":"function_call","call_id":"bad","name":"f","arguments":"[]"}]}`,
 		`{"model":"public","input":[{"type":"function_call_output","call_id":"bad","output":[{"type":"input_image","image_url":"https://invalid.test"}]}]}`,
 		`{"model":"public","input":"hi","reasoning":{"effort":"high"}}`,
-		`{"model":"public","input":"hi","parallel_tool_calls":false}`,
+		`{"model":"public","input":"hi","parallel_tool_calls":false,"tools":[{"type":"function","name":"f","parameters":{},"strict":false}]}`,
 		`{"model":"public","input":"hi","store":true}`,
 		`{"model":"public","input":"hi","text":{"format":{"type":"json_schema","schema":{}}}}`,
 	}

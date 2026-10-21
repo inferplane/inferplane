@@ -1,13 +1,13 @@
 ---
 translation_source: performance/index.md
-translation_source_sha256: aa7731744ea9cadac278dcea608c7c97cc1577d4edc491251c4960a944e7c888
+translation_source_sha256: 24d6eccfe525ce5fd2d45389614e0cfdec95abe58e4d2164e875b99212909861
 title: 성능 결과
 description: inferplane의 지연, 처리량, 캐시 비용과 네이티브 Converse 호환성 실측 결과.
 ---
 
 # 성능 결과 {#performance-results}
 
-**2026년 10월 20일 기준.** 저장된 최신 측정 결과를 보여줍니다. 아래 네이티브 Converse·UI 결과는 아직 병합되지 않은 개발 구현에서 얻었으며, 공개 main 브랜치에서 사용할 수 있는 기능을 뜻하지 않습니다. 게이트웨이·전체 모델 측정은 10월 19일, 네이티브 Converse·관리자 UI 측정은 10월 20일 자료입니다. 명시된 조건에서의 관측이며 운영 SLA를 의미하지 않습니다.
+**2026년 10월 21일 기준.** 저장된 최신 측정 결과를 보여줍니다. 아래 네이티브 Converse·UI 결과는 아직 병합되지 않은 개발 구현에서 얻었으며, 공개 main 브랜치에서 사용할 수 있는 기능을 뜻하지 않습니다. 게이트웨이·전체 모델 측정은 10월 19일, 네이티브 Converse·관리자 UI 측정은 10월 20일 자료입니다. 반복 호출·CLI 호환성·자동 압축 검증은 10월 20–21일에 추가했습니다. 명시된 조건에서의 관측이며 운영 SLA를 의미하지 않습니다.
 
 <div class="grid cards" markdown>
 
@@ -15,9 +15,9 @@ description: inferplane의 지연, 처리량, 캐시 비용과 네이티브 Conv
 
     Bedrock 직접 호출에서 42개 모델이 하나 이상의 과제를 완료했습니다. Anthropic, OpenAI, xAI/Grok, Qwen, DeepSeek, Moonshot/Kimi, MiniMax, GLM을 포함합니다.
 
--   **26개 모델에서 입력 점유율 95–100% 성공**
+-   **26개 모델: 거의 가득 찬 입력 회수 성공**
 
-    선언된 컨텍스트 한계 부근에서 삽입한 세 값을 모두 회수했습니다. 합성 입력 회수 결과이며 코딩·문서 이해 성능 점수는 아닙니다.
+    10월 19일 시험에서 입력이 선언 창의 95–100%를 차지한 상태로 세 값을 모두 회수했습니다. 95–100%는 입력의 크기이며 성공률이 아닙니다. 반복 시험 결과는 아래 CLI 호환성 페이지에서 확인할 수 있습니다.
 
 -   **네이티브 Invoke 48/48건 완료**
 
@@ -30,7 +30,10 @@ description: inferplane의 지연, 처리량, 캐시 비용과 네이티브 Conv
 </div>
 
 [전체 모델 결과 보기](models.md){ .md-button .md-button--primary }
+[CLI 호환성·오류 분석](clients.md){ .md-button }
 [측정 데이터 다운로드](../assets/data/performance.json){ .md-button download="inferplane-performance.json" }
+
+[반복 호출과 Claude Code·Codex 호환성](clients.md)에서 모델별 반복 성공률, 실제 코딩 과제와 클라이언트 창 설정을 확인할 수 있습니다.
 
 ## 게이트웨이 지연 {#gateway-latency}
 
