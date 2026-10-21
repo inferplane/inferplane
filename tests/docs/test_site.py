@@ -114,6 +114,26 @@ class DocumentationTests(unittest.TestCase):
             errors, _ = translations.check_translations(docs)
             self.assertTrue(any("code examples differ" in error for error in errors))
 
+    def test_language_metadata_uses_sitemap_without_theme_fetches(self):
+        html = (
+            '<html><head>'
+            '<link rel="canonical" href="https://example.test/guide/">'
+            '<link rel="alternate" href="./" hreflang="en">'
+            '<link hreflang="ko" rel="alternate" href="../../ko/guide/">'
+            '<link rel="alternate" type="application/rss+xml" href="feed.xml">'
+            '</head><body>'
+            '<a href="../../ko/guide/" hreflang="ko">한국어</a>'
+            '<link rel="alternate" hreflang="en" href="body-link">'
+            '</body></html>'
+        )
+        result = hooks.on_post_page(html, None, None)
+        self.assertNotIn('<link rel="alternate" href="./"', result)
+        self.assertNotIn('<link hreflang="ko"', result)
+        self.assertIn('href="body-link"', result)
+        self.assertIn('rel="canonical"', result)
+        self.assertIn('type="application/rss+xml"', result)
+        self.assertIn('<a href="../../ko/guide/" hreflang="ko">', result)
+
     def test_bilingual_adr_indexes_are_current(self):
         self.assertEqual(translations.check_indexes(ROOT / "docs"), [])
 
