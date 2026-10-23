@@ -498,16 +498,16 @@ func TestAdminMux_logsOmittedWhenNilAnalyticsQ(t *testing.T) {
 type analyticsStubQ struct{}
 
 func (analyticsStubQ) Summary(analytics.SummaryQuery) (analytics.Summary, error) {
-	return analytics.Summary{Totals: analytics.Totals{Requests: 1}}, nil
+	return analytics.Summary{Totals: analytics.Totals{Requests: 1, Operations: analytics.OperationTotals{Completed: 1, Unknown: 1}}}, nil
 }
 func (analyticsStubQ) TimeSeries(analytics.TimeSeriesQuery) ([]analytics.DayPoint, error) {
-	return []analytics.DayPoint{}, nil
+	return []analytics.DayPoint{{Day: "2026-10-21", Operations: analytics.OperationTotals{Completed: 1, Unknown: 1}}}, nil
 }
 func (analyticsStubQ) Health() (analytics.Health, error) {
 	return analytics.Health{Mode: "A", IsLeader: true}, nil
 }
 func (analyticsStubQ) Recent(limit int, before string) ([]analytics.Event, error) {
-	return []analytics.Event{}, nil
+	return []analytics.Event{{ID: "fixture-evidence", HasCost: true, OutcomeState: "unknown", CostState: "legacy_unknown"}}, nil
 }
 
 // --- /admin/teams + /admin/users wiring (D3, ADR-016) ---
@@ -802,5 +802,40 @@ func TestAdminMux_ConnectSrcEmptyIsByteIdenticalCSP(t *testing.T) {
 	csp := rec.Header().Get("Content-Security-Policy")
 	if csp != "default-src 'self'; frame-ancestors 'none'" {
 		t.Fatalf("CSP with nil connectSrc = %q, want byte-identical to the pre-SSO CSP", csp)
+	}
+}
+
+// New evidence is protected by the same full-admin boundary as legacy analytics.
+func TestAdminMux_AnalyticsEvidenceFullAdminBoundary(t *testing.T) {
+	v := &fakeVerifier{claims: adminauth.Claims{Subject: "u-alpha", Groups: []string{"team-alpha"}}}
+	mapping := adminauth.MappingConfig{GroupMappings: []adminauth.GroupMapping{{Group: "team-alpha", Teams: []string{"alpha"}}}}
+	mux := AdminMux(stubStore{}, []string{"admin-tok"}, v, mapping, func() configapi.View { return configapi.View{} }, nil, nil, nil, nil, nil, nil, nil, nil, analyticsStubQ{}, nil, nil, nil, nil, nil, nil, nil)
+	for _, path := range []string{"/admin/analytics/summary", "/admin/analytics/timeseries", "/admin/logs"} {
+		for _, tc := range []struct {
+			token  string
+			status int
+		}{{"", 401}, {jwtShaped, 403}, {"admin-tok", 200}} {
+			req := httptest.NewRequest("GET", path, nil)
+			if tc.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+			}
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != tc.status {
+				t.Errorf("%s status=%d want=%d body=%s", path, rec.Code, tc.status, rec.Body.String())
+			}
+			if tc.status == 200 {
+				field := `"operations"`
+				if path == "/admin/logs" {
+					field = `"cost_state"`
+				}
+				if !strings.Contains(rec.Body.String(), field) {
+					t.Errorf("%s missing authorized evidence: %s", path, rec.Body.String())
+				}
+			}
+			if tc.status != 200 && (strings.Contains(rec.Body.String(), `"operations"`) || strings.Contains(rec.Body.String(), `"cost_state"`)) {
+				t.Errorf("%s leaked evidence: %s", path, rec.Body.String())
+			}
+		}
 	}
 }

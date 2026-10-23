@@ -34,6 +34,79 @@ If outstanding authority cannot be established, keep affected windows frozen. An
 
 No automated refund/reconciliation API or generic zero-downtime rollback procedure is provided. Follow the specific [durable authority](../durable-budgets.md), [shared store](../shared-governance.md), and [identity migration](../verified-identity.md) contracts.
 
+## Recover analytics evidence
+
+Analytics events and rollups are rebuildable read models; audit JSONL is the
+source. This recovery does not alter key/governance/identity, authority, grant,
+permit or settlement tables. Never treat projection reset, an estimated zero or
+missing cost as a refund or renewed admission balance (ADR-053).
+
+1. Record the profile, upgraded writer versions, source segment inventory and
+   retention gaps. Preserve exact original JSONL bytes, the derived DB and, in
+   Mode B, checkpoints/lease metadata for diagnosis. Use a consistent backup;
+   do not delete originals or checkpoints to make a completeness claim.
+2. Upgrade **all analytics writers** before replay. Mixed old/new writers are
+   not qualified for projection completeness: older code can still skip Cost=nil
+   records or write conservative default projections. Plan schema-lock time and
+   test rollback/restore in isolation; an old binary is not a validated rollback.
+3. Follow the applicable source-recovery path below, then compare health/lag,
+   retained-source counts and the outcome/cost invariants over an explicit UTC
+   period. Keep any missing source interval documented even if legacy rows reach 0.
+
+### SQLite Mode A
+
+Opening the upgraded index adds missing columns idempotently. Existing rows keep
+`has_cost=true`, `outcome_state=unknown`, `cost_state=legacy_unknown`,
+`projection_version=0`; old HTTP 200 alone proves neither success nor complete cost.
+SQLite's additive ALTER steps are individually applied, not the Mode-B single
+backfill transaction; an interrupted open can resume missing-column migration.
+
+Explicitly select the retained originals for replay. At gateway startup, Mode A
+calls `Index.Replay` for each configured `audit.sinks` file path. With traffic
+stopped, use the upgraded binary and the intended Mode-A index/configured original
+file sinks, then inspect startup replay warnings and the resulting summary/logs.
+Startup does not discover all rotated archives or recover stdout automatically;
+only configured readable files are replayed. Preserve original segments and use
+an isolated source replay when assessing additional archives. There is no Mode-A
+HTTP rebuild or audit-replay CLI command; its rebuild route returns 405.
+
+Replay upgrades a matching version-0 ID to version 1 from the original evidence;
+version-1 IDs remain first-write-wins. Repeated replay does not double count.
+Previously omitted Cost=nil completions can enter the index. An old Cost=nil
+source becomes unavailable, while an old Cost-present source without usage evidence
+remains legacy_unknown even at version 1. A truncated final JSONL line is skipped.
+Without retained originals, conservative version-0 rows cannot gain evidence and
+missing costless history cannot be reconstructed.
+
+### PostgreSQL Mode B
+
+Startup migration uses one connection, an advisory lock and one transaction to
+add event/rollup columns and regenerate rollups from retained derived events
+on the first upgrade. A durable migration marker commits in that transaction;
+current-schema opens do not rewrite rollups. Failure rolls back columns, backfill
+and marker together so the upgrade can retry; statement timeout is restored.
+The first upgrade can take schema locks and scan retained events. It does **not** recover
+Cost=nil originals that an older aggregator skipped before an advanced checkpoint.
+Retain those source segments and the checkpoint backup.
+
+After all writers are upgraded, an authorized full admin can call the existing
+`POST /admin/analytics/rebuild`. A 204 means the reset succeeded, not that replay
+has finished. The reset clears derived events/rollups/checkpoints and advances
+the lease epoch to fence old workers; the aggregator then reacquires leadership
+and replays retained segments from the start. Stale epochs cannot change events,
+rollups or checkpoints. Check `/admin/analytics/health` and queried results until
+replay catches up. PostgreSQL corrected-record upserts recompute both old and new
+team/model/day groups; repeated replay remains idempotent.
+
+If originals were expired, migration/rebuild cannot manufacture the absent
+history. Zero `legacy_projection_records` is not proof of complete collection;
+compare source retention, collection drops and lag. Keep the pre-rebuild backup
+and originals until validation and retention requirements are satisfied.
+
+These procedures describe implemented recovery behavior. Local synthetic tests
+and a disposable PostgreSQL exercise are documented in ADR-053; no live database
+rebuild, production rollout or paid-model qualification is claimed.
+
 ## Evidence needed before production
 
 Record recovery time and permitted data loss from an actual restore/failover exercise. Include database loss separately from CP process loss, retained uncertainty after a crash, and identity rotation with historical balances. These are acceptance measurements, not guarantees supplied by this guide.

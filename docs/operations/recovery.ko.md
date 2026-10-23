@@ -1,6 +1,6 @@
 ---
 translation_source: operations/recovery.md
-translation_source_sha256: 0de6712d2ada1036bfe4ded412d21b8a3cc7d068b1ff7f3eb6925b0edac4175c
+translation_source_sha256: 59fd0e646e97a83070465245a22ff96e0c51544f425814462d34250f95c7012f
 ---
 
 # 업그레이드와 복구 {#upgrade-and-recover}
@@ -38,6 +38,70 @@ ADR-045는 모든 조건 안에서 유효한 기존 로컬 권한만 사용할 �
 미해결 권한을 확정할 수 없으면 영향받는 윈도를 동결 상태로 유지하세요. 접근할 수 없는 게이트웨이나 만료된 권한은 미사용 잔액의 증거가 아닙니다. 카운터 절단, 허가·권한 행 삭제, 실행 중 저널 복제, 새 계정 참조로 재발급하여 서비스를 복구하지 마세요.
 
 자동 환급·조정 API나 일반적인 무중단 롤백 절차는 제공하지 않습니다. [영속 권한](../durable-budgets.md), [공유 저장소](../shared-governance.md), [신원 마이그레이션](../verified-identity.md)의 구체적인 계약을 따르세요.
+
+## 분석 근거 복구 {#recover-analytics-evidence}
+
+분석 이벤트·rollup은 재구축 가능한 읽기 모델이며 감사 JSONL이 원본입니다.
+이 복구는 키/거버넌스/신원·권한·grant·permit·정산 테이블을 바꾸지 않습니다.
+투영 초기화·산정액 0·비용 누락을 환급이나 승인 잔액 복구로 취급하지 마세요(ADR-053).
+
+1. 프로파일·업그레이드 writer 버전·원본 구간 목록·보관 공백을 기록합니다. 정확한
+   원본 JSONL 바이트와 파생 DB, Mode B의 checkpoint/lease 메타데이터를 진단용으로
+   보존합니다. 일관된 백업을 사용하고 완전성을 주장하려고 원본·checkpoint를 삭제하지 마세요.
+2. 재생 전에 **모든 analytics writer**를 업그레이드합니다. 이전/새 writer 혼합
+   구간의 투영 완전성은 검증되지 않았습니다. 구버전은 Cost=nil을 건너뛰거나 보수적
+   기본 투영을 쓸 수 있습니다. 스키마 잠금 시간을 계획하고 격리 환경에서 롤백·복원을
+   시험하세요. 구버전 바이너리로 돌아가는 것만으로 검증된 롤백이 되지 않습니다.
+3. 아래 원본 복구 경로를 적용한 후 명시적 UTC 기간의 health/lag·보관 원본 건수·결과와
+   비용 불변식을 비교합니다. 과거 행이 0이어도 누락 원본 기간은 기록합니다.
+
+### SQLite Mode A {#sqlite-mode-a}
+
+업그레이드한 index를 열면 누락 열을 멱등적으로 추가합니다. 기존 행은
+`has_cost=true`, `outcome_state=unknown`, `cost_state=legacy_unknown`,
+`projection_version=0`을 유지합니다. 과거 HTTP 200만으로 성공·완전한 비용을
+증명하지 않습니다. SQLite의 additive ALTER는 개별 적용되며 Mode-B 단일 backfill
+트랜잭션과 다릅니다. 열기 중단 후 누락 열 마이그레이션을 재개할 수 있습니다.
+
+재생할 보관 원본을 명시적으로 선택합니다. 게이트웨이 시작 시 Mode A는 설정된
+`audit.sinks`의 각 file 경로에 `Index.Replay`를 호출합니다. 트래픽을 중지한 상태에서
+업그레이드 바이너리와 의도한 Mode-A index/원본 file sink 설정을 사용하고 시작
+재생 경고·summary/logs를 확인합니다. 시작 동작은 회전된 모든 archive를 발견하거나
+stdout을 자동 복구하지 않습니다. 설정된 읽기 가능한 파일만 재생합니다. 원본을
+보존하고 추가 archive 평가에는 격리된 원본 재생을 사용하세요. Mode-A HTTP rebuild나
+감사 재생 CLI 명령은 없으며 rebuild 경로는 405입니다.
+
+Replay는 동일 version-0 ID를 원본 근거로 version 1로 갱신하며 version-1 ID는
+first-write-wins를 유지합니다. 반복 재생은 중복 집계하지 않습니다. 이전에 빠진
+Cost=nil 완료 기록도 들어올 수 있습니다. 구버전 Cost=nil 원본은 unavailable,
+Cost가 있으나 사용량 근거가 없는 원본은 version 1에서도 legacy_unknown입니다.
+불완전 JSONL 마지막 줄은 건너뜁니다. 원본이 없으면 보수적 version-0 행의 근거를
+얻거나 누락된 비용 없는 이력을 복원할 수 없습니다.
+
+### PostgreSQL Mode B {#postgresql-mode-b}
+
+최초 업그레이드의 시작 마이그레이션은 단일 연결·advisory lock·한 트랜잭션으로
+이벤트/rollup 열을 추가하고 보관 파생 이벤트에서 rollup을 재생성합니다.
+영속 마이그레이션 마커도 같은 트랜잭션에서 커밋하므로 현재 스키마를 다시 열 때는
+rollup을 재작성하지 않습니다. 실패하면 열·backfill·마커를 함께 롤백해 재시도할 수
+있으며 statement timeout을 복원합니다. 최초 업그레이드에는 스키마 잠금과
+보관 이벤트 스캔이 필요할 수 있습니다. 이미 전진한 checkpoint 전에 구버전 수집기가 건너뛴 Cost=nil 원본은
+복구하지 **않습니다**. 원본 구간과 checkpoint 백업을 보존하세요.
+
+모든 writer 업그레이드 후 권한 있는 full admin이 기존 `POST /admin/analytics/rebuild`를
+호출할 수 있습니다. 204는 초기화 성공이지 재생 완료가 아닙니다. 초기화는 파생
+events/rollups/checkpoints를 비우고 lease epoch을 전진해 이전 worker를 차단합니다.
+이후 수집기가 리더십을 다시 얻고 보관 원본을 처음부터 재생합니다. 오래된 epoch은
+events·rollups·checkpoints를 바꾸지 못합니다. 재생이 따라잡을 때까지
+`/admin/analytics/health`와 조회 결과를 확인합니다. PostgreSQL corrected-record
+upsert는 이전·새 팀/모델/날짜 그룹을 모두 재계산하며 반복 재생도 멱등적입니다.
+
+원본이 만료되었으면 마이그레이션/rebuild가 없어진 이력을 만들 수 없습니다.
+`legacy_projection_records` 0도 전체 수집 증거가 아니므로 원본 보관·수집 drop·lag를
+비교합니다. 검증과 보관 요구가 충족될 때까지 rebuild 전 백업·원본을 유지하세요.
+
+이 절차는 구현된 복구 동작을 설명합니다. 로컬 합성 테스트와 일회용 PostgreSQL
+검증은 ADR-053에 기록하며 live DB rebuild·운영 배포·유료 모델 검증 완료를 주장하지 않습니다.
 
 ## 운영 전에 필요한 증거 {#evidence-needed-before-production}
 

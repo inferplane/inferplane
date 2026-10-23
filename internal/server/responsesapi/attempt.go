@@ -100,7 +100,7 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 	seq, err := a.target.Provider.Stream(a.req.Context(), a.proxy)
 	if err != nil || seq == nil {
 		status := errorStatus(err)
-		a.errorCode = upstreamCode(err)
+		a.errorCode = streamFailureCode(err)
 		a.finish(status, nil, nil, false, 0)
 		if !last && retryStatus(status) && a.req.Context().Err() == nil {
 			return true
@@ -124,9 +124,9 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 		}
 	}
 	fail := func(cause error) bool {
+		a.errorCode = streamFailureCode(cause)
 		if !committed {
 			status := errorStatus(cause)
-			a.errorCode = upstreamCode(cause)
 			a.finish(status, usage, nil, false, ttft)
 			if conversionErr == nil && !last && retryStatus(status) && a.req.Context().Err() == nil {
 				return true
@@ -136,13 +136,24 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 		}
 		// Never expose arbitrary provider error strings or restart a committed
 		// stream on another model. Output already observed is still settled.
-		_ = responses.WriteEvent(w, responses.Event{Type: "error", Data: json.RawMessage(`{"type":"error","code":"upstream_error","message":"upstream stream interrupted"}`)})
-		flusher.Flush()
+		if !errors.Is(cause, errClientWriteFailed) {
+			data, _ := json.Marshal(map[string]string{
+				"type": "error", "code": a.errorCode, "message": "upstream stream interrupted",
+			})
+			if err := responses.WriteEvent(w, responses.Event{Type: "error", Data: data}); err != nil {
+				a.errorCode = streamFailureCode(errClientWriteFailed)
+			} else {
+				flusher.Flush()
+			}
+		}
 		a.finish(200, usage, nil, true, ttft)
 		return false
 	}
 	for event, readErr := range seq {
 		if readErr != nil {
+			if errors.Is(readErr, responses.ErrTruncated) {
+				readErr = errors.Join(errStreamIncomplete, readErr)
+			}
 			return fail(readErr)
 		}
 		if event == nil {
@@ -167,22 +178,23 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 			if len(event.Raw) > 0 {
 				commit()
 				if _, err := w.Write(event.Raw); err != nil {
-					a.finish(200, usage, nil, true, ttft)
-					return false
+					return fail(errClientWriteFailed)
 				}
 				flusher.Flush()
 			}
 		} else if event.Chunk != nil {
 			events, err := renderer.Convert(event.Chunk)
 			if err != nil {
-				conversionErr = err
+				conversionErr = errResponseIncompatible
+				if terminal && usage == nil {
+					conversionErr = errUsageMissing
+				}
 				continue
 			}
 			for _, converted := range events {
 				commit()
 				if err := responses.WriteEvent(w, converted); err != nil {
-					a.finish(200, usage, nil, true, ttft)
-					return false
+					return fail(errClientWriteFailed)
 				}
 			}
 			if len(events) > 0 {
@@ -195,11 +207,17 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 	}
 	if !native {
 		if _, err := renderer.Finish(); err != nil {
-			return fail(err)
+			if errors.Is(err, responses.ErrTruncated) {
+				return fail(errStreamIncomplete)
+			}
+			return fail(errResponseIncompatible)
 		}
 	}
-	if !committed || !terminal || usage == nil || failed {
-		return fail(errors.New("incomplete stream"))
+	if !committed || !terminal || failed {
+		return fail(errStreamIncomplete)
+	}
+	if usage == nil {
+		return fail(errUsageMissing)
 	}
 	a.h.r.RecordResult(a.target.ProviderName, a.target.Identity, true)
 	requestpolicy.RecordSuccess(a.req)
@@ -223,7 +241,11 @@ func writeCodedError(w http.ResponseWriter, status int, message, code string) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	errorType := "upstream_error"
+	if code == "context_length_exceeded" || code == "invalid_encrypted_content" {
+		errorType = "invalid_request_error"
+	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
-		"type": "invalid_request_error", "code": code, "param": nil, "message": message,
+		"type": errorType, "code": code, "param": nil, "message": message,
 	}})
 }

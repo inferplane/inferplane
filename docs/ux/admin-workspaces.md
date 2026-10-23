@@ -28,6 +28,35 @@ Budgets and settled spend retain integer units. A configured limit and remaining
 
 Existing servers determine limit, key and policy authority. The UI does not claim unimplemented organization roles or user pools. Matching generations and `/healthz` are not proof of fleet HA or inference-admission readiness.
 
+## Request outcomes and cost evidence
+
+Gateway Overview and Usage show observed completion records, outcome counts and
+`(failed + partial) / completed` with unknown-count limitations. Team, model and
+daily rows carry the same evidence. Logs show HTTP status alongside outcome and
+bounded error reason; HTTP 200 + partial is a warning. Transport success does not
+measure model quality or the user's task completion.
+
+Estimated cost is separate from incomplete-evidence recorded amounts. The five
+states distinguish estimated (including a valid zero), uncertain, legacy_unknown,
+unpriced and unavailable. Unpriced/unavailable are not shown as dollar zero.
+Older APIs without `operations`/`cost_state` display a legacy/evidence-unavailable
+notice and recorded amounts without invented completions or success. Integer
+strings and BigInt preserve values beyond JavaScript's safe-integer range.
+
+The coverage help explains source retention, queue drops, lag and version-0
+projections. A zero legacy-projection count does not prove complete history.
+The unit is an audit completion record, excluding start-only refusals, unauthenticated
+401s, admin events and failures never sent by the client. Full-admin authorization
+and profile-specific admission/authority remain unchanged. See the
+[API contract](../api-reference.md#analytics-outcome-and-cost-evidence-adr-053).
+
+`TestAnalyticsEvidenceBehavior` executes shipped JavaScript and checks rendered
+DOM, ratio 3/8 (37.5%), every cost state, older APIs, bounded HTML-shaped errors,
+large integers, failed refresh and failed pagination. The 2026-10-21 synthetic
+browser run saved 54 screenshots across English/Korean, light/dark and
+390/768/1440 px, including scrolled mobile evidence and network failures. It used
+local fake APIs and does not establish live traffic coverage or model quality.
+
 ## Reproduce
 
 ```bash

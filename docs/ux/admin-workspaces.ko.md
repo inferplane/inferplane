@@ -1,6 +1,6 @@
 ---
 translation_source: ux/admin-workspaces.md
-translation_source_sha256: fca1bde80ee7e645215fc80bae5c88ef79a82bc772743f5eea6eb2e91b654f5b
+translation_source_sha256: b4deaf8604cb00614c86b75f8e5ac449ad2986da21c4e66aa8b75255ddf71e3c
 ---
 
 # 관리자 UX 구성과 검증
@@ -46,6 +46,31 @@ translation_source_sha256: fca1bde80ee7e645215fc80bae5c88ef79a82bc772743f5eea6eb
 한도·키·정책 권한은 기존 서버가 결정한다. 이 화면은 미구현 조직 역할이나
 사용자 풀을 구현한 것으로 표시하지 않는다. generation 일치나 `/healthz`는
 fleet HA 또는 추론 승인 readiness의 증거가 아니다.
+
+## 요청 결과와 비용 근거 {#request-outcomes-and-cost-evidence}
+
+게이트웨이 Overview·Usage는 관측 완료 기록·결과 건수·`(failed + partial) / completed`와
+unknown 한계를 표시합니다. 팀·모델·일별 행도 같은 근거를 담습니다. Logs는 HTTP status와
+결과·제한된 오류 원인을 함께 표시하며 HTTP 200 + partial은 경고입니다. 전송 성공은
+모델 품질이나 사용자의 작업 완수 지표가 아닙니다.
+
+산정액은 근거 불완전 기록 금액과 분리합니다. 다섯 상태는 estimated(유효한 0 포함),
+uncertain, legacy_unknown, unpriced, unavailable을 구분하며 unpriced/unavailable을
+달러 0으로 표시하지 않습니다. `operations`/`cost_state`가 없는 구버전 API는
+구버전/근거 정보 없음과 기록 금액을 표시하고 완료·성공을 만들어 넣지 않습니다.
+정수 문자열·BigInt로 JavaScript 안전 정수 범위를 넘는 값도 보존합니다.
+
+관측 범위 도움말은 원본 보관·큐 drop·lag·version-0 투영을 설명합니다. 과거 투영 건수
+0도 전체 이력 증거가 아닙니다. 단위는 감사 완료 기록이며 시작만 있는 거부·미인증
+401·관리자 이벤트·클라이언트가 전송하지 못한 실패는 제외합니다. Full-admin 권한과
+프로파일별 승인·금전 권한은 유지합니다. [API 계약](../api-reference.md#analytics-outcome-and-cost-evidence-adr-053)을
+확인하세요.
+
+`TestAnalyticsEvidenceBehavior`는 배포 JavaScript를 실행해 렌더링 DOM·3/8 (37.5%)·
+모든 비용 상태·구버전 API·HTML 형태 오류 제한·큰 정수·refresh 및 페이지 실패를
+검증합니다. 2026-10-21 합성 브라우저 실행은 영어/한국어·라이트/다크·390/768/1440px의
+54개 스크린샷을 저장했으며 스크롤한 모바일 근거와 네트워크 실패도 포함합니다.
+로컬 가짜 API를 사용했으므로 실제 트래픽 범위나 모델 품질을 증명하지 않습니다.
 
 ## 재현
 

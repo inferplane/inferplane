@@ -1,5 +1,5 @@
 """Exercise the embedded gateway console with synthetic local APIs.
-Run: python3 internal/server/adminui/testdata/browser_qa.py --screenshots /tmp/gateway-qa
+Run: python3 internal/server/adminui/testdata/browser_qa.py --screenshots <local-scratch>/gateway-qa
 Requires existing Playwright + Chromium. No service, upstream, credentials or IdP.
 """
 import argparse
@@ -19,7 +19,21 @@ KEYS = [
 PROVIDER = {'name': 'private', 'type': 'anthropic', 'base_url': 'https://private.invalid', 'auth': 'env:PRIVATE_KEY', 'data_boundary': 'internal'}
 MODEL = {'name': 'private-coder', 'context_window': 32768, 'capabilities': ['tools'], 'aliases': ['private-alias'],
          'targets': [{'provider': 'private', 'model': 'upstream', 'api': 'invoke_model'}]}
-STATE = {'admin': True, 'analytics': True, 'summary_status': 200, 'large_money': True, 'writes': [], 'reads': []}
+STATE = {'admin': True, 'analytics': True, 'summary_status': 200, 'logs_status': 200, 'large_money': True, 'evidence': False, 'writes': [], 'reads': []}
+
+OPERATIONS = {'completed': 8, 'succeeded': 4, 'failed': 2, 'partial': 1, 'unknown': 1,
+              'estimated_requests': 3, 'uncertain_requests': 1, 'unpriced_requests': 1, 'unavailable_requests': 2,
+              'legacy_unknown_requests': 1, 'estimated_cost_micros': 1300, 'uncertain_recorded_cost_micros': 2050,
+              'legacy_projection_records': 1}
+EVENTS = [dict(id=id, status=status, outcome_state=outcome, cost_state=cost, cost_micros=amount,
+               has_cost=has_cost, partial=id == 'C', input_tokens=0, output_tokens=0,
+               error_code='stream_incomplete' if id == 'C' else '', team='engineering', model='private-coder',
+               provider='private', ts='2026-10-21T10:00:00Z', projection_version=1)
+          for id, status, outcome, cost, amount, has_cost in [
+              ('A', 200, 'succeeded', 'estimated', 1000, True), ('B', 502, 'failed', 'unavailable', 0, False),
+              ('C', 200, 'partial', 'uncertain', 2000, True), ('D', 200, 'succeeded', 'unpriced', 0, True),
+              ('E', 200, 'succeeded', 'legacy_unknown', 50, True), ('F', 200, 'succeeded', 'estimated', 0, True),
+              ('G', 0, 'unknown', 'unavailable', 0, False), ('H', 400, 'failed', 'estimated', 300, True)]]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -74,18 +88,26 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/admin/providers/catalog':
             self.respond(200, {'models': ['upstream']})
         elif path == '/admin/analytics/summary':
-            self.respond(STATE['summary_status'], {'totals': {'requests': 72, 'input_tokens': 200, 'output_tokens': 100, 'cache_read_tokens': 400, 'cost_micros': 9007199254740993 if STATE['large_money'] else 72458053},
-                                                 'by_team': [{'team': 'engineering', 'requests': 72, 'cost_micros': 5}], 'by_model': []})
+            if STATE['evidence']:
+                totals = {'requests': 6, 'input_tokens': 0, 'output_tokens': 0, 'cache_read_tokens': 0, 'cost_micros': 3350, 'operations': OPERATIONS}
+                self.respond(STATE['summary_status'], {'totals': totals,
+                    'by_team': [dict(totals, team='engineering')], 'by_model': [dict(totals, model='private-coder')]})
+            else:
+                self.respond(STATE['summary_status'], {'totals': {'requests': 72, 'input_tokens': 200, 'output_tokens': 100, 'cache_read_tokens': 400, 'cost_micros': 9007199254740993 if STATE['large_money'] else 72458053},
+                                                     'by_team': [{'team': 'engineering', 'requests': 72, 'cost_micros': 5}], 'by_model': []})
         elif path == '/admin/analytics/timeseries':
             now = datetime.now(timezone.utc)
-            self.respond(200, [{'day': now.date().isoformat(), 'cost_micros': 9007199254740993}, {'day': (now - timedelta(days=1)).date().isoformat(), 'cost_micros': 5}])
+            if STATE['evidence']:
+                self.respond(200, [{'day': now.date().isoformat(), 'requests': 6, 'cost_micros': 3350, 'operations': OPERATIONS}, {'day': (now - timedelta(days=30)).date().isoformat(), 'requests': 6, 'cost_micros': 3350, 'operations': OPERATIONS}])
+            else:
+                self.respond(200, [{'day': now.date().isoformat(), 'cost_micros': 9007199254740993}, {'day': (now - timedelta(days=1)).date().isoformat(), 'cost_micros': 5}])
         elif path == '/admin/teams':
             self.respond(200, {'data': [{'name': 'engineering', 'source': 'record', 'budget_usd_micros': 20000000,
                                         'budget_usd_micros_per_day': 1500000, 'tokens_per_day': 2500000}]})
         elif path == '/admin/users':
             self.respond(200, {'data': [{'owner': 'fixture-person', 'teams': ['engineering'], 'key_count': 1}]})
         elif path == '/admin/logs':
-            self.respond(200, {'data': [], 'entries': []})
+            self.respond(STATE['logs_status'], {'events': EVENTS if STATE['evidence'] else []})
         else:
             self.respond(404, {})
 
@@ -130,6 +152,7 @@ def main():
             page.locator('#shell').wait_for(state='visible')
             page.wait_for_function("() => document.getElementById('stat-spend').textContent.startsWith('$')")
             assert page.locator('#stat-spend').inner_text() == '$9,007,199,254.740993'
+            assert page.locator('#stat-spend-label').inner_text() == 'Recorded amount'
             assert page.locator('#token').input_value() == ''
             assert page.locator('#stat-spend-spark svg').count() == 1
             STATE['large_money'] = False
@@ -193,6 +216,63 @@ def main():
             assert STATE['writes'][-1][1]['aliases'] == ['private-alias']
             if args.screenshots:
                 page.screenshot(path=str(args.screenshots / 'gateway-models.png'), full_page=True)
+            # Exercise the actual evidence views in both languages/themes at every supported width.
+            STATE['evidence'] = True
+            page.locator('button.nav[data-view="usage"]').click()
+            page.wait_for_function("() => document.getElementById('usage-totals').textContent.includes('3/8 (37.5%)')")
+            assert 'Observed completed records' in page.locator('#usage-totals').inner_text()
+            assert '$0.001300' in page.locator('#usage-by-model').inner_text()
+            assert '$0.002050' in page.locator('#usage-by-day').inner_text()
+            assert page.locator('#usage-by-day tbody tr').count() == 1, 'sparse cutoff-day row escaped summary period'
+            page.locator('button.nav[data-view="logs"]').click()
+            page.wait_for_function("() => document.querySelectorAll('#logs-table tbody tr').length === 8")
+            rows = page.locator('#logs-table tbody tr')
+            assert 'HTTP 200' in rows.nth(2).inner_text() and 'Partial response' in rows.nth(2).inner_text()
+            assert rows.nth(2).locator('td.outcome.warn').count() == 1
+            assert '$' not in rows.nth(1).inner_text() and '$' not in rows.nth(3).inner_text()
+            assert '$0.000000' in rows.nth(5).inner_text()
+            assert 'Recorded amount' in rows.nth(4).inner_text() and 'Evidence missing' in rows.nth(4).inner_text()
+            for language in ('zh', 'ja'):
+                page.locator('#lang-select').select_option(language)
+                page.locator('button.nav[data-view="overview"]').click()
+                page.wait_for_function("() => document.getElementById('stat-spend-sub').textContent.includes('Last 30 days')")
+                assert '结算' not in page.locator('#stat-spend-sub').inner_text()
+                assert '確定支出' not in page.locator('#stat-spend-sub').inner_text()
+                if args.screenshots:
+                    page.screenshot(path=str(args.screenshots / f'evidence-overview-{language}.png'), full_page=True)
+                STATE['summary_status'] = 503
+                page.locator('button.nav[data-view="overview"]').click()
+                page.wait_for_function("() => document.getElementById('stat-spend-sub').textContent === 'Cost evidence unavailable · analytics required'")
+                STATE['summary_status'] = 200
+                if args.screenshots:
+                    page.screenshot(path=str(args.screenshots / f'evidence-overview-unavailable-{language}.png'), full_page=True)
+            for language in ('en', 'ko'):
+                page.locator('#lang-select').select_option(language)
+                for theme in ('light', 'dark'):
+                    page.evaluate("theme => document.documentElement.dataset.theme = theme", theme)
+                    for width in (390, 768, 1440):
+                        page.set_viewport_size({'width': width, 'height': 1000})
+                        for view in ('overview', 'usage', 'logs'):
+                            page.locator(f'button.nav[data-view="{view}"]').click()
+                            target = '#stat-requests-sub' if view == 'overview' else '#usage-totals' if view == 'usage' else '#logs-table'
+                            expected = '3/8 (37.5%)' if view != 'logs' else '부분 응답' if language == 'ko' else 'Partial response'
+                            page.wait_for_function("([id, expected]) => document.querySelector(id).textContent.includes(expected)", arg=[target, expected])
+                            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), f'{view} overflow: {language}/{theme}/{width}'
+                            if view == 'overview':
+                                assert page.locator('#stat-spend-label').inner_text() == ('산정 가능한 비용' if language == 'ko' else 'Estimable cost')
+                            if args.screenshots:
+                                page.screenshot(path=str(args.screenshots / f'evidence-{view}-{theme}-{language}-{width}.png'), full_page=True)
+                            if view == 'logs' and width == 390:
+                                wrapper = page.locator('#logs-table').locator('..')
+                                assert wrapper.evaluate('(el) => el.scrollWidth > el.clientWidth')
+                                wrapper.evaluate('(el) => el.scrollLeft = el.scrollWidth')
+                                assert rows.nth(2).locator('td').nth(6).evaluate('(el) => { const r = el.getBoundingClientRect(), w = el.closest(".table-scroll").getBoundingClientRect(); return r.left < w.right && r.right > w.left; }'), 'mobile cost column unreachable'
+                                wrapper.evaluate('(el) => { const cell = document.querySelector("#logs-table tbody tr:nth-child(3) td.outcome"); el.scrollLeft += cell.getBoundingClientRect().left - el.getBoundingClientRect().left; }')
+                                assert rows.nth(2).locator('td.outcome').evaluate('(el) => { const r = el.getBoundingClientRect(), w = el.closest(".table-scroll").getBoundingClientRect(); return r.left >= w.left - 1 && r.right <= w.right + 1; }'), 'mobile outcome column unreachable'
+                                if args.screenshots:
+                                    page.screenshot(path=str(args.screenshots / f'evidence-logs-scrolled-{theme}-{language}-{width}.png'), full_page=True)
+
+            page.evaluate("document.documentElement.dataset.theme = 'light'")
             page.locator('#lang-select').select_option('ko')
             assert page.locator('#workspace-search').inner_text() == '통합 검색'
             page.locator('#theme-toggle').click()
@@ -209,6 +289,24 @@ def main():
                 assert page.locator('#workspace-dialog').is_hidden()
             # Analytics failures and read-only profiles must remain visible.
             page.on('dialog', lambda d: d.accept())
+            page.locator('button.nav[data-view="logs"]').click()
+            page.wait_for_function("() => document.querySelectorAll('#logs-table tbody tr').length === 8")
+            STATE['logs_status'] = 503
+            page.locator('#logs-load-more').click()
+            page.locator('#workspace-error').wait_for(state='visible')
+            assert page.locator('#logs-table tbody tr').count() == 8, 'failed pagination lost loaded rows'
+            STATE['logs_status'] = 200
+            page.locator('#logs-load-more').click()
+            page.locator('#workspace-error').wait_for(state='hidden')
+            assert page.locator('#logs-table tbody tr').count() == 16, 'pagination recovery did not append rows'
+            assert page.locator('#workspace-error').inner_text() == ''
+            STATE['logs_status'] = 503
+            page.locator('button.nav[data-view="logs"]').click()
+            page.locator('#workspace-error').wait_for(state='visible')
+            assert page.locator('#logs-table tbody tr').count() == 0, 'failed refresh retained stale log rows'
+            if args.screenshots:
+                page.screenshot(path=str(args.screenshots / 'evidence-logs-network-failure.png'), full_page=True)
+            STATE['logs_status'] = 200
             STATE['summary_status'] = 503
             page.locator('button.nav[data-view="overview"]').click()
             page.wait_for_function("() => document.getElementById('stat-spend').textContent === '—'")
@@ -231,7 +329,7 @@ def main():
             assert page.locator('#team').is_hidden()
             assert not errors, errors
             browser.close()
-            print('Gateway browser QA passed: auth, exact spend/chart/key amounts, metadata preservation, filtering/search/keyboard, plaintext exclusion, Korean, themes, all views/mobile, read-only profile, disconnect.')
+            print('Gateway browser QA passed: A–H evidence views, partial HTTP200 warning, zero/unavailable/unpriced distinctions, English/Korean × light/dark × 390/768/1440 screenshots, auth, exact spend/chart/key amounts, metadata preservation, filtering/search/keyboard, plaintext exclusion, Korean, themes, all views/mobile, read-only profile, disconnect.')
     finally:
         server.shutdown()
         server.server_close()

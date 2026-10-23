@@ -54,10 +54,35 @@ func TestBillableModelOfDayOfExported(t *testing.T) {
 	if Billable(audit.Record{Event: "request_started"}) {
 		t.Fatal("Billable(started) = true, want false")
 	}
+	if Billable(audit.Record{Event: "request_completed"}) {
+		t.Fatal("Billable(costless completion) = true, want false")
+	}
 	if ModelOf(r) != "claude-sonnet-4-6" {
 		t.Fatalf("ModelOf = %q", ModelOf(r))
 	}
 	if DayOf("2026-06-29T10:00:00Z") != "2026-06-29" {
 		t.Fatalf("DayOf = %q", DayOf("2026-06-29T10:00:00Z"))
+	}
+}
+
+func TestCostlessCompletionUpdatesHealth(t *testing.T) {
+	ix, err := OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Close()
+	if err := ix.Ingest(audit.Record{Event: "request_started", ID: "started"}); err != nil {
+		t.Fatal(err)
+	}
+	h, err := ix.Health()
+	if err != nil || h.LastIngestTS != "" {
+		t.Fatalf("started freshness = %+v, %v", h, err)
+	}
+	if err := ix.Ingest(audit.Record{Event: "request_completed", ID: "costless"}); err != nil {
+		t.Fatal(err)
+	}
+	h, err = ix.Health()
+	if err != nil || h.LastIngestTS == "" {
+		t.Fatalf("costless completion freshness = %+v, %v", h, err)
 	}
 }

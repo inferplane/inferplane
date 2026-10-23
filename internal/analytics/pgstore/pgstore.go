@@ -43,7 +43,65 @@ CREATE TABLE IF NOT EXISTS rollup_day (
 ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS cache_read BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS cache_creation BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE events ADD COLUMN IF NOT EXISTS ts TEXT NOT NULL DEFAULT '';
-ALTER TABLE events ADD COLUMN IF NOT EXISTS body_ref TEXT NOT NULL DEFAULT '';`
+ALTER TABLE events ADD COLUMN IF NOT EXISTS body_ref TEXT NOT NULL DEFAULT '';
+ALTER TABLE events ADD COLUMN IF NOT EXISTS projection_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS has_cost BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS outcome_state TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE events ADD COLUMN IF NOT EXISTS cost_state TEXT NOT NULL DEFAULT 'legacy_unknown';
+ALTER TABLE events ADD COLUMN IF NOT EXISTS partial BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS error_code TEXT NOT NULL DEFAULT '';
+ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS completed BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS succeeded BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS failed BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS partial BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS unknown BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS estimated_requests BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS uncertain_requests BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS unpriced_requests BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS unavailable_requests BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS legacy_unknown_requests BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS estimated_cost_micros BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS uncertain_recorded_cost_micros BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE rollup_day ADD COLUMN IF NOT EXISTS legacy_projection_records BIGINT NOT NULL DEFAULT 0;`
+
+// The column and scan orders are shared by all rollup queries. Legacy totals
+// retain their cost-bearing denominator; operations count every completion.
+const operationColumns = `completed, succeeded, failed, partial, unknown,
+ estimated_requests, uncertain_requests, unpriced_requests, unavailable_requests,
+ legacy_unknown_requests, estimated_cost_micros, uncertain_recorded_cost_micros,
+ legacy_projection_records`
+
+const operationSums = `COALESCE(SUM(completed),0), COALESCE(SUM(succeeded),0),
+ COALESCE(SUM(failed),0), COALESCE(SUM(partial),0), COALESCE(SUM(unknown),0),
+ COALESCE(SUM(estimated_requests),0), COALESCE(SUM(uncertain_requests),0),
+ COALESCE(SUM(unpriced_requests),0), COALESCE(SUM(unavailable_requests),0),
+ COALESCE(SUM(legacy_unknown_requests),0), COALESCE(SUM(estimated_cost_micros),0),
+ COALESCE(SUM(uncertain_recorded_cost_micros),0), COALESCE(SUM(legacy_projection_records),0)`
+
+const rollupColumns = `day, team, model, input_tokens, output_tokens, cache_read,
+ cache_creation, cost_micros, request_count, ` + operationColumns
+
+const eventRollupSelect = `SELECT day, team, model,
+ COALESCE(SUM(input_tokens) FILTER (WHERE has_cost),0),
+ COALESCE(SUM(output_tokens) FILTER (WHERE has_cost),0),
+ COALESCE(SUM(cache_read) FILTER (WHERE has_cost),0),
+ COALESCE(SUM(cache_creation) FILTER (WHERE has_cost),0),
+ COALESCE(SUM(cost_micros) FILTER (WHERE has_cost),0), COUNT(*) FILTER (WHERE has_cost),
+ COUNT(*), COUNT(*) FILTER (WHERE outcome_state='succeeded'),
+ COUNT(*) FILTER (WHERE outcome_state='failed'), COUNT(*) FILTER (WHERE outcome_state='partial'),
+ COUNT(*) FILTER (WHERE outcome_state='unknown'), COUNT(*) FILTER (WHERE cost_state='estimated'),
+ COUNT(*) FILTER (WHERE cost_state='uncertain'), COUNT(*) FILTER (WHERE cost_state='unpriced'),
+ COUNT(*) FILTER (WHERE cost_state='unavailable'), COUNT(*) FILTER (WHERE cost_state='legacy_unknown'),
+ COALESCE(SUM(cost_micros) FILTER (WHERE cost_state='estimated'),0),
+ COALESCE(SUM(cost_micros) FILTER (WHERE cost_state IN ('uncertain','legacy_unknown')),0),
+ COUNT(*) FILTER (WHERE projection_version=0) FROM events`
+
+func operationDestinations(o *analytics.OperationTotals) []any {
+	return []any{&o.Completed, &o.Succeeded, &o.Failed, &o.Partial, &o.Unknown,
+		&o.EstimatedRequests, &o.UncertainRequests, &o.UnpricedRequests, &o.UnavailableRequests,
+		&o.LegacyUnknownRequests, &o.EstimatedCostMicros, &o.UncertainRecordedCostMicros,
+		&o.LegacyProjectionRecords}
+}
 
 // Store implements analytics.Store against a shared Postgres database.
 type Store struct {
@@ -153,8 +211,31 @@ func (s *Store) ensureSchema(ctx context.Context) (retErr error) {
 		return fmt.Errorf("begin analytics schema migration: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, schema); err != nil {
-		return fmt.Errorf("create analytics schema: %w", err)
+	// The marker shares the advisory lock and transaction with the first
+	// projection upgrade. Current schemas avoid both ALTER locks and a full
+	// retained-history rewrite; an explicit Rebuild remains independent.
+	if _, err := tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS analytics_schema_migrations (
+  version INTEGER PRIMARY KEY
+)`); err != nil {
+		return fmt.Errorf("create analytics migration markers: %w", err)
+	}
+	var projectionInstalled bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM analytics_schema_migrations WHERE version = 1)`).Scan(&projectionInstalled); err != nil {
+		return fmt.Errorf("read analytics projection migration marker: %w", err)
+	}
+	if !projectionInstalled {
+		if _, err := tx.Exec(ctx, schema); err != nil {
+			return fmt.Errorf("create analytics schema: %w", err)
+		}
+		// Old rows retain conservative version-0 defaults; only source replay
+		// can provide evidence. Failure rolls back columns, rollups and marker.
+		if _, err := tx.Exec(ctx, `DELETE FROM rollup_day; INSERT INTO rollup_day (`+
+			rollupColumns+`) `+eventRollupSelect+` GROUP BY day, team, model`); err != nil {
+			return fmt.Errorf("backfill analytics projection rollups: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO analytics_schema_migrations(version) VALUES (1)`); err != nil {
+			return fmt.Errorf("record analytics projection migration: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit analytics schema migration: %w", err)
@@ -169,22 +250,23 @@ func (s *Store) Summary(q analytics.SummaryQuery) (analytics.Summary, error) {
 
 	row := s.db.QueryRow(context.Background(), `SELECT COALESCE(SUM(request_count),0),
 		COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
-		COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_creation),0), COALESCE(SUM(cost_micros),0)
-		FROM rollup_day WHERE 1=1`+where, args...)
-	if err := row.Scan(&out.Totals.Requests, &out.Totals.InputTokens, &out.Totals.OutputTokens,
-		&out.Totals.CacheReadTokens, &out.Totals.CacheCreationTokens, &out.Totals.CostMicros); err != nil {
+		COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_creation),0), COALESCE(SUM(cost_micros),0), `+
+		operationSums+` FROM rollup_day WHERE 1=1`+where, args...)
+	destinations := append([]any{&out.Totals.Requests, &out.Totals.InputTokens, &out.Totals.OutputTokens,
+		&out.Totals.CacheReadTokens, &out.Totals.CacheCreationTokens, &out.Totals.CostMicros}, operationDestinations(&out.Totals.Operations)...)
+	if err := row.Scan(destinations...); err != nil {
 		return out, fmt.Errorf("query analytics summary totals: %w", err)
 	}
 
 	teamRows, err := s.db.Query(context.Background(), `SELECT team, COALESCE(SUM(request_count),0),
-		COALESCE(SUM(cost_micros),0) FROM rollup_day WHERE 1=1`+where+`
+		COALESCE(SUM(cost_micros),0), `+operationSums+` FROM rollup_day WHERE 1=1`+where+`
 		GROUP BY team ORDER BY SUM(cost_micros) DESC`, args...)
 	if err != nil {
 		return out, fmt.Errorf("query analytics summary teams: %w", err)
 	}
 	for teamRows.Next() {
 		var r analytics.TeamRow
-		if err := teamRows.Scan(&r.Team, &r.Requests, &r.CostMicros); err != nil {
+		if err := teamRows.Scan(append([]any{&r.Team, &r.Requests, &r.CostMicros}, operationDestinations(&r.Operations)...)...); err != nil {
 			teamRows.Close()
 			return out, fmt.Errorf("scan analytics summary team: %w", err)
 		}
@@ -197,7 +279,7 @@ func (s *Store) Summary(q analytics.SummaryQuery) (analytics.Summary, error) {
 	teamRows.Close()
 
 	modelRows, err := s.db.Query(context.Background(), `SELECT model, COALESCE(SUM(request_count),0),
-		COALESCE(SUM(cost_micros),0) FROM rollup_day WHERE 1=1`+where+`
+		COALESCE(SUM(cost_micros),0), `+operationSums+` FROM rollup_day WHERE 1=1`+where+`
 		GROUP BY model ORDER BY SUM(cost_micros) DESC`, args...)
 	if err != nil {
 		return out, fmt.Errorf("query analytics summary models: %w", err)
@@ -205,7 +287,7 @@ func (s *Store) Summary(q analytics.SummaryQuery) (analytics.Summary, error) {
 	defer modelRows.Close()
 	for modelRows.Next() {
 		var r analytics.ModelRow
-		if err := modelRows.Scan(&r.Model, &r.Requests, &r.CostMicros); err != nil {
+		if err := modelRows.Scan(append([]any{&r.Model, &r.Requests, &r.CostMicros}, operationDestinations(&r.Operations)...)...); err != nil {
 			return out, fmt.Errorf("scan analytics summary model: %w", err)
 		}
 		out.ByModel = append(out.ByModel, r)
@@ -226,8 +308,8 @@ func (s *Store) TimeSeries(q analytics.TimeSeriesQuery) ([]analytics.DayPoint, e
 		days = 366
 	}
 	rows, err := s.db.Query(context.Background(), `SELECT day, COALESCE(SUM(request_count),0),
-		COALESCE(SUM(cost_micros),0), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0)
-		FROM rollup_day
+		COALESCE(SUM(cost_micros),0), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), `+
+		operationSums+` FROM rollup_day
 		WHERE day >= to_char((current_date - ($1::int * interval '1 day')), 'YYYY-MM-DD')
 		GROUP BY day ORDER BY day DESC LIMIT $2`, days, days)
 	if err != nil {
@@ -237,7 +319,7 @@ func (s *Store) TimeSeries(q analytics.TimeSeriesQuery) ([]analytics.DayPoint, e
 	out := []analytics.DayPoint{}
 	for rows.Next() {
 		var p analytics.DayPoint
-		if err := rows.Scan(&p.Day, &p.Requests, &p.CostMicros, &p.InputTokens, &p.OutputTokens); err != nil {
+		if err := rows.Scan(append([]any{&p.Day, &p.Requests, &p.CostMicros, &p.InputTokens, &p.OutputTokens}, operationDestinations(&p.Operations)...)...); err != nil {
 			return nil, fmt.Errorf("scan analytics time series point: %w", err)
 		}
 		out = append(out, p)
@@ -290,7 +372,7 @@ func (s *Store) Recent(limit int, before string) ([]analytics.Event, error) {
 		limit = 200
 	}
 	ctx := context.Background()
-	query := `SELECT id, ts, team, model, provider, status, input_tokens, output_tokens, cost_micros, body_ref FROM events`
+	query := `SELECT id, ts, team, model, provider, status, input_tokens, output_tokens, cost_micros, body_ref, has_cost, outcome_state, cost_state, partial, error_code, projection_version FROM events`
 	args := []any{}
 	if before != "" {
 		query += ` WHERE id < $1`
@@ -308,7 +390,7 @@ func (s *Store) Recent(limit int, before string) ([]analytics.Event, error) {
 	for rows.Next() {
 		var e analytics.Event
 		if err := rows.Scan(&e.ID, &e.TS, &e.Team, &e.Model, &e.Provider, &e.Status,
-			&e.InputTokens, &e.OutputTokens, &e.CostMicros, &e.BodyRef); err != nil {
+			&e.InputTokens, &e.OutputTokens, &e.CostMicros, &e.BodyRef, &e.HasCost, &e.OutcomeState, &e.CostState, &e.Partial, &e.ErrorCode, &e.ProjectionVersion); err != nil {
 			return nil, fmt.Errorf("scan analytics recent event: %w", err)
 		}
 		out = append(out, e)
@@ -371,8 +453,19 @@ func (s *Store) ingestBatch(ctx context.Context, holder string, epoch int64, rec
 
 	touched := map[rollupKey]struct{}{}
 	for _, r := range records {
-		if !analytics.Billable(r) {
+		if !analytics.Observable(r) {
 			continue
+		}
+		// Read the old key within this fenced transaction, before the upsert.
+		// Corrections may move across all grouping dimensions, or remove cost.
+		var previous rollupKey
+		err := tx.QueryRow(ctx, `SELECT day, team, model FROM events WHERE id=$1 FOR UPDATE`, r.ID).
+			Scan(&previous.day, &previous.team, &previous.model)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("read previous analytics event %q: %w", r.ID, err)
+		}
+		if err == nil {
+			touched[previous] = struct{}{}
 		}
 		key := rollupKey{day: analytics.DayOf(r.TS), team: r.Principal.Team, model: analytics.ModelOf(r)}
 		if err := upsertEvent(ctx, tx, r, key); err != nil {
@@ -428,6 +521,9 @@ type rollupKey struct {
 	model string
 }
 
+// Mode B intentionally permits corrections to version-1 events. ingestBatch
+// fences the transaction by lease holder/epoch, recomputes affected rollups and
+// commits checkpoints with it; Mode A's first-write-wins guard would lose corrections.
 func upsertEvent(ctx context.Context, tx pgx.Tx, r audit.Record, key rollupKey) error {
 	var in, out, cacheRead, cacheCreate int64
 	if r.Usage != nil {
@@ -444,31 +540,35 @@ func upsertEvent(ctx context.Context, tx pgx.Tx, r audit.Record, key rollupKey) 
 	if r.BodyRef != nil {
 		bodyRef = *r.BodyRef
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO events(id,day,team,model,provider,status,input_tokens,output_tokens,cache_read,cache_creation,cost_micros,ts,body_ref)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+	evidence := analytics.EvidenceOf(r)
+	var cost int64
+	if r.Cost != nil {
+		cost = r.Cost.AmountUSDMicros
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO events(id,day,team,model,provider,status,input_tokens,output_tokens,cache_read,cache_creation,cost_micros,ts,body_ref,
+  has_cost,outcome_state,cost_state,partial,error_code,projection_version)
+  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,1)
 		ON CONFLICT(id) DO UPDATE SET
 			day=excluded.day, team=excluded.team, model=excluded.model, provider=excluded.provider,
 			status=excluded.status, input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,
 			cache_read=excluded.cache_read, cache_creation=excluded.cache_creation, cost_micros=excluded.cost_micros,
-			ts=excluded.ts, body_ref = COALESCE(NULLIF(excluded.body_ref, ''), events.body_ref)`,
-		r.ID, key.day, key.team, key.model, r.Request.Provider, status, in, out, cacheRead, cacheCreate, r.Cost.AmountUSDMicros, r.TS, bodyRef)
+			ts=excluded.ts, body_ref = COALESCE(NULLIF(excluded.body_ref, ''), events.body_ref),
+   has_cost=excluded.has_cost, outcome_state=excluded.outcome_state, cost_state=excluded.cost_state,
+   partial=excluded.partial, error_code=excluded.error_code, projection_version=excluded.projection_version`,
+		r.ID, key.day, key.team, key.model, r.Request.Provider, status, in, out, cacheRead, cacheCreate, cost, r.TS, bodyRef,
+		evidence.HasCost, evidence.OutcomeState, evidence.CostState, evidence.Partial, evidence.ErrorCode)
 	return err
 }
 
 func recomputeRollup(ctx context.Context, tx pgx.Tx, key rollupKey) error {
-	_, err := tx.Exec(ctx, `INSERT INTO rollup_day(day, team, model, input_tokens, output_tokens, cache_read, cache_creation, cost_micros, request_count)
-		SELECT day, team, model, COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
-			COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_creation),0),
-			COALESCE(SUM(cost_micros),0), COUNT(*)
-		FROM events
-		WHERE day=$1 AND team=$2 AND model=$3
-		GROUP BY day, team, model
-		ON CONFLICT(day, team, model) DO UPDATE SET
-			input_tokens=excluded.input_tokens,
-			output_tokens=excluded.output_tokens,
-			cache_read=excluded.cache_read,
-			cache_creation=excluded.cache_creation,
-			cost_micros=excluded.cost_micros,
-			request_count=excluded.request_count`, key.day, key.team, key.model)
+	// Delete and regenerate atomically. When a correction moves the last event,
+	// the empty former group disappears rather than leaving stale totals.
+	if _, err := tx.Exec(ctx, `DELETE FROM rollup_day WHERE day=$1 AND team=$2 AND model=$3`,
+		key.day, key.team, key.model); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO rollup_day (`+rollupColumns+`) `+
+		eventRollupSelect+` WHERE day=$1 AND team=$2 AND model=$3 GROUP BY day, team, model`,
+		key.day, key.team, key.model)
 	return err
 }

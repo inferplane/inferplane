@@ -94,6 +94,15 @@ No failed request is replayed merely because it carries a recovery code.
 This applies before an SSE response is committed and to non-streaming HTTP
 failures; committed-stream interruption semantics are unchanged.
 
+For coded HTTP failures, `error.type` is `invalid_request_error` for the two
+allowlisted recovery codes. ADR-053 adds bounded gateway stream-failure codes
+such as `upstream_timeout`, `stream_incomplete`, `response_incompatible` and
+`usage_missing` when a failure occurs before SSE headers are committed. These
+retain the existing gateway `error.type="upstream_error"`; previously the same
+gateway failure path omitted `error.code`. Clients can use the new code for
+more specific diagnostics without treating the gateway failure as an invalid
+request. A failure code alone does not authorize replay.
+
 Responses now has a governed POST `/v1/responses` endpoint (ADR-044). Upgrade binaries/CRD before new-rule activation;
 CP privacy before first sync requires `require_sync`.
 
@@ -145,3 +154,25 @@ and `tokenQuota` day/month rules require this profile. `GET /v1/usage` returns
 `enforcement_mode: shared` and subject-scoped `shared_limits`. Key CLI commands
 accept `--config`; `keys import --sqlite ... --config ...` preserves raw identities
 and revocation tombstones. See [shared governance](../shared-governance.md).
+
+## Analytics evidence (ADR-053)
+
+`internal/server/analyticsapi/` serves full-admin summary, timeseries, logs,
+health and the existing Mode-B rebuild route. `internal/analytics/evidence.go`
+is the shared classifier for SQLite and PostgreSQL projections. Summary
+`Totals`, team/model rows and day points add `operations`; events add
+`has_cost`, `outcome_state`, `cost_state`, `partial`, bounded `error_code`
+and `projection_version`. No route, method or authorization tier changes.
+
+`operations.completed` counts observed `request_completed` records, including
+Cost=nil. Legacy requests/tokens/amounts still include only Cost-present records.
+The four outcome states and five cost states are exclusive within each class;
+transport success is independent of cost evidence. The API's integer estimates
+are not invoices, task-quality measures or admission credit.
+
+Read the [field contract and additive examples](../api-reference.md#analytics-outcome-and-cost-evidence-adr-053),
+[operational denominator](../operations/observability.md#read-outcome-and-cost-evidence)
+and [source recovery](../operations/recovery.md#recover-analytics-evidence).
+Mode-B migration/backfill is transactional; it does not replay source records
+skipped beyond old checkpoints. A zero legacy-projection count does not attest
+complete history. Neither profile's analytics changes financial authority.
