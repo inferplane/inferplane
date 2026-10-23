@@ -1354,6 +1354,7 @@ async function refreshLogsView() {
   await loadLogsPage(null, true);
 }
 
+// Rejects on API failure; callers own error display and any finally cleanup.
 async function loadLogsPage(before, reset) {
   const tbody = $("logs-table").querySelector("tbody");
   if (reset) tbody.replaceChildren();

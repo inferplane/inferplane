@@ -521,6 +521,9 @@ type rollupKey struct {
 	model string
 }
 
+// Mode B intentionally permits corrections to version-1 events. ingestBatch
+// fences the transaction by lease holder/epoch, recomputes affected rollups and
+// commits checkpoints with it; Mode A's first-write-wins guard would lose corrections.
 func upsertEvent(ctx context.Context, tx pgx.Tx, r audit.Record, key rollupKey) error {
 	var in, out, cacheRead, cacheCreate int64
 	if r.Usage != nil {

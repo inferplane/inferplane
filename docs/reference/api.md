@@ -94,6 +94,15 @@ No failed request is replayed merely because it carries a recovery code.
 This applies before an SSE response is committed and to non-streaming HTTP
 failures; committed-stream interruption semantics are unchanged.
 
+For coded HTTP failures, `error.type` is `invalid_request_error` for the two
+allowlisted recovery codes. ADR-053 adds bounded gateway stream-failure codes
+such as `upstream_timeout`, `stream_incomplete`, `response_incompatible` and
+`usage_missing` when a failure occurs before SSE headers are committed. These
+retain the existing gateway `error.type="upstream_error"`; previously the same
+gateway failure path omitted `error.code`. Clients can use the new code for
+more specific diagnostics without treating the gateway failure as an invalid
+request. A failure code alone does not authorize replay.
+
 Responses now has a governed POST `/v1/responses` endpoint (ADR-044). Upgrade binaries/CRD before new-rule activation;
 CP privacy before first sync requires `require_sync`.
 
