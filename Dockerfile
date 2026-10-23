@@ -1,5 +1,5 @@
 # Build a static single binary, run on a minimal distroless base.
-FROM golang:1.26.9 AS build
+FROM golang:1.26.10 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

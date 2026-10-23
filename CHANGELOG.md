@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **Go 1.26.10 toolchain.** Raise the minimum Go version and both Docker builders to include the `crypto/x509` certificate-distrust fix reported by CI as GO-2026-6809.
 - **Native Responses routes forwarded stored-state references to the shared upstream credential.** `POST /v1/responses` passed `previous_response_id`, `conversation` and `item_reference` input items straight to `openai_responses` / `bedrock_responses` targets, which resolve them under the gateway's single upstream identity. A caller who learned another user's response, conversation or item ID could continue that user's provider-held conversation; the bridge already refused these fields, and teams with a privacy rule failed closed only because the request was uninspectable. Every Responses target now refuses them with 400 `stored_reference_unsupported` before routing, without echoing the ID. `store` and `background` are unchanged: no retrieval endpoint is mounted, so stored responses are unreachable through the gateway. Clients that relied on server-side state must resend the full input; per-user ownership binding is planned separately (Bedrock native parity plan, PR-12).
 
 ### Added

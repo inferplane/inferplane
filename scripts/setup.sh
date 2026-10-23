@@ -8,7 +8,7 @@ echo "=== inferplane Setup ==="
 
 # Check prerequisites
 command -v git >/dev/null 2>&1 || { echo "ERROR: git is required"; exit 1; }
-command -v go  >/dev/null 2>&1 || { echo "ERROR: Go 1.26.9+ is required"; exit 1; }
+command -v go  >/dev/null 2>&1 || { echo "ERROR: Go 1.26.10+ is required"; exit 1; }
 
 # Fetch Go dependencies
 echo "Downloading Go modules..."
