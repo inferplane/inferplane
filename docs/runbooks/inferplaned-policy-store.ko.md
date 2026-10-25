@@ -1,6 +1,6 @@
 ---
 translation_source: runbooks/inferplaned-policy-store.md
-translation_source_sha256: 671775cf70c2d1bbbfc703e9ef16e251d9d1384eaf8fd93b3d1ff571e64da062
+translation_source_sha256: 9530fe49928266d649006f8c307ec29684495cdec4eafb9744d4c819bb1cbf09
 ---
 
 # ECS에서 영속 예산 설정 활성화 {#enable-persisted-budget-settings-on-ecs}
@@ -77,7 +77,7 @@ cfn-lint --regions ap-northeast-2 -t deploy/ecs/policy-store.yaml
 시작된 뒤에는 authoritative DSN과 문서를 유지해야 합니다.
 이미지 파일로 돌아가면 설정한 제한을 완화하거나 잃을 수 있습니다.
 
-## 정책 백업과 복원
+## 정책 백업과 복원 {#back-up-and-restore-policies}
 
 policy store에는 GovernancePolicy 문서만 저장됩니다. 정책 내보내기에는 예산 authority 잔액, 사용량 텔레메트리, identity 설정이 포함되지 않으며, 가져오기도 이것들을 복원하지 않습니다. 잔액을 복원하면 중앙 authority를 다시 쓰는 셈이 되기 때문입니다. 데이터베이스 자체는 위에서 설명한 RDS/pg_dump 백업을 계속 사용하세요.
 

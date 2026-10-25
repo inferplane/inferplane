@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: efcdd381c6f285410fbf5c1f453b7b4fb3eae64a87d08cf19fe89512fba3bb9d
+translation_source_sha256: 768076cbb8c5952326a331080c46c453cc507ac9fb9fa2a81d9ab35611771c1f
 ---
 
 # API 구현 {#api}
