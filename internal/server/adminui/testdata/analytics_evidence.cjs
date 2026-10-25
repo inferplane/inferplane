@@ -45,7 +45,7 @@ const context = vm.createContext({
     return { ok: true, status: 200, text: async () => JSON.stringify(body) };
   },
 });
-for (const name of ["i18n.js", "app.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "../static/", name), "utf8"), context);
+for (const name of ["i18n.js", "app.js", "evaluation.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "../static/", name), "utf8"), context);
 const run = code => vm.runInContext(code, context);
 const text = id => get(id).textContent;
 async function usagePeriodRegression() {

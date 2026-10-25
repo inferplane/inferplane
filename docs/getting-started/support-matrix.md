@@ -5,6 +5,8 @@ This is an implementation inventory, not an SLA. “Implemented” means reposit
 | Capability | Status | Scope / remaining qualification |
 | --- | --- | --- |
 | Messages, Chat Completions, Responses and Bedrock ingress | Implemented | Provider and capability combinations vary |
+| Native Bedrock Converse and ConverseStream | Implemented | Eligible Runtime targets; [native API and policy limits](../bedrock-converse-evaluation.md) |
+| Administrator model comparison | Implemented | Governed text requests, E2E and usage/cost evidence; [measured results](../performance/index.md) |
 | Virtual keys, model allow-lists, team restrictions | Implemented | Protect issuance/admin paths and store access |
 | Verified human/service identity | Opt-in | Required activation needs trusted historical bindings and rollout validation |
 | Durable global policy money | Opt-in · ADR-045/046 | Conservative reservations; unknown usage retains liability |

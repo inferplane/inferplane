@@ -24,3 +24,18 @@ func TestCacheQuantityDoesNotProveMonetaryRefund(t *testing.T) {
 		}
 	}
 }
+
+func TestConverseVendorFieldsCannotMultiplyGovernedGenerations(t *testing.T) {
+	for _, raw := range []string{
+		`{"messages":[],"additionalModelRequestFields":{"n":2}}`,
+		`{"messages":[],"additionalModelRequestFields":{"num_generations":2}}`,
+		`{"messages":[],"additionalModelRequestFields":{"n":null}}`,
+	} {
+		if singleGeneration([]byte(raw)) == nil {
+			t.Fatalf("multiple or unknown generation count admitted: %s", raw)
+		}
+	}
+	if err := singleGeneration([]byte(`{"messages":[{"content":[{"toolUse":{"input":{"n":20}}}]}],"additionalModelRequestFields":{"n":1}}`)); err != nil {
+		t.Fatal("tool arguments incorrectly interpreted as generation controls")
+	}
+}

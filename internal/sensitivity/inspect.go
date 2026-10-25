@@ -60,6 +60,9 @@ const (
 )
 
 func (inspector) Inspect(ctx context.Context, protocol string, raw []byte) (Result, error) {
+	if protocol == "bedrock-converse" {
+		protocol = "bedrock"
+	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}

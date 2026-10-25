@@ -19,9 +19,19 @@ func exceptionName(status int) string {
 		return "ModelTimeoutException"
 	case http.StatusTooManyRequests:
 		return "ThrottlingException"
+	case http.StatusServiceUnavailable:
+		return "ServiceUnavailableException"
+	case http.StatusRequestEntityTooLarge:
+		return "ValidationException"
 	default:
 		return "InternalServerException"
 	}
+}
+
+// WriteError lets outer authentication/readiness/body-limit gates use the same
+// AWS error envelope as the Bedrock operation handlers.
+func WriteError(w http.ResponseWriter, status int, message string) {
+	writeErr(w, status, message)
 }
 
 func writeErr(w http.ResponseWriter, status int, msg string) {

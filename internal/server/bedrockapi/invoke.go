@@ -1,4 +1,4 @@
-// Package bedrockapi implements the AWS Bedrock InvokeModel ingress.
+// Package bedrockapi implements Bedrock-shaped InvokeModel and native Converse ingresses.
 package bedrockapi
 
 import (
@@ -23,6 +23,7 @@ import (
 	"github.com/inferplane/inferplane/internal/pricing"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
+	"github.com/inferplane/inferplane/internal/sensitivity"
 	"github.com/inferplane/inferplane/internal/server/requestpolicy"
 	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/internal/tracing"
@@ -48,6 +49,43 @@ type InvokeHandler struct {
 	bodies     *bodystore.Recorder
 	usage      *telemetry.Collector // nil-safe: usage telemetry off when nil (control-plane mode)
 	streaming  bool
+	converse   bool
+}
+
+// NewConverseHandlerMetrics shares the Invoke ingress's auth-independent
+// routing, policy, admission and per-attempt settlement pipeline.
+func NewConverseHandlerMetrics(r *router.Router, holder *live.Holder, aud *audit.Writer, gov *governance.Governor, m *metrics.Metrics, streaming bool) *InvokeHandler {
+	h := NewInvokeHandlerMetrics(r, holder, aud, gov, m, streaming)
+	h.converse = true
+	return h
+}
+
+func (h *InvokeHandler) protocol() string {
+	if h.converse {
+		return "bedrock-converse"
+	}
+	return "bedrock"
+}
+
+func (h *InvokeHandler) serves(ct router.ChainTarget) bool {
+	if !h.converse {
+		return servesBedrockIngress(ct.Provider.Name())
+	}
+	native, ok := ct.Provider.(interface{ SupportsBedrockConverse(string) bool })
+	return ok && native.SupportsBedrockConverse(ct.Upstream)
+}
+
+func (h *InvokeHandler) servable(model string) bool {
+	chain, _, err := h.r.ResolveChain(model)
+	if err != nil {
+		return false
+	}
+	for _, ct := range chain {
+		if h.serves(ct) {
+			return true
+		}
+	}
+	return false
 }
 
 func NewInvokeHandler(r *router.Router, holder *live.Holder, streaming bool) *InvokeHandler {
@@ -78,6 +116,20 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "could not read request body")
 		return
+	}
+	if h.converse {
+		var object map[string]json.RawMessage
+		if json.Unmarshal(raw, &object) != nil || object == nil {
+			writeErr(w, http.StatusBadRequest, "invalid Converse request object")
+			return
+		}
+		// Reject ambiguous/malformed structures before financial admission.
+		// Incomplete inspection alone does NOT reject a native request; privacy
+		// rules below remain responsible for its opaque-content disposition.
+		if _, err := sensitivity.NewInspector().Inspect(req.Context(), "bedrock", raw); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid Converse request structure")
+			return
+		}
 	}
 
 	// Parsed is observation-only. Bedrock requests are always forwarded from
@@ -124,7 +176,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		// turn a served request into a 404 below the moment the budget tier
 		// activates. An unservable target means the substitution is ignored,
 		// not the request denied.
-		if servableOnBedrockIngress(h.r, served) {
+		if h.servable(served) {
 			h.metrics.ObserveModelSubstitution(p.Team, model, served)
 			req = req.WithContext(audit.WithSubstitutedFrom(req.Context(), model))
 			model = served
@@ -155,7 +207,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	chain = router.FilterModelAllowed(chain, func(m string) bool { return h.r.Allows(p, m) })
 	filtered := make([]router.ChainTarget, 0, len(chain))
 	for _, ct := range chain {
-		if servesBedrockIngress(ct.Provider.Name()) {
+		if h.serves(ct) {
 			filtered = append(filtered, ct)
 		}
 	}
@@ -172,10 +224,11 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		chain = router.FilterRegions(chain, teamRec.AllowedRegions)
 	}
 	result, routeErr := h.r.RouteRequest(req.Context(), router.RequestRoutingInput{
-		Principal: p, Protocol: "bedrock", RawBody: raw, RequestedModel: requestedModel,
+		Principal: p, Protocol: h.protocol(), RawBody: raw, RequestedModel: requestedModel,
 		Model: model, Chain: chain, State: st, AllowedRegions: teamRec.AllowedRegions,
 		SessionHint: requestpolicy.SessionHint(req),
 		Redactor:    requestpolicy.CombinedRedactor(h.mask, p.Team),
+		Compatible:  h.serves,
 	})
 	req = requestpolicy.Observe(w, req, result, h.metrics)
 	if routeErr != nil {
@@ -217,6 +270,16 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	piiMasked := result.Decision.Masked
 	if h.mask.Enabled(p.Team) {
 		masked, n, err := maskBody(raw, h.mask.Filter)
+		if h.converse {
+			// Native Converse includes tool, reasoning and opaque blocks that
+			// the legacy text-only masker cannot prove safe. Use the complete
+			// redactor with independent reinspection and fail closed.
+			masked, err = requestpolicy.CombinedRedactor(h.mask, p.Team).Redact(req.Context(), "bedrock", raw)
+			n = 0
+			if err == nil && !bytes.Equal(masked, raw) {
+				n = 1
+			}
+		}
 		if err != nil {
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
@@ -292,7 +355,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		pr := &providers.ProxyRequest{
 			Model: ct.Model, Upstream: ct.Upstream, Parsed: &parsed,
 			RawBody: raw, Headers: upHeaders, Stream: h.streaming,
-			IngressProtocol:  "bedrock",
+			IngressProtocol:  h.protocol(),
 			GuardrailID:      teamRec.GuardrailID,
 			GuardrailVersion: teamRec.GuardrailVersion,
 		}
@@ -353,7 +416,7 @@ func isModelNotFound(statusCode int, body []byte) bool {
 func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
-		if !last {
+		if !last && h.retryError(err, crossModelNext) {
 			return true
 		}
 		var ue *providers.UpstreamError
@@ -435,7 +498,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
-		if !last {
+		if !last && h.retryError(err, crossModelNext) {
 			return true
 		}
 		var ue *providers.UpstreamError
@@ -501,7 +564,32 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		if err != nil {
 			return partialFinish()
 		}
-		if ev == nil || ev.Chunk == nil {
+		if ev == nil {
+			continue
+		}
+		if h.converse {
+			if len(ev.Raw) == 0 {
+				return partialFinish()
+			}
+			if _, err := w.Write(ev.Raw); err != nil {
+				return partialFinish()
+			}
+			flusher.Flush()
+			if ev.Chunk == nil {
+				continue
+			}
+			if ttft == 0 && ev.Chunk.Type == "content_block_delta" {
+				ttft = time.Since(start).Seconds()
+			}
+			streamCompleted = streamCompleted || ev.Chunk.Type == "message_stop"
+			streamFailed = streamFailed || ev.Chunk.Type == "error"
+			lastUsage = schema.MergeUsage(lastUsage, ev.Chunk.Usage)
+			if lastUsage != nil {
+				usage = usageRef(lastUsage)
+			}
+			continue
+		}
+		if ev.Chunk == nil {
 			continue
 		}
 		chunkJSON, err := json.Marshal(ev.Chunk)
@@ -530,6 +618,9 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		if lastUsage != nil {
 			usage = usageRef(lastUsage)
 		}
+	}
+	if h.converse && (!streamCompleted || streamFailed || lastUsage == nil) {
+		return partialFinish()
 	}
 
 	cost := h.settle(p, providerName, model, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
@@ -639,7 +730,7 @@ func (h *InvokeHandler) audit(ctx context.Context, p keystore.Principal, model, 
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Principal:     requestpolicy.AuditPrincipal(p),
 		Request: audit.RequestRef{
-			Ingress: "bedrock", ModelRequested: model, ModelResolved: upstream,
+			Ingress: h.protocol(), ModelRequested: model, ModelResolved: upstream,
 			Stream: h.streaming, PIIMasked: piiMasked, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), Routing: audit.RoutingFrom(ctx),
 		},
 		Outcome: outcome,
@@ -661,7 +752,7 @@ func (h *InvokeHandler) auditCompleted(ctx context.Context, id string, p keystor
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Principal:     requestpolicy.AuditPrincipal(p),
 		Request: audit.RequestRef{
-			Ingress: "bedrock", ModelRequested: model, ModelResolved: upstream, Stream: h.streaming,
+			Ingress: h.protocol(), ModelRequested: model, ModelResolved: upstream, Stream: h.streaming,
 			ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), Routing: audit.RoutingFrom(ctx),
 		},
 		Outcome: &audit.OutcomeRef{Status: status},
@@ -696,7 +787,7 @@ func (h *InvokeHandler) auditCompletedPartial(ctx context.Context, p keystore.Pr
 		ID:            ulid.New(),
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Principal:     requestpolicy.AuditPrincipal(p),
-		Request:       audit.RequestRef{Ingress: "bedrock", ModelRequested: model, ModelResolved: upstream, Stream: h.streaming, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), Routing: audit.RoutingFrom(ctx)},
+		Request:       audit.RequestRef{Ingress: h.protocol(), ModelRequested: model, ModelResolved: upstream, Stream: h.streaming, ModelSubstitutedFrom: audit.SubstitutedFrom(ctx), Routing: audit.RoutingFrom(ctx)},
 		Outcome:       &audit.OutcomeRef{Status: 200, Partial: true},
 		Usage:         usage,
 		Cost:          cost,

@@ -5,7 +5,7 @@ description: Measured inferplane latency, throughput, cache cost and native Conv
 
 # Performance results
 
-**As of October 21, 2026.** This page presents the latest saved measurements. Native Converse/UI results below belong to an unmerged development implementation; they do not describe functionality available in the published main branch. Gateway and broad model measurements are from October 19; native Converse and administrator UI measurements are from October 20. Repeated calls, CLI compatibility and automatic-compaction validation were added on October 20–21. These are bounded observations, not a production SLA.
+**As of October 21, 2026.** This page presents the latest saved measurements. Native Converse/UI results below were measured on the pre-merge development build of the implementation that main now includes; re-measure before treating them as current main behavior. Gateway and broad model measurements are from October 19; native Converse and administrator UI measurements are from October 20. Repeated calls, CLI compatibility and automatic-compaction validation were added on October 20–21. These are bounded observations, not a production SLA.
 
 <div class="grid cards" markdown>
 
@@ -23,7 +23,7 @@ description: Measured inferplane latency, throughput, cache cost and native Conv
 
 -   **4/4 native Converse requests completed**
 
-    Haiku 4.5 and Qwen3 32B on the development build, each through its administrator UI and a streaming SDK client. One request per model/API.
+    Haiku 4.5 and Qwen3 32B on the pre-merge development build, each through its administrator UI and a streaming SDK client. One request per model/API.
 
 </div>
 
@@ -83,7 +83,7 @@ For context-sized request costs and generation latency, see the [model tables](m
 
 ## Native Converse and administrator UI
 
-The evaluated **development build** accepted `/model/{configured-model}/converse` and `/converse-stream` for eligible Bedrock Runtime targets. Its **Model comparison** administrator page executed paired requests through virtual-key admission and settlement. This implementation is not merged into main; publishing these measurements does not enable those endpoints or that UI. The [API reference](../api-reference.md) describes the published implementation.
+The evaluated pre-merge **development build** accepted `/model/{configured-model}/converse` and `/converse-stream` for eligible Bedrock Runtime targets. Its **Model comparison** administrator page executed paired requests through virtual-key admission and settlement. Main now includes this implementation; publishing these measurements does not enable those endpoints or that UI in an existing deployment. See the [usage guide](../bedrock-converse-evaluation.md) and the [API reference](../api-reference.md) for the current contract.
 
 <!-- performance:native -->
 | Model | API | Completed/calls | E2E (s) | TTFT (s) | Request cost |
