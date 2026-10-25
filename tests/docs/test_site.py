@@ -102,6 +102,8 @@ class DocumentationTests(unittest.TestCase):
             docs = Path(temp)
             (docs / "decisions").mkdir()
             (docs / "decisions/ADR-001.md").write_text("# Original record\n")
+            (docs / "benchmarks").mkdir()
+            (docs / "benchmarks/archived.md").write_text("# Historical evidence\n")
             self.assertEqual(translations.check_translations(docs), ([], 0))
             original = "# Guide\n\n````bash\nmayu serve\n````\n"
             (docs / "guide.md").write_text(original, encoding="utf-8")

@@ -1,11 +1,15 @@
 ---
 translation_source: reference/pricing.md
-translation_source_sha256: 66f7cf338c51925ad7e94c2625a8847923d40c9ba28e3e88f799d5f9576f380c
+translation_source_sha256: efed14a8e315bd487396276dbaa359aef73e167c3f46736c565bb1ef9c1d7c8a
 ---
 
 # 응답 단위 컨텍스트 요금
 
 mayu는 설치된 토폴로지의 가격 스냅샷으로 공급자 시도마다 정수 microUSD를 정산합니다. Codex reported_cost를 요구하거나 만들지 않습니다. 설정 단가 추정이며 세금·개별 할인·호스팅 도구 요금·미설정 서비스 구간은 포함하지 않습니다.
+
+관측한 캐시 비용은 [성능 결과](../performance/index.md#observed-prompt-cache-cost),
+컨텍스트 크기에 따른 요청 비용은 [모델별 성능](../performance/models.md)에서
+확인하세요. 측정 당시 기록된 가격을 기준으로 합니다.
 
 ## 설정
 

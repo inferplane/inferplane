@@ -1,9 +1,13 @@
 ---
 translation_source: reference/context-window-validation.md
-translation_source_sha256: 9b9f1992de87b5db6e2227906e080e6ea8b0abbac93426bcd55be058306d449c
+translation_source_sha256: fb4febc542898e527cb81a873fddaf068e103bc3a994a2a2ccc4d97a4a944e5e
 ---
 
 # 컨텍스트 윈도우 실호출 검증, 2026-10-02
+
+최신 모델별 용량·지연·비용 실측은 [모델별 성능](../performance/models.md)에서
+확인하세요. 이 문서는 10월 2일 클라이언트 프로파일 검증과 해당 설정의
+한계를 보존합니다.
 
 공개 모델마다 하나의 설정된 타깃을 가진 로컬 mayu 게이트웨이에 인증된 합성 텍스트 요청을 보냈습니다. 임의 도구·이력, 모델 품질, 다른 배포·리전 또는 정확한 최대값을 검증한 것은 아닙니다. [기계 판독 증거](../validation/context-window-probes-2026-10-02.json)에는 프롬프트·가상 키·계정·세션 식별자를 기록하지 않습니다.
 
