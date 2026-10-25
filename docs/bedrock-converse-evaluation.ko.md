@@ -1,6 +1,6 @@
 ---
 translation_source: bedrock-converse-evaluation.md
-translation_source_sha256: dd070960de8dc9023186bc27956e966429045a38ec8f188d93bc0dcdbf558480
+translation_source_sha256: ff351f20f6cbdd4568d2361da440fa8402e07214a0e8ed46f6d8ba914e8bc413
 ---
 
 # 네이티브 Converse와 관리자 비교 {#native-converse-and-administrator-comparison}
@@ -19,7 +19,10 @@ resolver가 선택합니다. 네이티브 요청은 리디렉션을 따르거나
 
 JSON과 네이티브 eventstream 프레임 바이트를 보존합니다. 필수 가드레일 삽입과
 검증된 개인정보 마스킹은 정책상 예외입니다. 잘못되거나 충돌하는 가드레일,
-지원하지 않는 가격 변경 옵션과 모호한 구조는 거절합니다. 스트림에는
+지원하지 않는 가격 변경 옵션과 모호한 구조는 거절합니다. 클라이언트가
+`guardrailConfig`를 다시 지정하려면 필수 `guardrailIdentifier`와
+`guardrailVersion`만 포함해야 합니다. Bedrock은 멤버 이름의 대소문자를 구분하므로
+`guardrailConfig`·`serviceTier`·`performanceConfig`의 대소문자 변형도 거절합니다. 스트림에는
 messageStop과 유효한 후속 사용량이 있어야 합니다. 중단 시 AWS 예외를 보내고
 회계 불확실성을 유지합니다. 모든 업스트림 모델에서 모든 네이티브 필드를
 지원한다는 의미는 아닙니다.

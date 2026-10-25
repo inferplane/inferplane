@@ -255,9 +255,18 @@ func (p *provider) prepareNativeConverse(req *providers.ProxyRequest) (*provider
 	if !p.SupportsBedrockConverse(req.Upstream) {
 		return nil, synthError(400, "native Converse requires a Bedrock Runtime target")
 	}
-	var body map[string]json.RawMessage
-	if json.Unmarshal(req.RawBody, &body) != nil || body == nil {
+	body, ok := uniqueMembers(req.RawBody)
+	if !ok {
 		return nil, synthError(400, "invalid Converse request object")
+	}
+	// Bedrock treats a case variant as a different member; a case-folding
+	// parser would not. Refuse rather than guess which one applies.
+	for name := range body {
+		for _, guarded := range []string{"guardrailConfig", "serviceTier", "performanceConfig"} {
+			if name != guarded && strings.EqualFold(name, guarded) {
+				return nil, synthError(400, "ambiguous Converse policy field")
+			}
+		}
 	}
 	// The current price table is keyed by provider/model, not service tier.
 	// An unpriced priority/optimized request could invalidate hard money
@@ -266,8 +275,8 @@ func (p *provider) prepareNativeConverse(req *providers.ProxyRequest) (*provider
 		{"serviceTier", "type", "default"}, {"performanceConfig", "latency", "standard"},
 	} {
 		if raw, exists := body[modifier.field]; exists {
-			var value map[string]string
-			if json.Unmarshal(raw, &value) != nil || value[modifier.key] != modifier.supported {
+			value, ok := exactStringMembers(raw, modifier.key)
+			if !ok || value[modifier.key] != modifier.supported {
 				return nil, synthError(400, "native Converse requires the default service tier and standard latency pricing")
 			}
 		}
@@ -280,11 +289,11 @@ func (p *provider) prepareNativeConverse(req *providers.ProxyRequest) (*provider
 		g.Version = "DRAFT"
 	}
 	if value, exists := body["guardrailConfig"]; exists {
-		var supplied struct {
-			ID      string `json:"guardrailIdentifier"`
-			Version string `json:"guardrailVersion"`
-		}
-		if json.Unmarshal(value, &supplied) != nil || supplied.ID != g.ID || supplied.Version != g.Version {
+		// Only the exact required pair may be restated. Extra members such
+		// as streamProcessingMode or trace would change how the mandatory
+		// guardrail runs, so they conflict too.
+		supplied, ok := exactStringMembers(value, "guardrailIdentifier", "guardrailVersion")
+		if !ok || supplied["guardrailIdentifier"] != g.ID || supplied["guardrailVersion"] != g.Version {
 			return nil, synthError(400, "Converse guardrail conflicts with the required guardrail")
 		}
 		return req, nil
@@ -303,4 +312,57 @@ func (p *provider) prepareNativeConverse(req *providers.ProxyRequest) (*provider
 	copy := *req
 	copy.RawBody = raw
 	return &copy, nil
+}
+
+// uniqueMembers decodes one JSON object level, refusing duplicate names and
+// trailing data. Policy fields are checked by exact name because Bedrock
+// matches member names case-sensitively, whereas encoding/json keeps the
+// last duplicate and its struct decoding folds case.
+func uniqueMembers(raw []byte) (map[string]json.RawMessage, bool) {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	if t, err := d.Token(); err != nil || t != json.Delim('{') {
+		return nil, false
+	}
+	members := map[string]json.RawMessage{}
+	for d.More() {
+		t, err := d.Token()
+		name, ok := t.(string)
+		if err != nil || !ok {
+			return nil, false
+		}
+		if _, duplicate := members[name]; duplicate {
+			return nil, false
+		}
+		var value json.RawMessage
+		if d.Decode(&value) != nil {
+			return nil, false
+		}
+		members[name] = value
+	}
+	if t, err := d.Token(); err != nil || t != json.Delim('}') {
+		return nil, false
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return nil, false
+	}
+	return members, true
+}
+
+// exactStringMembers requires an object with exactly the named members, each
+// a JSON string.
+func exactStringMembers(raw json.RawMessage, names ...string) (map[string]string, bool) {
+	members, ok := uniqueMembers(raw)
+	if !ok || len(members) != len(names) {
+		return nil, false
+	}
+	values := make(map[string]string, len(names))
+	for _, name := range names {
+		member := bytes.TrimSpace(members[name])
+		var value string
+		if len(member) == 0 || member[0] != '"' || json.Unmarshal(member, &value) != nil {
+			return nil, false
+		}
+		values[name] = value
+	}
+	return values, true
 }

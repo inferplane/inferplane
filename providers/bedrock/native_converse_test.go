@@ -271,3 +271,65 @@ func TestNativeConverseRefusesUnpricedTierModifiers(t *testing.T) {
 		t.Fatal("tier validation ran after egress")
 	}
 }
+
+// Bedrock parses member names case-sensitively, while encoding/json struct
+// decoding folds case and keeps the last match. Ambiguous or extended policy
+// fields must therefore be refused instead of validated through a struct.
+func TestNativeConverseRefusesAmbiguousGuardrailConfig(t *testing.T) {
+	calls := 0
+	n := nativeFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		io.WriteString(w, `{"usage":{"inputTokens":1,"outputTokens":1}}`)
+	})
+	p := &provider{native: n, defaultGuardrail: Guardrail{ID: "required", Version: "1"}}
+	for _, body := range []string{
+		`{"messages":[],"guardrailConfig":{"guardrailIdentifier":"other","GUARDRAILIDENTIFIER":"required","guardrailVersion":"1"}}`,
+		`{"messages":[],"guardrailConfig":{"GuardrailIdentifier":"required","guardrailVersion":"1"}}`,
+		`{"messages":[],"guardrailConfig":{"guardrailIdentifier":"required","guardrailVersion":"1","streamProcessingMode":"async"}}`,
+		`{"messages":[],"GuardrailConfig":{"guardrailIdentifier":"other","guardrailVersion":"1"}}`,
+	} {
+		if _, err := p.Complete(context.Background(), &providers.ProxyRequest{
+			IngressProtocol: "bedrock-converse", Upstream: "model", RawBody: []byte(body),
+		}); err == nil {
+			t.Errorf("ambiguous guardrail accepted: %s", body)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("ambiguous guardrail reached egress %d times", calls)
+	}
+	exact := []byte(`{"messages":[],"guardrailConfig":{"guardrailIdentifier":"required","guardrailVersion":"1"}}`)
+	req := &providers.ProxyRequest{IngressProtocol: "bedrock-converse", Upstream: "model", RawBody: exact}
+	if _, err := p.Complete(context.Background(), req); err != nil || calls != 1 || !bytes.Equal(req.RawBody, exact) {
+		t.Fatalf("exact required guardrail refused or rewritten: err=%v calls=%d", err, calls)
+	}
+}
+
+func TestNativeConverseRefusesCaseVariantTierModifiers(t *testing.T) {
+	calls := 0
+	n := nativeFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		io.WriteString(w, `{"usage":{"inputTokens":1,"outputTokens":1}}`)
+	})
+	p := &provider{native: n}
+	for _, body := range []string{
+		`{"messages":[],"ServiceTier":{"type":"priority"}}`,
+		`{"messages":[],"serviceTier":{"type":"default","Type":"priority"}}`,
+		`{"messages":[],"PerformanceConfig":{"latency":"optimized"}}`,
+		`{"messages":[],"performanceConfig":{"latency":"standard","Latency":"optimized"}}`,
+	} {
+		if _, err := p.Complete(context.Background(), &providers.ProxyRequest{
+			IngressProtocol: "bedrock-converse", Upstream: "model", RawBody: []byte(body),
+		}); err == nil {
+			t.Errorf("ambiguous tier modifier accepted: %s", body)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("ambiguous tier modifier reached egress %d times", calls)
+	}
+	if _, err := p.Complete(context.Background(), &providers.ProxyRequest{
+		IngressProtocol: "bedrock-converse", Upstream: "model",
+		RawBody: []byte(`{"messages":[],"serviceTier":{"type":"default"},"performanceConfig":{"latency":"standard"}}`),
+	}); err != nil || calls != 1 {
+		t.Fatalf("default tier and standard latency refused: err=%v calls=%d", err, calls)
+	}
+}

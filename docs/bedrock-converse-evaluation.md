@@ -15,8 +15,12 @@ perform hidden transport retries.
 JSON and native eventstream frame bytes are preserved. Mandatory guardrail
 insertion and verified privacy masking remain policy exceptions. Invalid or
 conflicting guardrails, unsupported pricing modifiers and ambiguous structures
-are refused. The stream must include messageStop and valid trailing usage;
-interruption emits an AWS exception and retains financial uncertainty.
+are refused. A restated `guardrailConfig` must contain only the required
+`guardrailIdentifier` and `guardrailVersion`, and case variants of
+`guardrailConfig`, `serviceTier` or `performanceConfig` are refused because
+Bedrock matches member names case-sensitively. The stream must include
+messageStop and valid trailing usage; interruption emits an AWS exception and
+retains financial uncertainty.
 This does not promise support for every native field on every upstream model.
 
 ## Run a comparison
