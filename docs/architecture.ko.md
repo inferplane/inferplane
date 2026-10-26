@@ -1,6 +1,6 @@
 ---
 translation_source: architecture.md
-translation_source_sha256: fb1cb7b09ad6ff618c5bd28d5e9a866dbc83adc6f64f5664e15120db8f7f27f7
+translation_source_sha256: 16c64c97cebe7f8c0ccb68334e12ac96c8ab13cf8566ea9e2d3cdec4b5589f9b
 ---
 
 # 아키텍처 {#architecture}
@@ -48,6 +48,11 @@ Messages, Chat Completions, Responses, Bedrock 형식 생성 경로는 신원·�
 | 공유 Postgres · ADR-046 | 공유 키·팀 스냅샷, 원자적 요청률·토큰·금전 예약 | 새 키 조회·승인에 접근 가능한 Postgres와 유효 정책 바인딩 필요 |
 
 과금되는 외부 호출 전에 집행합니다. 권한 프로파일은 **공급자 시도마다** 보수적 상한을 예약합니다. 알려진 사용량을 정산하고 환급을 증명할 수 없으면 불확실성을 유지합니다. 만료·노드 유실·스트림 중단으로 새 잔액이 생기지 않습니다. 금전은 정수 microUSD와 round-half-even을 사용합니다. 가격은 운영자가 검토하는 회계 입력이며 외부 청구서 보장이 아닙니다.
+
+로컬 프로파일도 시도마다 금전 의무를 예약합니다(ADR-054). 미확정 의무를 함께
+검사해 동시 요청이 한 요청분의 예산 초과를 여러 배로 늘리지 못하게 합니다.
+중단되거나 가격을 확정할 수 없는 결과의 예약은 달력 윈도 종료까지 유지하며,
+관측 지출과 미확정 의무는 구분합니다. 카운터는 프로세스 로컬이고 재시작 시 초기화됩니다.
 
 ### 공급자 계층 · providers {#provider-layer-providers}
 

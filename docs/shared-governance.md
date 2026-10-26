@@ -66,8 +66,9 @@ spec:
 ```
 
 Use `tokenQuota` for shared monthly token limits; the legacy config
-`quota.tokens_per_month` is rejected in this profile because it has no authoritative
-team-store column. Multiple rules and team/key layers all apply; a warn source
+`quota.tokens_per_month` is rejected in every profile because it is not enforced.
+The `GovernancePolicy.tokenQuota` replacement requires shared Postgres admission.
+Multiple rules and team/key layers all apply; a warn source
 cannot loosen a blocking rule.
 
 Each provider attempt reserves a conservative bound: five declared context-window

@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: b994fc13a25a08db662d1b7c12c14e38b64aae1f8bf9057a2e626f776bd26996
+translation_source_sha256: 911544b47f6da51aec1a960de34e0ef1639c3af9b827d89dce2e4790d46972fd
 ---
 
 # 데이터 구현 {#data}
@@ -19,7 +19,7 @@ translation_source_sha256: b994fc13a25a08db662d1b7c12c14e38b64aae1f8bf9057a2e626
 | SQLite 키 | `internal/keystore/sqlite.go` | SHA-256 키와 teams. name 기본키, allowed_models, rpm/tpm, tokens_per_day, quota_on_exceeded, budget_usd_micros, budget_on_exceeded, budget_usd_micros_per_day(0=무제한), guardrail_id/version, allowed_regions, 생성·갱신 시각 |
 | 저장소 인터페이스 | `internal/keystore/keystore.go` | Store·Principal·Allows와 별도 TeamStore. KeyEnsurer도 선택적 인터페이스. SQLite EnsureKey는 key_hash 충돌 시 revoked·created_at을 건드리지 않고 갱신해 선언형 참조 키의 재생성을 지원. Create 계열은 새 임의 키 생성 |
 | 공급자 저장소 | `internal/providerstore/sqlite.go` | 참조만 있는 providers, 기본 guardrail_id/version, 순서 있는 model_targets, 모델 단위 model_aliases, 영속 seeded 표시 meta. 이식 가능한 TEXT/INTEGER DDL |
-| 감사 기록 | `internal/audit/writer.go` | 단일 쓰기 해시 체인·WAL 정리 |
+| 감사 기록 | `internal/audit/writer.go` | 단일 쓰기 해시 체인·보관 WAL 검증·고정된 승인 압력 |
 | 감사 WAL | `internal/audit/wal.go` | buffer_then_block 디스크 버퍼 |
 | 감사 검증 | `internal/audit/verify.go` | 인스턴스 구간별 체인 검증 |
 | 감사 앵커 | `internal/audit/s3anchor/` | 선택적 S3 Object Lock WORM 해시 앵커, 비밀·개인정보 없는 객체 |
@@ -36,6 +36,11 @@ translation_source_sha256: b994fc13a25a08db662d1b7c12c14e38b64aae1f8bf9057a2e626
 
 - cgo 없는 modernc SQLite가 기본이어서 정적 바이너리로 빠르게 시작할 수 있습니다.
 - 인스턴스별 감사 체인이 정상 재시작을 변조와 구분합니다.
+- `audit.failure_mode`는 기본 `buffer_then_block`만 지원합니다. 보관 WAL 기록
+  1024개 또는 WAL 추가·정리 실패는 새 추론 승인을 닫습니다. 재시작은 보관 기록을
+  계산하며 저장 대상으로 자동 재생하지 않습니다. 이미 승인된 요청은 정산 기록을
+  남길 수 있습니다. [내구성과 복구](../operations/observability.md#audit-durability-limits)를
+  참고하세요.
 - 관리 이벤트 admin_key_created·revoked·denied는 이메일 아닌 불투명 sub와 auth_method(oidc·break_glass)를 기록합니다. auth_method는 PrincipalRef 끝에 덧붙여 혼합 버전 바이트 검증을 유지합니다.
 - 검사 후 차감하는 두 단계 처리로 거부된 요청이 팀을 과금하지 않게 합니다.
 - 프롬프트·응답 원문은 감사 체인에 넣지 않습니다. 선택적 audit.log_bodies가 별도의 암호화·삭제 가능 저장소에 보관하고 체인에는 불투명 body_ref만 넣습니다. body_ref·record_ref도 omitempty로 구조체 끝에 추가합니다.

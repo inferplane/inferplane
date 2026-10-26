@@ -30,22 +30,59 @@ type InstanceState struct {
 	Count    int64
 }
 
+// auditLines keeps ScanLines framing without a per-record size ceiling.
+// ReadBytes owns each returned line, so hashing never requires reserialization
+// or an extra copy. A final non-newline token is still inspected before its
+// read error is reported; HeadAtCount can return an already reached checkpoint.
+type auditLines struct {
+	reader *bufio.Reader
+	line   []byte
+	err    error
+}
+
+func (l *auditLines) next() bool {
+	if l.err != nil {
+		return false
+	}
+	line, err := l.reader.ReadBytes('\n')
+	l.err = err
+	if len(line) == 0 {
+		return false
+	}
+	if line[len(line)-1] == '\n' {
+		line = line[:len(line)-1]
+	}
+	// Preserve the existing ScanLines CRLF and final-CR delimiter handling.
+	// Every other byte, including valid JSON whitespace, remains hashed.
+	if len(line) > 0 && line[len(line)-1] == '\r' {
+		line = line[:len(line)-1]
+	}
+	l.line = line
+	return true
+}
+
+func (l *auditLines) readError() error {
+	if l.err == io.EOF {
+		return nil
+	}
+	return l.err
+}
+
 // Verify reads a JSONL audit stream and checks the hash chain: each record's
 // prev_hash must equal sha256 of the PRECEDING record's exact line bytes, and
 // the first record of each per-instance segment must carry the genesis hash. A
 // tampered record changes its bytes, so the NEXT record's prev_hash no longer
 // matches — that's the break.
 func Verify(r io.Reader) (VerifyResult, error) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
+	lines := auditLines{reader: bufio.NewReader(r)}
 	var n int
 	expectedPrev := genesisHash
 	curInstance := ""
 	var curCount int64
 	instances := map[string]InstanceState{}
 	first := true
-	for sc.Scan() {
-		line := append([]byte(nil), sc.Bytes()...)
+	for lines.next() {
+		line := lines.line
 		if len(line) == 0 {
 			continue
 		}
@@ -71,7 +108,7 @@ func Verify(r io.Reader) (VerifyResult, error) {
 		curCount++
 		instances[curInstance] = InstanceState{HeadHash: expectedPrev, Count: curCount}
 	}
-	if err := sc.Err(); err != nil {
+	if err := lines.readError(); err != nil {
 		return VerifyResult{}, err
 	}
 	return VerifyResult{OK: true, Records: n, Instances: instances}, nil
@@ -86,14 +123,13 @@ func Verify(r io.Reader) (VerifyResult, error) {
 // count records in this stream (false on a short/absent segment — the
 // truncation signal an anchor exists to catch).
 func HeadAtCount(r io.Reader, instance string, count int64) (headHash string, found bool, err error) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
+	lines := auditLines{reader: bufio.NewReader(r)}
 	expectedPrev := genesisHash
 	curInstance := ""
 	var curCount int64
 	first := true
-	for sc.Scan() {
-		line := append([]byte(nil), sc.Bytes()...)
+	for lines.next() {
+		line := lines.line
 		if len(line) == 0 {
 			continue
 		}
@@ -117,7 +153,7 @@ func HeadAtCount(r io.Reader, instance string, count int64) (headHash string, fo
 			return expectedPrev, true, nil
 		}
 	}
-	if err := sc.Err(); err != nil {
+	if err := lines.readError(); err != nil {
 		return "", false, err
 	}
 	return "", false, nil

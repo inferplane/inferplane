@@ -21,7 +21,7 @@ Provider/model/pricing topology can use the documented SIGHUP reload where suppo
 | Shared Postgres unavailable | Restore the qualified database path; new shared admission fails closed |
 | Node journal unavailable | Stop affected admission; preserve journal and sidecars for investigation |
 | Incomplete stream / unknown usage | Keep uncertain liability reserved; compare observed usage and provider evidence |
-| Audit sink unavailable | Recover the sink before buffer exhaustion; retain WAL bytes |
+| Audit sink / WAL unavailable | Preserve WAL bytes; required-sink backlog or WAL failures close new inference admission. Repair and reconcile before restart |
 | Node lost | Preserve central grants as committed; expiry is not a refund |
 
 ADR-045 can use valid existing local authority only within all gates. ADR-046 always needs its database for new shared admission. A control-plane HTTP outage and a database outage are different exercises.
@@ -33,6 +33,31 @@ Restoring earlier policy/identity/authority rows can resurrect spend already use
 If outstanding authority cannot be established, keep affected windows frozen. An unreachable gateway or expired grant does not prove unused credit. Do not truncate counters, drop permit/grant rows, copy a running private journal, or reissue an account under a fresh reference to restore service.
 
 No automated refund/reconciliation API or generic zero-downtime rollback procedure is provided. Follow the specific [durable authority](../durable-budgets.md), [shared store](../shared-governance.md), and [identity migration](../verified-identity.md) contracts.
+
+## Recover audit admission
+
+`buffer_then_block` closes new inference after 1024 retained WAL records, or
+immediately after a WAL append/truncate failure. The latch lasts for the process.
+Restarting with the same full backlog stays unready; malformed/truncated WAL
+refuses startup. The gateway does not automatically replay WAL into audit sinks.
+
+1. Stop the affected writer and preserve an exact copy of its WAL, per-instance
+   sink segments and relevant delivery/checkpoint evidence before changing files.
+2. Repair storage permissions/capacity and required-sink availability. Verify
+   archived complete segments with `mayu audit verify`; preserve damaged tails
+   separately for investigation rather than silently discarding them.
+3. Reconcile which records each sink already accepted. Recover missing records
+   through an isolated, sink-specific procedure that preserves exact line bytes,
+   per-instance ordering and delivery checkpoints or idempotency. A blanket
+   replay can duplicate records already delivered during partial fan-out.
+4. After retained evidence is archived and missing delivery is accounted for,
+   prepare the active WAL for a new segment and restart. Keep the archive until
+   retention and external verification requirements are met. Confirm `/readyz`,
+   buffer metrics and fresh sink delivery before restoring traffic.
+
+There is no general-purpose audit WAL replay CLI. This procedure does not recover
+records that never reached durable storage or prove resistance to host-side
+history rewriting.
 
 ## Recover analytics evidence
 

@@ -190,7 +190,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		dec := h.gov.PreCheck(subject(p), keyPolicy(p), estimate)
 		if !dec.Allowed {
 			h.denied(req, p, model, dec.Status, string(dec.Code), start)
-			writeError(w, dec.Status, "insufficient_quota", dec.Reason)
+			writeError(w, dec.Status, governanceErrorType(dec.Status), dec.Reason)
 			return
 		}
 		admission = dec.Admission
@@ -209,7 +209,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			dec := h.gov.PreCheck(subject(p), keyPolicy(p), estimate)
 			if !dec.Allowed {
 				h.denied(req, p, model, dec.Status, string(dec.Code), start)
-				writeError(w, dec.Status, "insufficient_quota", dec.Reason)
+				writeError(w, dec.Status, governanceErrorType(dec.Status), dec.Reason)
 				return
 			}
 			admission = dec.Admission
@@ -239,7 +239,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				w.Header().Set("x-inferplane-model-fallback", ct.Model)
 			}
 		}
-		reservedReq, finishBudget, reserveErr := requestpolicy.ReserveBudget(req, h.gov, p, ct, st, raw)
+		reservedReq, finishBudget, reserveErr := requestpolicy.ReserveBudget(req, h.gov, p, ct, st, raw, admission)
 		if reserveErr != nil {
 			status := requestpolicy.BudgetStatus(reserveErr)
 			requestpolicy.BudgetErrorHeaders(w, reserveErr)

@@ -43,7 +43,7 @@ func reserveShared(req *http.Request, g *governance.Governor, p keystore.Princip
 	return req, func() { a.finishShared(governance.SharedSettlement{}) }, nil
 }
 
-func (a *budgetAttempt) settleShared(usage *schema.Usage, complete bool) {
+func (a *budgetAttempt) settleShared(usage *schema.Usage, complete bool) bool {
 	u, exactCost, invalid := authorityUsage(usage, a.window)
 	tokens, exactTokens, invalidTokens := authorityTokens(usage, a.window)
 	settlement := governance.SharedSettlement{Complete: complete, InvalidUsage: invalid || invalidTokens}
@@ -59,6 +59,7 @@ func (a *budgetAttempt) settleShared(usage *schema.Usage, complete bool) {
 		}
 	}
 	a.finishShared(settlement)
+	return complete && !settlement.InvalidUsage && settlement.CostMicroUSD != nil && settlement.Tokens != nil
 }
 
 func (a *budgetAttempt) finishShared(settlement governance.SharedSettlement) {

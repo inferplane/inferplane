@@ -86,6 +86,12 @@ an interrupted stream does not create fresh credit. Monetary arithmetic uses
 integer microUSD and round-half-even; pricing is an operator-reviewed accounting
 input, not a guarantee about an external invoice.
 
+The local profile also reserves money per attempt (ADR-054). Outstanding
+liability prevents overlapping requests from multiplying one-request overshoot.
+Interrupted or unpriceable results retain credit until the calendar window ends;
+known spend and unresolved liability remain separate. These counters remain
+process-local and reset on restart.
+
 ### Provider Layer (`providers/*`)
 
 | Package | Responsibility |

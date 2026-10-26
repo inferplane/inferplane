@@ -67,8 +67,8 @@ if os.environ.get('FAKE_WAIT'):
     time.sleep(30)
 sys.exit(int(os.environ.get('FAKE_EXIT', '0')))
 """
-# Change only the in-process endpoint for tests; the production helper has no
-# user-controlled remote endpoint or credential loading mechanism.
+# Change only the in-process endpoint for tests; the production helper permits
+# a local port override without a remote credential destination.
 BOOTSTRAP = """
 import os, runpy, sys
 parent_env = dict(os.environ)
@@ -295,6 +295,20 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(record["key_present"])
         self.assertNotIn("offline-placeholder", json.dumps(record))
 
+    def test_local_port_override_is_used_for_discovery_and_child_provider(self):
+        self.env["INFERPLANE_PORT"] = str(self.server.server_port)
+        result = self.run_launcher("-m", "test.grok")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.requests, [("/v1/models", "Bearer offline-placeholder")])
+        self.assertIn(self.base_url, self.record()["config"]["model_providers.inferplane"])
+
+    def test_invalid_port_refuses_before_discovery_or_codex(self):
+        for port in ["0", "65536", "remote-host", "8080@remote", "8080/path"]:
+            with self.subTest(port=port):
+                self.env["INFERPLANE_PORT"] = port
+                self.assert_refused(self.run_launcher())
+                self.assertEqual(self.requests, [])
+
     def test_portable_catalog_does_not_advertise_native_reasoning_or_state(self):
         result = self.run_launcher()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -501,6 +515,10 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(model["supported_reasoning_levels"][1]["effort"], "xhigh")
         self.assertEqual(json.loads(self.record()["config"]["model_reasoning_effort"]), "xhigh")
         self.assertNotIn('model_reasoning_effort="none"', self.record()["args"])
+        # A bridge picker choice would inherit xhigh in installed Codex and
+        # be rejected by the stateless bridge before calling its provider.
+        self.assertEqual({m["slug"] for m in self.record()["catalog"]["models"]},
+                         {"openai.gpt-6-astra"})
         self.record_path.unlink()
         for slug in ["new-native-model", "offline-placeholder"]:
             with self.subTest(slug=slug):

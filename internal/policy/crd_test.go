@@ -91,6 +91,9 @@ func TestRoutingPolicyCRDSchema(t *testing.T) {
 		t.Errorf("CRD rules must match the %d-rule runtime bound for finite CEL cost", maxPolicyRules)
 	}
 	rule := at(rules, "items", "properties")
+	if at(rule, "budget", "properties", "adminContact")["type"] != "string" {
+		t.Fatal("Kubernetes prunes budget.adminContact instead of preserving the refusal contact")
+	}
 	sensitive := at(rule, "sensitiveData")
 	props := at(sensitive, "properties")
 	for _, field := range []string{"onDetected", "onUninspectable"} {

@@ -1,6 +1,6 @@
 ---
 translation_source: shared-governance.md
-translation_source_sha256: 280bd5a59d4d1a0a707a365ac41a39d09ab84f0aa861e649744c7371df3e9a91
+translation_source_sha256: 97a3da4cf6906c59224016215dc5efd40960e2461aba04816760c870ef1226f7
 ---
 
 # 공유 키와 전역 요청률·토큰 할당량 {#shared-keys-and-global-ratetoken-quotas}
@@ -54,7 +54,7 @@ spec:
       tokenQuota: {limitTokens: 100000000, period: CalendarMonth}
 ```
 
-공유 월별 토큰 한도에는 `tokenQuota`를 사용합니다. 기존 `quota.tokens_per_month`에는 기준 팀 저장소 열이 없어 이 프로파일에서 거부됩니다. 여러 규칙과 팀·키 계층이 모두 적용되며 경고 규칙이 차단 규칙을 완화할 수 없습니다.
+공유 월별 토큰 한도에는 `tokenQuota`를 사용합니다. 기존 `quota.tokens_per_month`는 집행되지 않아 모든 프로파일에서 거부됩니다. 대체 설정 `GovernancePolicy.tokenQuota`는 공유 Postgres 승인이 필요합니다. 여러 규칙과 팀·키 계층이 모두 적용되며 경고 규칙이 차단 규칙을 완화할 수 없습니다.
 
 각 공급자 시도는 선언된 컨텍스트의 토큰 종류 5개와 해당 정수 가격 상한을 보수적으로 예약합니다. 상한보다 작은 한도는 짧은 요청도 거부할 수 있습니다. 사용량이 완전하면 미사용 부분을 반환하고, 부분 스트림·누락 사용량이면 불확실성을 유지합니다. 캐시 TTL 가격을 몰라도 독립적으로 알려진 토큰 수량 정산은 가능합니다.
 

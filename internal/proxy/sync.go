@@ -97,8 +97,9 @@ func (t *LeaseTable) Blocked(team string) (bool, string) {
 }
 
 // set replaces the table from one heartbeat's grants, merging per (team,
-// window) most-restrictive-first: smallest allowance binds, hard if any rule
-// is hard, earliest expiry wins. Merging never crosses windows — a daily
+// window): hard grants bind before soft grants, then the smallest allowance
+// and earliest expiry among grants of that kind win. A soft threshold cannot
+// narrow or expire independent hard authority. Merging never crosses windows — a daily
 // allowance and a monthly allowance are not comparable quantities.
 func (t *LeaseTable) set(grants []policy.LeaseGrant) {
 	byTeam := make(map[string]map[v1alpha1.BudgetPeriod]Lease, len(grants))
@@ -120,13 +121,18 @@ func (t *LeaseTable) set(grants []policy.LeaseGrant) {
 			windows[period] = Lease{AllowanceMicroUSD: g.AllowanceMicroUSD, ExpiresAt: g.ExpiresAt, HardCap: g.HardCap}
 			continue
 		}
+		if g.HardCap != l.HardCap {
+			if g.HardCap {
+				windows[period] = Lease{AllowanceMicroUSD: g.AllowanceMicroUSD, ExpiresAt: g.ExpiresAt, HardCap: true}
+			}
+			continue
+		}
 		if g.AllowanceMicroUSD < l.AllowanceMicroUSD {
 			l.AllowanceMicroUSD = g.AllowanceMicroUSD
 		}
 		if g.ExpiresAt.Before(l.ExpiresAt) {
 			l.ExpiresAt = g.ExpiresAt
 		}
-		l.HardCap = l.HardCap || g.HardCap
 		windows[period] = l
 	}
 	t.mu.Lock()

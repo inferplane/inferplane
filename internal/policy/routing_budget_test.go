@@ -103,9 +103,25 @@ func TestRoutingBudgetLegacySoftAndReferencedHardKeepAdmissionSemantics(t *testi
 			t.Fatal(rejected)
 		}
 		got, _ := s.TeamLimits("eng")
-		if got.BudgetMicrosPerMonth != 100000 || got.BudgetHard != strictHard ||
+		want := int64(1000000) // independent total hard cap remains binding
+		if strictHard {
+			want = 100000 // the referenced rule itself is a tighter hard cap
+		}
+		if got.BudgetMicrosPerMonth != want || !got.BudgetHard ||
 			routingThreshold(t, got, "RoutingBudgetMicrosPerMonth") != 0 {
-			t.Fatalf("legacy soft or referenced hard budget lost existing semantics: %+v", got)
+			t.Fatalf("legacy soft threshold erased independent hard cap or referenced hard cap was ignored: %+v", got)
+		}
+		if !strictHard {
+			// With no independent hard cap, a legacy soft reference still
+			// supplies its ordinary warn-only admission/accounting meter.
+			d.Spec.Rules = []v1alpha1.Rule{d.Spec.Rules[0], d.Spec.Rules[2]}
+			if rejected := s.ApplyWire([]v1alpha1.GovernancePolicy{d}); len(rejected) != 0 {
+				t.Fatal(rejected)
+			}
+			got, _ = s.TeamLimits("eng")
+			if got.BudgetMicrosPerMonth != 100000 || got.BudgetHard {
+				t.Fatalf("legacy soft-only accounting meter changed: %+v", got)
+			}
 		}
 	}
 }

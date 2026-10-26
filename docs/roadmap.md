@@ -179,7 +179,7 @@ discipline; `key_id`/owner stay out of the JSON by default.
 
 ---
 
-## ⑤ Provider coverage: embeddings first (ADR candidate — unassigned; next available slot is ADR-040 as of 2026-08-14)
+## ⑤ Provider coverage: embeddings first (ADR candidate — unassigned; choose the next unused number when recording the decision)
 
 **Gap.** The product remains focused on chat/coding traffic. The canonical schema is a
 Messages-superset — embeddings structurally don't fit it, and forcing them

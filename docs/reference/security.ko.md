@@ -1,6 +1,6 @@
 ---
 translation_source: reference/security.md
-translation_source_sha256: 8eb7bf2a0f76de9965953745db19ad232b6eeedbbb564d6ddcdbb8ad0d8e7e5e
+translation_source_sha256: 61f00709d07c95c5bccc7ae156b43d3707866e5ed1de8da837c7820f84a12e33
 ---
 
 # 보안 {#security}
@@ -24,7 +24,7 @@ translation_source_sha256: 8eb7bf2a0f76de9965953745db19ad232b6eeedbbb564d6ddcdbb
 | 교차 모델 폴백 재검사 | `internal/router/router.go` | 초기 허용 검사 뒤 추가된 폴백도 FilterModelAllowed로 다시 확인. 미설정 요청 이름만 허용된 키는 거부하며 다른 모델로 조용히 전환하지 않음 |
 | 키 해시 | `internal/keystore/sqlite.go` | SHA-256 저장·평문 1회 표시. 선언형 키도 key_ref 사용, 인라인 금지 |
 | TLS 검증 | `internal/server/tls.go` | 인증서·키 한쪽만 설정하면 거부 |
-| 비밀 참조 | `internal/config/config.go` | env/file/secret 참조, 인라인 api_key 거부 |
+| 비밀 참조 | `internal/config/config.go` | env/file만 지원. 인라인 api_key와 미지원 secret 필드는 거부. Kubernetes Secret은 파일로 마운트하거나 환경 변수로 연결 |
 | 자격 증명 중개 | `controlplane/broker.go`, `proxy/credentials.go`, `bedrock/client.go` | 최대 1시간 STS 세션. 읽을 수 없는 호스트 환경에서 노드 Bedrock IAM을 제거할 수 있음. 개발자 소유 호스트에서는 우회 방지가 아님. 하트비트와 다른 전용 토큰, JWT bearer는 검증 없이 403. 소스 누락·최초 조회 실패·알 수 없는 인증 모드·원격 평문 HTTP는 거부. 기본 AWS 체인으로 대체하지 않음 |
 | 메트릭 보호 | `internal/metrics/metrics.go` | key_id·비밀 라벨 없음, _rejected로 카디널리티 제한 |
 

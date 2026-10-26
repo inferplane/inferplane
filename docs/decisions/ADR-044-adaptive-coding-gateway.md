@@ -64,8 +64,12 @@ automatically a good coding model.
 
 ## Failure domains and HA boundary
 
-The classifier and affinity store add no network dependency. Node-local mayu
-instances isolate failures to their own clients. Multiple approved backend
+The built-in deterministic inspection and affinity store add no network
+dependency. Opt-in `pii_classification` plugins can call an HTTP classifier
+(including the SystemOne sidecar); timeout, saturation or failure follows
+`onUninspectable` in Enforce, while Shadow records the result without restriction.
+Node-local mayu instances isolate failures to their own clients unless operators
+configure a shared classifier endpoint. Multiple approved backend
 targets can fail over within the same data/cost boundary. A control-plane
 endpoint never handles inference; already installed policy and valid authority
 can be evaluated locally.

@@ -24,6 +24,25 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
 - `CGO_ENABLED=0` static binary so the image can be distroless/nonroot with no libc.
 - The admin key console's static assets (`internal/server/adminui/static/`) ship inside the binary via `go:embed` — no image, chart, or build-pipeline change (ADR-001).
 - **Config hot-reload (ADR-006):** edit config and `kill -HUP <pid>` (K8s: signal PID 1 or roll the pods) to apply provider/model/pricing changes with no restart — the topology is swapped atomically, governance counters/keystore/audit persist, and a bad config rolls back. Listen addrs, TLS, drain, and team policy limits are NOT hot (restart required).
+- The chart hashes the main config into the pod template, so Helm upgrades of
+  restart-required settings roll pods. Separately mounted policy files remain
+  watched. Its default admin token ref reads `INFERPLANE_ADMIN_TOKEN` from the
+  existing Secret; replace `server.admin_auth` deliberately for another setup.
+- Gateway startup probes allow ten minutes for synchronous replay before
+  liveness begins; tune `startupProbe` to your retained history. Pod `fsGroup`
+  defaults to 65532 for writable nonroot data volumes. Existing claims and CSI
+  drivers must support that ownership.
+- Typed config fields reject unknown names, negative limits, invalid
+  `on_exceeded` actions and out-of-range monetary caps. Inert `_comment`,
+  `_comment_*` and `_*_example` annotations are allowed; map names and classifier
+  options remain free-form. Nonzero `quota.tokens_per_month` is unsupported;
+  monthly `tokenQuota` enforcement requires the shared Postgres profile.
+- `mayu config validate --config config.json` performs offline schema/secret-ref
+  validation through `LoadRaw`. It does not open runtime stores, construct
+  provider/AWS credentials or contact upstreams; a valid declaration does not
+  establish runtime readiness. `serve` checks those runtime dependencies.
+- Both gateway listeners have a 10-second request-header deadline. There is no
+  total response deadline that would cut off long-running SSE streams.
 - Default/local mode is single-replica. ADR-046 shared Postgres mode supports multiple gateways; the chart rejects unsafe local replication. Persistent shared mode renders a StatefulSet with separate PVCs, required node anti-affinity and a disruption budget. See [shared governance](../shared-governance.md).
 - **Persistence:** local mode retains its existing Deployment/PVC behavior. Shared mode stores keys and counters in Postgres; per-replica PVCs hold independent audit segments. Do not share one audit WAL between replicas.
 - The chart references an `existingSecret` and never creates secrets (design §7).
@@ -92,8 +111,10 @@ Use the isolated `examples/policy-routing/governance.yaml`, not the quick-start
 already enforces. No fleet HA or durability improvement is implied. See
 [operator guide](../policy-routing.md).
 
-ADR-044 keeps adaptive decisions and bounded affinity state node-local, with no
-central classifier/cache dependency. Backend failover remains inside approved
+ADR-044 keeps policy decisions and bounded affinity state node-local. Built-in
+deterministic inspection has no network dependency; optional HTTP classifiers
+add endpoint availability and timeout dependencies, with `onUninspectable` applied
+in Enforce. Backend failover remains inside approved
 privacy/cost constraints. Already installed rules remain usable during a control
 plane outage while required authority is valid; expired hard leases still deny.
 ADR-045 adds opt-in Postgres global monetary authority with interchangeable

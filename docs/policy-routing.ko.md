@@ -1,6 +1,6 @@
 ---
 translation_source: policy-routing.md
-translation_source_sha256: 9f62350b60dae5809d9a5c468a83855cb674d64eed7503b63e99bafecc7998cf
+translation_source_sha256: ea14e8c6e205b6f9d9dd5efdd19e2d99c10fc6c23a0dbda8d8e269cd669abecc
 ---
 
 # 정책 기반 라우팅 {#policy-aware-routing}
@@ -30,9 +30,18 @@ mayu serve --config examples/config.policy-routing.json
 
 규칙마다 종류가 하나이고 `routing` 하위 종류도 하나입니다. affinity는 현재 거부되며 budgetTiers 또는 context를 사용합니다. 한 정책 안의 `team`·`user`는 AND 조건이고 일치하는 모든 정책이 적용됩니다.
 
+예산 입장은 각 달력 기간별로 독립적으로 병합합니다. 설정·팀의 차단 예산이나
+정책 hard cap이 있으면 가장 작은 hard cap을 유지합니다. 더 작은 soft 예산이
+그 cap을 없애거나 더 작은 차단 cap으로 바뀌지 않습니다. hard cap이 없을 때만
+가장 작은 soft 예산을 경고 전용 사용량 계측에 사용합니다. 티어 전환은 원래
+예산 참조와 임계값을 각각 평가합니다. 설정의 `on_exceeded`를 생략하면 차단이
+기본값입니다. 레거시 제어 평면 lease도 hard 우선으로 병합하며 hard lease의
+만료를 적용합니다. 사용자 일간·월간 예산은 현재 초과 모드 하나를 공유하므로,
+어느 기간이든 hard cap이 있으면 함께 설정된 soft 기간에도 차단 모드가 적용됩니다.
+
 | 필드 | 계약 |
 | --- | --- |
-| `sensitiveData.onDetected` | `InternalOnly` 또는 `Block` 필수 |
+| `sensitiveData.onDetected` | `InternalOnly`, `Block`, `Mask` 중 필수. Mask는 완전한 마스킹 검증·재검사 필요 |
 | `sensitiveData.onUninspectable` | `InternalOnly` 또는 `Block` 필수 |
 | `sensitiveData.internalModels` | 하나라도 InternalOnly이면 명시적 모델 이름 필요. 빈 목록·와일드카드 불가, 별칭은 현재 토폴로지로 해석 |
 | 민감 정보 규칙 `failurePolicy` | `FailClosed` 필수. 검사·조회 오류는 거부 |

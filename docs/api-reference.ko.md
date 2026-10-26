@@ -1,6 +1,6 @@
 ---
 translation_source: api-reference.md
-translation_source_sha256: 7ecaf284e5c0953f45a9c6b6fa654a844b1f5bb8d7ef4da04aea7898c28c51b2
+translation_source_sha256: 9c3feca93b68fa421083252513c6605cd2609367ae838887eca550d45f109363
 ---
 
 # API 레퍼런스 {#api-reference}
@@ -29,7 +29,7 @@ GET  /v1/models
 | 엔드포인트 | 동작 |
 | --- | --- |
 | `/v1/messages` | Messages, stream=true이면 SSE. Anthropic 프로토콜 업스트림에 본문 원문 전달 |
-| `/v1/messages/count_tokens` | 정책·준비 상태·저장소 거부에는 로컬 HTTP 200 계산. 자격 증명 누락·무효는 401 가능 |
+| `/v1/messages/count_tokens` | 토큰 계산. **키 인증 성공 후 200**이며 라우팅·정책·준비 상태·저장소 거부에는 로컬 계산을 유지. 없거나 잘못된 키는 401 |
 | `/v1/models` | 주체가 사용할 모델 조회. `anthropic-version`으로 응답 형식 협상 |
 
 ### OpenAI 수신 {#openai-ingress}

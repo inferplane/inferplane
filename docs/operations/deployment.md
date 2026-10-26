@@ -42,6 +42,8 @@ Issue keys through the private admin API/console, or use `docker exec` with `may
 ## Deploy the Helm chart
 
 The chart expects an existing Secret; it never creates provider credentials. Your secret controller should provision `inferplane-secrets` in the selected namespace.
+Its default `server.admin_auth.token_refs` reads `INFERPLANE_ADMIN_TOKEN` from
+that Secret. Configure an alternative authentication block explicitly if needed.
 
 Prepare a values file with your registry/digest-compatible image selection, reviewed config, resources, persistence, and network exposure. For a local-profile evaluation:
 
@@ -77,6 +79,11 @@ helm upgrade --install inferplane charts/inferplane \
 ```
 
 Local mode allows one replica. Persistent local mode uses a Recreate deployment, so plan downtime during replacement.
+The pod uses UID/GID and `fsGroup` 65532; confirm that the storage driver or
+pre-provisioned claim permits group writes. The gateway startup probe allows
+ten minutes for audit/analytics replay before liveness begins; tune it for your
+history. Main config changes roll pods through a checksum annotation, while
+separately mounted policy changes remain watched.
 
 For multiple replicas, use the explicit [shared profile](../shared-governance.md) and [shared Helm example](../../examples/helm.shared-governance.yaml). It needs the same authority database/schema, initialized control planes, unique gateway identities, and enough schedulable nodes for anti-affinity. Persistent shared mode uses separate PVCs; it does not make Postgres highly available.
 

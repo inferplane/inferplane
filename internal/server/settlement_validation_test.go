@@ -111,24 +111,34 @@ func TestEveryIngressValidatesAccountingAndClosesAdmission(t *testing.T) {
 				in, out, flat, five := int64(2), int64(3), int64(100), int64(40)
 				u := &schema.Usage{InputTokens: &in, OutputTokens: &out}
 				wantQuota, wantCost := int64(900), int64(0)
+				// The legacy audit projection remains compatible. Local money
+				// records independently valid priced categories and retains the
+				// unresolved bound, rather than zeroing every category.
+				wantObserved := int64(0)
 				switch kind {
 				case "negative":
 					out = -1000
+					wantObserved = 2
 				case "negative-cache":
 					flat = -1
 					u.CacheCreationInputTokens = &flat
+					wantObserved = 5
 				case "negative-tier":
 					five = -1
 					u.CacheCreation = &schema.CacheCreation{Ephemeral5mInputTokens: &five}
+					wantObserved = 5
 				case "overflow":
 					in = math.MaxInt64
+					wantObserved = 3
 				case "contradictory-ttl":
 					u.CacheCreationInputTokens = &flat
 					u.CacheCreation = &schema.CacheCreation{Ephemeral5mInputTokens: &five, Ephemeral1hInputTokens: &five}
+					wantObserved = 5
 				case "partial-ttl":
 					u.CacheCreationInputTokens = &flat
 					u.CacheCreation = &schema.CacheCreation{Ephemeral5mInputTokens: &five}
 					wantQuota, wantCost = 1005, 130
+					wantObserved = 55 // input/output + explicitly observed 5m writes
 				case "missing":
 					u = nil
 				case "failure":
@@ -136,6 +146,7 @@ func TestEveryIngressValidatesAccountingAndClosesAdmission(t *testing.T) {
 				case "interrupted":
 					f.Public.Partial = true
 					wantQuota, wantCost = 905, 5
+					wantObserved = 5
 				}
 				f.Public.Usage = u
 				l := &pendingLimiter{LimiterStore: limiter.NewMemory()}
@@ -161,8 +172,18 @@ func TestEveryIngressValidatesAccountingAndClosesAdmission(t *testing.T) {
 					t.Fatalf("quota=%d want %d", got, wantQuota)
 				}
 				w := budget.CalendarMonthIn(time.UTC)
-				if got := b.Spent(budget.Key(budget.ScopeTeam, "team", w), w); got != wantCost {
-					t.Fatalf("cost=%d want %d", got, wantCost)
+				if got := b.Spent(budget.Key(budget.ScopeTeam, "team", w), w); got != wantObserved {
+					t.Fatalf("observed cost=%d want %d", got, wantObserved)
+				}
+				status := g.UsageOf(governance.Subject{Team: "team"}, governance.KeyPolicy{}).TeamBudget
+				if kind == "interrupted" && !ing.stream {
+					// The fake's Partial flag only interrupts Stream; Complete
+					// returns exact input/output usage and releases its hold.
+					if status.ReservedUSDMicros != 0 {
+						t.Fatalf("complete observation retained liability: %+v", status)
+					}
+				} else if status.ReservedUSDMicros == 0 || status.RemainingUSDMicros != 0 {
+					t.Fatalf("invalid/incomplete observation released liability: %+v", status)
 				}
 				if kind == "failure" || kind == "missing" {
 					return

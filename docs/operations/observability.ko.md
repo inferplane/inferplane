@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: c102a93f640ed5f1804e7e71a7b580068451da81e7cca3bd9c8a1129e415f2f5
+translation_source_sha256: 79adf31679ee6e95a52071667daeab0305ee2dd6fcc87dcf6374578125da10d7
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -26,10 +26,10 @@ translation_source_sha256: c102a93f640ed5f1804e7e71a7b580068451da81e7cca3bd9c8a1
 
 | 신호 | 확인할 내용 |
 | --- | --- |
-| 지속적인 준비 상태 실패·503 | 정책 동기화, 신원 지문, DB, 권한 발급·저널 |
+| 지속적인 준비 상태 실패·503 | 정책 동기화, 신원 지문, DB, 권한 발급·저널, 감사 WAL 압력 |
 | `inferplane_pricing_miss_total` | 경로 가격 누락·가격 메타데이터 오류 |
 | `inferplane_audit_write_failures_total` | 저장 권한·용량·하위 시스템 가용성 |
-| `inferplane_audit_buffer_utilization_ratio` | WAL 누적과 저장 실패 조사. 자동 요청 차단의 증거는 아님 |
+| `inferplane_audit_buffer_utilization_ratio` | 보관 WAL 기록 수 / 1024. 1 이상이면 새 추론 차단. 1 미만에서도 WAL 실패가 고정될 수 있으므로 `/readyz` 확인 |
 | `inferplane_audit_anchor_failures_total` | 객체 저장소·IAM·보존 설정 |
 | `gen_ai_server_time_to_first_token_seconds` | 업스트림·요청 경로 지연 |
 | `inferplane_fallback_total`·회로 차단기 상태 | 공급자 실패·비호환 |
@@ -112,13 +112,26 @@ bin/mayu report --file /path/to/instance-audit.jsonl --by team,model
 
 ## 감사 내구성 한계 {#audit-durability-limits}
 
-기본 차트는 감사 기록을 컨테이너 stdout(최선 노력 저장 대상)으로 내보내고, WAL은 데이터
-볼륨에 두며 로컬 분석 인덱스는 끕니다. 따라서 파드 볼륨에서 계속 커지는 파일이 없습니다.
-[감사 기록 수집](#collect-audit-records)을 참고하세요. 다른 배포는 저장 대상을 명시적으로 설정하세요.
-필수 저장 대상 실패는 진단 지표를 증가시키지만 현재 자동 fail-closed 요청 차단을
-보장하지 않습니다. WAL 자동 재생·복구도 미완성이므로 준비 상태나 로컬 체인 검증을
-모든 과거 기록의 보존 증거로 취급하지 마세요. 저장 실패 시 증거를 보존하고 영향을
-받는 트래픽을 중지하세요.
+차트 기본 설정은 컨테이너 stdout(최선 노력 저장 대상)으로 감사 기록을 내보내고,
+WAL은 데이터 볼륨에 두며 로컬 분석 인덱스는 비활성화합니다. WAL이 정상 동작하면
+해당 볼륨에 데이터가 누적되지 않습니다. [감사 기록 수집](#collect-audit-records)을
+참고하세요. 다른 배포는 저장 대상을 명시적으로 구성해야 합니다.
+
+`audit.failure_mode` 기본값은 유일하게 지원하는 `buffer_then_block`입니다.
+필수 저장 대상이 실패하면 해당 기록과 이후 기록을 WAL에 보관합니다. 보관 기록이
+1024개에 도달하면 준비되지 않은 상태로 고정됩니다. 인증된 새 추론 요청은 프로토콜에
+맞는 503과 `Retry-After`를 받고 `/readyz`도 503을 반환합니다. WAL 추가·정리 실패는
+즉시 이 상태로 고정합니다. 최선 노력 저장 대상 실패는 요청 승인을 닫지 않습니다.
+토큰 계산 API는 로컬/200을 유지하고 모델 목록도 사용할 수 있습니다. 생존 검사는
+계속 프로세스 응답 여부를 표시합니다.
+
+이 상태는 자동으로 해제되지 않습니다. 이미 승인된 요청, 관리 이벤트와 계산 요청은
+계속 기록을 추가할 수 있으므로 1024는 새 요청 승인 임계값이며 엄격한 기록 수·바이트
+상한이 아닙니다. 시작 시 보관 WAL을 검증하고 기록 수를 읽습니다. 재시작만으로 가득 찬
+버퍼를 해제할 수 없으며 손상되거나 잘린 WAL은 시작을 거부합니다. 과거 일부 저장 대상에
+이미 전달된 기록이 있을 수 있으므로 자동 저장 대상 재생은 하지 않습니다.
+[감사 승인 복구 절차](recovery.md#recover-audit-admission)에 따라 증거를 보존하고
+대조한 뒤 재시작하세요. 준비 상태와 로컬 체인 검증은 전체 이력 전달의 증거가 아닙니다.
 
 ## 감사 기록 수집 {#collect-audit-records}
 

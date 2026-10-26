@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"regexp"
+	"strconv"
 
 	smithy "github.com/aws/smithy-go"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
@@ -69,10 +71,13 @@ func anthropicErrType(status int) string {
 // specific signal Bedrock gives) > the ErrorCode table above > the HTTP
 // transport status smithy captured > 502 (unclassifiable).
 //
-// The synthesized body never includes ErrorMessage() — it can carry an
+// The synthesized body never echoes ErrorMessage() — it can carry an
 // account id or ARN (see health.go's credentialErrorCodes comment) — only the
-// error CODE, which is safe (config-bounded AWS vocabulary, not client input).
+// error CODE and strictly recognized numeric prompt-overflow evidence.
 func upstreamError(err error) *providers.UpstreamError {
+	if overflow := promptOverflow(err); overflow != nil {
+		return overflow
+	}
 	status := 502
 	code := ""
 
@@ -116,6 +121,33 @@ func upstreamError(err error) *providers.UpstreamError {
 	// from the client's side). Logs are operator-only.
 	log.Printf("bedrock: upstream error status=%d code=%s: %v", status, code, err)
 	return synthError(status, msg)
+}
+
+var promptOverflowPattern = regexp.MustCompile(`(?i)^prompt is too long: ([0-9]+) tokens > ([0-9]+) maximum$`)
+
+// Only the SDK's typed validation exception with this complete numeric shape
+// is recovery evidence. Extra text, unknown wording and generic errors retain
+// the normal scrubbed error; no provider string becomes a client message.
+func promptOverflow(err error) *providers.UpstreamError {
+	var validation *brtypes.ValidationException
+	if !errors.As(err, &validation) {
+		return nil
+	}
+	match := promptOverflowPattern.FindStringSubmatch(validation.ErrorMessage())
+	if match == nil {
+		return nil
+	}
+	input, inputErr := strconv.ParseInt(match[1], 10, 64)
+	limit, limitErr := strconv.ParseInt(match[2], 10, 64)
+	if inputErr != nil || limitErr != nil || limit <= 0 || input <= limit {
+		return nil
+	}
+	body, _ := json.Marshal(map[string]any{
+		"type": "error",
+		"error": map[string]string{"type": "invalid_request_error", "code": "context_length_exceeded",
+			"message": "prompt is too long: " + strconv.FormatInt(input, 10) + " tokens > " + strconv.FormatInt(limit, 10) + " maximum"},
+	})
+	return &providers.UpstreamError{StatusCode: 400, Body: body}
 }
 
 // synthError builds an UpstreamError with an Anthropic-shaped body, for the

@@ -1052,6 +1052,9 @@ func EnsureIncludeUsage(top map[string]json.RawMessage) {
 	if prev, has := top["stream_options"]; has {
 		_ = json.Unmarshal(prev, &so)
 	}
+	if so == nil {
+		so = map[string]json.RawMessage{}
+	}
 	so["include_usage"] = json.RawMessage("true")
 	if raw, err := json.Marshal(so); err == nil {
 		top["stream_options"] = raw

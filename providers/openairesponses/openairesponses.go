@@ -181,8 +181,8 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 		Status string `json:"status"`
 	}
 	_ = json.Unmarshal(raw, &envelope) // ResponseUsage already validated the document.
-	if parseErr != nil || envelope.Status != "completed" {
-		// A failed/incomplete or unrenderable response may already have spent
+	if parseErr != nil || (envelope.Status != "completed" && envelope.Status != "incomplete") {
+		// A failed or unrenderable response may already have spent
 		// tokens. Return a safe non-2xx observation rather than losing usage
 		// in a generic error. The ingress must settle this attempt before it
 		// considers fallback; none of the remote output/error is client-safe.

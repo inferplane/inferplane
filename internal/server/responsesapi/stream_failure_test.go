@@ -186,19 +186,28 @@ func streamErrorCode(t *testing.T, body string) string {
 	t.Helper()
 	var code string
 	for _, frame := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n\n") {
-		if !strings.HasPrefix(frame, "event: error\n") {
+		if !strings.HasPrefix(frame, "event: error\n") && !strings.HasPrefix(frame, "event: response.failed\n") {
 			continue
 		}
 		var payload struct {
-			Code string `json:"code"`
+			Code     string `json:"code"`
+			Response struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			} `json:"response"`
 		}
-		if err := json.Unmarshal([]byte(strings.TrimPrefix(frame, "event: error\ndata: ")), &payload); err != nil {
+		_, data, _ := strings.Cut(frame, "\ndata: ")
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
 			t.Fatal(err)
 		}
 		if code != "" {
 			t.Fatal("multiple gateway errors")
 		}
 		code = payload.Code
+		if code == "" {
+			code = payload.Response.Error.Code
+		}
 	}
 	return code
 }

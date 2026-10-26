@@ -29,11 +29,10 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "serve":
-		cfgPath := "config.json"
-		for i := 2; i < len(os.Args)-1; i++ {
-			if os.Args[i] == "--config" {
-				cfgPath = os.Args[i+1]
-			}
+		cfgPath, err := configPathArgs("serve", os.Args[2:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(2)
 		}
 		if err := run(cfgPath); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -52,6 +51,8 @@ func main() {
 		os.Exit(reportCmd(os.Args[2:]))
 	case "pricing":
 		os.Exit(pricingCmd(os.Args[2:]))
+	case "config":
+		os.Exit(configCmd(os.Args[2:]))
 	case "login":
 		if err := loginCmd(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -74,6 +75,7 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  mayu serve --config <path>")
+	fmt.Fprintln(os.Stderr, "  mayu config validate --config <path>")
 	fmt.Fprintln(os.Stderr, "  mayu keys create --team <t> --models <csv> --store <path>")
 	fmt.Fprintln(os.Stderr, "  mayu keys list --store <path>")
 	fmt.Fprintln(os.Stderr, "  mayu keys revoke --id <key_id> --store <path>")

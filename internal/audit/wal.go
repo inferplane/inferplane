@@ -2,14 +2,16 @@ package audit
 
 import (
 	"bufio"
+	"io"
 	"os"
 	"sync"
 )
 
 // WAL is a disk-backed, append-only buffer for audit records that a required
-// sink failed to accept. Records survive a crash/restart and are replayed on
-// reopen, so buffer_then_block never loses a record to an in-memory-only
-// buffer (§5.4). Newline-delimited, same framing as the sinks.
+// sink failed to accept. Synced records remain across restart; the writer
+// validates/counts them on reopen without automatically replaying them into
+// sinks. Recovery must account for any previous partial delivery before
+// clearing retained evidence. Newline-delimited, same framing as the sinks.
 type WAL struct {
 	mu   sync.Mutex
 	f    *os.File
@@ -43,19 +45,27 @@ func (w *WAL) Replay(fn func(rec []byte) error) error {
 	if _, err := w.f.Seek(0, 0); err != nil {
 		return err
 	}
-	sc := bufio.NewScanner(w.f)
-	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if len(line) == 0 {
-			continue
+	// Append/Record.Canonical have no per-record 1-MiB limit. A Scanner
+	// ceiling would refuse valid writer output after restart. ReadBytes owns
+	// each line's storage and preserves exact bytes without a second copy.
+	reader := bufio.NewReader(w.f)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if readErr != nil && readErr != io.EOF {
+			return readErr
 		}
-		cp := append([]byte(nil), line...)
-		if err := fn(cp); err != nil {
-			return err
+		if len(line) > 0 && line[len(line)-1] == '\n' {
+			line = line[:len(line)-1]
+		}
+		if len(line) > 0 {
+			if err := fn(line); err != nil {
+				return err
+			}
+		}
+		if readErr == io.EOF {
+			return nil
 		}
 	}
-	return sc.Err()
 }
 
 // Truncate empties the WAL after its records have been durably flushed to sinks.

@@ -112,6 +112,9 @@ func ensureIncludeUsageRaw(raw []byte) ([]byte, error) {
 		// A non-object value was invalid on this wire to begin with —
 		// replaced wholesale, same posture as openai.EnsureIncludeUsage.
 		_ = json.Unmarshal(raw[start:end], &so)
+		if so == nil {
+			so = map[string]json.RawMessage{}
+		}
 		so["include_usage"] = json.RawMessage("true")
 		repl, merr := json.Marshal(so)
 		if merr != nil {
@@ -295,9 +298,10 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 	// (teed verbatim). Any other ingress (Anthropic re-renders from Parsed;
 	// Bedrock tees RawBody) gets an Anthropic-shaped re-render under the
 	// PUBLIC model name, so raw OpenAI JSON never reaches an
-	// Anthropic-speaking client. Non-2xx still returns the upstream body
-	// (teeable) with Parsed nil.
-	out := &providers.ProxyResponse{StatusCode: resp.StatusCode, Headers: resp.Header, RawBody: body}
+	// Anthropic-speaking client. Native non-2xx bytes remain teeable; an
+	// Anthropic-ingress 400 is converted to a safe protocol-specific error.
+	body, header := anthropicRequestError(req, resp.StatusCode, body, resp.Header)
+	out := &providers.ProxyResponse{StatusCode: resp.StatusCode, Headers: header, RawBody: body}
 	if resp.StatusCode/100 == 2 {
 		if parsed, perr := openai.ResponseToCanonical(body); perr == nil {
 			if parsed.Usage == nil {
@@ -343,7 +347,8 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, &providers.UpstreamError{StatusCode: resp.StatusCode, Body: body, Header: resp.Header}
+		body, header := anthropicRequestError(req, resp.StatusCode, body, resp.Header)
+		return nil, &providers.UpstreamError{StatusCode: resp.StatusCode, Body: body, Header: header}
 	}
 	inner := openai.ReadChatSSE(resp.Body, req.Model)
 	return func(yield func(*providers.StreamEvent, error) bool) {

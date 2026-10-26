@@ -9,6 +9,7 @@ package governance
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/inferplane/inferplane/internal/audit"
@@ -105,11 +106,13 @@ type UserPolicy struct {
 }
 
 type BudgetUsage struct {
-	LimitUSDMicros     int64     `json:"limit_usd_micros"`
-	SpentUSDMicros     int64     `json:"spent_usd_micros"`
-	RemainingUSDMicros int64     `json:"remaining_usd_micros"`
-	Window             string    `json:"window"`
-	ResetsAt           time.Time `json:"resets_at"`
+	LimitUSDMicros      int64     `json:"limit_usd_micros"`
+	SpentUSDMicros      int64     `json:"spent_usd_micros"`
+	RemainingUSDMicros  int64     `json:"remaining_usd_micros"`
+	Window              string    `json:"window"`
+	ResetsAt            time.Time `json:"resets_at"`
+	ReservedUSDMicros   int64     `json:"reserved_usd_micros,omitempty"`
+	AccountingUncertain bool      `json:"accounting_uncertain,omitempty"`
 }
 
 type QuotaUsage struct {
@@ -148,6 +151,8 @@ type UsageStatus struct {
 // (no live/config import) and billing a request on the same generation it
 // resolved on (ADR-006).
 type Governor struct {
+	localMoneyMu    sync.Mutex
+	localMoney      map[string]*localMoneyState
 	shared          SharedAuthority
 	authority       BudgetAuthority
 	teams           map[string]TeamPolicy
@@ -330,7 +335,7 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) (deci
 	a := &Admission{estimate: estimateTokens, missing: true}
 	defer func() {
 		if !decision.Allowed {
-			a.Close()
+			a.Cancel()
 		}
 	}()
 	if estimateTokens < 0 {
@@ -606,6 +611,27 @@ func (g *Governor) UsageOf(s Subject, kp KeyPolicy) UsageStatus {
 			Window:      "1m",
 		}
 	}
+	for _, entry := range []struct {
+		usage *BudgetUsage
+		scope string
+		id    string
+		win   budget.Window
+	}{
+		{u.TeamBudget, budget.ScopeTeam, s.Team, g.monthWindow()},
+		{u.TeamBudgetDay, budget.ScopeTeam, s.Team, g.dayWindow()},
+		{u.KeyBudget, budget.ScopeKey, s.KeyID, g.monthWindow()},
+		{u.KeyBudgetDay, budget.ScopeKey, s.KeyID, g.dayWindow()},
+		{u.UserBudget, budget.ScopeUser, userBudgetID(s), g.monthWindow()},
+		{u.UserBudgetDay, budget.ScopeUser, userBudgetID(s), g.dayWindow()},
+	} {
+		if entry.usage != nil {
+			entry.usage.ReservedUSDMicros, entry.usage.AccountingUncertain = g.localReserved(budget.Key(entry.scope, entry.id, entry.win), entry.win)
+			entry.usage.RemainingUSDMicros = max64(0, entry.usage.RemainingUSDMicros-min(entry.usage.ReservedUSDMicros, entry.usage.RemainingUSDMicros))
+			if entry.usage.AccountingUncertain {
+				entry.usage.RemainingUSDMicros = 0
+			}
+		}
+	}
 	return u
 }
 
@@ -622,6 +648,12 @@ func (g *Governor) Settle(s Subject, kp KeyPolicy, provider, model string, u pri
 		return g.settle(s, kp, provider, model, u, table, nil)
 	}
 	admission.once.Do(func() { admission.cost, admission.missing = g.settle(s, kp, provider, model, u, table, admission) })
+	if admission.moneyOwned {
+		if table == nil {
+			return 0, true
+		}
+		return table.CostUSDMicros(provider, model, u)
+	}
 	return admission.cost, admission.missing
 }
 
@@ -634,14 +666,19 @@ func (g *Governor) settle(s Subject, kp KeyPolicy, provider, model string, u pri
 	}()
 	actualTokens, err := u.TotalTokens()
 	if err != nil {
+		if g.HasSharedAuthority() {
+			g.metrics.IncPricingMiss(provider, model)
+		}
 		return 0, true
 	}
 	if g.HasSharedAuthority() {
 		if table == nil {
+			g.metrics.IncPricingMiss(provider, model)
 			return 0, true
 		}
 		cost, err := table.CostUSDMicrosChecked(provider, model, u)
 		if err != nil {
+			g.metrics.IncPricingMiss(provider, model)
 			return 0, true
 		}
 		g.metrics.AddBudgetSpend(s.Team, model, "total", float64(cost)/1e6)
@@ -675,6 +712,9 @@ func (g *Governor) settle(s Subject, kp KeyPolicy, provider, model string, u pri
 		costMicros, pricingMissing = 0, true
 	} else {
 		costMicros, pricingMissing = table.CostUSDMicros(provider, model, u)
+	}
+	if admission != nil && admission.moneyOwned {
+		return costMicros, pricingMissing
 	}
 	if p.BudgetMicrosPerMonth > 0 {
 		mw := g.monthWindow()

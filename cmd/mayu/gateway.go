@@ -266,7 +266,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		}
 	}
 	inst := instanceID()
-	aud, err := audit.NewWriter(inst, raw.Audit.Buffer.Path, sinks)
+	aud, err := audit.NewWriter(inst, raw.Audit.Buffer.Path, sinks, audit.WithFailureMode(raw.Audit.FailureMode))
 	if err != nil {
 		store.Close()
 		return nil, fmt.Errorf("audit: %w", err)
@@ -494,33 +494,19 @@ func newGateway(cfgPath string) (*gateway, error) {
 		tpm := restrictiveRate(base.TokensPerMinute, tl.TPM)
 		budgetMicros, budgetExceeded := base.BudgetMicrosPerMonth, base.BudgetExceeded
 		if tl.BudgetMicrosPerMonth > 0 {
-			if budgetMicros == 0 || tl.BudgetMicrosPerMonth < budgetMicros {
-				budgetMicros = tl.BudgetMicrosPerMonth
+			mode := "warn"
+			if tl.BudgetHard {
+				mode = "block"
 			}
-			// Block wins on tie (CLAUDE.md): a soft policy budget layered
-			// on a base that blocks must NOT loosen enforcement to warn —
-			// the base's on_exceeded is not a dimension the policy rule
-			// declared (PR #50 review finding).
-			if tl.BudgetHard || base.BudgetExceeded == "block" {
-				budgetExceeded = "block"
-			} else {
-				budgetExceeded = "warn"
-			}
+			budgetMicros, budgetExceeded = restrictiveBudget(budgetMicros, budgetExceeded, tl.BudgetMicrosPerMonth, mode)
 		}
 		budgetDayMicros, budgetDayExceeded := base.BudgetMicrosPerDay, base.BudgetDayExceeded
 		if tl.BudgetMicrosPerDay > 0 {
-			if budgetDayMicros == 0 || tl.BudgetMicrosPerDay < budgetDayMicros {
-				budgetDayMicros = tl.BudgetMicrosPerDay
+			mode := "warn"
+			if tl.BudgetDayHard {
+				mode = "block"
 			}
-			// Same block-wins-on-tie rule as the month window above, resolved
-			// independently: the two windows are separate rules with separate
-			// hardCap flags, so a soft DAY rule must not soften a blocking
-			// month base and vice versa.
-			if tl.BudgetDayHard || base.BudgetDayExceeded == "block" {
-				budgetDayExceeded = "block"
-			} else {
-				budgetDayExceeded = "warn"
-			}
+			budgetDayMicros, budgetDayExceeded = restrictiveBudget(budgetDayMicros, budgetDayExceeded, tl.BudgetMicrosPerDay, mode)
 		}
 		// Budget-lease clamp (ADR-034): within a lease the local limit is
 		// the granted allowance, so enforcement needs no network round
@@ -547,15 +533,11 @@ func newGateway(cfgPath string) (*gateway, error) {
 				if allowance < 1 {
 					allowance = 1
 				}
-				if limit != 0 && allowance >= limit {
-					return limit, exceeded
+				mode := "warn"
+				if l.HardCap {
+					mode = "block"
 				}
-				// Same block-wins-on-tie rule as the overlay above: a soft
-				// lease clamping a blocking budget keeps block.
-				if l.HardCap || exceeded == "block" {
-					return allowance, "block"
-				}
-				return allowance, "warn"
+				return restrictiveBudget(limit, exceeded, allowance, mode)
 			}
 			budgetMicros, budgetExceeded = clamp(budgetMicros, budgetExceeded, v1alpha1.PeriodCalendarMonth)
 			budgetDayMicros, budgetDayExceeded = clamp(budgetDayMicros, budgetDayExceeded, v1alpha1.PeriodCalendarDay)
@@ -941,7 +923,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		maxAge := raw.ControlPlane.MaxPolicyAgeDuration
 		governanceGate = func() (bool, string) { return syncer.GovernanceReady(maxAge) }
 	}
-	g.dataSrv = &http.Server{Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol), server.WithMaxRequestBytes(cfg.Server.MaxRequestBytes), server.WithGovernanceGate(governanceGate))}
+	g.dataSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol), server.WithMaxRequestBytes(cfg.Server.MaxRequestBytes), server.WithGovernanceGate(governanceGate))}
 	if authority != nil || shared != nil {
 		next := g.dataSrv.Handler
 		g.dataSrv.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -1018,7 +1000,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 			return true, ""
 		}
 	}
-	g.adminSrv = &http.Server{Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore != nil), auditFileSinks, aud, anchorReader, readiness, m, writer, liveExport(holder), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), cfg.Probe.AllowedHosts...)}
+	g.adminSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore != nil), auditFileSinks, aud, anchorReader, readiness, m, writer, liveExport(holder), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), cfg.Probe.AllowedHosts...)}
 	g.adminSrv.Handler = server.WithEvaluations(g.adminSrv.Handler, g.dataSrv.Handler, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), aud)
 	authorityTransferred = true
 	sharedTransferred = true

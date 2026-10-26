@@ -79,19 +79,20 @@ console, all opt-in behind one env var.
    rules. The boot attach (seed + first load) is therefore a hard boot
    dependency, bounded at 10 seconds — an unreachable database fails the
    boot instead of hanging it.
-7. **No new authorization axis (accepted limitation, not an oversight).**
-   inferplaned has no admin-vs-viewer split at all — a verified OIDC
-   identity and the static token are admin-equivalent (ADR-037, D4/D5) — so
-   policy writes cross exactly the same `authn` threshold reads already
-   cross: `GET`/`PUT`/`DELETE /v1alpha1/policies` sit behind the same
-   middleware as sync, dataplanes and export. A read/write split is future
-   work and would belong with a control-plane principal model, not bolted
-   onto one endpoint. Meanwhile the feature stays functional without a
+7. **Dedicated policy-write authority (current implementation).**
+   `GET /v1alpha1/policies` uses the heartbeat/read authentication.
+   `PUT`/`DELETE` require a verified console OIDC identity with an accepted
+   group mapping or the dedicated `INFERPLANED_POLICY_WRITE_TOKEN`, distinct
+   from both heartbeat and broker tokens. The heartbeat token deployed to
+   nodes cannot write policy. Fine-grained OIDC writer/viewer roles remain
+   future work; accepted console identities can write. The token-free,
+   verifier-free development posture remains open for loopback use.
+   Meanwhile the feature stays functional without a
    store: `GET` works file-only with `"writable": false` (how the console
    renders read-only), and `PUT`/`DELETE` return 405.
 8. **Deferred:** RDS provisioning and ECS secret injection (a cost/infra
-   decision, separate from this code change); policy history / audit of who
-   changed what (inferplaned has no audit chain); and `GET` of a single
+   decision, separate from this code change); independently anchored policy
+   history (digest-only mutation evidence exists, not a mayu audit chain); and `GET` of a single
    policy (the list is small).
 
 ## Consequences
@@ -108,13 +109,14 @@ console, all opt-in behind one env var.
   clear message if it is set with an empty `--policies`.
 - With the DSN unset, behaviour is byte-identical to today: file-only
   policies, mtime watch running, `PUT`/`DELETE` answering 405.
-- Accepted limitation (recorded in decision 7): every authenticated identity
-  can write policy, because inferplaned has no finer-grained principal model
-  to hang a read/write split on.
+- Policy reads and writes have separate bearer authority as described in
+  decision 7. Accepted console OIDC identities remain write-capable; no
+  finer-grained console writer/viewer split is implemented.
 - The env-only configuration follows the `INFERPLANED_TOKEN` /
   `INFERPLANED_USAGE_DSN` precedent — inferplaned has no config file.
-- **`inferplaned` is task-replaceable, not horizontally scalable: run exactly
-  one task.** Postgres-backing the policy/telemetry stores makes those stores
+- **Legacy in-memory lease profile: run exactly one `inferplaned` task.**
+  ADR-045/046 add separate opt-in durable/shared profiles; attaching this
+  policy store alone does not activate them. Postgres-backing these stores makes them
   safe across task replacement, but the budget-lease ledger
   (`internal/controlplane`) is still per-process in-memory. Two concurrent
   `inferplaned` tasks would each grant full budget allowances against the

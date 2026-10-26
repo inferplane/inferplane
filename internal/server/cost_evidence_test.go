@@ -55,7 +55,7 @@ func TestResponsesRetryPreservesCostUsageAndAuditEvidence(t *testing.T) {
 	}
 	f.Holder.Swap(state)
 	store := budget.NewMemory()
-	gov := governance.NewGovernor(map[string]governance.TeamPolicy{"team": {BudgetMicrosPerMonth: 10000, BudgetExceeded: "block"}}, limiter.NewMemory(), store, nil)
+	gov := governance.NewGovernor(map[string]governance.TeamPolicy{"team": {BudgetMicrosPerMonth: 10_000_000, BudgetExceeded: "block"}}, limiter.NewMemory(), store, nil)
 	aud, lines := policyAudit(t)
 	closeAudit := sync.OnceValue(aud.Close)
 	t.Cleanup(func() { _ = closeAudit() })
@@ -99,8 +99,14 @@ func TestResponsesRetryPreservesCostUsageAndAuditEvidence(t *testing.T) {
 		}
 	}
 	window := budget.CalendarMonthIn(time.UTC)
-	if got := store.Spent(budget.Key(budget.ScopeTeam, "team", window), window); got != 52 {
-		t.Fatalf("observability changed settlement: %d", got)
+	// The legacy cost evidence includes an explicitly uncertain 5m cache-write
+	// estimate. Only independently priced input/output/read are observed spend;
+	// the failed attempt's whole liability must remain reserved for unknown TTL.
+	if got := store.Spent(budget.Key(budget.ScopeTeam, "team", window), window); got != 27 {
+		t.Fatalf("known categories lost or unknown TTL estimate treated as actual spend: %d", got)
+	}
+	if status := gov.UsageOf(governance.Subject{Team: "team"}, governance.KeyPolicy{}).TeamBudget; status.ReservedUSDMicros == 0 {
+		t.Fatalf("unknown cache TTL released the failed attempt's financial liability: %+v", status)
 	}
 	for _, a := range spans[0].Attributes() {
 		if a.Key == "inferplane.usage.cache_read_input_tokens" && a.Value.AsInt64() != 0 {

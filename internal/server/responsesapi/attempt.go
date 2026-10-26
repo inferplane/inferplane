@@ -125,6 +125,12 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 	}
 	fail := func(cause error) bool {
 		a.errorCode = streamFailureCode(cause)
+		recovery := a.errorCode == "context_length_exceeded" || a.errorCode == "invalid_encrypted_content"
+		// Native terminal failures must retain the SSE recovery shape consumed
+		// by Codex even when they are the first upstream event.
+		if !committed && native && recovery && errors.Is(cause, responses.ErrFailed) {
+			commit()
+		}
 		if !committed {
 			status := errorStatus(cause)
 			a.finish(status, usage, nil, false, ttft)
@@ -140,7 +146,16 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 			data, _ := json.Marshal(map[string]string{
 				"type": "error", "code": a.errorCode, "message": "upstream stream interrupted",
 			})
-			if err := responses.WriteEvent(w, responses.Event{Type: "error", Data: data}); err != nil {
+			event := responses.Event{Type: "error", Data: data}
+			if recovery {
+				event.Type = "response.failed"
+				event.Data, _ = json.Marshal(map[string]any{
+					"type": "response.failed",
+					"response": map[string]any{"object": "response", "status": "failed", "output": []any{},
+						"error": map[string]string{"code": a.errorCode, "message": "upstream stream interrupted"}},
+				})
+			}
+			if err := responses.WriteEvent(w, event); err != nil {
 				a.errorCode = streamFailureCode(errClientWriteFailed)
 			} else {
 				flusher.Flush()

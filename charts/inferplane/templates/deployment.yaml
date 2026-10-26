@@ -26,10 +26,14 @@ spec:
       {{- include "inferplane.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/config: {{ .Values.config | toJson | sha256sum }}
       labels:
         {{- include "inferplane.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "inferplane.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- if gt (int .Values.replicaCount) 1 }}
       affinity:
         podAntiAffinity:
@@ -43,6 +47,8 @@ spec:
         - name: inferplane
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           args: ["serve", "--config", "/etc/inferplane/config.json"]
           envFrom:
             - secretRef:
@@ -60,6 +66,8 @@ spec:
             httpGet:
               path: /healthz
               port: admin
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:

@@ -12,6 +12,25 @@ serviceAccount:
   create: true
   name: ""
   annotations: {}   # e.g. eks.amazonaws.com/role-arn for Bedrock IRSA
+# Writable data volumes for the image's nonroot UID/GID. The CSI driver must
+# support fsGroup ownership; pre-provision existing claims accordingly.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile: { type: RuntimeDefault }
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities: { drop: ["ALL"] }
+# Synchronous audit/analytics replay precedes HTTP listeners. Allow up to ten
+# minutes before liveness begins; tune for the largest retained audit history.
+startupProbe:
+  httpGet: { path: /healthz, port: admin }
+  periodSeconds: 5
+  failureThreshold: 120
+  timeoutSeconds: 2
 persistence:
   enabled: false   # opt in for production — without it /var/lib/inferplane is an
                    # emptyDir and the key store/audit WAL are wiped on every restart
@@ -48,7 +67,11 @@ secrets:
   existingSecret: inferplane-secrets   # must contain ANTHROPIC_API_KEY, INFERPLANE_ADMIN_TOKEN, ...
 # config.json rendered into a ConfigMap. Secrets use api_key_ref env: from existingSecret.
 config:
-  server: { listen: ":8080", admin_listen: ":9090" }
+  server:
+    listen: ":8080"
+    admin_listen: ":9090"
+    admin_auth:
+      token_refs: [ { env: INFERPLANE_ADMIN_TOKEN } ]
   key_store: { type: sqlite, path: /var/lib/inferplane/keys.db }
   # To preload virtual keys, add entries like this and put INFERPLANE_VIRTUAL_KEY
   # in secrets.existingSecret; the chart exposes that Secret through envFrom.
@@ -92,6 +115,9 @@ config:
   #   service_name: inferplane
 # Measured 2026-09-25 (fake upstream, 2–200 KB requests): RSS 27 MB idle, 79 MB
 # peak at >1,000 req/s; CPU 0.8–8.5 ms per request, scaling with body size.
+# These figures do not cover the default 64 MiB body cap, concurrent large
+# requests, privacy inspection or audit replay. Size memory for your workload
+# and lower config.server.max_request_bytes when large bodies are unnecessary.
 # No CPU limit: throttling would add latency to every in-flight stream.
 resources:
   requests: { cpu: 50m, memory: 64Mi }

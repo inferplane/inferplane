@@ -1,6 +1,6 @@
 ---
 translation_source: reference/infrastructure.md
-translation_source_sha256: c24011a9bd44e974c73117a6f583d610c0679bb6a25baf8691ec6d29546aa6e5
+translation_source_sha256: 40bc363b684ef26196b4649f09ceb830ae1238f79dded9b8039af39b8b65f839
 ---
 
 # 인프라 {#infrastructure}
@@ -29,6 +29,11 @@ mayu·inferplaned를 각각 정적 바이너리로 빌드해 별도의 distroles
 - CGO를 끈 정적 바이너리여서 libc 없이 비루트 distroless 실행이 가능합니다.
 - 관리 콘솔 정적 자산은 `go:embed`로 바이너리에 포함됩니다(ADR-001).
 - **설정 재로드:** 설정 수정 후 `kill -HUP <pid>`로 공급자·모델·가격을 원자적으로 교체합니다. 거버넌스 카운터·키·감사는 유지하고 오류 시 이전 설정을 유지합니다. 리스너·TLS·드레인·팀 정책 한도는 재시작이 필요합니다.
+- 차트는 기본 설정의 해시를 Pod 템플릿에 넣으므로 재시작이 필요한 설정을 Helm으로 변경하면 Pod가 교체됩니다. 별도 정책 파일은 계속 감시합니다. 기본 관리 토큰 참조는 기존 Secret의 `INFERPLANE_ADMIN_TOKEN`을 읽습니다. 다른 인증 구성에는 `server.admin_auth`를 명시적으로 교체하세요.
+- 게이트웨이 startup probe는 동기 재생에 기본 10분을 허용한 뒤 liveness 검사를 시작합니다. 보관 이력에 맞춰 `startupProbe`를 조정하세요. Pod `fsGroup`은 기본 65532이며 nonroot 데이터 볼륨 쓰기 권한에 사용합니다. 기존 PVC·CSI 드라이버도 해당 소유권을 지원해야 합니다.
+- 형식이 정의된 설정은 알 수 없는 필드, 음수 한도, 잘못된 `on_exceeded`, 범위를 벗어난 금전 한도를 거부합니다. 비활성 주석 `_comment`, `_comment_*`, `_*_example`은 허용하며 맵 이름·분류기 옵션은 자유 형식입니다. 0이 아닌 `quota.tokens_per_month`는 지원하지 않습니다. 월별 `tokenQuota` 집행은 공유 Postgres 프로파일이 필요합니다.
+- `mayu config validate --config config.json`은 `LoadRaw`를 통해 오프라인 스키마·비밀 참조를 검증합니다. 런타임 저장소를 열거나 공급자·AWS 자격 증명을 구성하거나 업스트림에 접속하지 않습니다. 선언이 유효해도 런타임 준비 상태를 증명하지 않으며 해당 의존성은 `serve`에서 검사합니다.
+- 두 게이트웨이 리스너에는 요청 헤더를 읽는 10초 제한이 있습니다. 긴 SSE 스트림을 끊는 전체 응답 시간 제한은 없습니다.
 - 로컬 기본은 복제본 하나입니다. ADR-046 공유 Postgres는 여러 게이트웨이를 지원하며 차트가 잘못된 로컬 복제를 거부합니다. 영속 공유는 독립 PVC의 StatefulSet·필수 안티어피니티·중단 예산입니다. [공유 거버넌스](../shared-governance.md)를 참고하세요.
 - **영속성:** 로컬은 기존 Deployment·PVC 동작, 공유는 키·카운터를 Postgres에 두고 복제본별 PVC에 감사 구간을 저장합니다. WAL을 공유하지 마세요.
 - 차트는 existingSecret만 참조하고 비밀을 만들지 않습니다.
@@ -56,4 +61,4 @@ mayu·inferplaned를 각각 정적 바이너리로 빌드해 별도의 distroles
 
 sensitiveData·context 활성화 전에 모든 mayu, inferplaned, 사용하는 CRD를 업그레이드합니다. 경로·가격·검증된 경계와 기능을 먼저 설치하세요. 로컬 정책은 토폴로지 조립 후 리스너 시작 전에, CP ApplyWire는 각 데이터 영역에서 목적지를 검사합니다. 첫 요청부터 보호하려면 require_sync, 정책 나이 제한에는 max_policy_age를 사용합니다. 준비되지 않거나 오래된 상태에서도 계산은 로컬/200입니다. 빠른 시작 디렉터리 대신 독립 policy-routing 예제를 사용하세요. Shadow는 컨텍스트 선호에만 적용하고 개인정보는 이미 집행합니다. 이 라우팅 기능만으로 HA·내구성이 좋아지는 것은 아닙니다. [운영자 가이드](../policy-routing.md)를 참고하세요.
 
-ADR-044의 결정·유한 어피니티는 로컬이며 중앙 분류기·캐시 의존성이 없습니다. 폴백은 승인된 개인정보·비용 제약 안에서만 동작합니다. CP 장애 중에도 유효 권한이 있는 동안 설치된 규칙을 쓰며 만료된 하드 리스는 거부합니다. ADR-045는 Postgres 전역 금전 권한, 교체 가능한 CP 복제본, 비공개 영속 노드 저널을 추가합니다. CP 준비 상태는 DB를 검사하고 데이터 영역은 장애 중 이미 확정된 유한 잔액만 유지합니다. 복제 DB와 안정적인 CP 주소를 운영하세요. ADR-045는 로컬 키·요청률·토큰을 전역화하지 않으며 별도 동기 공유 승인은 ADR-046입니다. [배포·실패 동작](../durable-budgets.md)을 참고하세요.
+ADR-044의 정책 결정·유한 어피니티는 로컬입니다. 기본 결정적 검사는 네트워크 의존성이 없지만 선택적 HTTP 분류기는 엔드포인트 가용성·시간 제한에 의존하며 Enforce에서 `onUninspectable`을 적용합니다. 폴백은 승인된 개인정보·비용 제약 안에서만 동작합니다. CP 장애 중에도 유효 권한이 있는 동안 설치된 규칙을 쓰며 만료된 하드 리스는 거부합니다. ADR-045는 Postgres 전역 금전 권한, 교체 가능한 CP 복제본, 비공개 영속 노드 저널을 추가합니다. CP 준비 상태는 DB를 검사하고 데이터 영역은 장애 중 이미 확정된 유한 잔액만 유지합니다. 복제 DB와 안정적인 CP 주소를 운영하세요. ADR-045는 로컬 키·요청률·토큰을 전역화하지 않으며 별도 동기 공유 승인은 ADR-046입니다. [배포·실패 동작](../durable-budgets.md)을 참고하세요.

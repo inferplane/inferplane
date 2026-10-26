@@ -69,6 +69,37 @@ func TestGovernorSettleRecordsMetrics(t *testing.T) {
 	}
 }
 
+// Settlement reporting must retain missing-price evidence in the shared
+// profile too; a nil observation cannot be represented as zero known spend.
+func TestSharedSettlementRecordsMissingPriceMetric(t *testing.T) {
+	for _, kind := range []string{"nil-table", "missing-rate", "invalid-usage"} {
+		t.Run(kind, func(t *testing.T) {
+			m := metrics.New()
+			g := NewGovernor(nil, limiter.NewMemory(), budget.NewMemory(), m)
+			g.SetSharedAuthority(&sharedReportingOnly{})
+			table := testTable()
+			u := pricing.Usage{Input: 1}
+			if kind == "nil-table" {
+				table = nil
+			} else if kind == "missing-rate" {
+				table = pricing.New(pricing.OnMissingAllow, nil)
+			} else {
+				u.Input = -1
+			}
+			_, missing := g.Settle(Subject{Team: "t"}, KeyPolicy{}, "p", "m", u, table, nil)
+			if !missing {
+				t.Fatal("unknown/invalid cost was reported as known")
+			}
+			if count, err := testutil.GatherAndCount(m.Registry(), "inferplane_pricing_miss_total"); err != nil || count != 1 {
+				t.Fatalf("missing-price evidence not recorded: count=%d err=%v", count, err)
+			}
+		})
+	}
+}
+
+// This test exercises reporting only; it must never call shared admission.
+type sharedReportingOnly struct{ SharedAuthority }
+
 func TestGovernorTPMBlocks(t *testing.T) {
 	teams := map[string]TeamPolicy{"t": {TokensPerMinute: 1000}}
 	g := NewGovernor(teams, limiter.NewMemory(), budget.NewMemory(), nil)

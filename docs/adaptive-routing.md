@@ -258,7 +258,10 @@ percentage is promised without measurements.
 
 ## Availability and verification
 
-Mayu performs classification, policy inspection and pin lookup locally.
+Mayu performs deterministic inspection, policy evaluation and pin lookup locally.
+Opt-in `pii_classification` can call an HTTP endpoint, including a pod-local
+SystemOne sidecar. Classifier timeout, saturation and failure apply
+`onUninspectable` in Enforce; Shadow records without restricting the request.
 Backend failover is constrained by the same PII, capability, region and cost
 limits. Replicate approved backends and keep control-plane management off the
 inference path. Global monetary authority now has an opt-in Postgres ledger and

@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 
 	"github.com/inferplane/inferplane/internal/adminauth"
@@ -136,6 +137,9 @@ func LoadKeyStore(path string) (KeyStoreConfig, error) {
 	}
 	if _, bad := fields["dsn"]; bad {
 		return KeyStoreConfig{}, fmt.Errorf("config: use key_store.dsn_ref instead of inline dsn")
+	}
+	if err := validateConfigFields(root.KeyStore, reflect.TypeFor[KeyStoreConfig](), "key_store"); err != nil {
+		return KeyStoreConfig{}, err
 	}
 	var cfg KeyStoreConfig
 	if err := json.Unmarshal(root.KeyStore, &cfg); err != nil {
