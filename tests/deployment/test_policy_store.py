@@ -46,10 +46,11 @@ class PolicyRoutingTests(unittest.TestCase):
         self.assertEqual(cfg["DefaultCacheBehavior"], old["DefaultCacheBehavior"])
         self.assertEqual(cfg["Origins"][:-1], old["Origins"])
         self.assertEqual(cfg["CacheBehaviors"][len(helper.PATHS):], old["CacheBehaviors"])
-        self.assertEqual([b["PathPattern"] for b in cfg["CacheBehaviors"][:5]], list(helper.PATHS))
-        for behavior in cfg["CacheBehaviors"][:5]:
+        self.assertEqual([b["PathPattern"] for b in cfg["CacheBehaviors"][:len(helper.PATHS)]], list(helper.PATHS))
+        for behavior in cfg["CacheBehaviors"][:len(helper.PATHS)]:
             self.assertEqual(behavior["OriginRequestPolicyId"], "forward-auth")
             self.assertEqual(behavior["AllowedMethods"], old["DefaultCacheBehavior"]["AllowedMethods"])
+        self.assertIn("/v1alpha1/config/*", helper.PATHS)
         self.assertNotIn("/v1alpha1/usage", helper.PATHS)
         self.assertNotIn("/ui/*", helper.PATHS)
 

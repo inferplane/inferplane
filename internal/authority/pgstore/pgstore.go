@@ -264,7 +264,7 @@ func (s *Store) Sync(ctx context.Context, dataplane string, req policy.Authority
 }
 
 func readPolicies(ctx context.Context, tx pgx.Tx) ([]v1alpha1.GovernancePolicy, error) {
-	rows, err := tx.Query(ctx, `SELECT name, doc_yaml FROM policies ORDER BY name`)
+	rows, err := tx.Query(ctx, `SELECT name, doc_yaml FROM policies ORDER BY name COLLATE "C"`)
 	if err != nil {
 		return nil, databaseError("read policies", err)
 	}

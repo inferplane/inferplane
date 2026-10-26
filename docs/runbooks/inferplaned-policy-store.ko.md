@@ -1,6 +1,6 @@
 ---
 translation_source: runbooks/inferplaned-policy-store.md
-translation_source_sha256: 671775cf70c2d1bbbfc703e9ef16e251d9d1384eaf8fd93b3d1ff571e64da062
+translation_source_sha256: 9530fe49928266d649006f8c307ec29684495cdec4eafb9744d4c819bb1cbf09
 ---
 
 # ECS에서 영속 예산 설정 활성화 {#enable-persisted-budget-settings-on-ecs}
@@ -60,7 +60,7 @@ DB, Fargate, secret, 네트워크의 상시 요금이 추가됩니다. 현재 �
    기다립니다.
 5. Main stack 경로 변경안을 준비합니다. 생성된 VPC origin ID를 `PolicyVpcOriginId`로
    전달하고 기존 모든 파라미터를 유지합니다. Distribution만 교체 없이 변경되는지
-   확인한 뒤 실행·전파를 기다립니다. 정책·SSO 경로 5개를 invalidate합니다.
+   확인한 뒤 실행·전파를 기다립니다. 정책·SSO·config 경로 6개를 invalidate합니다.
 6. 공개 경로·인증 거부, 기존 사용량 서비스 유지, 새 서비스 readiness, SSO 설정,
    테스트 응답을 사용하는 브라우저의 쓰기 버튼을 확인합니다.
    실제 사람의 SSO 완료나 운영 정책 변경은 별도로 보고해야 합니다.
@@ -76,3 +76,30 @@ cfn-lint --regions ap-northeast-2 -t deploy/ecs/policy-store.yaml
 첫 쓰기 전에는 유지한 기존 경로로 rollback할 수 있습니다. DB 정책 수정이
 시작된 뒤에는 authoritative DSN과 문서를 유지해야 합니다.
 이미지 파일로 돌아가면 설정한 제한을 완화하거나 잃을 수 있습니다.
+
+## 정책 백업과 복원 {#back-up-and-restore-policies}
+
+policy store에는 GovernancePolicy 문서만 저장됩니다. 정책 내보내기에는 예산 authority 잔액, 사용량 텔레메트리, identity 설정이 포함되지 않으며, 가져오기도 이것들을 복원하지 않습니다. 잔액을 복원하면 중앙 authority를 다시 쓰는 셈이 되기 때문입니다. 데이터베이스 자체는 위에서 설명한 RDS/pg_dump 백업을 계속 사용하세요.
+
+가져오기는 정책 CP 태스크 하나만 서비스 중일 때 실행하고, 롤아웃 중에는 실행하지 마세요. `deploy/ecs/policy-store.yaml`은 `MaximumPercent: 200`을 사용하므로 배포 중 inferplaned 태스크 두 개가 겹칠 수 있습니다. `writeMu`는 프로세스 로컬이어서 PUT/DELETE와 같은 기존 동시성 공백이 있습니다. DB 수준 compare-and-swap은 후속 작업으로 기록되어 있습니다.
+
+읽기 토큰으로 백업합니다(예: cron).
+
+```bash
+curl -fsS -H "Authorization: Bearer $INFERPLANED_TOKEN" \
+  "$CP/v1alpha1/config/export" -o "policies-$(date -u +%Y%m%dT%H%M%SZ).yaml"
+```
+
+복원할 때는 먼저 미리보기를 실행하고, 미리보기에서 받은 generation으로 적용합니다. 정책 쓰기 토큰을 사용합니다.
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $INFERPLANED_POLICY_WRITE_TOKEN" \
+  --data-binary @policies.yaml "$CP/v1alpha1/config/import?dry_run=true" | tee preview.json
+GEN=$(jq -r .current_generation preview.json)
+curl -fsS -X POST -H "Authorization: Bearer $INFERPLANED_POLICY_WRITE_TOKEN" \
+  --data-binary @policies.yaml "$CP/v1alpha1/config/import?expected_generation=$GEN"
+```
+
+가져오기는 정책 세트 전체를 교체합니다. 파일에 없는 문서는 삭제됩니다. `409`가 나오면 미리보기 이후 정책이 바뀐 것이니 미리보기를 다시 실행하세요. 빈 파일은 `allow_empty=true`가 필요합니다. YAML 전송 한도는 64 MiB이며, 두 sync 모드와 요청에 따른 authority 항목을 포함한 최악의 sync 응답 크기를 구성 요소별로 측정하고, 데이터 플레인 디코딩 한도인 8 MiB를 초과하면 즉시 중단하여 `400`으로 거부합니다. 요청에 따른 크기 여유는 실제 데이터 플레인 클라이언트가 로컬 nonce로 생성하는 ASCII-safe/hex authority 요청 식별자를 전제로 합니다. JSON 이스케이프가 많이 필요한 식별자는 이를 보낸 데이터 플레인 자신의 디코딩 한도만 초과할 수 있습니다. pgstore 검증에서 authority 요청 식별자 문자 집합을 제한하는 작업은 후속 과제로 기록되어 있습니다. "committed but not applied" `500`이 나오면 store에는 이미 새 세트가 반영된 것이니, 미리보기를 다시 실행해 실제로 배포 중인 세트를 확인하세요. 콘솔의 Policies → Export YAML / Import (restore)에서도 같은 흐름을 제공합니다.
+
+이 변경 이전에 준비한 배포에서는 `/v1alpha1/config/*` 요청이 여전히 기존 CP origin으로 갑니다. `prepare-policy-controlplane.py`는 이미 policy origin이 있으면 실행을 거부하므로, `/v1alpha1/config/*` behavior(policy-cp origin, `forward-auth` origin request policy)를 검토를 거쳐 수동으로 추가하세요. 그다음 policy/SSO/config 경로 6개를 무효화합니다.

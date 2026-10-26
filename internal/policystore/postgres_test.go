@@ -210,3 +210,97 @@ func TestNewPostgresDSNNeverInErrors(t *testing.T) {
 		t.Fatalf("parse error leaked the dsn: %v", err)
 	}
 }
+
+func TestReplaceSwapsWholeSetAndMarksSeeded(t *testing.T) {
+	p := newTestStore(t)
+	ctx := context.Background()
+	if err := p.Put(ctx, "old-a", []byte("doc: old-a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Put(ctx, "keep", []byte("doc: keep-v1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Replace(ctx, []Doc{
+		{Name: "keep", YAML: []byte("doc: keep-v2")},
+		{Name: "new-b", YAML: []byte("doc: new-b")},
+	}); err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+	docs, err := p.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 2 || docs[0].Name != "keep" || docs[1].Name != "new-b" {
+		t.Fatalf("after Replace got %+v, want exactly [keep new-b]", docs)
+	}
+	if string(docs[0].YAML) != "doc: keep-v2" {
+		t.Fatalf("keep not overwritten: %q", docs[0].YAML)
+	}
+	seeded, err := p.Seeded(ctx)
+	if err != nil || !seeded {
+		t.Fatalf("Seeded after Replace = %v, %v; want true", seeded, err)
+	}
+	// Replace with nothing empties the store but keeps the marker, so a
+	// restored-empty store is never re-seeded from --policies files.
+	if err := p.Replace(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if docs, _ := p.List(ctx); len(docs) != 0 {
+		t.Fatalf("Replace(nil) left %d docs", len(docs))
+	}
+	if seeded, _ := p.Seeded(ctx); !seeded {
+		t.Fatal("Replace(nil) cleared the seed marker")
+	}
+}
+
+func TestReplaceRollsBackOnFailure(t *testing.T) {
+	p := newTestStore(t)
+	ctx := context.Background()
+	if err := p.Put(ctx, "survivor", []byte("doc: survivor")); err != nil {
+		t.Fatal(err)
+	}
+	// A duplicate name violates the primary key on the second INSERT, after
+	// the DELETE already ran inside the transaction: everything must roll back.
+	err := p.Replace(ctx, []Doc{
+		{Name: "dup", YAML: []byte("doc: 1")},
+		{Name: "dup", YAML: []byte("doc: 2")},
+	})
+	if err == nil {
+		t.Fatal("Replace with duplicate names succeeded; want an error")
+	}
+	docs, lerr := p.List(ctx)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if len(docs) != 1 || docs[0].Name != "survivor" {
+		t.Fatalf("failed Replace was not rolled back: %+v", docs)
+	}
+}
+
+// List must be byte-ordered regardless of the database collation: the
+// controlplane's GenerationOf is order-sensitive and is compared against a
+// Go-sorted import preview and against authority/pgstore's own read. Under
+// en_US collation "team-b" sorts after "teama"; in byte order it sorts before.
+func TestListIsByteOrderedNotCollationOrdered(t *testing.T) {
+	p := newTestStore(t)
+	ctx := context.Background()
+	for _, n := range []string{"teama", "team-b", "Team-c"} {
+		if err := p.Put(ctx, n, []byte("doc: "+n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	docs, err := p.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := []string{docs[0].Name, docs[1].Name, docs[2].Name}
+	want := []string{"Team-c", "team-b", "teama"} // bytewise: 'T' < 't', '-' < 'a'
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("List order %v, want byte order %v", got, want)
+		}
+	}
+	if !strings.Contains(policyListSQL, `COLLATE "C"`) {
+		t.Fatal(`List query must pin COLLATE "C" so the order does not depend on the server's locale`)
+	}
+}

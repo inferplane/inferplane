@@ -1,6 +1,6 @@
 ---
 translation_source: runbooks/inferplaned-dashboard.md
-translation_source_sha256: facb8d111c4843aa4a4750a7d4953a849cbe45ab6a1cd3428aa1c9ee2b012516
+translation_source_sha256: 6b70616348c958e43b2adb7f69ee0b742e78bb77de561bae15ec98cfda292611
 ---
 
 # Control plane 운영 대시보드 {#control-plane-operations-dashboard}
@@ -27,7 +27,7 @@ GovernancePolicy 문서를 관리하고 사용량·하트비트 관측을 읽습
 | Users & costs | 보고 계정 수·평균, 사용자별 지출·토큰, 팀 필터, 모델 상세, 정확한 재무 참조를 사용하는 개인 예산·토큰 설정 |
 | Budgets | 팀·사용자 예산 검색, 일간·월간 필터, 새 정책 또는 기존 정책에 예산 추가, USD 한도 편집, 검토 후 게시 |
 | Data planes | 현재 generation, 지원 API 버전, 최근 노드 관측, generation 비교, 마지막 하트비트, 기록된 정책 거절 상세 |
-| Policies | 모든 규칙 조회, 정책·subject 검색, 기존 예산·rate·모델 접근 필드 편집, 전체 JSON 문서 생성·편집, 게시 전 검토, 정확한 이름 입력 후 삭제 |
+| Policies | 모든 규칙 조회, 접근·rate·개인정보·대체 정책의 안내식 생성, 정확한 변경 요약과 초안 복귀, 기존 예산·rate·모델 접근 편집, 전체 JSON 편집, 명시적 게시와 이름 확인 삭제, YAML 내보내기와 가져오기(복원): dry-run diff 후 미리보기 generation에 고정한 Replace 적용(파일 최대 64 MiB, 예산 원장·사용량은 복원하지 않음) |
 
 개요는 비용·사용자·토큰 KPI → UTC 일별 지출·모델 분포 → 팀·사용자 지출 순위 →
 배포 관측 순서입니다. 상세 근거는 접힌 영역에 둡니다. 기본 예산 화면은 대상·

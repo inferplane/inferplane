@@ -60,7 +60,7 @@ those new resources before executing the change set.
 5. Prepare the main-stack routing candidate. Pass the provisioned VPC-origin ID
    as `PolicyVpcOriginId` and preserve every existing parameter. Review that
    only Distribution changes without replacement, then execute and wait for
-   propagation. Invalidate the five policy/SSO paths.
+   propagation. Invalidate the six policy/SSO/config paths.
 6. Verify public routing/auth refusal, unchanged usage service, new service
    readiness, existing SSO configuration, and synthetic browser write controls.
    A human SSO completion or real policy mutation must be reported separately.
@@ -76,3 +76,54 @@ cfn-lint --regions ap-northeast-2 -t deploy/ecs/policy-store.yaml
 Before the first write, the preserved old routes provide a rollback option.
 After DB policy edits begin, rollback must keep the authoritative DSN and
 documents. Reverting to image files could loosen or discard configured limits.
+
+## Back up and restore policies
+
+The policy store holds GovernancePolicy documents only. A policy export does
+NOT capture budget authority balances, usage telemetry or identity
+configuration, and an import never restores them. Restoring a balance would
+rewrite central authority. For the database itself, keep relying on the
+RDS/pg_dump backups described above.
+
+Run imports only when a single policy CP task is serving, never during a rollout.
+`deploy/ecs/policy-store.yaml` uses `MaximumPercent: 200`, so two inferplaned tasks
+can overlap during deployment. `writeMu` is process-local, the same pre-existing
+concurrency gap as PUT/DELETE; a DB-level compare-and-swap is a recorded follow-up.
+
+Back up with the read token (for example, from cron):
+
+```bash
+curl -fsS -H "Authorization: Bearer $INFERPLANED_TOKEN" \
+  "$CP/v1alpha1/config/export" -o "policies-$(date -u +%Y%m%dT%H%M%SZ).yaml"
+```
+
+To restore, preview first and then apply with the previewed generation. Use the
+policy write token:
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $INFERPLANED_POLICY_WRITE_TOKEN" \
+  --data-binary @policies.yaml "$CP/v1alpha1/config/import?dry_run=true" | tee preview.json
+GEN=$(jq -r .current_generation preview.json)
+curl -fsS -X POST -H "Authorization: Bearer $INFERPLANED_POLICY_WRITE_TOKEN" \
+  --data-binary @policies.yaml "$CP/v1alpha1/config/import?expected_generation=$GEN"
+```
+
+Import REPLACES the whole set. Every document missing from the file is
+deleted. A `409` means policies changed after the preview; re-run the preview.
+An empty file needs `allow_empty=true`. The YAML transport cap is 64 MiB; the
+worst-case sync size for the set is measured componentwise, stopping as soon as
+it exceeds the 8 MiB data-plane decode bound (import returns `400`). Both sync
+modes and request-driven authority items are included. The request-driven
+allowance assumes ASCII-safe/hex authority request identifiers, as real
+data-plane clients generate local nonces. Escaping-heavy identifiers can exceed
+only the sending data plane’s own decode bound. Restricting authority request
+identifier charset in pgstore validation is a recorded follow-up. A `500`
+saying "committed but not applied" means the store holds the new set; re-run a
+dry run to confirm what is distributed. The console offers the same flow under
+Policies → Export YAML / Import (restore).
+
+If the distribution was prepared before this change, its `/v1alpha1/config/*`
+requests still reach the legacy CP origin. `prepare-policy-controlplane.py`
+refuses an existing policy origin, so add the `/v1alpha1/config/*` behavior
+(policy-cp origin, `forward-auth` origin request policy) by reviewed manual
+edit. Then invalidate the six policy/SSO/config paths.

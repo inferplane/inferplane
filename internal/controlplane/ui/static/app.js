@@ -112,7 +112,7 @@
     return x === y ? String(a.key).localeCompare(String(b.key)) : x > y ? -1 : 1;
   }
 
-  async function request(path, { method = "GET", body, write = false, byteLimit = 0 } = {}) {
+  async function request(path, { method = "GET", body, raw, text = false, write = false, byteLimit = 0 } = {}) {
     const sid = session, signal = controller.signal;
     async function send() {
       if (sid !== session || signal.aborted) {
@@ -125,8 +125,8 @@
       const auth = write ? writeToken || token : token;
       const resp = await fetch(path, {
         method, signal, cache: "no-store", credentials: "omit", redirect: "error",
-        headers: { ...(auth ? { Authorization: "Bearer " + auth } : {}), ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
-        body: body !== undefined ? exactJSON(body) : undefined,
+        headers: { ...(auth ? { Authorization: "Bearer " + auth } : {}), ...(raw !== undefined ? { "Content-Type": "application/yaml" } : body !== undefined ? { "Content-Type": "application/json" } : {}) },
+        body: raw !== undefined ? raw : body !== undefined ? exactJSON(body) : undefined,
       });
       if (resp.status === 204) return null;
       if (!resp.ok) {
@@ -139,7 +139,8 @@
         }
         const err = Error(msg); err.status = resp.status; throw err;
       }
-      let raw;
+      if (text) return resp.text();
+      let payload;
       if (byteLimit && resp.body?.getReader) {
         const reader = resp.body.getReader(), decoder = new TextDecoder(), parts = []; let size = 0;
         try {
@@ -149,13 +150,13 @@
             if (size > byteLimit) { await reader.cancel(); throw Error("Chart history is too large. Select a shorter reporting period."); }
             parts.push(decoder.decode(value, { stream: true }));
           }
-          parts.push(decoder.decode()); raw = parts.join("");
+          parts.push(decoder.decode()); payload = parts.join("");
         } finally { reader.releaseLock(); }
       } else {
-        raw = await resp.text();
-        if (byteLimit && new TextEncoder().encode(raw).byteLength > byteLimit) throw Error("Chart history is too large. Select a shorter reporting period.");
+        payload = await resp.text();
+        if (byteLimit && new TextEncoder().encode(payload).byteLength > byteLimit) throw Error("Chart history is too large. Select a shorter reporting period.");
       }
-      return parseExactJSON(raw);
+      return parseExactJSON(payload);
     }
     // The deployed CP's missLimitedKeySet refuses another signature check
     // while one is in flight. Queue OIDC API reads/writes (including initial
@@ -225,6 +226,7 @@
     $("budget-search").value = $("budget-period-filter").value = "";
     $("new-budget").disabled = true; clearBudgetForm();
     $("new-rule").disabled = true; clearRuleForm(); clearCommand();
+    $("export-policies").disabled = $("import-policies").disabled = true;
     $("change-summary").textContent = ""; $("change-summary").hidden = true;
     $("last-updated").textContent = "Not refreshed";
     $("write-status").textContent = "No dedicated write credential selected.";
@@ -1167,6 +1169,8 @@
     $("policy-nav-count").hidden = !policies; $("policy-nav-count").textContent = String(policies?.policies.length || 0);
     $("new-policy").disabled = !canWrite();
     $("new-rule").disabled = !canWrite();
+    $("export-policies").disabled = !policies;
+    $("import-policies").hidden = !writable; $("import-policies").disabled = !canWrite();
     $("write-status").textContent = writeToken ? "Dedicated write credential selected in memory; the server checks it when publishing." : ssoSession ? "Console OIDC credential selected; the server checks write authorization when publishing." : token === "" && connected ? "Loopback-development session; the server still decides write admission." : "No dedicated write credential selected. Read token does not authorize writes.";
     const list = $("policies-list"); list.textContent = "";
     const term = $("policy-search").value.toLowerCase();
@@ -1295,6 +1299,21 @@
     $("policy-editor").hidden = $("editor-label").hidden = false; $("policy-editor").value = "";
     $("policy-review").textContent = exactJSON(view.policy, 2); $("dialog-confirm").textContent = "Delete policy";
   }
+  function openImport(bundle, preview) {
+    if (!canWrite()) return;
+    const s = preview.summary, empty = s.added + s.changed + s.unchanged === 0;
+    pendingChange = { mode: "import", bundle, preview, empty, session, wasDirty: dirty };
+    dialogBase("Restore · preview", "Importing REPLACES the complete policy set with this file. Documents absent from the file are deleted. Budget ledger balances and usage history are not restored.");
+    $("policy-review").textContent = [
+      ...(preview.store_rejected ? ["Note: the policy store holds documents the loader rejects; this diff is against the stored rows, and Current generation is the last distributed set."] : []),
+      "Summary: " + s.added + " added · " + s.changed + " changed · " + s.removed + " removed · " + s.unchanged + " unchanged",
+      "Current generation: " + preview.current_generation,
+      "Result generation:  " + preview.result_generation, "",
+      ...preview.changes.map(c => c.action.padEnd(10) + " " + c.name),
+    ].join("\n");
+    if (empty) message("dialog-error", "This file contains no policies. Applying it deletes every policy.");
+    $("dialog-confirm").textContent = s.removed > 0 ? "Restore and delete " + s.removed + " " + (s.removed === 1 ? "policy" : "policies") : "Restore policies";
+  }
   function closeDialog() {
     if ($("dialog-confirm").disabled) return;
     $("policy-dialog").close(); dirty = pendingChange?.wasDirty ?? dirty; pendingChange = null; $("policy-editor").value = ""; $("policy-review").textContent = "";
@@ -1319,6 +1338,24 @@
         if (!change.name && policies.policies.some(v => v.name === name)) throw Error("That policy already exists. Edit it explicitly instead of overwriting it.");
         openReview(name, doc);
       } catch (e) { message("dialog-error", e.message); }
+      return;
+    }
+    if (change.mode === "import") {
+      $("dialog-confirm").disabled = $("dialog-cancel").disabled = $("dialog-close").disabled = $("dialog-back").disabled = true;
+      try {
+        const q = new URLSearchParams({ expected_generation: change.preview.current_generation });
+        if (change.empty) q.set("allow_empty", "true");
+        const result = await request("/v1alpha1/config/import?" + q, { method: "POST", raw: change.bundle, write: true });
+        if (change.session !== session) return;
+        $("dialog-confirm").disabled = false; closeDialog(); dirty = false;
+        await refresh();
+        if (change.session === session && connected) {
+          const s = result.summary;
+          message("notice", "Policies restored: " + s.added + " added, " + s.changed + " changed, " + s.removed + " removed. Check data-plane generation coverage after the next heartbeat. ");
+          const inspect = el("button", "Inspect distribution →", "text-button"); inspect.addEventListener("click", () => inspectFleet()); $("notice").append(inspect);
+        }
+      } catch (e) { if (change.session === session) message("dialog-error", e.status === 409 ? "Policies changed since preview; re-run preview." : e.message); }
+      finally { if (change.session === session) $("dialog-confirm").disabled = $("dialog-cancel").disabled = $("dialog-close").disabled = $("dialog-back").disabled = false; }
       return;
     }
     if (change.mode === "delete" && $("policy-editor").value !== change.name) { message("dialog-error", "The policy name does not match."); return; }
@@ -1429,6 +1466,38 @@
       message("notice", "Exported finest-granularity usage for all teams in the selected UTC period; table filters do not narrow the export.");
     } catch (e) { if (sid === session) { if (e.status === 401 || e.status === 403) lock(); setError(e.message); } }
     finally { if (sid === session) $("export-usage").disabled = !usage; }
+  });
+  $("export-policies").addEventListener("click", async () => {
+    if (!connected) return;
+    const sid = session; $("export-policies").disabled = true; setError("");
+    try {
+      const yaml = await request("/v1alpha1/config/export", { text: true });
+      if (sid !== session) return;
+      const blob = new Blob([yaml], { type: "application/yaml" }), url = URL.createObjectURL(blob), link = el("a");
+      link.href = url; link.download = "inferplane-policies-" + String(policies?.generation || "export").slice(0, 12) + ".yaml";
+      document.body.append(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+      message("notice", "Exported the distributed policy set. Restore it with Import (restore).");
+    } catch (e) { if (sid === session) { if (e.status === 401 || e.status === 403) lock(); setError(e.message); } }
+    finally { if (sid === session) $("export-policies").disabled = !policies; }
+  });
+  $("import-policies").addEventListener("click", () => {
+    if (!canWrite()) return;
+    $("import-file").value = ""; $("import-file").click();
+  });
+  $("import-file").addEventListener("change", async () => {
+    const file = $("import-file").files?.[0]; if (!file || !canWrite()) return;
+    const sid = session; setError("");
+    if (file.size > 67108864) { setError("Import file exceeds 64 MiB."); return; }
+    try {
+      const bundle = await file.text();
+      if (sid !== session || !canWrite()) return; // the read outlived its session
+      const preview = await request("/v1alpha1/config/import?dry_run=true", { method: "POST", raw: bundle, write: true });
+      if (sid !== session) return;
+      if (pendingChange !== null || $("policy-dialog").open) {
+        setError("Another policy change is in progress. Finish or cancel it, then import again."); return;
+      }
+      openImport(bundle, preview);
+    } catch (e) { if (sid === session) setError(e.message); } // write refusals keep the read session, like PUT/DELETE
   });
   const today = new Date().toISOString().slice(0, 10);
   $("since").value = today.slice(0, 8) + "01"; $("until").value = today;

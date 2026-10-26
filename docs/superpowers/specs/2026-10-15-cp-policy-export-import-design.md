@@ -52,10 +52,21 @@ so the browser download gets a stable name. Auth stays `authn` (read).
   through the group mapping. The heartbeat token is never accepted
   (`policies.go:248-249`).
 - **Body:** multi-document GovernancePolicy YAML (YAML or JSON), bounded by
-  `importMaxBodyBytes` (8 MiB). That is the data plane's sync-response decode
-  bound (`internal/proxy/sync.go:377`), so any set the fleet can receive can
-  also be restored. The 1 MiB `policyMaxBodyBytes` remains the per-document PUT
-  bound. An oversized body is a 413.
+  `importMaxBodyBytes` (64 MiB of raw YAML). This is a memory cap only; an
+  oversized body is a 413. The estimated full sync response must fit
+  `importMaxSyncBytes` (8 MiB), the data plane's sync-response decode bound
+  (`internal/proxy/sync.go:377`). The estimate is
+  `2 × set JSON bytes + total rules × 1024 + 512 KiB`: durable authority sends
+  policies twice, every rule kind contributes a conservative 1024-byte
+  allowance (about 2.4x the measured 434-byte envelope per budget rule), and
+  512 KiB covers other envelope fields. An estimate over the bound is a 400.
+  Single-document PUTs can already accumulate a set past this bound; import
+  does not close that pre-existing gap.
+  - Block YAML adds bounded per-line indentation relative to JSON. Policy
+    nesting is fixed by the schema; a multiline-string fixture measured about
+    4.9x.
+  - So 64 MiB admits the export of every set within the fleet bound.
+  - The 1 MiB `policyMaxBodyBytes` remains the per-document PUT bound.
 - **Query:**
   - `dry_run=true` validates and diffs only. It never writes.
   - `expected_generation=<gen>` is required when `dry_run` is not true. A
@@ -91,16 +102,16 @@ distributed.
 | 401/403 | Auth (`authnWrite`) |
 | 405 | No policy store attached |
 | 409 | `expected_generation` mismatch; the response carries `current_generation` |
-| 413 | Body over 8 MiB |
+| 413 | Body over 64 MiB |
 | 500 | Store committed but the in-memory install refused the set (`ErrImportNotApplied`; unreachable for a validated bundle). The store holds the NEW set; the response says so and recommends a dry run |
-| 503 | Store failure (`writePolicyError` default, fixed body `policy store unavailable`); the store and the in-memory set are left unchanged |
+| 503 | Store unreadable during the pre-import reconcile, or `Replace` failed and the read-back does not show the new set. Fixed body `policy store unavailable`. The outcome is not confirmed; re-run a dry run once the store is reachable. A `Replace` error whose read-back shows exactly the predicted set (lost commit acknowledgement) is reported as 200 |
 
 Writes reuse `writeJSONError` / `writePolicyError`.
 
 ## Server flow (`Server.ApplyImport`)
 
-1. Read `s.policyStore`, `s.identityConfig`, `s.generation` and `s.wire` under
-   `s.mu`. If there is no store, return `ErrNoPolicyStore`.
+1. Read the store and startup-immutable `s.identityConfig` under `s.mu`. If no
+   store is attached, return `ErrNoPolicyStore` before preparing the bundle.
 2. `policy.ParseWireDocs(body)`. Then require `metadata.name` on every
    document, reject duplicate names, and run
    `policy.ValidateIdentitySubjects(docs, identityConfig)`.
@@ -110,24 +121,38 @@ Writes reuse `writeJSONError` / `writePolicyError`.
    and identity checks, that is every way `applyWire` can reject a set. So
    `applyWire` is NOT refactored, and the post-commit `ReloadFromStore` cannot
    reject what was validated here.
-4. Canonicalize each document with `yaml.Marshal` (sigs.k8s.io/yaml, as
-   `export.go` and `AttachPolicyStore` do), giving one stored row per document.
-   Compute the diff by name against canonicalized current `s.wire`, and compute
-   `result_generation = policy.GenerationOf(sorted docs)`.
+4. Sort documents by name and canonicalize each with `yaml.Marshal`
+   (sigs.k8s.io/yaml, as `export.go` and `AttachPolicyStore` do), giving one
+   stored row per document. Reparse those bytes, compute `result_generation`
+   with `policy.GenerationOf`, and check the full sync size estimate. All
+   bundle preparation in steps 2–4 runs BEFORE acquiring `s.writeMu`.
+   Then hold `s.writeMu` through reconciliation, diff, precondition, commit,
+   read-back, audit and install. Call `ReloadFromStore`: a store READ failure
+   (`errStoreList`) is a 503. If the loader rejects stored rows, call
+   `store.List` again (failure is also a 503) and diff against raw stored bytes
+   by row name; absent rows are removed, different bytes changed, identical
+   bytes unchanged. Otherwise diff against canonicalized current `s.wire`.
+   Read `s.generation` and `s.wire` under `s.mu`; rejected rows leave
+   `current_generation` at the last distributed generation. Reconciliation
+   prevents a committed-but-unreloaded PUT/DELETE or a lost commit
+   acknowledgement from leaving a valid stored set's precondition stale.
 5. If dry-run, return the diff.
-6. Check `expected_generation` against `s.generation`. Return 409 on mismatch.
-   For a non-dry-run request, `ApplyImport` acquires `s.writeMu` (see Store)
-   before step 1 and holds it through step 7. The diff, the check and the commit
-   therefore all describe the same set.
+6. Check `expected_generation` against the reconciled `s.generation`. Return
+   409 on mismatch. Because of the step-4 `writeMu`, the diff, the check and the
+   commit all describe the same set.
 7. Call `store.Replace(ctx, docs)`. Then install the already-validated
    reparsed snapshot directly with `applyWire(reparsed, nil)`, setting
    `s.updated` to the commit time. There is NO post-commit DB re-read: a
    failing `List` or a canceled request cannot leave memory on the replaced set
    while the store holds the new one. If the install were ever refused, the
    response is 500 `ErrImportNotApplied` (never the "unchanged" 503), and a
-   best-effort `ReloadFromStore` runs on a detached 10s context. Then
-   `recordMutation` runs for each put/delete, plus one `op=import` entry. The
-   order is still "commit, then memory".
+   best-effort `ReloadFromStore` runs on a detached 10s context. Audit entries
+   are recorded immediately after a confirmed commit, BEFORE the install: one
+   per put/delete plus one `op=import`. A committed restore is therefore never
+   unaudited. When `Replace` itself returns an error, a detached 10s read-back
+   runs. If the store holds exactly the predicted set, the commit happened (its
+   acknowledgement was lost), so the restore is audited and reported as
+   success. The order is still "commit, then memory".
 
 Generation consistency: `GenerationOf` is order-sensitive. Step 4 sorts by Go
 byte order, and `PostgresStore.List` and authority `readPolicies` both order by
@@ -163,9 +188,13 @@ by `ApplyWrite`, `ApplyDelete` and `ApplyImport`. That makes the step-6
 generation check and the step-7 commit/reload atomic against single-document
 PUT/DELETE as well as against another import. `s.mu` keeps its existing short
 critical sections, so heartbeats are never blocked behind a Postgres round
-trip. Cross-replica races are out of scope because the deployment runs a single
-policy replica (`docs/runbooks/inferplaned-policy-store.md:23`). The advisory
-lock only guarantees that two transactions never interleave rows.
+trip. `writeMu` is process-local. Although the deployment normally runs a single
+policy CP task, `deploy/ecs/policy-store.yaml` uses `MaximumPercent: 200`, so two
+inferplaned tasks can overlap during rollouts. Run imports only when a single
+policy CP task is serving, never during a rollout. This is the same pre-existing
+cross-process concurrency gap as PUT/DELETE; a DB-level compare-and-swap is a
+recorded follow-up. The advisory lock only guarantees that two transactions
+never interleave rows.
 
 Every `policystore.Store` test double gains `Replace`.
 
@@ -188,8 +217,11 @@ The Policies view gets two buttons.
   as a Blob download.
 - **Import (restore)** is hidden when the deployment has no writable store
   (`policies.writable == false`), and disabled unless `canWrite()` (`app.js:172`).
-  Preview and apply errors with 401/403 `lock()` the session, as every other
-  write path does. The browser rejects files over 8 MiB before uploading.
+  A write refusal (403) during preview or apply keeps the read session, as
+  PUT/DELETE do (`dashboard.cjs` write-403 contract). Only the export (a read)
+  locks on 401/403. The browser rejects files over 64 MiB before uploading. A
+  file read that resolves after a disconnect is dropped rather than uploaded
+  with the next session's credential. Disconnect disables both buttons.
   1. A file picker accepts `.yaml`, `.yml` or `.json`, read client-side.
   2. A `dry_run=true` POST runs, and the existing policy dialog renders a
      plain-text diff listing (action + name), the summary counts and both
@@ -198,9 +230,12 @@ The Policies view gets two buttons.
   3. On confirm, the console POSTs with `expected_generation=current_generation`
      from the dry-run response. An empty bundle shows an extra warning and
      sends `allow_empty=true`.
-  4. A 409 shows "Policies changed since preview; re-run preview". 400 and 413
-     show the server message in `dialog-error`. On success the policy list
-     reloads.
+  4. Preview errors (before the dialog opens) appear in the page error banner.
+     Apply errors appear in `dialog-error`, and the dialog stays open. A 409
+     reads "Policies changed since preview; re-run preview". On success the
+     policy list reloads.
+  5. The Policies rows of `docs/runbooks/inferplaned-dashboard.md` and its
+     `.ko.md` list both controls.
 
 UI strings are English, like the rest of the CP console. That console has no
 i18n layer, unlike the `mayu` admin UI's `i18n.js`.
@@ -235,7 +270,8 @@ Go tests use `-race`.
     store stays untouched.
   - An empty bundle gives 400 without `allow_empty` and empties the set with
     it.
-  - No store gives 405. Over 8 MiB gives 413.
+  - No store gives 405. Transport bodies over 64 MiB give 413; estimated full
+    sync responses over 8 MiB give 400, including the per-rule allowance.
   - The heartbeat token is rejected with 403 (`authnWrite`), and the write token is accepted.
   - Mutation entries are emitted for changed documents and the import only.
   - A store `Replace` error leaves memory unchanged, with a 503.

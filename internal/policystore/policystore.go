@@ -40,4 +40,10 @@ type Store interface {
 	// row count, gates this — an emptied store is never re-seeded
 	// (internal/providerstore precedent).
 	Seed(ctx context.Context, docs []Doc) (bool, error)
+	// Replace atomically makes docs the COMPLETE stored set: every existing
+	// row is deleted and docs inserted in ONE transaction, and the seed
+	// marker is set so a restored store is never re-seeded from files.
+	// Callers validate docs first; this package never parses them. A failure
+	// leaves the previous set intact.
+	Replace(ctx context.Context, docs []Doc) error
 }
