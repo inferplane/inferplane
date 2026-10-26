@@ -77,6 +77,12 @@ func TestGatewayBootsAndShutsDown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGateway: %v", err)
 	}
+	if g.dataSrv.ReadHeaderTimeout != 10*time.Second || g.adminSrv.ReadHeaderTimeout != 10*time.Second {
+		t.Fatal("both HTTP planes must bound slow request headers")
+	}
+	if g.dataSrv.WriteTimeout != 0 {
+		t.Fatal("header protection must not impose a total streaming deadline")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -384,9 +390,10 @@ func TestGateway_BedrockCountTokensNeverFails(t *testing.T) {
 // sso:false and CSP byte-identical to the pre-SSO header; oidc absent → 404.
 
 func TestGateway_AuthConfigEndpoint_SSOOn(t *testing.T) {
+	t.Setenv("MAYU_TEST_BREAK_GLASS_TOKEN", "break-glass-tok")
 	cfgPath := writeTestConfig(t, func(cfg map[string]any, dir string) {
 		cfg["server"].(map[string]any)["admin_auth"] = map[string]any{
-			"tokens": []any{"break-glass-tok"},
+			"token_refs": []any{map[string]any{"env": "MAYU_TEST_BREAK_GLASS_TOKEN"}},
 			"oidc": map[string]any{
 				"issuer":        "https://idp.example.com/pool-123",
 				"client_id":     "console-client",
@@ -436,9 +443,10 @@ func TestGateway_AuthConfigEndpoint_SSOOn(t *testing.T) {
 }
 
 func TestGateway_AuthConfigEndpoint_SSOOff(t *testing.T) {
+	t.Setenv("MAYU_TEST_BREAK_GLASS_TOKEN", "break-glass-tok")
 	cfgPath := writeTestConfig(t, func(cfg map[string]any, dir string) {
 		cfg["server"].(map[string]any)["admin_auth"] = map[string]any{
-			"tokens": []any{"break-glass-tok"},
+			"token_refs": []any{map[string]any{"env": "MAYU_TEST_BREAK_GLASS_TOKEN"}},
 			"oidc": map[string]any{
 				"issuer":    "https://idp.example.com/pool-123",
 				"client_id": "console-client",

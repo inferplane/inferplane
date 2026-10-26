@@ -52,8 +52,11 @@ legacy-thinking adapter matches `opus-5` (Opus 5 and 5.5) and rewrites only the
 `budget_tokens` form; `disabled` passes through and fails. Default effort is
 `medium`, one level below Opus 5. Forced `tool_choice` (`any`/`tool`) returns 400,
 so an OpenAI or Responses client sending `tool_choice: required` is rejected
-upstream; the gateway does not weaken it to `auto`. No client acceptance has
-been recorded for Opus 5.5.
+upstream; the gateway does not weaken it to `auto`. The published
+[client measurements](../performance/clients.md) record Codex text/tool smoke
+successes for Opus 5.5 using the campaign build's stateless Responses bridge,
+and failed Claude Code trials. Those bounded tests do
+not qualify all clients, long sessions or model quality.
 
 Sonnet 5.5 has the same prices as Sonnet 5 except cache reads, which cost 0.05x
 input, as for Opus 5.5; its example declares every rate. Seoul offers only the
@@ -65,8 +68,11 @@ adapter's `sonnet-5` pattern also matches Sonnet 5.5 and rewrites only the
 `budget_tokens` form; `disabled` passes through and fails. Forced `tool_choice`
 (`any`/`tool`) returns 400, as for Opus 5.5. Its thinking blocks are bound to
 the model and conversation: other models drop them, and replaying one after
-editing earlier history can return 400. No client acceptance has been recorded
-for Sonnet 5.5.
+editing earlier history can return 400. The published
+[client measurements](../performance/clients.md) record Codex text/tool smoke
+successes for Sonnet 5.5 using the campaign build's stateless Responses bridge,
+and failed Claude Code trials. Long-input failures and
+timeouts are recorded separately; these results do not qualify all clients.
 
 ## Client setup and acceptance status
 

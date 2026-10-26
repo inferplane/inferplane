@@ -12,6 +12,6 @@
 - [ ] Every commit is DCO signed off (`git commit -s`) — see [DCO](../DCO)
 - [ ] `go build ./... && go test ./... -race && go vet ./...` pass
 - [ ] `gofmt -l .` reports nothing
-- [ ] No secrets, keys, or inline credentials anywhere (config uses `env:` / `file:` / `secret:` refs only)
+- [ ] No secrets, keys, or inline credentials anywhere (config uses supported `env:` / `file:` refs only)
 - [ ] Provider-only PRs touch only `providers/<name>/` and provider docs (design §8)
 - [ ] Docs updated where behavior changed (README, `docs/`, ADR if a decision was made)

@@ -508,10 +508,10 @@ func allowsModel(allow []string, model string, canon func(string) string) bool {
 
 // mergeTeamLimits folds every team-subject budget/rate rule into one
 // TeamLimits per team, most-restrictive-wins PER WINDOW: the day and month
-// budget windows fold independently, the smallest non-zero limit binds each
-// dimension within its own window, and a window's budget is hard if the
-// binding (smallest) budget rule for that window — or any equal to it — is a
-// hard cap. An unlimited rule touches neither window. A finite soft budget
+// budget windows fold independently. The smallest hard cap binds each window;
+// when there is no hard cap, the smallest soft limit supplies its usage meter.
+// Soft thresholds never erase or narrow an independent hard cap. An unlimited
+// rule touches neither window. A finite soft budget
 // referenced by a strict routing tier contributes only to the separate routing
 // accounting threshold for its window, never to an admission cap.
 //
@@ -561,32 +561,16 @@ func mergeTeamLimits(policies []*Policy) map[string]TeamLimits {
 					// unlimited rule cannot unlimit the day and leave the
 					// month capped, or vice versa.
 				case r.Budget.Period == v1alpha1.PeriodCalendarDay:
-					switch {
-					case tl.BudgetMicrosPerDay == 0 || r.Budget.LimitMicroUSD < tl.BudgetMicrosPerDay:
-						tl.BudgetMicrosPerDay = r.Budget.LimitMicroUSD
-						tl.BudgetDayHard = r.Budget.HardCap
-						tl.AdminContactDay = r.Budget.AdminContact
-					case r.Budget.LimitMicroUSD == tl.BudgetMicrosPerDay && r.Budget.HardCap:
-						tl.BudgetDayHard = true
-						if tl.AdminContactDay == "" {
-							tl.AdminContactDay = r.Budget.AdminContact
-						}
-					}
+					tl.BudgetMicrosPerDay, tl.BudgetDayHard, tl.AdminContactDay = mergeBudgetWindow(
+						tl.BudgetMicrosPerDay, tl.BudgetDayHard, tl.AdminContactDay,
+						r.Budget.LimitMicroUSD, r.Budget.HardCap, r.Budget.AdminContact)
 				default:
 					// CalendarMonth, including a Budget built directly in a
 					// test with a zero-value Period — the month window is the
 					// meaning of "no period stated" everywhere in this schema.
-					switch {
-					case tl.BudgetMicrosPerMonth == 0 || r.Budget.LimitMicroUSD < tl.BudgetMicrosPerMonth:
-						tl.BudgetMicrosPerMonth = r.Budget.LimitMicroUSD
-						tl.BudgetHard = r.Budget.HardCap
-						tl.AdminContact = r.Budget.AdminContact
-					case r.Budget.LimitMicroUSD == tl.BudgetMicrosPerMonth && r.Budget.HardCap:
-						tl.BudgetHard = true
-						if tl.AdminContact == "" {
-							tl.AdminContact = r.Budget.AdminContact
-						}
-					}
+					tl.BudgetMicrosPerMonth, tl.BudgetHard, tl.AdminContact = mergeBudgetWindow(
+						tl.BudgetMicrosPerMonth, tl.BudgetHard, tl.AdminContact,
+						r.Budget.LimitMicroUSD, r.Budget.HardCap, r.Budget.AdminContact)
 				}
 			}
 		}
@@ -615,11 +599,8 @@ func minNonZero(a, b int64) int64 {
 // user anywhere" together with "this user in this team".
 type userKey struct{ team, user string }
 
-// narrow returns u narrowed by o, most-restrictive-wins PER WINDOW: the
-// smaller non-zero limit binds each window independently, and a window is
-// hard if the binding rule — or any rule equal to it — is a hard cap. This is
-// mergeTeamLimits's ladder, factored out so the per-rule fold and the
-// two-entry lookup fold cannot drift apart.
+// narrow returns u narrowed by o, independently per window. Hard caps bind
+// before soft meters, then the smallest limit of the same kind wins.
 //
 // THE `o.<window> == 0` GUARD IS LOAD-BEARING, and it is the one thing
 // mergeTeamLimits does not need: mergeTeamLimits inspects a RULE, where the
@@ -630,29 +611,28 @@ type userKey struct{ team, user string }
 // ZERO OUT a month cap set by another policy, i.e. silently delete a money
 // control. There is a test for exactly this.
 func (u UserLimits) narrow(o UserLimits) UserLimits {
-	switch {
-	case o.BudgetMicrosPerMonth == 0:
-		// contributes nothing to the month window
-	case u.BudgetMicrosPerMonth == 0 || o.BudgetMicrosPerMonth < u.BudgetMicrosPerMonth:
-		u.BudgetMicrosPerMonth, u.BudgetHard, u.AdminContact = o.BudgetMicrosPerMonth, o.BudgetHard, o.AdminContact
-	case o.BudgetMicrosPerMonth == u.BudgetMicrosPerMonth && o.BudgetHard:
-		u.BudgetHard = true
-		if u.AdminContact == "" {
-			u.AdminContact = o.AdminContact
-		}
-	}
-	switch {
-	case o.BudgetMicrosPerDay == 0:
-		// contributes nothing to the day window
-	case u.BudgetMicrosPerDay == 0 || o.BudgetMicrosPerDay < u.BudgetMicrosPerDay:
-		u.BudgetMicrosPerDay, u.BudgetDayHard, u.AdminContactDay = o.BudgetMicrosPerDay, o.BudgetDayHard, o.AdminContactDay
-	case o.BudgetMicrosPerDay == u.BudgetMicrosPerDay && o.BudgetDayHard:
-		u.BudgetDayHard = true
-		if u.AdminContactDay == "" {
-			u.AdminContactDay = o.AdminContactDay
-		}
-	}
+	u.BudgetMicrosPerMonth, u.BudgetHard, u.AdminContact = mergeBudgetWindow(
+		u.BudgetMicrosPerMonth, u.BudgetHard, u.AdminContact,
+		o.BudgetMicrosPerMonth, o.BudgetHard, o.AdminContact)
+	u.BudgetMicrosPerDay, u.BudgetDayHard, u.AdminContactDay = mergeBudgetWindow(
+		u.BudgetMicrosPerDay, u.BudgetDayHard, u.AdminContactDay,
+		o.BudgetMicrosPerDay, o.BudgetDayHard, o.AdminContactDay)
 	return u
+}
+
+// mergeBudgetWindow preserves the independent hard admission cap. Original
+// soft rules remain in the policy snapshot for routing threshold evaluation.
+func mergeBudgetWindow(limit int64, hard bool, contact string, otherLimit int64, otherHard bool, otherContact string) (int64, bool, string) {
+	if otherLimit == 0 {
+		return limit, hard, contact
+	}
+	if limit == 0 || (otherHard && !hard) || (otherHard == hard && otherLimit < limit) {
+		return otherLimit, otherHard, otherContact
+	}
+	if otherLimit == limit && otherHard == hard && contact == "" {
+		contact = otherContact
+	}
+	return limit, hard, contact
 }
 
 // userLimitsFromBudget lifts ONE budget rule into a single-window UserLimits,

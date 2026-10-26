@@ -21,10 +21,10 @@ Start with the [Grafana dashboard](../../deploy/grafana/inferplane.json). Config
 
 | Signal | Investigate |
 | --- | --- |
-| Sustained readiness failures / 503s | Policy sync, identity fingerprint, DB availability, authority grant/journal |
+| Sustained readiness failures / 503s | Policy sync, identity fingerprint, DB availability, authority grant/journal, audit WAL pressure |
 | `inferplane_pricing_miss_total` | Missing route rates or incorrect pricing metadata |
 | `inferplane_audit_write_failures_total` | Sink permissions, capacity, downstream availability |
-| `inferplane_audit_buffer_utilization_ratio` | WAL filling; investigate sink failures (not proof of automatic admission blocking) |
+| `inferplane_audit_buffer_utilization_ratio` | Retained WAL records / 1024; at 1 or above, new inference is blocked. Check `/readyz` for a latched WAL failure even below 1 |
 | `inferplane_audit_anchor_failures_total` | Object storage/IAM/retention configuration |
 | `gen_ai_server_time_to_first_token_seconds` | Upstream or request-path latency |
 | `inferplane_fallback_total` / circuit state | Provider failure or incompatibility |
@@ -115,12 +115,27 @@ For an issue report, include the commit/image, profile, client version, status/e
 
 The default chart writes audit records to container stdout (a best-effort sink)
 with a WAL on the data volume and the local analytics index disabled, so nothing
-grows on the pod volume; see [Collect audit records](#collect-audit-records). Any
-other deployment must configure its sinks explicitly. A
-required-sink failure increments diagnostics but does not currently provide a
-guaranteed fail-closed admission gate. Automatic WAL replay/recovery is incomplete;
-do not treat process readiness or a local chain check as proof that all prior
-records survived. Preserve evidence and stop affected traffic during sink failures.
+accumulates there during successful WAL operation; see
+[Collect audit records](#collect-audit-records). Any other deployment must
+configure its sinks explicitly.
+
+`audit.failure_mode` defaults to `buffer_then_block`, the only supported mode.
+A required-sink failure retains that record and all later records in the WAL.
+At 1024 retained records the writer latches unready: authenticated new inference
+receives a protocol-specific 503 with `Retry-After`, and `/readyz` reports 503.
+WAL append/truncate failures latch unready immediately. Best-effort sink failures
+do not close admission. Count APIs remain local/200 and model listing remains
+available. Health checks continue to report process liveness.
+
+The latch does not recover automatically. Already admitted requests, admin
+events and count requests may still append records, so 1024 is an admission
+threshold, not a strict record or byte bound. Startup validates and counts
+retained WAL records; restarting alone cannot clear a full backlog, and a
+malformed/truncated backlog refuses startup. No automatic sink replay is
+performed because a previous partial fan-out may already have delivered some
+records. Preserve and reconcile evidence using the
+[audit recovery procedure](recovery.md#recover-audit-admission) before restart.
+Readiness and local chain verification do not prove complete historical delivery.
 
 ## Collect audit records
 

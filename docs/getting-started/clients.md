@@ -33,9 +33,14 @@ Examples: [Anthropic/Bedrock](../../examples/config.json), [self-hosted](../../e
 
 ## Claude Code MCP tool search
 
-Claude Code disables MCP tool search (deferred tool loading) when `ANTHROPIC_BASE_URL`
-points to a non-first-party host, so every MCP tool definition is sent up front.
-Set `ENABLE_TOOL_SEARCH=true` in the client environment to enable it through `mayu`.
+Claude Code 2.1.304 and later enable MCP tool search (deferred tool loading)
+by default through a custom `ANTHROPIC_BASE_URL`. Older clients require
+`ENABLE_TOOL_SEARCH=true` (or an `auto` setting) to enable it through `mayu`.
+Set `ENABLE_TOOL_SEARCH=false` to send every MCP tool definition up front.
+From 2.1.305, an unrecognized HTTP 400/422 can trigger a retry without tool
+search, enlarging the prompt. A context refusal must retain its recognizable
+error semantics; a generic validation error is insufficient.
+See the [official gateway tool-search behavior](https://code.claude.com/docs/en/mcp#tool-search-through-an-llm-gateway).
 Anthropic and Bedrock `invoke_model` routes forward `defer_loading`, the search tool
 and `tool_reference` history unchanged, and privacy inspection accepts those blocks;
 Bedrock Converse cannot express them and drops the search tool, so deferred tools

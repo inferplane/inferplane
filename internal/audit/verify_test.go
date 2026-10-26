@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -171,5 +173,164 @@ func TestHeadAtCountNotFoundOnBrokenChainBeforeReachingCount(t *testing.T) {
 	}
 	if found {
 		t.Fatal("a chain broken before the target count must report found=false, not a wrong hash")
+	}
+}
+
+func largeVerifyChain(t *testing.T) ([]byte, []string) {
+	t.Helper()
+	var stream bytes.Buffer
+	var heads []string
+	prev := genesisHash
+	for i, rec := range []Record{
+		{SchemaVersion: 1, Instance: "large", Event: "request_started", Request: RequestRef{ModelRequested: strings.Repeat("x", 2*1024*1024+17)}},
+		{SchemaVersion: 1, Instance: "large", Event: "request_completed"},
+		{SchemaVersion: 1, Instance: "restart", Event: "request_started"},
+	} {
+		if rec.Instance == "restart" {
+			prev = genesisHash
+		}
+		rec.PrevHash = prev
+		line, err := rec.Canonical()
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Valid JSON formatting is part of the line bytes, not something the
+		// verifier may reconstruct by decoding and reserializing the record.
+		if i == 0 {
+			line = append(line, ' ', '\t')
+		} else if i == 1 {
+			line = append([]byte(" \t"), line...)
+		}
+		sum := sha256.Sum256(line)
+		prev = "sha256:" + hex.EncodeToString(sum[:])
+		heads = append(heads, prev)
+		stream.Write(line)
+		stream.WriteByte('\n')
+	}
+	return stream.Bytes(), heads
+}
+
+func TestVerifyAcceptsLargeExactByteChain(t *testing.T) {
+	stream, heads := largeVerifyChain(t)
+	result, err := Verify(bytes.NewReader(stream))
+	if err != nil || !result.OK || result.Records != 3 {
+		t.Fatalf("large valid multi-segment chain rejected: result=%+v err=%v", result, err)
+	}
+	if result.Instances["large"] != (InstanceState{HeadHash: heads[1], Count: 2}) ||
+		result.Instances["restart"] != (InstanceState{HeadHash: heads[2], Count: 1}) {
+		t.Fatalf("exact-byte instance heads differ from independently hashed lines: %+v", result.Instances)
+	}
+}
+
+func TestHeadAtCountAcceptsLargeExactByteCheckpoints(t *testing.T) {
+	stream, heads := largeVerifyChain(t)
+	for _, checkpoint := range []struct {
+		instance string
+		count    int64
+		head     string
+	}{
+		{"large", 1, heads[0]}, {"large", 2, heads[1]}, {"restart", 1, heads[2]},
+	} {
+		head, found, err := HeadAtCount(bytes.NewReader(stream), checkpoint.instance, checkpoint.count)
+		if err != nil || !found || head != checkpoint.head {
+			t.Fatalf("large anchored checkpoint %s/%d: head=%q found=%v err=%v", checkpoint.instance, checkpoint.count, head, found, err)
+		}
+	}
+}
+
+func TestVerifyLargeRecordDetectsByteTampering(t *testing.T) {
+	stream, heads := largeVerifyChain(t)
+	for _, tc := range []struct {
+		name, before, after string
+	}{
+		{"model", strings.Repeat("x", 32), strings.Repeat("x", 31) + "y"},
+		{"json whitespace", "} \t\n", "}  \n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tampered := bytes.Replace(stream, []byte(tc.before), []byte(tc.after), 1)
+			if bytes.Equal(tampered, stream) {
+				t.Fatal("tamper did not change fixture bytes")
+			}
+			result, err := Verify(bytes.NewReader(tampered))
+			if err != nil || result.OK || result.BrokenAt != 2 {
+				t.Fatalf("large-record byte change not detected at next record: result=%+v err=%v", result, err)
+			}
+			head, found, err := HeadAtCount(bytes.NewReader(tampered), "large", 1)
+			if err != nil || !found || head == heads[0] {
+				t.Fatalf("external first-record anchor did not detect changed bytes: head=%q found=%v err=%v", head, found, err)
+			}
+			if _, found, err := HeadAtCount(bytes.NewReader(tampered), "large", 2); err != nil || found {
+				t.Fatalf("broken large chain reached later anchor: found=%v err=%v", found, err)
+			}
+		})
+	}
+}
+
+func TestVerifyRetainsLineFramingAndTrailingEOFBehavior(t *testing.T) {
+	stream := writeChain(t).Bytes()
+	want, err := Verify(bytes.NewReader(stream))
+	if err != nil {
+		t.Fatal(err)
+	}
+	crlf := bytes.ReplaceAll(stream, []byte{'\n'}, []byte{'\r', '\n'})
+	for _, tc := range []struct {
+		name string
+		data []byte
+	}{
+		{"LF", stream},
+		{"CRLF", crlf},
+		{"final JSON without newline", bytes.TrimSuffix(stream, []byte{'\n'})},
+		{"final JSON followed by CR", bytes.TrimSuffix(crlf, []byte{'\n'})},
+		{"empty lines", append([]byte("\r\n\n"), stream...)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Verify(bytes.NewReader(tc.data))
+			if err != nil || !result.OK || result.Records != want.Records || result.Instances["inst-1"] != want.Instances["inst-1"] {
+				t.Fatalf("established framing changed: result=%+v err=%v", result, err)
+			}
+			head, found, err := HeadAtCount(bytes.NewReader(tc.data), "inst-1", 3)
+			if err != nil || !found || head != want.Instances["inst-1"].HeadHash {
+				t.Fatalf("checkpoint framing changed: head=%q found=%v err=%v", head, found, err)
+			}
+		})
+	}
+}
+
+type verifyFailureReader struct {
+	data []byte
+	err  error
+}
+
+func (r *verifyFailureReader) Read(p []byte) (int, error) {
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	if len(r.data) == 0 {
+		return n, r.err // includes the permitted simultaneous data+error case
+	}
+	return n, nil
+}
+
+func TestVerifyRetainsReaderErrorAndEarlyAnchorBehavior(t *testing.T) {
+	stream := writeChain(t).Bytes()
+	sentinel := errors.New("injected audit read error")
+	// Both a terminated record and the old ScanLines final-EOF token behavior
+	// must preserve real reader errors after any buffered records are inspected.
+	for _, data := range [][]byte{stream, bytes.TrimSuffix(stream, []byte{'\n'})} {
+		reader := func() io.Reader { return &verifyFailureReader{data: data, err: sentinel} }
+		if _, err := Verify(reader()); !errors.Is(err, sentinel) {
+			t.Fatalf("reader failure converted into successful verification: %v", err)
+		}
+		if _, found, err := HeadAtCount(reader(), "inst-1", 3); err != nil || !found {
+			t.Fatalf("already reached checkpoint lost to later reader error: found=%v err=%v", found, err)
+		}
+		if _, found, err := HeadAtCount(reader(), "inst-1", 4); found || !errors.Is(err, sentinel) {
+			t.Fatalf("unreached checkpoint swallowed reader error: found=%v err=%v", found, err)
+		}
+	}
+	// A malformed final token is reported as broken evidence before a later
+	// reader error, as it was under ScanLines; it is not silently skipped.
+	malformed := &verifyFailureReader{data: []byte("{"), err: sentinel}
+	if result, err := Verify(malformed); err != nil || result.OK || result.BrokenAt != 1 {
+		t.Fatalf("malformed buffered token changed classification: result=%+v err=%v", result, err)
 	}
 }

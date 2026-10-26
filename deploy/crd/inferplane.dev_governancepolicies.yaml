@@ -106,6 +106,8 @@ spec:
                             minimum: 1
                           hardCap:
                             type: boolean
+                          adminContact:
+                            type: string
                           lease:
                             type: object
                             properties:

@@ -1,6 +1,6 @@
 ---
 translation_source: reference/bedrock-coding-models.md
-translation_source_sha256: 20ce56bec2c16b9358d4fd0f8d6079209412ae3188c618b395c09e3263141f59
+translation_source_sha256: 183a67fe0e0a308843cef0a843079a27d8ae444bd972659decb50167a84afdb4
 ---
 
 # Bedrock 코딩 모델: Kimi K3, Fable 5.1, Opus 5.5, Sonnet 5.5
@@ -55,7 +55,10 @@ Opus 5.5의 캐시 읽기는 입력의 0.05배이므로 예제는 기본 0.1배 
 그대로 전달돼 실패합니다. 기본 effort는 Opus 5보다 한 단계 낮은 `medium`입니다.
 강제 `tool_choice`(`any`/`tool`)는 400을 반환하므로 OpenAI·Responses 클라이언트의
 `tool_choice: required`는 업스트림에서 거부됩니다. 게이트웨이는 이를 `auto`로 약화하지
-않습니다. Opus 5.5의 클라이언트 검증 기록은 아직 없습니다.
+않습니다. 공개 [클라이언트 측정](../performance/clients.md)에는 Opus 5.5의 Codex
+캠페인 빌드의 무상태 Responses 브리지를 사용한 텍스트·도구 smoke 성공과 Claude Code
+실패가 기록되어 있습니다. 한정된 시험이며
+모든 클라이언트·장기 세션·모델 품질을 검증하지 않습니다.
 
 Sonnet 5.5는 캐시 읽기를 빼면 Sonnet 5와 가격이 같습니다. 캐시 읽기는 Opus 5.5처럼
 입력의 0.05배이며, 예제는 모든 단가를 명시합니다. 서울은 `global.` 프로파일만 제공하고,
@@ -66,7 +69,10 @@ us-east-1은 `us.anthropic.claude-sonnet-5-5`도 제공하므로 별도 가격�
 적용되며 `budget_tokens` 형태만 재작성합니다. `disabled`는 그대로 전달돼 실패합니다.
 강제 `tool_choice`(`any`/`tool`)도 Opus 5.5처럼 400을 반환합니다. thinking 블록은
 모델과 대화에 묶여 다른 모델은 이를 버리고, 이전 이력을 수정한 뒤 재전송하면 400이 날 수 있습니다.
-Sonnet 5.5의 클라이언트 검증 기록은 아직 없습니다.
+공개 [클라이언트 측정](../performance/clients.md)에는 Sonnet 5.5의 Codex 텍스트·도구
+smoke 성공은 캠페인 빌드의 무상태 Responses 브리지를 사용했으며 Claude Code 실패도
+기록되어 있습니다. 긴 입력의 실패·시간 초과는
+별도 기록이며 모든 클라이언트를 검증한 결과는 아닙니다.
 
 ## 클라이언트 연결과 검증 상태
 

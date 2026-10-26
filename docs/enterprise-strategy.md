@@ -136,7 +136,7 @@ guardrail **and the audit chain attested that it was applied.** Fixed:
 `mantleGuardrailCheck` (`providers/bedrock/bedrock.go`) now refuses any
 guarded request routed to Mantle with a 400 naming the conflict, before
 egress — the bypass and the falsified attestation are gone. Remaining gap
-(why the contract row stays ❌): Mantle has no guardrail parameter, so the
+(why the contract row remains partial): Mantle has no guardrail parameter, so the
 requirement "a configured guardrail *applies* on every egress path" is still
 unmet — a guarded team simply cannot use Mantle-only models until guardrail
 evaluation exists off the InvokeModel/Converse APIs (or the refusal is

@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: 2b625b481776d381694e4070c40e857bfed7ac0c122463e2ce3a9180f7680d90
+translation_source_sha256: 26d5decf9bf63faee3b7d8b5be65531a0b45f6aad8f9fa1c608499f635a3d3c4
 ---
 
 # API 구현 {#api}
@@ -62,9 +62,13 @@ count 엔드포인트, TPM·쿼터 추정, 금전 예약, 개인정보 검사, �
 독립적입니다. 남은 입력이 한도에 들어가지 않으면 압축은 계속 실패할 수 있으며,
 모델 한도를 더 크게 가정하면 안 됩니다.
 
-count_tokens는 별칭도 정규화하며 항상 200입니다. 같은 프로토콜이면 원문 전달, 다르면 정규 변환을 적용합니다. 별칭은 RBAC·라우팅·감사·메트릭 전에 정규 이름으로 바꿉니다. Anthropic 원문 경로는 최상위 model만 바꾸고 중첩 cache_control과 HTML 이스케이프 상태를 보존합니다. 오류는 수신 형식이며 허용된 가용 모델 목록을 표시합니다.
+키 인증이 성공하면 count_tokens는 별칭을 정규화하고 라우팅·준비 상태 거부에도 200을 반환합니다. 없거나 잘못된 키는 핸들러 실행 전 401을 받습니다. 같은 프로토콜이면 원문 전달, 다르면 정규 변환을 적용합니다. 별칭은 RBAC·라우팅·감사·메트릭 전에 정규 이름으로 바꿉니다. Anthropic 원문 경로는 최상위 model만 바꾸고 중첩 cache_control과 HTML 이스케이프 상태를 보존합니다. 오류는 수신 형식이며 허용된 가용 모델 목록을 표시합니다.
 
-**모델 폴백:** 한 단계 model_fallbacks와 기본 동일 계열 휴리스틱을 허용 검사 전에 적용합니다. 미설정 이름만 허용된 키는 다른 모델을 대신 받지 않고 거부됩니다. 이미 설정된 모델도 업스트림 404·Bedrock ValidationException이면 기존 폴백 루프에서 교차 모델을 시도하되, 나중 추가한 타깃을 FilterModelAllowed로 다시 검사합니다. 응답 x-inferplane-model-fallback은 공급자 폴백 헤더와 독립적입니다.
+**모델 폴백:** 한 단계 model_fallbacks와 기본 동일 계열 휴리스틱을 허용 검사 전에 적용합니다. 미설정 이름만 허용된 키는 다른 모델을 대신 받지 않고 거부됩니다. 이미 설정된 모델도 업스트림 404이면 기존 폴백 루프에서 교차 모델을 시도하되, 나중 추가한 타깃을 FilterModelAllowed로 다시 검사합니다. 응답 x-inferplane-model-fallback은 공급자 폴백 헤더와 독립적입니다.
+
+Messages는 출력 전 전송 오류·5xx/429·교차 모델 404만 재시도합니다. 타입이 있는 검증 오류와 다른 4xx는 종료하며 일반적인 Bedrock ValidationException은 모델 부재 근거가 아닙니다. 각 재시도 타깃은 전송 전에 자체 컨텍스트 선언을 다시 검사하며 최초 사전 검사 계약은 유지합니다. 엄격한 숫자 형식의 프롬프트 초과 SDK 검증 오류만 안전한 context_length_exceeded 코드와 인식 가능한 초과 문구를 보존하고 나머지 Bedrock 원문은 숨깁니다.
+
+Messages에서 OpenAI 호환 업스트림의 HTTP 400 오류는 Anthropic `invalid_request_error` 형식으로 변환합니다. 중첩된 `error.code=context_length_exceeded`는 고정 문구 `prompt is too long`으로 바꾸며, v0.8.5 소스로 확인한 기존 vLLM Chat Completions 초과 문구가 정확히 일치하면 검증된 양수 토큰 합계와 한도도 보존합니다. 이 합계에는 요청한 출력 토큰이 포함될 수 있습니다. 알 수 없거나 잘못되었거나 너무 큰 오류 형식은 공급자 원문을 노출하거나 컨텍스트 오류로 추측하지 않고 `upstream request rejected`로 반환합니다. 파싱 한도는 64 KiB입니다. 비스트리밍 응답과 스트리밍 시작 오류에 적용하며 OpenAI 수신 오류 바이트는 그대로 유지합니다.
 
 **기존 선택적 예산 티어:** routing의 budgetTiers는 affinity·context와 별개이고 budgetRef는 같은 문서의 숫자 한도를 가진 예산입니다. 기존 ADR-034는 CP 리스 원장으로 전역 사용률을 판단하고 윈도 안에서 단조롭게 티어를 유지합니다. 이미 라우팅된 모델에 SubstituteTier를 적용하며 원래 모델과 목적지 RBAC·경로가 모두 유효할 때만 치환합니다. 대안을 못 쓰면 원래 모델을 유지합니다. x-inferplane-substituted-model과 감사 model_substituted_from을 남깁니다. 정책 적용 단계에서도 SetRoutedAndPriced로 목적지 경로·가격을 요구하며 없으면 문서 전체를 거부합니다. 엄격 티어의 별도 거부 의미는 ADR-044를 따릅니다.
 
@@ -101,6 +105,14 @@ Responses는 Bedrock Converse·InvokeModel·Mantle, Anthropic·Chat 어댑터의
 
 인증된 키 권한으로 조회 결과를 제한하고 추론 시에도 기능·개인정보·예산·호환성을 재검사합니다.
 
+### 로컬 금전 사용량 · ADR-054 {#local-monetary-usage-adr-054}
+
+`GET /v1/usage`의 로컬 예산 객체는 미확정 시도별 의무인 `reserved_usd_micros`와
+정산을 동결했음을 나타내는 `accounting_uncertain`을 선택적으로 추가합니다.
+`spent_usd_micros`는 관측 비용을 유지합니다. 잔액은 예약을 반영하며 동결 시 0입니다.
+마지막 사용량을 받지 못하면 실제 비용을 0으로 꾸미지 않고 의무를 유지합니다.
+이 카운터는 프로세스 재시작 시 초기화됩니다.
+
 ### 영속 예산 하트비트 · ADR-045 {#durable-budget-heartbeat-adr-045}
 
 DURABLE_BUDGETS=true이면 POST /v1alpha1/sync가 authority.protocol=escrow-v1을 협상합니다. 비-JWT 머신 bearer만 허용하고 콘솔 OIDC는 권한을 발급할 수 없습니다. 전체 정책, DB 소유 윈도, 권한, 보고·계량 ack를 반환합니다. 기존 요청은 409이고 영속 클라이언트는 구형·무효 응답을 거부합니다. ActiveTier의 팀·사용자 범위를 유지하며 readyz는 실제 DB를 검사합니다. [전송 계약](../../internal/authority/pgstore/README.md)과 [설정](../durable-budgets.md)을 참고하세요.
@@ -115,8 +127,12 @@ key_store.type과 governance_store.type을 postgres로 설정하면 키 공유·
 `context_length_exceeded`, `invalid_encrypted_content`만 보존합니다.
 `error.code` 및 기존 감사 `outcome.error`에 기록하고 원문 메시지·param·알 수 없는
 코드는 숨깁니다. 오류 해석은 64 KiB로 제한하며 복구 코드만을 이유로 재시도하지
-않습니다. SSE 전송 시작 전과 비스트리밍 HTTP 실패에 적용하며 이미 전송 중인
-스트림의 중단 처리는 바뀌지 않습니다.
+않습니다. SSE 전송 시작 전과 비스트리밍 HTTP 실패에 적용합니다. 네이티브 SSE의
+종료 실패도 원문을 제거한 `response.failed` 이벤트로 두 코드를 보존하며 첫 이벤트가
+실패인 경우에도 동일합니다. 다른 중단은 기존의 제한된 게이트웨이 오류 이벤트를 유지합니다.
+유효한 네이티브 `status="incomplete"` 출력과 사용량은 재시도 없이 전달합니다.
+`max_output_tokens`는 정상적인 미완료 종료 이유입니다. Responses 승인 HTTP 429의
+`error.type`은 청구 쿼터 타입 `insufficient_quota` 대신 `rate_limit_exceeded`입니다.
 
 코드가 포함된 HTTP 실패에서 두 허용 복구 코드의 `error.type`은
 `invalid_request_error`입니다. ADR-053은 SSE 헤더 전송 전 발생한 게이트웨이

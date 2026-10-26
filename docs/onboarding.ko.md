@@ -1,6 +1,6 @@
 ---
 translation_source: onboarding.md
-translation_source_sha256: 0a5e7e18e653819bcb97b39573d6b24d3f1e04312d9d82cb65acc7d747bb0b87
+translation_source_sha256: 3066d6caf581f9cbe4bfc6f665145dd628977804082709c32bf92541aa82e6a2
 ---
 
 # 개발자 온보딩 {#developer-onboarding}
@@ -48,7 +48,7 @@ gofmt -l .               # must print nothing
 ## 개발 흐름 {#development-workflow}
 
 - 브랜치 접두사: `feat/`, `fix/`, `docs/`, `refactor/`, `chore/`.
-- Conventional Commits와 **DCO 서명**(`git commit -s`)을 사용합니다.
+- Conventional Commits와 **DCO sign-off**(`git commit -s`)를 사용합니다. 이는 `Signed-off-by` trailer를 추가하며 `git commit -S`의 암호학적 서명과 별개입니다. 프로젝트 정책상 필수이지만 현재 저장소 workflow에는 DCO 강제 검사 작업이 없습니다.
 - 공급자 PR은 `providers/<name>/`, `cmd/mayu/main.go`의 blank import, 공급자 문서만 수정합니다. 핵심 내부 구현을 바꾸지 않습니다.
 - 제출 전 `go test ./... -race`, `bash tests/run-all.sh`를 실행합니다.
 

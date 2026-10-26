@@ -26,7 +26,7 @@ GET  /v1/models
 | Endpoint | Notes |
 |----------|-------|
 | `POST /v1/messages` | Messages API; streaming via SSE when `"stream": true`. Body forwarded verbatim to an Anthropic-protocol upstream. |
-| `POST /v1/messages/count_tokens` | Local HTTP-200 counting on policy/readiness/storage refusal; missing or invalid credentials can still return 401. |
+| `POST /v1/messages/count_tokens` | Token counting. **Returns 200 after successful key authentication**; routing, policy, readiness and storage refusals use local counting. Missing or invalid keys return 401. |
 | `GET /v1/models` | Lists models the principal may use (negotiated by `anthropic-version`). |
 
 ### OpenAI ingress

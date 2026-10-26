@@ -1,6 +1,6 @@
 ---
 translation_source: operations/deployment.md
-translation_source_sha256: 9fdf54ad32f3dc11856798308759c5a0344020771b47c18c9ce6c962fed7987e
+translation_source_sha256: 59d6680ce2e8702a954db4c5953257ef95ee9ffc2e2a7b9108876f867597cc98
 ---
 
 # 컨테이너 배포 {#deploy-with-containers}
@@ -47,6 +47,8 @@ docker run --rm --name inferplane \
 ## Helm 차트 배포 {#deploy-the-helm-chart}
 
 차트는 기존 Secret을 참조하고 공급자 자격 증명을 생성하지 않습니다. 비밀 관리 컨트롤러로 대상 네임스페이스에 `inferplane-secrets`를 준비하세요.
+기본 `server.admin_auth.token_refs`는 해당 Secret의 `INFERPLANE_ADMIN_TOKEN`을 읽습니다.
+다른 인증이 필요하면 인증 블록을 명시적으로 구성하세요.
 
 레지스트리·다이제스트에 맞는 이미지, 검토된 설정, 리소스, 영속성, 네트워크 노출을 values 파일에 작성합니다. 로컬 프로파일의 평가 예시는 다음과 같습니다.
 
@@ -82,6 +84,10 @@ helm upgrade --install inferplane charts/inferplane \
 ```
 
 로컬 모드는 복제본 하나만 허용합니다. 영속 로컬 모드는 Recreate 배포이므로 교체 중 중단 시간을 계획하세요.
+Pod는 UID/GID와 `fsGroup` 65532를 사용합니다. 스토리지 드라이버·기존 PVC의 그룹 쓰기
+권한을 확인하세요. 게이트웨이 startup probe는 감사·분석 재생에 10분을 허용한 뒤
+liveness 검사를 시작하므로 보관 이력에 맞춰 조정합니다. 기본 설정 변경은 해시
+annotation으로 Pod를 교체하며 별도 정책 파일 변경은 계속 감시합니다.
 
 여러 복제본에는 명시적인 [공유 프로파일](../shared-governance.md)과 [공유 Helm 예제](../../examples/helm.shared-governance.yaml)를 사용합니다. 동일한 권한 DB·스키마, 초기화된 제어 영역, 고유한 게이트웨이 식별자, 안티어피니티를 충족할 노드가 필요합니다. 영속 공유 모드는 PVC를 분리하지만 Postgres의 고가용성까지 구성하지는 않습니다.
 

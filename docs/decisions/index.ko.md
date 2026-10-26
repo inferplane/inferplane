@@ -56,3 +56,4 @@
 - [ADR-051: Cost-first dashboard and comparative budget table](ADR-051-cost-first-console-layout.md)
 - [ADR-052: Native Converse ingress and governed administrator comparison](ADR-052-native-converse-governed-evaluation.md)
 - [ADR-053: Request outcomes and cost evidence](ADR-053-request-outcomes-cost-evidence.md)
+- [ADR-054: Local monetary liability per provider attempt](ADR-054-local-attempt-liability.md)

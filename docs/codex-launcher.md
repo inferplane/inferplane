@@ -2,7 +2,9 @@
 
 `scripts/inferplane-codex` is a Python 3.9+ standard-library helper for the
 local inferplane gateway. It reads `INFERPLANE_API_KEY` from its inherited
-environment and authenticates `GET http://127.0.0.1:8081/v1/models`. It never
+environment and authenticates `GET http://127.0.0.1:8080/v1/models`. Set
+`INFERPLANE_PORT` to a local gateway port from 1 to 65535; the context probe
+uses the same override. The default matches the gateway's 8080 listener. It never
 loads `mayu.env`, reads upstream credentials, or falls back to a direct provider.
 
 **Integration status:** catalog loading, model-specific context, argument
@@ -144,11 +146,17 @@ generic HTTP 400, a quota refusal or a body-size error with a context limit.
 An accepted synthetic text request proves a lower bound for that request
 shape, not a maximum, tool-history quality, or availability across regions.
 
+Native responses can return the configured upstream model name instead of the
+public alias. Qualification requires that exact configured target name, valid
+usage, and no substitution, fallback or policy-routing header. A mismatched
+native model remains unqualified; the ledger does not record private target IDs.
+
 The catalog is a startup snapshot. Newly added models/metadata require
 relaunching; the gateway remains responsible for request-time authorization
 and routing. A picker entry is not proof of Responses/tool compatibility.
-Switching from native to bridged models can leave unsupported opaque history;
-start a new session when the bridge refuses that history.
+Native sessions offer native routes only. To use a bridge after a native
+session, relaunch with that bridge and start a new session; inherited effort
+and opaque history cannot be translated safely.
 
 ## Responses and tool capability filtering
 
@@ -284,8 +292,11 @@ continuing to refuse non-neutral efforts and actual opaque history.
 Native initial models get no effort override. Their catalog entries retain
 the bundled native reasoning choices. The bridge-only startup override does
 not edit the user's persistent config, approval policy, or sandbox settings.
-The `/model` picker is supplied the same per-model reasoning choices and
-context bounds; the helper does not erase or translate existing session history.
+When the initial model is native, the picker contains native routes only.
+Installed Codex 0.163.0 retains a native session's configured effort when
+switching models, even when a bridge advertises only `none`. Relaunch with an
+explicit bridged model and start a new session to move from native to bridge.
+The helper preserves native effort and existing history.
 
 Codex also unconditionally requests `include=["reasoning.encrypted_content"]`
 in ordinary Responses requests. Catalog flags prevent enabling Responses Lite;

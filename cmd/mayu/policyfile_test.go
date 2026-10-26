@@ -136,26 +136,26 @@ spec:
 }
 
 // PR #50 review finding (HIGH): a SOFT policy budget layered on a config
-// team whose budget blocks must NOT loosen enforcement to warn — block wins
-// on tie. Before the fix, the overlay unconditionally reset on_exceeded to
+// team whose budget blocks must NOT loosen enforcement to warn. Before the
+// fix, the overlay unconditionally reset on_exceeded to
 // the policy's own mode, so a tighter-but-soft file rule silently disabled
 // blocking.
 func TestE2EPolicyFileSoftBudgetKeepsBaseBlock(t *testing.T) {
 	up := newAnthropicUpstream(t)
 	dataURL, adminURL, _ := bootGateway(t, func(cfg map[string]any, dir string) {
 		teamsAPIConfig(up.srv.URL)(cfg, dir)
-		// Config: roomy budget, but BLOCK on exceed.
+		// Config: an independent hard cap, wider than the soft threshold.
 		cfg["teams"] = map[string]any{
 			"pol-team": map[string]any{
 				"allowed_models": []any{"*"},
-				"budget":         map[string]any{"usd_per_month": 1000.0, "on_exceeded": "block"},
+				"budget":         map[string]any{"usd_per_month": 0.002, "on_exceeded": "block"},
 			},
 		}
 		polDir := filepath.Join(dir, "policies")
 		if err := os.MkdirAll(polDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		// Policy: tighter budget, SOFT (no hardCap) — must inherit block.
+		// Policy: a smaller soft meter must preserve the actual hard cap.
 		pol := `apiVersion: inferplane.dev/v1alpha1
 kind: GovernancePolicy
 metadata: { name: pol-team-soft-cap }
@@ -174,14 +174,16 @@ spec:
 
 	_, key := createKey(t, adminURL, "pol-team", []string{"*"})
 
+	if limit, ok := budgetLimitMicros(getUsage(t, dataURL, key), "team_budget"); !ok || limit != 2_000 {
+		t.Fatalf("independent hard cap must remain 2000 microUSD: limit=%d found=%v", limit, ok)
+	}
 	r1 := postMessages(t, dataURL, key, "claude-test")
 	io.Copy(io.Discard, r1.Body)
 	r1.Body.Close()
 	if r1.StatusCode != http.StatusOK {
 		t.Fatalf("first request: status %d, want 200", r1.StatusCode)
 	}
-	// Past the 1 milliUSD file limit now. warn would admit (200); the base's
-	// block must win → 402.
+	// Past the base hard cap now. The soft meter must not change its mode.
 	r2 := postMessages(t, dataURL, key, "claude-test")
 	io.Copy(io.Discard, r2.Body)
 	r2.Body.Close()
@@ -371,25 +373,24 @@ spec:
 // TestE2EPolicyFileSoftDayBudgetKeepsBaseBlock is the day-window twin of
 // TestE2EPolicyFileSoftBudgetKeepsBaseBlock: a SOFT policy day rule layered
 // on a config team whose DAILY budget blocks must not loosen enforcement to
-// warn — block wins on tie, resolved per window. This pins the overlay's
-// `tl.BudgetDayHard || base.BudgetDayExceeded == "block"` line, the kind of
-// one-word inversion that would silently turn a hard cap into a warning.
+// warn, resolved per window. The soft threshold must not become the hard
+// cap's limit either.
 func TestE2EPolicyFileSoftDayBudgetKeepsBaseBlock(t *testing.T) {
 	up := newAnthropicUpstream(t)
 	dataURL, adminURL, _ := bootGateway(t, func(cfg map[string]any, dir string) {
 		teamsAPIConfig(up.srv.URL)(cfg, dir)
-		// Config: roomy DAILY budget, but BLOCK on exceed.
+		// Config: an independent DAILY hard cap, wider than the soft threshold.
 		cfg["teams"] = map[string]any{
 			"pol-team": map[string]any{
 				"allowed_models": []any{"*"},
-				"budget":         map[string]any{"usd_per_day": 1000.0, "on_exceeded": "block"},
+				"budget":         map[string]any{"usd_per_day": 0.002, "on_exceeded": "block"},
 			},
 		}
 		polDir := filepath.Join(dir, "policies")
 		if err := os.MkdirAll(polDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		// Policy: tighter DAY budget, SOFT (no hardCap) — must inherit block.
+		// Policy: a smaller DAY soft meter must preserve the actual hard cap.
 		pol := `apiVersion: inferplane.dev/v1alpha1
 kind: GovernancePolicy
 metadata: { name: pol-team-soft-day }
@@ -410,14 +411,16 @@ spec:
 
 	_, key := createKey(t, adminURL, "pol-team", []string{"*"})
 
+	if limit, ok := budgetLimitMicros(getUsage(t, dataURL, key), "team_budget_day"); !ok || limit != 2_000 {
+		t.Fatalf("independent daily hard cap must remain 2000 microUSD: limit=%d found=%v", limit, ok)
+	}
 	r1 := postMessages(t, dataURL, key, "claude-test")
 	io.Copy(io.Discard, r1.Body)
 	r1.Body.Close()
 	if r1.StatusCode != http.StatusOK {
 		t.Fatalf("first request: status %d, want 200", r1.StatusCode)
 	}
-	// Past the 1 milliUSD file limit now. warn would admit (200); the base's
-	// block must win → 402.
+	// Past the base hard cap now. The soft meter must not change its mode.
 	r2 := postMessages(t, dataURL, key, "claude-test")
 	got, _ := io.ReadAll(r2.Body)
 	r2.Body.Close()

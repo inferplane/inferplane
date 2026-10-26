@@ -1,6 +1,6 @@
 ---
 translation_source: getting-started/clients.md
-translation_source_sha256: 2142c1b5221a300fbb528a7e6029f3ed45386a594f421d5d76fcc5395e1d1756
+translation_source_sha256: b52e8be5ca4e578800fe24cff054fbf8879b2b8ddc14d8e83d2b0ce49d32e09b
 ---
 
 # 클라이언트와 공급자 연결 {#connect-clients-and-providers}
@@ -38,9 +38,14 @@ translation_source_sha256: 2142c1b5221a300fbb528a7e6029f3ed45386a594f421d5d76fcc
 
 ## Claude Code MCP 도구 검색 {#claude-code-mcp-tool-search}
 
-Claude Code는 `ANTHROPIC_BASE_URL`이 Anthropic이 아닌 호스트이면 MCP 도구 검색(지연 로딩)을
-끄고 모든 MCP 도구 정의를 처음부터 보냅니다. `mayu`를 통해 쓰려면 클라이언트 환경에
-`ENABLE_TOOL_SEARCH=true`를 설정하세요. Anthropic과 Bedrock `invoke_model` 경로는
+Claude Code 2.1.304부터 사용자 지정 `ANTHROPIC_BASE_URL`에서도 MCP 도구 검색(지연 로딩)을
+기본으로 켭니다. 이전 버전은 `mayu`를 통해 쓰려면 `ENABLE_TOOL_SEARCH=true` 또는
+`auto` 설정이 필요합니다. 모든 도구 정의를 처음부터 보내려면 `ENABLE_TOOL_SEARCH=false`를
+설정하세요. 2.1.305부터 인식하지 못한 HTTP 400/422이면 도구 검색 없이 재시도하여
+프롬프트가 커질 수 있습니다. 컨텍스트 초과 오류는 클라이언트가 인식하는 의미를 유지해야
+하며 일반적인 검증 오류만으로는 부족합니다.
+[공식 게이트웨이 도구 검색 동작](https://code.claude.com/docs/en/mcp#tool-search-through-an-llm-gateway)을 참고하세요.
+Anthropic과 Bedrock `invoke_model` 경로는
 `defer_loading`, 검색 도구, `tool_reference` 이력을 그대로 전달하고 개인정보 검사도 이
 블록을 인식합니다. Bedrock Converse는 이를 표현할 수 없어 검색 도구를 버리므로 지연 도구가
 처음부터 로드됩니다. 2026-09-24 Bedrock InvokeModel(Claude Haiku 4.5)에서 서버 측 검색,

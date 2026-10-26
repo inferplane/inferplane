@@ -1,7 +1,7 @@
 # ADR-053: Request outcomes and cost evidence
 
 **Date:** 2026-10-21
-**Status:** Accepted design; implemented locally, final branch review pending. Production rollout and live rebuild are not qualified.
+**Status:** Accepted; implementation merged to main. Production rollout and live rebuild are not qualified.
 **Related:** ADR-007 (chargeback), ADR-015 (analytics Mode B), ADR-018 (logs), ADR-030 (settlement), ADR-045/046 (authority), ADR-049 (workspaces).
 
 ## Context

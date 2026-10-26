@@ -130,6 +130,18 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	if gov.HasSharedAuthority() {
 		countGate = func() (bool, string) { return false, "shared counts are local" }
 	}
+	if aud != nil {
+		existing := countGate
+		countGate = func() (bool, string) {
+			if ok, reason := aud.Ready(); !ok {
+				return false, reason
+			}
+			if existing != nil {
+				return existing()
+			}
+			return true, ""
+		}
+	}
 	ct.SetGovernanceGate(countGate)
 	ct.SetObservability(aud, m)
 	mux.Handle("POST /v1/messages/count_tokens", ct)
@@ -214,6 +226,9 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	if o.governanceGate != nil {
 		governed = governanceGateMiddleware(o.governanceGate, mux)
 	}
+	if aud != nil {
+		governed = auditGateMiddleware(aud.Ready, governed)
+	}
 	dataMux.Handle("/", maxBytesMiddleware(limit, KeyAuth(store, governed)))
 	return dataMux
 }
@@ -224,6 +239,41 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 // like defaultMaxRequestBytes above, because this package does not import
 // internal/policy.
 const governanceRetryAfterSeconds = "15"
+
+// auditGateMiddleware closes only new generation admission, inside KeyAuth.
+// Counts stay local/200; catalog/usage reads and self-revocation remain available.
+// The writer's latch requires operator repair; Retry-After is a polling hint.
+func auditGateMiddleware(gate func() (bool, string), next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		generation := r.Method == http.MethodPost && (p == "/v1/messages" ||
+			p == "/v1/chat/completions" || p == "/v1/responses" ||
+			(strings.HasPrefix(p, "/model/") && (strings.HasSuffix(p, "/invoke") ||
+				strings.HasSuffix(p, "/invoke-with-response-stream") ||
+				strings.HasSuffix(p, "/converse") || strings.HasSuffix(p, "/converse-stream"))))
+		if generation {
+			if ok, reason := gate(); !ok {
+				message := "audit not ready: " + reason
+				var body any
+				switch {
+				case strings.HasPrefix(p, "/model/"):
+					w.Header().Set("X-Amzn-ErrorType", "ServiceUnavailableException")
+					body = map[string]string{"message": message}
+				case p == "/v1/messages":
+					body = map[string]any{"type": "error", "error": map[string]string{"type": "api_error", "message": message}}
+				default:
+					body = map[string]any{"error": map[string]any{"type": "server_error", "message": message, "param": nil, "code": "audit_unavailable"}}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After", governanceRetryAfterSeconds)
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_ = json.NewEncoder(w).Encode(body)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 // governanceGateMiddleware refuses governed traffic while the control-plane
 // sync gate is not ready. Sits INSIDE KeyAuth (an unauthenticated caller
@@ -315,8 +365,15 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
 	// /readyz reflects the require_sync gate when one is wired (review/fable5
 	// §08 B2): a scale-out during a control-plane outage must NOT pass health
-	// checks while the new replica is ungoverned. nil gate = always ready.
+	// checks while the new replica is ungoverned. Audit durability pressure
+	// independently refuses readiness when a writer is attached.
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if ok, reason := aud.Ready(); !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ready": false, "reason": reason})
+			return
+		}
 		if readyGate != nil {
 			if ok, reason := readyGate(); !ok {
 				w.Header().Set("Content-Type", "application/json")

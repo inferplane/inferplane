@@ -4,6 +4,7 @@ from decimal import Decimal
 from pathlib import Path
 import runpy
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -62,6 +63,50 @@ class ContextProbeTests(unittest.TestCase):
         self.assertNotIn("reasoning", native)
         bridge = self.probe["payload"]("m", 100, "bridge", 128)
         self.assertEqual(bridge["reasoning"], {"effort": "none"})
+
+    def test_probe_qualifies_only_declared_native_target_without_fallback(self):
+        class Response:
+            status = 200
+            def __init__(self, model, headers):
+                self.model, self.headers = model, headers
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def read(self, limit):
+                import json
+                return json.dumps({"model": self.model, "usage": {
+                    "input_tokens": 10, "output_tokens": 2}}).encode()
+        class Opener:
+            def __init__(self, response):
+                self.response = response
+            def open(self, request, timeout):
+                return self.response
+        rate = self.probe["rates"]({"input_per_mtok": 2, "output_per_mtok": 6})
+        cases = [
+            ("upstream-native", {}, "accepted"),
+            ("unexpected-native", {}, "substituted_unqualified"),
+            ("upstream-native", {"x-inferplane-fallback": "other"}, "substituted_unqualified"),
+            ("upstream-native", {"x-inferplane-model-fallback": "other"}, "substituted_unqualified"),
+            ("upstream-native", {"x-inferplane-routed-model": "other"}, "substituted_unqualified"),
+        ]
+        for model, headers, expected in cases:
+            with self.subTest(model=model, headers=headers):
+                record = {"model": "public.alias", "reserved_micro_usd": 2000, "held_micro_usd": 2000}
+                self.probe["probe"](Opener(Response(model, headers)), "offline-placeholder", b"{}",
+                                    record, rate, 128, expected_model="upstream-native")
+                self.assertEqual(record["state"], expected)
+                self.assertNotIn("upstream-native", str(record))
+
+    def test_local_port_override_has_no_remote_credential_destination(self):
+        for port, expected in [("", "http://127.0.0.1:8080/v1"),
+                               ("8081", "http://127.0.0.1:8081/v1")]:
+            with self.subTest(port=port), patch.dict("os.environ", {"INFERPLANE_PORT": port}):
+                self.assertEqual(self.probe["gateway_base_url"](), expected)
+        for port in ["0", "65536", "elsewhere", "8080/path", "8080@elsewhere"]:
+            with self.subTest(port=port), patch.dict("os.environ", {"INFERPLANE_PORT": port}):
+                with self.assertRaises(ValueError):
+                    self.probe["gateway_base_url"]()
 
     def test_unknown_errors_and_missing_usage_hold_the_full_reservation(self):
         class Response:

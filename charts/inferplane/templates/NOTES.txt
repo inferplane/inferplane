@@ -1,3 +1,5 @@
+{{- $shared := and (eq (default "" .Values.config.key_store.type) "postgres") (eq (dig "governance_store" "type" "" .Values.config) "postgres") -}}
+{{- $workload := ternary "statefulset" "deployment" (and $shared .Values.persistence.enabled) -}}
 inferplane is deploying.
 
 1. Wait for the pod to become ready:
@@ -21,8 +23,10 @@ inferplane is deploying.
 {{- end }}
 
 3. Issue your first virtual key (never recoverable after this — copy it now):
-   kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "inferplane.fullname" . }} -- \
-     inferplane keys create --team demo --models '*' --store /var/lib/inferplane/keys.db
+   kubectl exec -n {{ .Release.Namespace }} {{ $workload }}/{{ include "inferplane.fullname" . }} -c inferplane -- \
+     mayu keys create --team YOUR_TEAM --models 'YOUR_ALLOWED_MODEL' --config /etc/inferplane/config.json
+   Choose a team and model from your config. This uses the configured SQLite or
+   Postgres key backend. Required identity mode also needs --service-account.
 
 4. Point Claude Code at it:
    export ANTHROPIC_BASE_URL=http://localhost:8080   # or your Ingress host
@@ -31,7 +35,8 @@ inferplane is deploying.
 
 5. Watch it work:
    curl -s http://localhost:9090/metrics | grep inferplane_requests_total
-   Admin console: http://localhost:9090/admin/ui/ (paste the token from secret
-   "{{ .Values.secrets.existingSecret }}", key INFERPLANE_ADMIN_TOKEN)
+   Admin console: http://localhost:9090/admin/ui/ (use the credentials configured
+   in server.admin_auth; the chart default reads INFERPLANE_ADMIN_TOKEN from
+   Secret "{{ .Values.secrets.existingSecret }}")
 
 Full walkthrough: README.md "Usage" · docs/runbooks/ · deploy/grafana/inferplane.json

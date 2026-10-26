@@ -56,6 +56,12 @@ closed, per-rule. Soft rules never gate: control-plane outage fails open for
 them (`failurePolicy`, ADR-031). A partial allowance clamps to ≥1 µUSD,
 accepting up to one request of local overshoot (the §5.3 posture).
 
+ADR-054 now enforces that process-local overshoot boundary with an atomic
+per-attempt liability check. Missing/incomplete usage retains liability, separate
+from observed spend. This does not make legacy leases durable global escrow;
+restart still loses local counters, and separate replicas retain their qualified
+legacy allowances.
+
 ### 4. Explicit rejection, visible skew
 
 Distributed documents apply PER DOCUMENT on the data plane (unlike the

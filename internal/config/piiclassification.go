@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -86,7 +87,7 @@ func (c ClassifierConfig) EffectiveThreshold() float64 {
 
 // checkPIIClassificationRaw runs before the structured parse. It rejects an
 // inline api_key and any unknown field, so a misspelled key can never silently
-// widen a classifier's scope (LoadRaw ignores unknown keys elsewhere).
+// widen a classifier's scope. LoadRaw validates the remaining typed config too.
 func checkPIIClassificationRaw(raw json.RawMessage) error {
 	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil
@@ -102,9 +103,10 @@ func checkPIIClassificationRaw(raw json.RawMessage) error {
 			return fmt.Errorf("config: pii_classification.classifiers[%d] has inline api_key; use api_key_ref (§7)", i)
 		}
 	}
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	if err := d.Decode(new(PIIClassificationConfig)); err != nil {
+	if err := validateConfigFields(raw, reflect.TypeFor[PIIClassificationConfig](), "pii_classification"); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw, new(PIIClassificationConfig)); err != nil {
 		return fmt.Errorf("config: pii_classification: %w", err)
 	}
 	return nil

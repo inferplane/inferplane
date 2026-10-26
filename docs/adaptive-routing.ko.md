@@ -1,6 +1,6 @@
 ---
 translation_source: adaptive-routing.md
-translation_source_sha256: 5aef2b04c965ef0c4020b5035229184309dac151c6e4ff6fcaa06c8e08a646eb
+translation_source_sha256: 6800e59e50c3b94f1b0cdd25c793b7b906fcba0bc41926239cee369b577c78e1
 ---
 
 # 적응형 라우팅과 Codex {#adaptive-routing-and-codex}
@@ -21,7 +21,7 @@ translation_source_sha256: 5aef2b04c965ef0c4020b5035229184309dac151c6e4ff6fcaa06
 | 개인정보 마스킹 | 검사 가능한 탐지 내용에 `Mask`, 외부 호출 전 완전 변환·재검사 |
 | 예산 전환 | `budgetTiers.enforceTargets: true`, 임계값 100 지원. 모든 재시도가 선택 모델 내에 머묾 |
 | 총예산 하드 한도 | 독립적으로 유지. 저비용·내부 모델도 소진 시 거부 |
-| 가용성 | 로컬 결정과 승인된 백엔드 폴백. 중앙 분류·어피니티 서비스 없음 |
+| 가용성 | 로컬 결정과 승인된 백엔드 폴백. 선택적 HTTP 분류기의 가용성은 별도 의존성 |
 
 비호환 목적지, 알 수 없는 경계, 거부된 모델, 빈 교집합이 외부·고비용 폴백으로 바뀌지 않습니다. 공급자 캐시는 이러한 제약 아래의 선호 조건입니다. 유지 기간은 새 컨텍스트 선호 적용을 지연할 수 있으므로 캐시 비용과 작업 품질을 함께 고려하세요.
 
@@ -169,7 +169,7 @@ SSE를 보존합니다. **별도 AWS Web Search 작업 요금은 토큰 기반 �
 
 ## 가용성과 검증 {#availability-and-verification}
 
-분류·정책 검사·세션 고정 조회는 mayu 로컬에서 수행합니다. 백엔드 폴백도 같은 개인정보·기능·리전·비용 한도를 지킵니다. 승인된 백엔드를 복제하고 제어 영역 관리를 추론 경로 밖에 두세요. 전역 금전 권한에는 선택적 Postgres 원장·영속 노드 저널이 있습니다. [영속 예산](durable-budgets.md), [ADR-045](decisions/ADR-045-durable-budget-authority.md)를 참고하세요. 공유 키·전역 요청률·토큰 할당량에는 가용한 HA Postgres가 필요한 [공유 게이트웨이](shared-governance.md)를 사용합니다. 노드 로컬 프로파일의 기존 요청률·키 한계는 유지합니다.
+결정적 검사·정책 평가·세션 고정 조회는 mayu 로컬에서 수행합니다. 선택적 `pii_classification`은 같은 Pod의 SystemOne 사이드카를 포함한 HTTP 엔드포인트를 호출할 수 있습니다. 분류기 시간 초과·포화·실패에는 Enforce의 `onUninspectable`을 적용하며 Shadow는 요청을 제한하지 않고 기록합니다. 백엔드 폴백도 같은 개인정보·기능·리전·비용 한도를 지킵니다. 승인된 백엔드를 복제하고 제어 영역 관리를 추론 경로 밖에 두세요. 전역 금전 권한에는 선택적 Postgres 원장·영속 노드 저널이 있습니다. [영속 예산](durable-budgets.md), [ADR-045](decisions/ADR-045-durable-budget-authority.md)를 참고하세요. 공유 키·전역 요청률·토큰 할당량에는 가용한 HA Postgres가 필요한 [공유 게이트웨이](shared-governance.md)를 사용합니다. 노드 로컬 프로파일의 기존 요청률·키 한계는 유지합니다.
 
 일반 테스트는 가짜 공급자와 일회용 저장소를 사용합니다. 선택적인 설치 클라이언트 시험은 격리 설정과 로컬 가짜 업스트림으로 실제 Codex CLI 도구 왕복을 실행합니다.
 

@@ -1,6 +1,6 @@
 ---
 translation_source: roadmap.md
-translation_source_sha256: 2eb598e73da41bff1586725a8a54f72962fcd30d86b4fc7c7d9d119e886aa2ad
+translation_source_sha256: 28c8772a2aa0968bf7bc3ff747d4d2bbad49077a9c22c5ea76981fa1be01f31b
 ---
 
 # 로드맵: 중앙 프록시 대비 운영 과제 {#roadmap-closing-the-five-operational-gaps-vs-central-proxy-gateways}

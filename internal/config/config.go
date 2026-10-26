@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -296,8 +297,10 @@ type RateLimitConfig struct {
 	TokensPerMinute   int64 `json:"tokens_per_minute"`
 }
 
-// QuotaConfig is a team's daily/monthly token window (two-phase optimistic
-// check + post-debit). OnExceeded selects block|warn.
+// QuotaConfig is a team's daily token window (two-phase optimistic check +
+// post-debit). TokensPerMonth is retained to reject previously ignored settings;
+// shared monthly enforcement uses GovernancePolicy.tokenQuota instead.
+// OnExceeded selects block|warn.
 type QuotaConfig struct {
 	TokensPerDay   int64  `json:"tokens_per_day"`
 	TokensPerMonth int64  `json:"tokens_per_month"`
@@ -770,6 +773,9 @@ func LoadRaw(path string) (*Config, error) {
 	if err := checkPIIClassificationRaw(probe.PIIClassification); err != nil {
 		return nil, err
 	}
+	if err := validateConfigFields(data, reflect.TypeFor[Config](), "config"); err != nil {
+		return nil, err
+	}
 
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
@@ -793,6 +799,12 @@ func LoadRaw(path string) (*Config, error) {
 	}
 	if err := validateServer(&cfg.Server); err != nil {
 		return nil, err
+	}
+	if err := validateTeams(cfg.Teams); err != nil {
+		return nil, err
+	}
+	if cfg.Audit.FailureMode != "" && cfg.Audit.FailureMode != "buffer_then_block" {
+		return nil, fmt.Errorf("config: audit.failure_mode must be buffer_then_block (empty uses the default)")
 	}
 	if err := validatePricing(cfg.Pricing); err != nil {
 		return nil, err

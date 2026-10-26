@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -463,8 +464,18 @@ func ParseEvent(data []byte) (*schema.ChatChunk, error) {
 		return &schema.ChatChunk{Type: "message_delta", Usage: resp.Usage, Delta: marshal(map[string]any{"stop_reason": resp.StopReason})}, nil
 	case "response.failed", "error":
 		c := &schema.ChatChunk{Type: "error"}
-		if resp, err := object(m["response"]); err == nil {
+		code := ""
+		if kind == "error" {
+			code = optionalText(m["code"])
+		} else if resp, err := object(m["response"]); err == nil {
 			c.Usage, _ = usageToCanonical(resp["usage"])
+			if detail, err := object(resp["error"]); err == nil {
+				code = optionalText(detail["code"])
+			}
+		}
+		safe := marshal(map[string]any{"error": map[string]string{"code": code}})
+		if providers.ResponseErrorCode(safe) != "" {
+			return c, errors.Join(ErrFailed, &providers.UpstreamError{StatusCode: 400, Body: safe})
 		}
 		return c, ErrFailed
 	}
@@ -527,7 +538,7 @@ func ReadSSE(r io.Reader, model string) iter.Seq2[*providers.StreamEvent, error]
 					chunk.Message.Model = model
 				}
 				if perr != nil {
-					if perr == ErrFailed && chunk != nil {
+					if errors.Is(perr, ErrFailed) && chunk != nil {
 						// Preserve observed usage for settlement before reporting
 						// the failure, but do not echo a secret-bearing error body.
 						if !yield(&providers.StreamEvent{Chunk: chunk}, nil) {

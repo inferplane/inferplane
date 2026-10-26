@@ -2,7 +2,6 @@
 package anthropicapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -349,6 +348,17 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// the next target, records the breaker result, and sets x-inferplane-fallback.
 	// Once a stream yields its first event the response is committed — no fallback.
 	for i, ct := range chain {
+		// Revalidate the current target before reserving or dispatching:
+		// a fallback model can have a smaller window than the first choice.
+		if win := requestpolicy.ContextWindow(st, ct.Model); i > 0 && win > 0 && estimateTokens(raw) > win {
+			if est := requestpolicy.ContextTextEstimate("anthropic", raw); est > win {
+				msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum (gateway text estimate excluding inline image payloads; model %s has a %d-token context window). Compact the conversation or reduce the input.", est, win, ct.Model, win)
+				h.audit(req.Context(), p, ct.Model, ct.Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
+				h.metrics.ObserveRequest(ingressName, ct.Model, ct.ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
+				writeErr(w, http.StatusBadRequest, "invalid_request_error", msg)
+				return
+			}
+		}
 		// Inject the trace context into a CLONE of the inbound headers per attempt
 		// (ADR-011 gate): never mutate the shared req.Header or bleed across
 		// attempts; the body is untouched (header-only — cache-safe §4.4).
@@ -374,7 +384,7 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				w.Header().Set("x-inferplane-model-fallback", ct.Model)
 			}
 		}
-		reservedReq, finishBudget, reserveErr := requestpolicy.ReserveBudget(req, h.gov, p, ct, st, raw)
+		reservedReq, finishBudget, reserveErr := requestpolicy.ReserveBudget(req, h.gov, p, ct, st, raw, requestpolicy.AdmissionFrom(req))
 		if reserveErr != nil {
 			status := requestpolicy.BudgetStatus(reserveErr)
 			requestpolicy.BudgetErrorHeaders(w, reserveErr)
@@ -406,16 +416,19 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 // isModelNotFound reports whether an upstream response looks like a
-// "model not found" rejection rather than an unrelated client error — a plain
-// 404, or a 400 whose body names a Bedrock ValidationException (Bedrock
-// returns 400, not 404, for a model not enabled/available in that region).
-// Deliberately narrow: only these are ever retried across a D5 model-level
-// fallback boundary; any other 4xx stays a client error, teed verbatim.
-func isModelNotFound(statusCode int, body []byte) bool {
-	if statusCode == 404 {
-		return true
+// "model not found" rejection rather than an unrelated client error.
+// Generic Bedrock ValidationException also covers context/tool/schema errors.
+func isModelNotFound(statusCode int, _ []byte) bool {
+	return statusCode == 404
+}
+
+func retryMessagesError(err error, crossModelNext bool) bool {
+	var upstream *providers.UpstreamError
+	if errors.As(err, &upstream) {
+		status := upstream.HTTPStatus()
+		return status == 429 || status >= 500 || (crossModelNext && status == 404)
 	}
-	return statusCode == 400 && bytes.Contains(body, []byte("ValidationException"))
+	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
 // govErrType maps a governance deny status to the Anthropic error `type`.
@@ -438,7 +451,7 @@ func govErrType(status int) string {
 func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
-		if !last {
+		if !last && retryMessagesError(err, crossModelNext) {
 			return true // transport error → fall back
 		}
 		// Tee a non-2xx upstream error verbatim (status/body) so the client
@@ -514,18 +527,14 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 
 // serveStream proxies one streaming target. Fallback is PRE-TTFT ONLY: if
 // Stream() returns an error before any event is yielded AND a next target exists
-// (!last), it returns retriable=true and the caller falls back — this already
-// covers a cross-model "model not found" (D5, crossModelNext) since the
-// anthropic provider's Stream() wraps ANY non-2xx pre-TTFT response as an
-// error, unlike Complete()'s status-in-response path (see serveComplete),
-// so crossModelNext needs no extra gating here; it is accepted only for
-// parity with serveComplete's signature. Once the first event is teed the
+// (!last), transport failures, 5xx/429 or cross-model 404 can fall back.
+// Validation and other client errors are terminal. Once the first event is teed the
 // response is committed; a mid-stream error terminates the stream (no
 // fallback). Returns false in all committed cases.
 func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
-		if !last {
+		if !last && retryMessagesError(err, crossModelNext) {
 			return true // pre-TTFT failure → fall back
 		}
 		// Tee a non-2xx upstream error verbatim (status/body) so the client

@@ -1,6 +1,6 @@
 ---
 translation_source: enterprise-strategy.md
-translation_source_sha256: ca413c0b8575c1f71b85801e27087106e62bee82c6844034b9e5b6f1bf3b836d
+translation_source_sha256: f9a8d36503498881add0fefa7216daad0bcce1b6fe2d295e2ea51eb5b53e38d4
 ---
 
 # 엔터프라이즈 제품 전략 {#enterprise-product-strategy}

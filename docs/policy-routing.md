@@ -52,9 +52,19 @@ Each rule has exactly one kind. `routing` has exactly one subtype: affinity
 (currently rejected), budgetTiers, or context. Selectors `team` and `user` are ANDed
 within one policy; all matching policies apply.
 
+Budget admission merges independently for each calendar window. Any blocking
+config/team budget or policy hard cap remains binding; the tightest hard cap wins.
+A smaller soft budget never erases that cap or becomes a smaller blocking cap.
+Without a hard cap, the tightest soft budget supplies a warn-only usage meter.
+Tier switching still evaluates each original budget reference and threshold.
+An omitted config `on_exceeded` defaults to blocking. Legacy control-plane leases
+follow the same hard-before-soft merge, including hard lease expiry. Per-user
+day/month budgets currently share one exceed mode: a hard cap in either window
+keeps that shared mode blocking, including an accompanying soft window.
+
 | Field | Contract |
 |---|---|
-| `sensitiveData.onDetected` | Required `InternalOnly` or `Block` |
+| `sensitiveData.onDetected` | Required `InternalOnly`, `Block` or `Mask`; Mask requires complete verified redaction and reinspection |
 | `sensitiveData.onUninspectable` | Required `InternalOnly` or `Block` |
 | `sensitiveData.internalModels` | Nonempty explicit names if either action is InternalOnly; no wildcards; aliases resolve on the current topology |
 | Sensitive rule `failurePolicy` | Must be `FailClosed`; inspection/lookup errors deny |

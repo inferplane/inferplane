@@ -42,7 +42,10 @@ disposable test service; a skipped database suite is not a passing qualification
 
 ## Development Workflow
 - Branch naming: `feat/`, `fix/`, `docs/`, `refactor/`, `chore/`.
-- Commit convention: Conventional Commits, **DCO signed off** (`git commit -s`). CI rejects unsigned commits.
+- Commit convention: Conventional Commits, **DCO signed off** (`git commit -s`).
+  This adds a `Signed-off-by` trailer; cryptographic signing uses `git commit -S`
+  and is separate. Sign-off is required by project policy; the repository's
+  workflows currently contain no DCO enforcement job.
 - Provider PRs touch only `providers/<name>/`, the blank-import line in `cmd/mayu/main.go`, and provider docs — zero core diff (design §8).
 - Run `go test ./... -race` and `bash tests/run-all.sh` before submitting.
 

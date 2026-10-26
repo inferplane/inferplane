@@ -263,12 +263,16 @@ Postgres transactions. Legacy CP allowances are not a durable escrow ledger.
   Initial broker acquisition fails boot/reload rather than falling back to the
   node's own AWS identity.
 - **Audit** — exact-byte hash chains sent to configured sinks, with observed
-  chargeback reporting (`mayu report`). Default chart configuration has no audit
-  sink; configure one explicitly. Local verification checks internal consistency,
+  chargeback reporting (`mayu report`). Default chart configuration sends audit
+  records to a best-effort stdout sink for off-node collection, with local
+  analytics disabled. Local verification checks internal consistency,
   not independent proof against complete host-side history rewriting. Required
-  sink failure, WAL replay and crash recovery remain open hardening work; use
-  [external anchors](docs/runbooks/audit-anchoring.md) when independent evidence
-  is required.
+  sink failures retain WAL records; 1024 retained records block new inference,
+  and WAL write/truncate failures block immediately. Recovery requires preserving
+  and reconciling the retained evidence before restart; there is no automatic
+  sink replay. See [audit durability](docs/operations/observability.md#audit-durability-limits)
+  and use [external anchors](docs/runbooks/audit-anchoring.md) when independent
+  evidence is required.
 
 ## Quick start — `mayu` standalone
 

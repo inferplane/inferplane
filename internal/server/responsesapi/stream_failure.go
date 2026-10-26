@@ -14,6 +14,13 @@ var (
 	errClientWriteFailed    = errors.New("client write failed")
 )
 
+func governanceErrorType(status int) string {
+	if status == 429 {
+		return "rate_limit_exceeded"
+	}
+	return "insufficient_quota"
+}
+
 // streamFailureCode retains only typed, bounded evidence. Error messages and
 // arbitrary provider codes can contain prompts or credentials and are ignored.
 func streamFailureCode(cause error) string {

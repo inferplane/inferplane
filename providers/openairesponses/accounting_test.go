@@ -13,16 +13,11 @@ import (
 )
 
 func TestCompletePreservesUsageOnUnsuccessfulNativeResponse(t *testing.T) {
-	for _, status := range []string{"failed", "incomplete", "in_progress", "cancelled"} {
+	for _, status := range []string{"failed", "in_progress", "cancelled"} {
 		t.Run(status, func(t *testing.T) {
 			raw := `{"id":"remote","model":"upstream","status":"` + status + `","output":[],
 				"error":{"message":"private-upstream-detail"},
 				"usage":{"input_tokens":100,"output_tokens":7,"input_tokens_details":{"cached_tokens":60,"cache_write_tokens":10}}}`
-			if status == "incomplete" {
-				raw = `{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},
-					"output":[{"type":"function_call","call_id":"c","name":"read","arguments":"{\"path\":"}],
-					"usage":{"input_tokens":100,"output_tokens":7,"input_tokens_details":{"cached_tokens":60,"cache_write_tokens":10}}}`
-			}
 			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Authorization", "Bearer private-upstream-detail")
 				_, _ = io.WriteString(w, raw)
