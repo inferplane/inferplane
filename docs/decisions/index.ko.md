@@ -54,4 +54,5 @@
 - [ADR-049: Task-oriented admin workspaces with explicit evidence and change review](ADR-049-task-oriented-admin-workspaces.md)
 - [ADR-050: User cost visibility and profile-aware budget/token policy guides](ADR-050-user-cost-and-token-policy-ux.md)
 - [ADR-051: Cost-first dashboard and comparative budget table](ADR-051-cost-first-console-layout.md)
+- [ADR-052: Native Converse ingress and governed administrator comparison](ADR-052-native-converse-governed-evaluation.md)
 - [ADR-053: Request outcomes and cost evidence](ADR-053-request-outcomes-cost-evidence.md)

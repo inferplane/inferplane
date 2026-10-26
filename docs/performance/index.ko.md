@@ -1,13 +1,13 @@
 ---
 translation_source: performance/index.md
-translation_source_sha256: 24d6eccfe525ce5fd2d45389614e0cfdec95abe58e4d2164e875b99212909861
+translation_source_sha256: 21e653df7c248ee041db89c1792e6b3ce0de1c7835ea4e91e4d49ac5bb64c72d
 title: 성능 결과
 description: inferplane의 지연, 처리량, 캐시 비용과 네이티브 Converse 호환성 실측 결과.
 ---
 
 # 성능 결과 {#performance-results}
 
-**2026년 10월 21일 기준.** 저장된 최신 측정 결과를 보여줍니다. 아래 네이티브 Converse·UI 결과는 아직 병합되지 않은 개발 구현에서 얻었으며, 공개 main 브랜치에서 사용할 수 있는 기능을 뜻하지 않습니다. 게이트웨이·전체 모델 측정은 10월 19일, 네이티브 Converse·관리자 UI 측정은 10월 20일 자료입니다. 반복 호출·CLI 호환성·자동 압축 검증은 10월 20–21일에 추가했습니다. 명시된 조건에서의 관측이며 운영 SLA를 의미하지 않습니다.
+**2026년 10월 21일 기준.** 저장된 최신 측정 결과를 보여줍니다. 아래 네이티브 Converse·UI 결과는 현재 main에 포함된 구현의 병합 전 개발 빌드에서 얻었습니다. 현재 main의 동작으로 보기 전에 다시 측정하세요. 게이트웨이·전체 모델 측정은 10월 19일, 네이티브 Converse·관리자 UI 측정은 10월 20일 자료입니다. 반복 호출·CLI 호환성·자동 압축 검증은 10월 20–21일에 추가했습니다. 명시된 조건에서의 관측이며 운영 SLA를 의미하지 않습니다.
 
 <div class="grid cards" markdown>
 
@@ -25,7 +25,7 @@ description: inferplane의 지연, 처리량, 캐시 비용과 네이티브 Conv
 
 -   **네이티브 Converse 4/4건 완료**
 
-    개발 빌드에서 Haiku 4.5와 Qwen3 32B를 관리자 UI·스트리밍 SDK로 각각 호출했습니다. 모델·API당 한 건입니다.
+    병합 전 개발 빌드에서 Haiku 4.5와 Qwen3 32B를 관리자 UI·스트리밍 SDK로 각각 호출했습니다. 모델·API당 한 건입니다.
 
 </div>
 
@@ -85,7 +85,7 @@ description: inferplane의 지연, 처리량, 캐시 비용과 네이티브 Conv
 
 ## 네이티브 Converse와 관리자 UI {#native-converse-and-administrator-ui}
 
-측정한 **개발 빌드**는 지원되는 Bedrock Runtime 목적지에 대해 `/model/{configured-model}/converse`와 `/converse-stream`을 수신했습니다. 해당 빌드의 관리자 **모델 비교** 페이지는 가상 키 승인·정산 경로로 두 모델을 호출했습니다. 이 구현은 main에 병합되지 않았으며, 측정 결과 게시는 해당 엔드포인트나 UI를 활성화하지 않습니다. 공개 구현은 [API 레퍼런스](../api-reference.md)를 참고하세요.
+측정한 병합 전 **개발 빌드**는 지원되는 Bedrock Runtime 목적지에 대해 `/model/{configured-model}/converse`와 `/converse-stream`을 수신했습니다. 해당 빌드의 관리자 **모델 비교** 페이지는 가상 키 승인·정산 경로로 두 모델을 호출했습니다. 현재 main에 이 구현이 포함되어 있지만, 측정 결과 게시가 기존 배포에서 해당 엔드포인트나 UI를 활성화하지는 않습니다. 현재 계약은 [사용 가이드](../bedrock-converse-evaluation.md)와 [API 레퍼런스](../api-reference.md)를 참고하세요.
 
 <!-- performance:native -->
 | 모델 | API | 완료/호출 | E2E (s) | TTFT (s) | 요청 비용 |

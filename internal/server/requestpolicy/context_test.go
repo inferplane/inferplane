@@ -13,6 +13,8 @@ func TestContextTextEstimateSeparatesInlineImageTransport(t *testing.T) {
 	for _, tc := range []struct{ protocol, body string }{
 		{"anthropic", `{"messages":[{"role":"user","content":[` + image + `]}]}`},
 		{"bedrock", `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"call","content":[` + image + `,{"type":"text","text":"describe it"}]}]}]}`},
+		{"bedrock", `{"messages":[{"role":"user","content":[{"image":{"format":"png","source":{"bytes":"` + data + `"}}},{"text":"describe"}]}]}`},
+		{"bedrock", `{"messages":[{"role":"user","content":[{"toolResult":{"toolUseId":"call","content":[{"image":{"format":"jpeg","source":{"bytes":"` + data + `"}}}]}}]}]}`},
 		{"openai", `{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,` + data + `","detail":"high"}}]}]}`},
 		{"responses", `{"input":[{"type":"message","role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,` + data + `"}]}]}`},
 	} {
@@ -26,6 +28,19 @@ func TestContextTextEstimateSeparatesInlineImageTransport(t *testing.T) {
 				t.Fatal("estimation changed forwarded image bytes")
 			}
 		})
+	}
+}
+
+func TestContextNativeImageDoesNotDiscountOpaqueFields(t *testing.T) {
+	data := strings.Repeat("AAAA", 4096)
+	for _, body := range []string{
+		`{"messages":[{"role":"user","content":[{"image":{"format":"pdf","source":{"bytes":"` + data + `"}}}]}]}`,
+		`{"messages":[{"role":"assistant","content":[{"toolUse":{"input":{"image":{"format":"png","source":{"bytes":"` + data + `"}}}}}]}]}`,
+		`{"messages":[{"role":"user","content":[{"toolResult":{"content":[{"json":{"image":{"format":"png","source":{"bytes":"` + data + `"}}}}]}}]}]}`,
+	} {
+		if got := ContextTextEstimate("bedrock", []byte(body)); got != int64(len(body)/4) {
+			t.Fatalf("opaque native content discounted: %d", got)
+		}
 	}
 }
 

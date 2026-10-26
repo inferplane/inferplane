@@ -650,3 +650,26 @@ func TestAdminUI_i18nWired(t *testing.T) {
 		t.Error("app.js never calls applyLang() — language switch would be a no-op")
 	}
 }
+
+// Both comparison sides must offer the same well-formed protocol choices; a
+// malformed tag silently drops an option that no browser fixture selects.
+func TestEvaluationProtocolSelectsMatch(t *testing.T) {
+	_, html := get(t, "/index.html")
+	option := regexp.MustCompile(`<option value="([a-z-]+)">[^<]+</option>`)
+	want := []string{"bedrock-converse", "anthropic", "responses", "openai"}
+	for _, id := range []string{"eval-protocol-a", "eval-protocol-b"} {
+		start := strings.Index(html, `<select id="`+id+`">`)
+		if start < 0 {
+			t.Fatalf("missing select %s", id)
+		}
+		body := html[start:]
+		body = body[:strings.Index(body, "</select>")]
+		var got []string
+		for _, m := range option.FindAllStringSubmatch(body, -1) {
+			got = append(got, m[1])
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") || strings.Count(body, "<option") != len(want) || strings.Count(body, "</option") != len(want) {
+			t.Errorf("%s options = %v, want %v with well-formed tags", id, got, want)
+		}
+	}
+}

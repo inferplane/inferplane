@@ -51,6 +51,16 @@ func ContextTextEstimate(protocol string, raw []byte) int64 {
 		}
 		for _, block := range blocks {
 			excluded += contextImageBytes(protocol, block)
+			if protocol == "bedrock" && block["type"] == nil {
+				var result struct {
+					Content []map[string]json.RawMessage `json:"content"`
+				}
+				if json.Unmarshal(block["toolResult"], &result) == nil {
+					for _, content := range result.Content {
+						excluded += contextImageBytes(protocol, content)
+					}
+				}
+			}
 			if (protocol == "anthropic" || protocol == "bedrock") && contextString(block["type"]) == "tool_result" {
 				var results []map[string]json.RawMessage
 				if json.Unmarshal(block["content"], &results) == nil {
@@ -76,6 +86,19 @@ func contextString(raw json.RawMessage) string {
 func contextImageBytes(protocol string, block map[string]json.RawMessage) int64 {
 	kind := contextString(block["type"])
 	switch {
+	case protocol == "bedrock" && kind == "" && block["image"] != nil:
+		var image struct {
+			Format string `json:"format"`
+			Source struct {
+				Bytes json.RawMessage `json:"bytes"`
+			} `json:"source"`
+		}
+		if json.Unmarshal(block["image"], &image) != nil || !contextImageType("image/"+image.Format) ||
+			!contextBase64(contextString(image.Source.Bytes)) {
+			return 0
+		}
+		data := bytes.TrimSpace(image.Source.Bytes)
+		return int64(len(data) - 2)
 	case (protocol == "anthropic" || protocol == "bedrock") && kind == "image":
 		var source map[string]json.RawMessage
 		if json.Unmarshal(block["source"], &source) != nil || contextString(source["type"]) != "base64" || !contextImageType(contextString(source["media_type"])) {

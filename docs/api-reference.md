@@ -26,7 +26,7 @@ GET  /v1/models
 | Endpoint | Notes |
 |----------|-------|
 | `POST /v1/messages` | Messages API; streaming via SSE when `"stream": true`. Body forwarded verbatim to an Anthropic-protocol upstream. |
-| `POST /v1/messages/count_tokens` | Token counting. **Always returns 200** (a non-200 crashes Claude Code). |
+| `POST /v1/messages/count_tokens` | Local HTTP-200 counting on policy/readiness/storage refusal; missing or invalid credentials can still return 401. |
 | `GET /v1/models` | Lists models the principal may use (negotiated by `anthropic-version`). |
 
 ### OpenAI ingress
@@ -48,6 +48,8 @@ GET  /v1/models
 ```text
 POST /model/{modelId}/invoke
 POST /model/{modelId}/invoke-with-response-stream
+POST /model/{modelId}/converse
+POST /model/{modelId}/converse-stream
 POST /model/{modelId}/count-tokens
 ```
 
@@ -55,8 +57,19 @@ These gateway routes use virtual-key authentication (`x-api-key` or Bearer),
 not client AWS SigV4 identity. URL-encode the configured model identifier.
 Generation uses the common admission/routing controls; streaming uses the
 Bedrock response shape. Count requests retain the local HTTP-200 contract
-when authentication, readiness, routing or storage prevents generation.
+when readiness, routing or storage prevents generation. Missing or invalid
+virtual keys can still return 401.
 Provider credentials and AWS signing are applied separately on egress.
+
+Native Converse preserves JSON bytes and named AWS eventstream frames, including
+trailing usage metadata. It does not wrap Converse events as InvokeModel chunks
+or apply the Anthropic adapter's parameter rewrites. Mandatory guardrail insertion
+and verified policy masking remain exceptions. A conflicting guardrail is refused.
+Only configured Bedrock Runtime targets qualify; Mantle and SDK endpoint overrides
+do not qualify. FIPS and dualstack selections are respected. Non-default service
+tiers and optimized latency are rejected until separately priced. Unknown cache
+TTL and unqualified OpenAI cached-input accounting remain uncertain.
+See [the native contract and evaluation guide](bedrock-converse-evaluation.md).
 
 ### Usage
 
@@ -219,6 +232,29 @@ amount. Missing `operations` or `cost_state` from an older API means evidence is
 unavailable, rather than success or zero cost. Bounded stream reasons and
 [coverage limits](operations/observability.md#read-outcome-and-cost-evidence)
 apply; raw error text is not added to this API.
+
+### Governed model comparison (`mayu` only, ADR-052)
+
+`POST /admin/evaluations` requires full administrator authorization and a separate
+`X-Inferplane-Virtual-Key`. Its JSON body is
+`{"protocol":"bedrock-converse","model":"configured-name","body":{"messages":[...]}}`.
+Protocols are `bedrock-converse`, `anthropic`, `openai`, and `responses`; for the
+last three, `body.model` must equal `model`. No URL or provider credential is accepted.
+The bridge makes one non-streaming request through the ordinary data-plane handler,
+including virtual-key authorization, routing, admission and audit. Stream/background
+requests are rejected. Request bodies use the configured gateway limit; the bridge
+itself is bounded at 64 MiB and browser-visible responses at 4 MiB.
+
+The outer HTTP response describes bridge authorization/validation. A successful
+bridge returns the inference `http_status`, semantic `outcome`, `response_success`,
+`stop_reason`, `duration_ms`, output, usage evidence, cost/pricing version,
+`accounting_known`, `attempts` and `unsettled_attempts`. `ttft_ms` is null:
+non-streaming E2E output tokens/second is not decode throughput. Refusals and
+truncations can have inference HTTP 200 but `response_success:false`.
+Known accounting requires one attempt and one complete settlement with sufficient
+usage and a configured price; it does not mean an AWS invoice was reconciled.
+After fallback, a reported final settlement is not a known total for all attempts.
+Responses are `no-store`. The control-plane binary never handles these inferences.
 
 ## Error Codes
 

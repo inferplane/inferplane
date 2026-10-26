@@ -157,6 +157,17 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	stream.SetBodyRecorder(bodies)
 	stream.SetUsageCollector(o.usage)
 	mux.Handle("POST /model/{modelId}/invoke-with-response-stream", stream)
+	for _, operation := range []struct {
+		path      string
+		streaming bool
+	}{{"converse", false}, {"converse-stream", true}} {
+		converse := bedrockapi.NewConverseHandlerMetrics(r, holder, aud, gov, m, operation.streaming)
+		converse.SetMasking(mask)
+		converse.SetTeamPolicy(teamPolicy)
+		converse.SetBodyRecorder(bodies)
+		converse.SetUsageCollector(o.usage)
+		mux.Handle("POST /model/{modelId}/"+operation.path, converse)
+	}
 	bct := bedrockapi.NewCountTokensHandler(r, holder)
 	bct.SetMasking(mask)
 	bct.SetTeamPolicy(teamPolicy)
@@ -231,6 +242,10 @@ func governanceGateMiddleware(gate func() (bool, string), next http.Handler) htt
 		if ok, reason := gate(); !ok {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Retry-After", governanceRetryAfterSeconds)
+			if strings.HasPrefix(r.URL.Path, "/model/") {
+				bedrockapi.WriteError(w, http.StatusServiceUnavailable, "governance not ready: "+reason)
+				return
+			}
 			w.WriteHeader(http.StatusServiceUnavailable)
 			body, _ := json.Marshal(map[string]any{
 				"type":  "error",
@@ -257,6 +272,10 @@ func maxBytesMiddleware(limit int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count := strings.HasSuffix(r.URL.Path, "/count_tokens") || strings.HasSuffix(r.URL.Path, "/count-tokens")
 		if r.ContentLength > limit && !count {
+			if strings.HasPrefix(r.URL.Path, "/model/") {
+				bedrockapi.WriteError(w, http.StatusRequestEntityTooLarge, "request body too large")
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
 			_, _ = w.Write([]byte(`{"error":"request body too large"}`))

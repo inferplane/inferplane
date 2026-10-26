@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: 768076cbb8c5952326a331080c46c453cc507ac9fb9fa2a81d9ab35611771c1f
+translation_source_sha256: 2b625b481776d381694e4070c40e857bfed7ac0c122463e2ce3a9180f7680d90
 ---
 
 # API 구현 {#api}
@@ -17,7 +17,9 @@ Messages·Chat Completions·Responses·Bedrock 수신과 상태·메트릭·키 
 | Anthropic | `internal/server/anthropicapi/` | messages·count_tokens·models. 알 수 없는 모델 404·금지 모델 403에 키의 허용 모델 목록 표시 |
 | OpenAI | `internal/server/openaiapi/` | chat/completions·models, 같은 허용 목록 오류 안내 |
 | Responses | `internal/server/responsesapi/` | POST /v1/responses, 네이티브와 지원 무상태 텍스트·도구 어댑터, 공통 승인·라우팅 |
-| Bedrock | `internal/server/bedrockapi/` | /model/{modelId}/invoke·invoke-with-response-stream의 AWS eventstream, count-tokens의 200·inputTokens. Claude Code의 Bedrock 모드·기본 URL·인증 생략 설정에서 bearer를 공통 KeyAuth로 해석. AWS 형식 message·X-Amzn-ErrorType 오류, 지원 Bedrock 대상 |
+| Bedrock | `internal/server/bedrockapi/` | /model/{modelId}/invoke·invoke-with-response-stream의 AWS eventstream, count-tokens는 정책·저장소 거부 시 로컬 HTTP 200 추정치와 inputTokens(잘못된 자격 증명은 401 가능). Claude Code의 Bedrock 모드·기본 URL·인증 생략 설정에서 bearer를 공통 KeyAuth로 해석. AWS 형식 message·X-Amzn-ErrorType 오류, 지원 Bedrock 대상 |
+| 네이티브 Converse | `internal/server/bedrockapi/`, `providers/bedrock/native_converse.go` | `/model/{modelId}/converse`, `/converse-stream`. 원본 JSON·AWS 이벤트, 공통 승인·감사, 적격 Runtime 대상만 지원(ADR-052) |
+| 정책 적용 비교 | `internal/server/evaluation.go` | mayu의 `POST /admin/evaluations`. 전체 관리자와 별도 가상 키, 비스트리밍 데이터 핸들러 실행, 응답 결과·정수 비용·불확실성 근거(ADR-052) |
 | 사용량 | `internal/server/usageapi/usage.go` | GET /v1/usage, 본인 키·팀의 유효 예산·할당량, 정수 microUSD, 무제한은 null. team_budget_day·key_budget_day는 calendar-day, 기존 월 필드는 calendar-month 유지. key_id 표시 없음 |
 | 관리 키 | `internal/server/adminapi/keys.go` | 팀 권한과 감사가 적용되는 발급·조회·폐기 |
 | 팀·사용자 | `internal/server/adminapi/teams.go` | GET /admin/teams는 관리 인증, PUT·DELETE /admin/teams/{name}은 전체 관리자. SetTeamLookup으로 다음 요청부터 집행. GET /admin/users는 owner의 읽기 전용 파생 뷰이며 사용자 테이블·사용자 지출 기능과 구분 |

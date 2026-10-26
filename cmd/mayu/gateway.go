@@ -1019,6 +1019,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		}
 	}
 	g.adminSrv = &http.Server{Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore != nil), auditFileSinks, aud, anchorReader, readiness, m, writer, liveExport(holder), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), cfg.Probe.AllowedHosts...)}
+	g.adminSrv.Handler = server.WithEvaluations(g.adminSrv.Handler, g.dataSrv.Handler, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), aud)
 	authorityTransferred = true
 	sharedTransferred = true
 	return g, nil

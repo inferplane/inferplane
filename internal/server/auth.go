@@ -8,6 +8,7 @@ import (
 
 	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/principal"
+	"github.com/inferplane/inferplane/internal/server/bedrockapi"
 )
 
 // KeyAuth resolves the client's virtual API key (x-api-key or Authorization:
@@ -21,7 +22,7 @@ func KeyAuth(store keystore.Store, next http.Handler) http.Handler {
 			key = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		}
 		if key == "" {
-			writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "missing API key")
+			writeKeyError(w, r, "missing API key")
 			return
 		}
 		p, err := store.Resolve(r.Context(), key)
@@ -36,14 +37,22 @@ func KeyAuth(store keystore.Store, next http.Handler) http.Handler {
 			// apiKeyHelper also re-invokes on any 401, so this message doesn't
 			// change client behavior, only what a human sees.
 			if errors.Is(err, keystore.ErrKeyExpired) {
-				writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "API key expired")
+				writeKeyError(w, r, "API key expired")
 				return
 			}
-			writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "invalid API key")
+			writeKeyError(w, r, "invalid API key")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(principal.With(r.Context(), p)))
 	})
+}
+
+func writeKeyError(w http.ResponseWriter, r *http.Request, message string) {
+	if strings.HasPrefix(r.URL.Path, "/model/") {
+		bedrockapi.WriteError(w, http.StatusUnauthorized, message)
+		return
+	}
+	writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", message)
 }
 
 func storeUnavailable(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +67,7 @@ func storeUnavailable(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Retry-After", "1")
 	if strings.HasPrefix(r.URL.Path, "/model/") {
+		w.Header().Set("X-Amzn-ErrorType", "ServiceUnavailableException")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]string{"__type": "ServiceUnavailableException", "message": "identity store unavailable"})
 		return

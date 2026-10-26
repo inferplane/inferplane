@@ -40,6 +40,7 @@
         <button class="nav active" data-view="overview">⌂&ensp;<span data-i18n="nav.overview">Overview</span></button>
         <button class="nav" data-view="usage">▤&ensp;<span data-i18n="nav.usage">Usage</span></button>
         <button class="nav" data-view="logs">≡&ensp;<span data-i18n="nav.logs">Logs</span></button>
+        <button class="nav" data-view="evaluation">⇆&ensp;<span data-i18n="nav.evaluation">Compare models</span></button>
         <button class="nav" data-view="keys">⚿&ensp;<span data-i18n="nav.keys">Virtual keys</span></button>
         <button class="nav" data-view="teams">⚇&ensp;<span data-i18n="nav.teamsUsers">Teams &amp; Users</span></button>
         <button class="nav" data-view="providers">⇄&ensp;<span data-i18n="nav.providersModels">Providers &amp; Models</span></button>
@@ -472,6 +473,42 @@
       </section>
 
       <!-- ===== settings (initial: connection quickstart; Phase 0b adds toggles) ===== -->
+      <section id="view-evaluation" class="view" hidden>
+        <div class="card">
+          <h2 data-i18n="eval.title">Compare two models with the same prompt</h2>
+          <p class="sub" data-i18n="eval.hint">Requests use your virtual key's permissions and budgets and may incur model charges. Results stay in this page's memory.</p>
+          <p id="eval-admin-only" class="sub" data-i18n="eval.adminOnly">Full administrator access is required.</p>
+          <form id="evaluation-form" hidden>
+            <label><span data-i18n="eval.key">Virtual key</span><input id="eval-key" type="password" autocomplete="off" spellcheck="false" required></label>
+            <div class="eval-pair">
+              <fieldset><legend>A</legend>
+                <label><span data-i18n="eval.model">Configured model</span><select id="eval-model-a" required></select></label>
+                <label>API<select id="eval-protocol-a"><option value="bedrock-converse">Bedrock Converse</option><option value="anthropic">Anthropic Messages</option><option value="responses">OpenAI Responses</option><option value="openai">OpenAI Chat</option></select></label>
+              </fieldset>
+              <fieldset><legend>B</legend>
+                <label><span data-i18n="eval.model">Configured model</span><select id="eval-model-b" required></select></label>
+                <label>API<select id="eval-protocol-b"><option value="bedrock-converse">Bedrock Converse</option><option value="anthropic">Anthropic Messages</option><option value="responses">OpenAI Responses</option><option value="openai">OpenAI Chat</option></select></label>
+              </fieldset>
+            </div>
+            <label><span data-i18n="eval.prompt">Shared prompt</span><textarea id="eval-prompt" rows="7" required></textarea></label>
+            <div class="row">
+              <label><span data-i18n="eval.maxTokens">Maximum output tokens</span><input id="eval-max-tokens" type="number" min="16" max="4096" value="128" required></label>
+              <label><span data-i18n="eval.repeats">Requests per model</span><input id="eval-repeats" type="number" min="1" max="5" value="1" required></label>
+            </div>
+            <p class="sub" data-i18n="eval.method">Sequential A/B requests alternate order each round. Non-streaming: throughput is output tokens ÷ total time; TTFT and decode speed are not measured. These checks do not score answer quality.</p>
+            <div class="row"><button type="submit" id="eval-run" data-i18n="eval.run">Run comparison</button><button type="button" id="eval-cancel" class="ghost" disabled data-i18n="eval.cancel">Stop</button><button type="button" id="eval-export" class="ghost" disabled data-i18n="eval.export">Export results</button></div>
+          </form>
+          <p id="eval-status" role="status" aria-live="polite"></p>
+          <p id="eval-error" role="alert" hidden></p>
+        </div>
+        <div id="eval-summary" class="eval-pair"></div>
+        <div class="card eval-results">
+          <h2 data-i18n="eval.results">Per-request evidence</h2>
+          <p class="sub" data-i18n="eval.costHint">Gateway settlements are not the AWS invoice. Missing prices, uncertain usage and cancelled calls must not be treated as zero cost. Estimates remain labelled.</p>
+          <div class="table-wrap"><table id="eval-results-table"><thead><tr><th>#</th><th data-i18n="eval.model">Model</th><th>API</th><th>HTTP</th><th data-i18n="eval.outcome">Response outcome</th><th>ms</th><th>Output tok/s · E2E</th><th>USD</th></tr></thead><tbody></tbody></table></div>
+          <div id="eval-outputs"></div>
+        </div>
+      </section>
       <section id="view-settings" class="view" hidden>
         <p class="hint"><span data-i18n="settings.introPre">Point a coding agent at this gateway with a virtual key.
           Issue a key in </span><b data-i18n="settings.virtualKeysWord">Virtual keys</b><span data-i18n="settings.introPost"> and these snippets fill in with live values.</span></p>
@@ -510,5 +547,6 @@ api key:  the same virtual key</code></pre>
   </dialog>
   <script src="i18n.js"></script>
   <script src="app.js"></script>
+  <script src="evaluation.js"></script>
 </body>
 </html>
