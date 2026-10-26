@@ -157,3 +157,7 @@ Shared policy money uses authority_accounts alongside node-local grants. Soft
 pending reservations remain liabilities but do not prematurely latch soft tiers.
 Counts are always local; DB failures deny generation. Mutable SQLite topology is
 unsupported. Separate per-replica audit segments are still required.
+
+## Governed model comparison (ADR-052)
+
+`server/evaluation.go` wraps mayu AdminMux only: full admin plus a separate virtual key, fresh headers, and the normal DataMux handler. It never chooses an arbitrary URL or runs on inferplaned. Request-scoped observers in `server/requestpolicy/settlement_observer.go` expose integer settlement evidence; more than one attempt cannot be displayed as a known full cost from the last settlement. `server/adminui/static/evaluation.js` runs sequential A/B then B/A non-streaming comparisons; E2E output tokens/s is not decode throughput and TTFT stays null. Result exports exclude keys, prompts and answer text.

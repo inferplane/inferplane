@@ -51,11 +51,11 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path.startswith('/admin/ui/'):
             name = path[len('/admin/ui/'):] or 'index.html'
-            if name not in ('index.html', 'style.css', 'app.js', 'i18n.js', 'favicon.svg'):
+            if name not in ('index.html', 'style.css', 'app.js', 'evaluation.js', 'i18n.js', 'favicon.svg'):
                 self.respond(404, {})
                 return
             self.send_response(200)
-            self.send_header('Content-Type', {'index.html': 'text/html', 'style.css': 'text/css', 'app.js': 'text/javascript', 'i18n.js': 'text/javascript', 'favicon.svg': 'image/svg+xml'}[name])
+            self.send_header('Content-Type', {'index.html': 'text/html', 'style.css': 'text/css', 'app.js': 'text/javascript', 'evaluation.js': 'text/javascript', 'i18n.js': 'text/javascript', 'favicon.svg': 'image/svg+xml'}[name])
             self.send_header('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'")
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.end_headers()
@@ -132,6 +132,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--screenshots', type=Path)
+    parser.add_argument('--chromium', type=str)
     args = parser.parse_args()
     if args.screenshots:
         args.screenshots.mkdir(parents=True, exist_ok=True)
@@ -140,7 +141,7 @@ def main():
     base = f'http://127.0.0.1:{server.server_port}'
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, executable_path=args.chromium)
             page = browser.new_page(viewport={'width': 1440, 'height': 1080}, color_scheme='light', locale='en-US')
             errors = []
             page.on('pageerror', lambda e: errors.append(str(e)))

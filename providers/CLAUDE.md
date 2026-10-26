@@ -40,3 +40,7 @@ Bedrock's four generation SDK operations use `aws.NopRetryer`. Gateway fallback
 owns attempts and their reservations; hidden SDK retries after a request body was
 accepted would lose uncertain spend. This applies in all profiles, including
 legacy mode. Health probes remain non-generation operations.
+
+## Native Converse ingress (ADR-052)
+
+`bedrock/native_converse.go` is a separate native-wire branch, not the Anthropic→Converse adapter. It preserves JSON and named AWS eventstream frames with CRC validation, signs with the gateway credentials, honors FIPS/dualstack, refuses native capability for SDK endpoint overrides, and has no redirect or transport retry. Required guardrail insertion and verified privacy masking are narrow exceptions; conflicting guardrails and unpriced service tiers/latency modifiers refuse. Missing usage, unknown cache TTL and unqualified OpenAI cached-input semantics retain accounting uncertainty. Mantle targets do not support native Converse. See `docs/bedrock-converse-evaluation.md`.

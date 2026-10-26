@@ -744,6 +744,10 @@ func requestCompatible(ingress string, provider providers.Provider, target confi
 	if hasDeclaration && !declared.SupportsIngress(ingress) {
 		return false
 	}
+	if ingress == "bedrock-converse" {
+		native, ok := provider.(interface{ SupportsBedrockConverse(string) bool })
+		return ok && target.API != "mantle" && native.SupportsBedrockConverse(target.Model)
+	}
 	if ingress == "responses" {
 		if provider.Name() == "openai_responses" {
 			return true

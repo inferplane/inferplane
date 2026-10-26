@@ -1,5 +1,9 @@
 # Context-window validation, 2026-10-02
 
+For the latest measured model capacity, latency and cost, see
+[model performance](../performance/models.md). This page retains the October 2
+client-profile validation and its configuration-specific limits.
+
 These synthetic text probes ran through the authenticated local mayu gateway,
 with one configured target per public model. They do not qualify arbitrary
 tools/history, model quality, another deployment/region, or an exact maximum.

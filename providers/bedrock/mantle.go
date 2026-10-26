@@ -227,6 +227,8 @@ func (m *mantleClient) do(ctx context.Context, path string, body []byte, sse boo
 	}
 	if sse {
 		req.Header.Set("Accept", "text/event-stream")
+	} else if strings.HasSuffix(path, "/converse-stream") {
+		req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 	}
 	creds, err := m.creds.Retrieve(ctx)
 	if err != nil {

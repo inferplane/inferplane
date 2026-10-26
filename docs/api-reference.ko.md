@@ -1,6 +1,6 @@
 ---
 translation_source: api-reference.md
-translation_source_sha256: bee3e2f539626b8bd4149316880d6f81af70bfca83d61c024700413f9a040761
+translation_source_sha256: 7ecaf284e5c0953f45a9c6b6fa654a844b1f5bb8d7ef4da04aea7898c28c51b2
 ---
 
 # API 레퍼런스 {#api-reference}
@@ -29,7 +29,7 @@ GET  /v1/models
 | 엔드포인트 | 동작 |
 | --- | --- |
 | `/v1/messages` | Messages, stream=true이면 SSE. Anthropic 프로토콜 업스트림에 본문 원문 전달 |
-| `/v1/messages/count_tokens` | 토큰 계산. **항상 200**. non-200은 Claude Code를 중단시킬 수 있음 |
+| `/v1/messages/count_tokens` | 정책·준비 상태·저장소 거부에는 로컬 HTTP 200 계산. 자격 증명 누락·무효는 401 가능 |
 | `/v1/models` | 주체가 사용할 모델 조회. `anthropic-version`으로 응답 형식 협상 |
 
 ### OpenAI 수신 {#openai-ingress}
@@ -51,10 +51,14 @@ GET  /v1/models
 ```text
 POST /model/{modelId}/invoke
 POST /model/{modelId}/invoke-with-response-stream
+POST /model/{modelId}/converse
+POST /model/{modelId}/converse-stream
 POST /model/{modelId}/count-tokens
 ```
 
-AWS SigV4 클라이언트 신원이 아니라 가상 키(`x-api-key`·Bearer)로 인증합니다. 설정된 모델 ID를 URL 인코딩하세요. 생성은 공통 승인·라우팅 제어를 사용하고 스트림은 Bedrock 응답 형식입니다. 인증·준비 상태·라우팅·저장소 때문에 생성을 거부하는 경우에도 계산은 로컬 HTTP 200을 유지합니다. 공급자 자격 증명과 AWS 서명은 외부 호출 때 별도로 적용합니다.
+AWS SigV4 클라이언트 신원이 아니라 가상 키(`x-api-key`·Bearer)로 인증합니다. 설정된 모델 ID를 URL 인코딩하세요. 생성은 공통 승인·라우팅 제어를 사용하고 스트림은 Bedrock 응답 형식입니다. 준비 상태·라우팅·저장소 때문에 생성을 거부하는 경우 계산은 로컬 HTTP 200을 유지하며, 키 누락·무효는 401이 가능합니다. 공급자 자격 증명과 AWS 서명은 외부 호출 때 별도로 적용합니다.
+
+네이티브 Converse는 JSON 원문과 마지막 사용량 메타데이터를 포함한 AWS 이벤트 프레임을 보존합니다. Converse 이벤트를 InvokeModel 청크로 감싸거나 Anthropic 변환기의 파라미터 보정을 적용하지 않습니다. 필수 Guardrail 삽입과 검증된 정책 마스킹은 예외이며 Guardrail 충돌은 거부합니다. 설정된 Bedrock Runtime 대상만 지원하고 Mantle·SDK 엔드포인트 재정의는 제외합니다. FIPS·dualstack 설정은 반영합니다. 별도 가격이 없는 서비스 등급·최적화 지연 옵션은 거부하며, 캐시 TTL이나 OpenAI 캐시 입력 과금 의미가 불명확하면 비용 불확실성을 유지합니다. [계약·평가 가이드](bedrock-converse-evaluation.md)를 참고하세요.
 
 ### 사용량 {#usage}
 
@@ -207,6 +211,14 @@ unavailable/unpriced에서 숫자 0을 알려진 달러 금액으로 표시하�
 구버전 API에 `operations` 또는 `cost_state`가 없으면 근거 정보 없음이지 성공·비용 0이
 아닙니다. 제한된 스트림 원인과 [관측 한계](operations/observability.md#read-outcome-and-cost-evidence)를
 적용하며 원문 오류 텍스트는 이 API에 추가하지 않습니다.
+
+### 정책이 적용되는 모델 비교 · mayu 전용 ADR-052 {#governed-model-comparison-mayu-only-adr-052}
+
+`POST /admin/evaluations`는 전체 관리자 권한과 별도의 `X-Inferplane-Virtual-Key`를 요구합니다. 본문은 `{"protocol":"bedrock-converse","model":"configured-name","body":{"messages":[...]}}` 형식입니다. 프로토콜은 `bedrock-converse`, `anthropic`, `openai`, `responses`이며, 뒤의 세 가지는 `body.model`과 `model`이 같아야 합니다. URL·공급자 자격 증명은 받지 않습니다. 일반 데이터 영역 핸들러를 통과하므로 가상 키 권한·라우팅·예산 승인·감사가 그대로 적용됩니다.
+
+비스트리밍 요청만 지원하며 stream·background는 거부합니다. 브리지 본문 상한은 64 MiB이고 데이터 영역의 설정된 본문 제한도 적용됩니다. 브라우저 응답 보관은 4 MiB로 제한됩니다. 바깥 HTTP 상태는 브리지 인증·검증 결과이며, 결과의 `http_status`가 실제 추론 상태입니다. 응답에는 `outcome`, `response_success`, `stop_reason`, `duration_ms`, 출력, 사용량 근거, 가격 버전·비용, `accounting_known`, `attempts`, `unsettled_attempts`가 포함됩니다.
+
+`ttft_ms`는 null입니다. 출력 토큰/E2E 초는 디코딩 처리량이 아닙니다. HTTP 200에서도 거절·출력 중단은 응답 실패로 집계합니다. 비용 확인에는 단일 시도·완전한 정산·사용량 근거·가격이 필요하며 AWS 청구서 대조를 뜻하지 않습니다. 재시도 후 마지막 정산 비용만 있으면 전체 비용 확인으로 표시하지 않습니다. 응답은 `no-store`이며 제어 영역 바이너리는 추론을 처리하지 않습니다.
 
 ## 오류 코드 {#error-codes}
 

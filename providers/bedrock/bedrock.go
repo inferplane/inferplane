@@ -38,10 +38,14 @@ func factory(cfg providers.Config) (providers.Provider, error) {
 	if mantleBase == "" {
 		mantleBase = fmt.Sprintf("https://bedrock-mantle.%s.api.aws", ac.cfg.Region)
 	}
+	native, err := newNativeConverseClient(ac.cfg.Region, ac.cfg.Credentials, cfg.HTTPClient, ac.rt.Options())
+	if err != nil {
+		return nil, err
+	}
 	// awsClient implements both invoker and converser; the mantle client
 	// shares its resolved credentials.
 	return &provider{
-		inv: ac, conv: ac, modelAPI: modelAPI,
+		inv: ac, conv: ac, modelAPI: modelAPI, native: native,
 		man:              newMantleClient(mantleBase, ac.cfg.Region, ac.cfg.Credentials, cfg.HTTPClient),
 		defaultGuardrail: Guardrail{ID: cfg.Settings["guardrail_id"], Version: cfg.Settings["guardrail_version"]},
 	}, nil
@@ -51,6 +55,7 @@ type provider struct {
 	inv              invoker
 	conv             converser
 	man              mantler
+	native           *nativeConverseClient
 	modelAPI         map[string]string // upstream modelId → "invoke_model"|"converse"|"mantle"
 	defaultGuardrail Guardrail         // provider-level default (D6, ADR-019) — the anti-bypass fix
 }
@@ -72,7 +77,7 @@ func (p *provider) Models() []schema.ModelInfo { return nil }
 
 func (p *provider) SupportsIngress(protocol string) bool {
 	switch protocol {
-	case "anthropic", "openai", "bedrock", "responses":
+	case "anthropic", "openai", "bedrock", "responses", "bedrock-converse":
 		return true
 	default:
 		return false
@@ -125,6 +130,13 @@ func (p *provider) Complete(ctx context.Context, req *providers.ProxyRequest) (*
 }
 
 func (p *provider) complete(ctx context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+	if req.IngressProtocol == "bedrock-converse" {
+		native, err := p.prepareNativeConverse(req)
+		if err != nil {
+			return nil, err
+		}
+		return p.native.Complete(ctx, native)
+	}
 	// Invoke and Converse both parse RawBody as Anthropic Messages JSON; an
 	// openai-ingress request must be re-rendered from Parsed first or its
 	// tools / tool history / max_completion_tokens are silently dropped
@@ -167,6 +179,13 @@ func (p *provider) Stream(ctx context.Context, req *providers.ProxyRequest) (ite
 }
 
 func (p *provider) stream(ctx context.Context, req *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
+	if req.IngressProtocol == "bedrock-converse" {
+		native, err := p.prepareNativeConverse(req)
+		if err != nil {
+			return nil, err
+		}
+		return p.native.Stream(ctx, native)
+	}
 	// Same cross-protocol re-render as complete(); see anthropicRequest.
 	api := p.apiFor(req.Upstream)
 	if api != "mantle" {

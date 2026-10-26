@@ -5,6 +5,10 @@ price snapshot. It does not require or fabricate a Codex `reported_cost`.
 These amounts are configured-price estimates, not invoices: taxes, private
 discounts, hosted-tool fees and unconfigured service tiers are outside them.
 
+See [performance results](../performance/index.md#observed-prompt-cache-cost)
+for observed cache costs and [model performance](../performance/models.md)
+for context-sized request costs under the recorded measurement prices.
+
 ## Configuration
 
 The top-level rates are short-context rates. Add both `short_context_limit`

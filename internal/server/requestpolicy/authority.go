@@ -37,6 +37,7 @@ type budgetAttempt struct {
 // The returned finalizer MUST run even after a panic/cancellation or early error;
 // absent a proved complete result it retains the entire reservation as uncertain.
 func ReserveBudget(req *http.Request, g *governance.Governor, p keystore.Principal, target router.ChainTarget, state *live.State, raw []byte) (*http.Request, func(), error) {
+	observeAttempt(req)
 	if !g.HasBudgetAuthority() && !g.HasSharedAuthority() {
 		return req, func() {}, nil
 	}
@@ -106,7 +107,8 @@ func BudgetStatus(err error) int {
 
 // SettleBudget distinguishes actual observed cost from authority retained for
 // uncertain outcomes. Missing/malformed usage can never prove a safe refund.
-func SettleBudget(req *http.Request, _ *audit.CostRef, usage *schema.Usage, complete bool) {
+func SettleBudget(req *http.Request, cost *audit.CostRef, usage *schema.Usage, complete bool) {
+	observeSettlement(req, cost, usage, complete)
 	a, _ := req.Context().Value(budgetKey{}).(*budgetAttempt)
 	if a == nil {
 		return
@@ -146,7 +148,7 @@ func singleGeneration(raw []byte) error {
 			}
 		}
 	}
-	for _, key := range []string{"inferenceConfig", "textGenerationConfig", "generation_config"} {
+	for _, key := range []string{"inferenceConfig", "textGenerationConfig", "generation_config", "additionalModelRequestFields"} {
 		if value, ok := fields[key]; ok {
 			if err := singleGeneration(value); err != nil {
 				return err

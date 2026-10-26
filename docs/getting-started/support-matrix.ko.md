@@ -1,6 +1,6 @@
 ---
 translation_source: getting-started/support-matrix.md
-translation_source_sha256: 73c0a588d3c280a5d410268bcc4225f166be0a551718f21adca5f5205f955454
+translation_source_sha256: ed0a97a202cdeec3ee0636a534293464420a0998ccaeb0e5a97c44cd1229d147
 ---
 
 # 기능 지원 범위 {#feature-support}
@@ -10,6 +10,8 @@ translation_source_sha256: 73c0a588d3c280a5d410268bcc4225f166be0a551718f21adca5f
 | 기능 | 상태 | 범위·남은 검증 |
 | --- | --- | --- |
 | Messages·Chat Completions·Responses·Bedrock 수신 | 구현됨 | 공급자·기능 조합별 차이 |
+| 네이티브 Bedrock Converse·ConverseStream | 구현됨 | 지원되는 Runtime 목적지; [네이티브 API·정책 제한](../bedrock-converse-evaluation.md) |
+| 관리자 모델 비교 | 구현됨 | 거버넌스가 적용되는 텍스트 요청, E2E·사용량·비용 근거; [실측 결과](../performance/index.md) |
 | 가상 키·모델 허용 목록·팀 제한 | 구현됨 | 발급·관리 경로와 저장소 접근 보호 필요 |
 | 검증된 사용자·서비스 신원 | 선택적 활성화 | 과거 바인딩 검토와 필수 모드 배포 검증 필요 |
 | 영속 전역 정책 금전 예산 | 선택적 · ADR-045/046 | 보수적 예약, 불명확한 사용량은 의무 유지 |
