@@ -61,6 +61,7 @@ type ChatHandler struct {
 	mask       *filter.Masking                               // nil-safe: masking off when nil (ADR-009)
 	teamPolicy func(team string) (keystore.TeamRecord, bool) // nil-safe: no per-team overrides when nil (D6/D7, ADR-016 fresh-read pattern)
 	bodies     *bodystore.Recorder                           // nil-safe: body capture off when nil (D4, ADR-018)
+	content    requestpolicy.ContentExport                   // nil-safe: governed content export off when nil
 	usage      *telemetry.Collector                          // nil-safe: usage telemetry off when nil (control-plane mode)
 }
 
@@ -84,6 +85,9 @@ func (h *ChatHandler) SetTeamPolicy(fn func(team string) (keystore.TeamRecord, b
 func (h *ChatHandler) SetUsageCollector(c *telemetry.Collector) { h.usage = c }
 
 func (h *ChatHandler) SetBodyRecorder(r *bodystore.Recorder) { h.bodies = r }
+
+// SetContentExport enables governed egress content export (observability rules).
+func (h *ChatHandler) SetContentExport(f requestpolicy.ContentExport) { h.content = f }
 
 func NewChatHandler(r *router.Router) *ChatHandler { return &ChatHandler{r: r} }
 
@@ -440,6 +444,10 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 	if h.bodies != nil && resp.StatusCode < 400 {
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, clientBody)
 	}
+	if resp.StatusCode < 400 {
+		h.content.Export(req.Context(), requestpolicy.ContentRecord{RecordID: recID, Team: p.Team, Account: p.AccountSubject(), Ingress: "openai",
+			Model: model, Upstream: upstream, TraceID: tracing.TraceID(req.Context()), Request: pr.RawBody, Response: clientBody})
+	}
 	h.auditCompleted(req.Context(), recID, p, model, upstream, resp.StatusCode, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
 	recordSpanSettled(req, prov.Name(), providerName, upstream, usage, cost, resp.StatusCode < 400, false)
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, resp.StatusCode, time.Since(start).Seconds(), 0)
@@ -574,6 +582,8 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 	if h.bodies != nil {
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, nil)
 	}
+	h.content.Export(req.Context(), requestpolicy.ContentRecord{RecordID: recID, Team: p.Team, Account: p.AccountSubject(), Ingress: "openai",
+		Model: model, Upstream: upstream, TraceID: tracing.TraceID(req.Context()), Request: pr.RawBody})
 	h.auditCompleted(req.Context(), recID, p, model, upstream, 200, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
 	recordSpanSettled(req, prov.Name(), providerName, upstream, usage, cost, true, false)
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 200, time.Since(start).Seconds(), ttft)

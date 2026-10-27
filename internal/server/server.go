@@ -51,6 +51,14 @@ type dataMuxOptions struct {
 	usage           *telemetry.Collector
 	maxRequestBytes int64
 	governanceGate  func() (bool, string)
+	content         requestpolicy.ContentExport
+}
+
+// WithContentExport installs governed egress content export on every
+// generation ingress, called next to body capture with the same bytes.
+// nil = off (the default).
+func WithContentExport(f requestpolicy.ContentExport) DataMuxOption {
+	return func(o *dataMuxOptions) { o.content = f }
 }
 
 // WithGovernanceGate installs the control_plane.require_sync gate (review/
@@ -121,6 +129,7 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	msgs.SetMasking(mask) // PII masking for configured teams (ADR-009); nil = off
 	msgs.SetTeamPolicy(teamPolicy)
 	msgs.SetBodyRecorder(bodies)
+	msgs.SetContentExport(o.content)
 	msgs.SetUsageCollector(o.usage)
 	mux.Handle("POST /v1/messages", msgs)
 	ct := anthropicapi.NewCountTokensHandler(r)
@@ -149,24 +158,28 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	chat.SetMasking(mask) // masked teams rejected on the OpenAI ingress (T6b)
 	chat.SetTeamPolicy(teamPolicy)
 	chat.SetBodyRecorder(bodies)
+	chat.SetContentExport(o.content)
 	chat.SetUsageCollector(o.usage)
 	mux.Handle("POST /v1/chat/completions", chat)
 	resp := responsesapi.NewHandler(r, aud, gov, m)
 	resp.SetMasking(mask)
 	resp.SetTeamPolicy(teamPolicy)
 	resp.SetBodyRecorder(bodies)
+	resp.SetContentExport(o.content)
 	resp.SetUsageCollector(o.usage)
 	mux.Handle("POST /v1/responses", resp)
 	invoke := bedrockapi.NewInvokeHandlerMetrics(r, holder, aud, gov, m, false)
 	invoke.SetMasking(mask)
 	invoke.SetTeamPolicy(teamPolicy)
 	invoke.SetBodyRecorder(bodies)
+	invoke.SetContentExport(o.content)
 	invoke.SetUsageCollector(o.usage)
 	mux.Handle("POST /model/{modelId}/invoke", invoke)
 	stream := bedrockapi.NewInvokeHandlerMetrics(r, holder, aud, gov, m, true)
 	stream.SetMasking(mask)
 	stream.SetTeamPolicy(teamPolicy)
 	stream.SetBodyRecorder(bodies)
+	stream.SetContentExport(o.content)
 	stream.SetUsageCollector(o.usage)
 	mux.Handle("POST /model/{modelId}/invoke-with-response-stream", stream)
 	for _, operation := range []struct {
@@ -177,6 +190,7 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 		converse.SetMasking(mask)
 		converse.SetTeamPolicy(teamPolicy)
 		converse.SetBodyRecorder(bodies)
+		converse.SetContentExport(o.content)
 		converse.SetUsageCollector(o.usage)
 		mux.Handle("POST /model/{modelId}/"+operation.path, converse)
 	}

@@ -101,12 +101,16 @@ func (a attempt) finish(status int, u *schema.Usage, body []byte, partial bool, 
 	a.h.metrics.ObserveRequest("responses", a.target.Model, a.target.ProviderName, a.principal.Team, status, time.Since(a.started).Seconds(), ttft)
 	id := ulid.New()
 	var bodyRef string
-	if a.h.bodies != nil && status/100 == 2 {
+	if status/100 == 2 {
 		requestBody := a.inputBody
 		if requestBody == nil {
 			requestBody = a.proxy.RawBody
 		}
-		bodyRef = a.h.bodies.Capture(id, a.principal.Team, requestBody, body)
+		if a.h.bodies != nil {
+			bodyRef = a.h.bodies.Capture(id, a.principal.Team, requestBody, body)
+		}
+		a.h.content.Export(a.req.Context(), requestpolicy.ContentRecord{RecordID: id, Team: a.principal.Team, Account: a.principal.AccountSubject(), Ingress: "responses",
+			Model: a.target.Model, Upstream: a.target.Upstream, TraceID: tracing.TraceID(a.req.Context()), Request: requestBody, Response: body})
 	}
 	if a.h.aud == nil {
 		return
