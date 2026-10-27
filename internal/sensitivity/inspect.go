@@ -17,21 +17,25 @@ import (
 // Result contains only bounded categories and aggregate request signals.
 // Complete means the submitted content was inspectable, not that it is PII-free.
 type Result struct {
-	Complete            bool
-	Categories          []string
-	InputTokens         int64
-	OutputTokens        int64
-	UserTurns           int
-	HasHistory          bool
-	HasTools            bool
-	HasVision           bool
-	HasReasoning        bool
-	HasStructuredOutput bool
-	HasRemoteTools      bool
+	Complete bool
+	// SensitiveDataInspected proves finite detectors ran over the traversal.
+	// It does not establish complete coverage or absence of sensitive data.
+	SensitiveDataInspected bool `json:"-"`
+	Categories             []string
+	InputTokens            int64
+	OutputTokens           int64
+	UserTurns              int
+	HasHistory             bool
+	HasTools               bool
+	HasVision              bool
+	HasReasoning           bool
+	HasStructuredOutput    bool
+	HasRemoteTools         bool
 }
 
 // Inspector accepts anthropic, openai, responses, and bedrock ingress protocols.
 // Bedrock token-count callers supply the already-decoded inner request body.
+// Inspect always performs full finite sensitive-data detection.
 type Inspector interface {
 	Inspect(context.Context, string, []byte) (Result, error)
 }
@@ -60,6 +64,13 @@ const (
 )
 
 func (inspector) Inspect(ctx context.Context, protocol string, raw []byte) (Result, error) {
+	return inspector{}.InspectWithMode(ctx, protocol, raw, DetectSensitiveData)
+}
+
+func (inspector) InspectWithMode(ctx context.Context, protocol string, raw []byte, mode InspectionMode) (Result, error) {
+	if mode != DetectSensitiveData && mode != StructureOnly {
+		return Result{}, errInspectionMode
+	}
 	if protocol == "bedrock-converse" {
 		protocol = "bedrock"
 	}
@@ -71,15 +82,17 @@ func (inspector) Inspect(ctx context.Context, protocol string, raw []byte) (Resu
 	default:
 		return Result{}, errProtocol
 	}
-	categories := make(map[string]bool)
-	w := walker{ctx: ctx, visit: func(text string) error {
-		return detect(ctx, text, categories)
-	}}
+	var categories map[string]bool
+	w := walker{ctx: ctx, visit: func(string) error { return nil }}
+	if mode == DetectSensitiveData {
+		categories = make(map[string]bool)
+		w.visit = func(text string) error { return detect(ctx, text, categories) }
+	}
 	root, err := w.decode(raw, 0)
 	if err != nil {
 		return Result{}, err
 	}
-	result := Result{Complete: true, InputTokens: w.inputTokens}
+	result := Result{Complete: true, SensitiveDataInspected: mode == DetectSensitiveData, InputTokens: w.inputTokens}
 	// One token per decoded UTF-8 byte, plus eight per JSON value, budgets
 	// keys, tool definitions and framing conservatively. This is deliberately
 	// not a tokenizer or a claim about an upstream's exact token accounting.

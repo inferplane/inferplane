@@ -47,20 +47,25 @@ func TestInspectionBenchmarkFixtures(t *testing.T) {
 }
 
 func BenchmarkInspect(b *testing.B) {
-	for _, protocol := range inspectionfixture.Protocols {
-		for _, size := range inspectionfixture.Sizes {
-			raw := inspectionBenchmarkFixture(protocol, size)
-			for _, concurrency := range inspectionfixture.Concurrency {
-				b.Run(fmt.Sprintf("%s/bytes=%d/c=%d", protocol, size, concurrency), func(b *testing.B) {
-					inspector := NewInspector()
-					inspectionfixture.Run(b, len(raw), concurrency, func() error {
-						result, err := inspector.Inspect(context.Background(), protocol, raw)
-						if err == nil && (!result.Complete || result.OutputTokens != 32) {
-							return fmt.Errorf("unexpected synthetic inspection outcome")
-						}
-						return err
+	for _, mode := range []struct {
+		name string
+		mode InspectionMode
+	}{{"full", DetectSensitiveData}, {"structure", StructureOnly}} {
+		for _, protocol := range inspectionfixture.Protocols {
+			for _, size := range inspectionfixture.Sizes {
+				raw := inspectionBenchmarkFixture(protocol, size)
+				for _, concurrency := range inspectionfixture.Concurrency {
+					b.Run(fmt.Sprintf("%s/%s/bytes=%d/c=%d", mode.name, protocol, size, concurrency), func(b *testing.B) {
+						inspector := NewInspector().(SelectiveInspector)
+						inspectionfixture.Run(b, len(raw), concurrency, func() error {
+							result, err := inspector.InspectWithMode(context.Background(), protocol, raw, mode.mode)
+							if err == nil && (!result.Complete || result.OutputTokens != 32) {
+								return fmt.Errorf("unexpected synthetic inspection outcome")
+							}
+							return err
+						})
 					})
-				})
+				}
 			}
 		}
 	}
