@@ -92,6 +92,9 @@ type Store struct {
 	routedAndPriced   func(model string) error
 	sharedEnforcement bool
 	identityConfig    *identity.Config
+	// observabilityCeiling validates observability exporter/signal pairs
+	// against this data plane's local ceiling; nil skips (control plane).
+	observabilityCeiling func(exporter, signal string) error
 }
 
 // SetSharedEnforcement is a startup-only capability declaration. It must only
@@ -115,6 +118,9 @@ type snapshot struct {
 	files           map[string]time.Time // watched file → mtime at load
 	teams           map[string]TeamLimits
 	users           map[userKey]UserLimits
+	// observability is true when any accepted policy has an observability
+	// rule, so the request-path lookup returns immediately otherwise.
+	observability bool
 }
 
 // NewStore loads the given paths (files or directories) and fails on any
@@ -161,7 +167,7 @@ func (s *Store) ApplyWire(docs []v1alpha1.GovernancePolicy) []Rejection {
 			seen[name] = true
 			p, err := FromV1Alpha1(&docs[i])
 			if err == nil {
-				err = checkEnforceable(p, s.routedAndPriced, s.sharedEnforcement)
+				err = checkEnforceable(p, s.routedAndPriced, s.observabilityCeiling, s.sharedEnforcement)
 			}
 			if err != nil {
 				return []Rejection{{Policy: name, Reason: err.Error()}}
@@ -227,7 +233,7 @@ func (s *Store) ApplyWire(docs []v1alpha1.GovernancePolicy) []Rejection {
 		seen[name] = true
 		p, err := FromV1Alpha1(&docs[i])
 		if err == nil {
-			err = checkEnforceable(p, s.routedAndPriced, s.sharedEnforcement)
+			err = checkEnforceable(p, s.routedAndPriced, s.observabilityCeiling, s.sharedEnforcement)
 		}
 		if err != nil {
 			rememberRejection(&docs[i])
@@ -259,6 +265,7 @@ func (s *Store) ApplyWire(docs []v1alpha1.GovernancePolicy) []Rejection {
 		policies:        accepted,
 		teams:           mergeTeamLimits(accepted),
 		users:           mergeUserLimits(accepted),
+		observability:   hasObservability(accepted),
 	})
 	return rejected
 }
@@ -281,7 +288,7 @@ func (s *Store) Reload() error {
 		if err := validateIdentitySubject(p.Subject.User, s.identityConfig); err != nil {
 			return err
 		}
-		if err := checkEnforceable(p, s.routedAndPriced, s.sharedEnforcement); err != nil {
+		if err := checkEnforceable(p, s.routedAndPriced, s.observabilityCeiling, s.sharedEnforcement); err != nil {
 			return err
 		}
 	}
@@ -293,22 +300,29 @@ func (s *Store) Reload() error {
 		}
 	}
 	s.snap.Store(&snapshot{
-		policies: policies,
-		files:    mtimes,
-		teams:    mergeTeamLimits(policies),
-		users:    mergeUserLimits(policies),
+		policies:      policies,
+		files:         mtimes,
+		teams:         mergeTeamLimits(policies),
+		users:         mergeUserLimits(policies),
+		observability: hasObservability(policies),
 	})
 	return nil
 }
 
 // checkEnforceable rejects rules this data plane build cannot enforce yet.
 // routedAndPriced is the ADR-041 apply-time target check for budgetTiers
-// substitution rules (nil skips it — see Store.routedAndPriced doc).
-func checkEnforceable(p *Policy, routedAndPriced func(model string) error, shared bool) error {
+// substitution rules (nil skips it — see Store.routedAndPriced doc);
+// observabilityCeiling checks observability exporters the same way.
+func checkEnforceable(p *Policy, routedAndPriced func(model string) error, observabilityCeiling func(exporter, signal string) error, shared bool) error {
 	reject := func(rule, reason string) error {
 		return &UnsupportedError{APIVersion: SupportedAPIVersions[0], Kind: "GovernancePolicy", Rule: rule, Reason: reason}
 	}
 	for _, r := range p.Rules {
+		if r.Observability != nil && observabilityCeiling != nil {
+			if err := checkObservabilityCeiling(r.Observability, observabilityCeiling); err != nil {
+				return reject(r.Name, err.Error())
+			}
+		}
 		if r.TokenQuota != nil && !shared {
 			return reject(r.Name, "tokenQuota requires shared Postgres governance")
 		}
@@ -756,6 +770,14 @@ func clonePolicy(p *Policy) *Policy {
 }
 
 func cloneRule(r Rule) Rule {
+	if r.Observability != nil {
+		o := *r.Observability
+		if o.Traces != nil {
+			t := *o.Traces
+			o.Traces = &t
+		}
+		r.Observability = &o
+	}
 	if r.TokenQuota != nil {
 		q := *r.TokenQuota
 		r.TokenQuota = &q
