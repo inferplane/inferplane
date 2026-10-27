@@ -1,0 +1,5 @@
+goos: linux
+goarch: arm64
+pkg: github.com/inferplane/inferplane/internal/router
+BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=1-4         	      10	 254408181 ns/op	         0 failures	 252043315 p50_ns	 257353975 p95_ns	 257353975 p99_ns	  26992640 rss_bytes	         1.000 workers	 5359092 B/op	     136 allocs/op
+PASS

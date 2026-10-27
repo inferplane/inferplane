@@ -1,0 +1,23 @@
+File: baseline-mayu.test
+Build ID: 364c6ddc1af850d80fd624f63fb52433eab88e57
+Type: alloc_space
+Time: 2026-10-27 09:18:47 UTC
+Showing nodes accounting for 278.05MB, 97.47% of 285.26MB total
+Dropped 86 nodes (cum <= 1.43MB)
+Showing top 15 nodes out of 57
+      flat  flat%   sum%        cum   cum%
+  162.02MB 56.80% 56.80%   162.02MB 56.80%  encoding/json.(*Decoder).refill
+   50.89MB 17.84% 74.64%    77.49MB 27.16%  encoding/json.(*decodeState).literalStore
+   30.44MB 10.67% 85.31%    30.44MB 10.67%  io.ReadAll
+   26.60MB  9.32% 94.63%    26.60MB  9.32%  encoding/json.(*RawMessage).UnmarshalJSON
+    2.57MB   0.9% 95.53%     2.57MB   0.9%  regexp.(*Regexp).get
+    2.31MB  0.81% 96.34%     3.47MB  1.22%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Request
+    1.72MB   0.6% 96.95%     1.72MB   0.6%  runtime/pprof.StartCPUProfile
+    1.50MB  0.53% 97.47%     1.50MB  0.53%  regexp/syntax.(*compiler).inst
+         0     0% 97.47%   201.34MB 70.58%  encoding/json.(*Decoder).Decode
+         0     0% 97.47%   201.34MB 70.58%  encoding/json.(*Decoder).Token
+         0     0% 97.47%   162.02MB 56.80%  encoding/json.(*Decoder).readValue
+         0     0% 97.47%    26.60MB  9.32%  encoding/json.(*decodeState).object
+         0     0% 97.47%    77.49MB 27.16%  encoding/json.(*decodeState).unmarshal
+         0     0% 97.47%    77.49MB 27.16%  encoding/json.(*decodeState).value
+         0     0% 97.47%    38.17MB 13.38%  encoding/json.Unmarshal

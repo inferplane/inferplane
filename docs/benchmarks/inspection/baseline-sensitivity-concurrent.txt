@@ -1,0 +1,14 @@
+goos: linux
+goarch: arm64
+pkg: github.com/inferplane/inferplane/internal/sensitivity
+BenchmarkInspect/responses/bytes=204800/c=32-4         	      32	  12543352 ns/op	         0 failures	 328274159 p50_ns	 384636916 p95_ns	 386953807 p99_ns	  23797760 rss_bytes	        32.00 workers	  825393 B/op	     100 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=32-4         	      32	  12496948 ns/op	         0 failures	 316635256 p50_ns	 385884095 p95_ns	 387541967 p99_ns	  25276416 rss_bytes	        32.00 workers	  814442 B/op	      95 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=32-4         	      32	  12509804 ns/op	         0 failures	 336192022 p50_ns	 386777981 p95_ns	 389508104 p99_ns	  25645056 rss_bytes	        32.00 workers	  832403 B/op	     101 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=32-4         	      32	  12896080 ns/op	         0 failures	 281525729 p50_ns	 370036106 p95_ns	 392502051 p99_ns	  25591808 rss_bytes	        32.00 workers	  802349 B/op	      94 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=32-4         	      32	  12754648 ns/op	         0 failures	 183657539 p50_ns	 382639900 p95_ns	 404320534 p99_ns	  24141824 rss_bytes	        32.00 workers	  795626 B/op	      91 allocs/op
+BenchmarkInspect/responses/bytes=1048576/c=32-4        	      32	  63839174 ns/op	         0 failures	 976495281 p50_ns	1118591706 p95_ns	1120699424 p99_ns	  88932352 rss_bytes	        16.00 workers	 5317977 B/op	      96 allocs/op
+BenchmarkInspect/responses/bytes=1048576/c=32-4        	      32	  64194077 ns/op	         0 failures	 974815040 p50_ns	1136927460 p95_ns	1160967879 p99_ns	  95465472 rss_bytes	        16.00 workers	 5319347 B/op	      98 allocs/op
+BenchmarkInspect/responses/bytes=1048576/c=32-4        	      32	  63853824 ns/op	         0 failures	 978036674 p50_ns	1088784721 p95_ns	1143173419 p99_ns	  90251264 rss_bytes	        16.00 workers	 5335757 B/op	     103 allocs/op
+BenchmarkInspect/responses/bytes=1048576/c=32-4        	      32	  64128808 ns/op	         0 failures	 906611434 p50_ns	1130511800 p95_ns	1264632373 p99_ns	  94420992 rss_bytes	        16.00 workers	 5327068 B/op	     101 allocs/op
+BenchmarkInspect/responses/bytes=1048576/c=32-4        	      32	  64211234 ns/op	         0 failures	 969738206 p50_ns	1145317389 p95_ns	1182857879 p99_ns	  92393472 rss_bytes	        16.00 workers	 5339652 B/op	     108 allocs/op
+PASS

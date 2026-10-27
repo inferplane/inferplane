@@ -1,0 +1,5 @@
+goos: linux
+goarch: arm64
+pkg: github.com/inferplane/inferplane/cmd/mayu
+BenchmarkGatewayInspection/responses/none/bytes=1048576/c=1-4         	      10	 281520193 ns/op	         1.000 dispatches/op	         0 failures	 281131785 p50_ns	 282869595 p95_ns	 282869595 p99_ns	  44613632 rss_bytes	         1.000 workers	21400496 B/op	     825 allocs/op
+PASS

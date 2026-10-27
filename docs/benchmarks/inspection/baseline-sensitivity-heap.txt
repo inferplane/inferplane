@@ -1,0 +1,23 @@
+File: baseline-sensitivity.test
+Build ID: 9a8632e3f867d0577cd192f74245fc5a0c247cd8
+Type: alloc_space
+Time: 2026-10-27 09:18:02 UTC
+Showing nodes accounting for 154.17MB, 97.73% of 157.75MB total
+Dropped 35 nodes (cum <= 0.79MB)
+Showing top 15 nodes out of 43
+      flat  flat%   sum%        cum   cum%
+   46.84MB 29.69% 29.69%    46.84MB 29.69%  encoding/json.(*Decoder).refill
+   46.34MB 29.38% 59.07%    46.34MB 29.38%  internal/bytealg.MakeNoZero
+   45.83MB 29.05% 88.12%    92.18MB 58.43%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Request
+   11.57MB  7.33% 95.45%    11.57MB  7.33%  encoding/json.(*decodeState).literalStore
+    1.55MB  0.98% 96.43%     1.55MB  0.98%  regexp.(*Regexp).get
+    1.16MB  0.73% 97.17%     1.16MB  0.73%  runtime/pprof.StartCPUProfile
+    0.88MB  0.56% 97.73%     1.45MB  0.92%  compress/flate.NewWriter (inline)
+         0     0% 97.73%     1.45MB  0.92%  compress/gzip.(*Writer).Write
+         0     0% 97.73%    58.40MB 37.02%  encoding/json.(*Decoder).Decode
+         0     0% 97.73%    58.40MB 37.02%  encoding/json.(*Decoder).Token
+         0     0% 97.73%    46.84MB 29.69%  encoding/json.(*Decoder).readValue
+         0     0% 97.73%    11.57MB  7.33%  encoding/json.(*decodeState).unmarshal
+         0     0% 97.73%    11.57MB  7.33%  encoding/json.(*decodeState).value
+         0     0% 97.73%    60.47MB 38.33%  github.com/inferplane/inferplane/internal/sensitivity.(*walker).decode
+         0     0% 97.73%     2.06MB  1.31%  github.com/inferplane/inferplane/internal/sensitivity.(*walker).text

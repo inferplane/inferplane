@@ -1,0 +1,23 @@
+File: baseline-sensitivity.test
+Build ID: 9a8632e3f867d0577cd192f74245fc5a0c247cd8
+Type: delay
+Time: 2026-10-27 09:18:02 UTC
+Showing nodes accounting for 8.36s, 100% of 8.36s total
+Dropped 11 nodes (cum <= 0.04s)
+Showing top 15 nodes out of 19
+      flat  flat%   sum%        cum   cum%
+     5.58s 66.74% 66.74%      5.58s 66.74%  runtime.chanrecv1
+     2.78s 33.26%   100%      2.78s 33.26%  sync.(*WaitGroup).Wait
+         0     0%   100%      2.78s 33.28%  github.com/inferplane/inferplane/internal/sensitivity.BenchmarkInspect
+         0     0%   100%      2.78s 33.26%  github.com/inferplane/inferplane/internal/sensitivity.BenchmarkInspect.func1
+         0     0%   100%      2.78s 33.26%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Run
+         0     0%   100%      2.80s 33.46%  main.main
+         0     0%   100%      2.80s 33.46%  runtime.main
+         0     0%   100%      5.58s 66.72%  testing.(*B).Run
+         0     0%   100%      2.53s 30.24%  testing.(*B).doBench
+         0     0%   100%      2.53s 30.23%  testing.(*B).doBench.gowrap1
+         0     0%   100%      2.53s 30.23%  testing.(*B).launch
+         0     0%   100%      2.53s 30.24%  testing.(*B).run
+         0     0%   100%      3.05s 36.49%  testing.(*B).run1
+         0     0%   100%      3.04s 36.31%  testing.(*B).run1.func1
+         0     0%   100%      8.36s   100%  testing.(*B).runN

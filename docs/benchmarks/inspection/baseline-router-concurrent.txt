@@ -1,0 +1,14 @@
+goos: linux
+goarch: arm64
+pkg: github.com/inferplane/inferplane/internal/router
+BenchmarkRouteRequestInspection/responses/none/bytes=204800/c=32-4         	      32	  13011837 ns/op	         0 failures	 272990884 p50_ns	 390326773 p95_ns	 391881175 p99_ns	  34553856 rss_bytes	        32.00 workers	  809269 B/op	     109 allocs/op
+BenchmarkRouteRequestInspection/responses/none/bytes=204800/c=32-4         	      32	  12519321 ns/op	         0 failures	 339958950 p50_ns	 386931630 p95_ns	 392970071 p99_ns	  34938880 rss_bytes	        32.00 workers	  814461 B/op	     104 allocs/op
+BenchmarkRouteRequestInspection/responses/none/bytes=204800/c=32-4         	      32	  12770480 ns/op	         0 failures	 333575108 p50_ns	 392669921 p95_ns	 392807845 p99_ns	  34021376 rss_bytes	        32.00 workers	  810950 B/op	     109 allocs/op
+BenchmarkRouteRequestInspection/responses/none/bytes=204800/c=32-4         	      32	  12582941 ns/op	         0 failures	 350353564 p50_ns	 390692282 p95_ns	 392767718 p99_ns	  35913728 rss_bytes	        32.00 workers	  799391 B/op	     100 allocs/op
+BenchmarkRouteRequestInspection/responses/none/bytes=204800/c=32-4         	      32	  12798439 ns/op	         0 failures	 287293665 p50_ns	 381362551 p95_ns	 394924630 p99_ns	  34885632 rss_bytes	        32.00 workers	  796599 B/op	     104 allocs/op
+BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=32-4        	      32	  64078717 ns/op	         0 failures	 970249259 p50_ns	1177068696 p95_ns	1184188858 p99_ns	  98164736 rss_bytes	        16.00 workers	 5327587 B/op	     112 allocs/op
+BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=32-4        	      32	  64897823 ns/op	         0 failures	1000259349 p50_ns	1137854574 p95_ns	1142995991 p99_ns	 105070592 rss_bytes	        16.00 workers	 5318649 B/op	     110 allocs/op
+BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=32-4        	      32	  63864125 ns/op	         0 failures	 981254267 p50_ns	1108083532 p95_ns	1130854449 p99_ns	  97632256 rss_bytes	        16.00 workers	 5326157 B/op	     112 allocs/op
+BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=32-4        	      32	  63608011 ns/op	         0 failures	 937881463 p50_ns	1222938445 p95_ns	1271007082 p99_ns	 104288256 rss_bytes	        16.00 workers	 5322041 B/op	     113 allocs/op
+BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=32-4        	      32	  64164226 ns/op	         0 failures	 986731765 p50_ns	1070927831 p95_ns	1123463214 p99_ns	  99762176 rss_bytes	        16.00 workers	 5331951 B/op	     114 allocs/op
+PASS

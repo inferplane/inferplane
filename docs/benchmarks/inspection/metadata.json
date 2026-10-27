@@ -1,0 +1,67 @@
+{
+  "date_utc": "2026-10-27",
+  "baseline_runtime_commit": "0360e81f8ddecc21ccb8cc590cf6d4f5270a31de",
+  "baseline_documentation_commit": "9d1226e244024f3255fbc94d70a069c70b4b269f",
+  "go_version": "go version go1.26.10 linux/arm64",
+  "os": "Linux",
+  "kernel": "6.18.35-68.127.amzn2023.aarch64",
+  "architecture": "aarch64",
+  "gomaxprocs": 4,
+  "gogc": "100 (default)",
+  "gomemlimit": "unset (default)",
+  "logical_inflight_body_cap_bytes": 16777216,
+  "body_bytes": [
+    20480,
+    204800,
+    1048576,
+    8388608
+  ],
+  "requested_concurrency": [
+    1,
+    8,
+    32
+  ],
+  "main_matrix": {
+    "benchtime": "100ms",
+    "trials": 5
+  },
+  "fixed_concurrency": {
+    "protocol": "responses",
+    "body_bytes": [
+      204800,
+      1048576
+    ],
+    "requested_concurrency": 32,
+    "benchtime": "32x",
+    "trials": 5
+  },
+  "profiles": {
+    "protocol": "responses",
+    "body_bytes": 1048576,
+    "requested_concurrency": 1,
+    "benchtime": "10x",
+    "trials": 1,
+    "includes_setup_and_teardown": true,
+    "heap_sample": "inuse_space"
+  },
+  "fake_upstream_delay_ns": 0,
+  "governance_profile": "SQLite/local; no CP; no money or rate caps",
+  "model_context_window": 67108864,
+  "pricing": "explicit free synthetic override, on_missing=block",
+  "audit": "local async WAL, no required external sink",
+  "learned_classifier": "local fake Clear, no RPC, cache disabled; native alias refusal unqualified",
+  "optional_profiles_unmeasured": [
+    "ADR-045 node-local journal",
+    "ADR-046 shared Postgres",
+    "real learned classifier",
+    "60 MiB isolated stress"
+  ],
+  "rss": "VmRSS at end of each case, not peak",
+  "latency": "sampled per-operation wall clock; ns/op is throughput-derived; workers are actual active ceilings; large-body worker count is capped",
+  "baseline_binary_sha256": {
+    "sensitivity": "484f11951d0c5a66d565ed30fd054e851d16b2e53b6925d828ce679534d9d463",
+    "router": "4785666b830df08e7ca2f11a66ce31ed2f1b17a6c001ea824e4e8207f411cf4c",
+    "mayu": "6d01cf71e0352c83a3267ea1d0da7cd67c87155398de447312e9e01d6b5285e4"
+  },
+  "cpu_model": "model not exposed; linux/arm64, Go runtime reports 16 CPUs"
+}
