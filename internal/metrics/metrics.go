@@ -41,6 +41,7 @@ type Metrics struct {
 	substitution       *prometheus.CounterVec // inferplane_model_substitution_total (ADR-041)
 	routingDecisions   *prometheus.CounterVec // inferplane_routing_decisions_total
 	classifiers        *classifierMetrics     // PII classifier collectors (classifier.go)
+	otelExport         *prometheus.CounterVec // inferplane_otel_export_records_total
 }
 
 func New() *Metrics {
@@ -114,10 +115,15 @@ func New() *Metrics {
 			// config-declared values (team, from/to model names) — never
 			// raw, unvalidated client input.
 		}, []string{"team", "from_model", "to_model"}),
+		otelExport: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "inferplane_otel_export_records_total",
+			Help: "Governed OTLP export records by exporter, signal and outcome (sent, dropped_queue_full, dropped_oversize, dropped_export_error)." +
+				" Exporter names come from local config; no team, user or key label.",
+		}, []string{"exporter", "signal", "outcome"}),
 	}
 	reg.MustRegister(m.tokenUsage, m.requestDuration, m.ttft, m.requestsTotal,
 		m.fallbackTotal, m.circuitState, m.quotaUtil, m.budgetUtil, m.budgetSpend, m.pricingMiss,
-		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected, m.substitution, m.routingDecisions)
+		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected, m.substitution, m.routingDecisions, m.otelExport)
 	m.classifiers = newClassifierMetrics(reg)
 	// Prometheus only emits a labeled metric family once it has at least one
 	// observed child series. Pre-initialize the token-usage family to zero so
@@ -196,6 +202,15 @@ func (m *Metrics) IncUsageWindowDropped() {
 		return
 	}
 	m.usageDropped.Inc()
+}
+
+// ObserveOTelExport counts n governed export records for one exporter,
+// signal and outcome. Every label value is config-bounded or a fixed set.
+func (m *Metrics) ObserveOTelExport(exporter, signal, outcome string, n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	m.otelExport.WithLabelValues(exporter, signal, outcome).Add(float64(n))
 }
 
 // IncAnchorFailure counts a failed audit-anchor write (ADR-012).
