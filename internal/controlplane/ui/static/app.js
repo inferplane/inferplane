@@ -1200,8 +1200,14 @@
     header.append(heading, edit); card.append(header);
     const tags = el("div", undefined, "policy-badges");
     for (const rule of doc.spec?.rules || []) {
-      const kind = ["budget", "rate", "modelAccess", "routing", "sensitiveData", "tokenQuota"].find(k => rule[k]);
+      const kind = ["budget", "rate", "modelAccess", "routing", "sensitiveData", "tokenQuota", "observability"].find(k => rule[k]);
       let text = rule.name + " · " + (kind || "unknown");
+      if (rule.observability) {
+        const o = rule.observability;
+        if (o.traces) text += " · traces→" + o.traces.exporter + " " + (o.traces.samplePercent ?? 100) + "%";
+        if (o.audit) text += " · audit→" + o.audit.exporter;
+        if (o.content) text += " · content→" + o.content.exporter;
+      }
       if (rule.budget) text += rule.budget.unlimited ? " · unlimited" : " · " + (rule.budget.period || "CalendarMonth") + " · " + usd(integer(rule.budget.limitMilliUSD || 0) * 1000n);
       if (rule.budget?.hardCap) text += " · hard cap";
       tags.append(badge(text, rule.failurePolicy === "FailClosed" ? "accent" : "neutral"));
