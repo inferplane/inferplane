@@ -1,7 +1,9 @@
 // Package tracing is the opt-in OpenTelemetry seam (ADR-011). It owns the OTel
-// SDK import (Init builds the OTLP exporter + TracerProvider) and exposes small
-// request-span helpers so the rest of the gateway depends only on this package,
-// not the SDK. When Init is not called, every helper is a cheap no-op (the
+// SDK import (InitRouted builds the OTLP exporters + TracerProvider; Init is the
+// legacy single-exporter form) and exposes small request-span helpers so the
+// rest of the gateway depends only on this package, not the SDK. Spans are
+// always recorded once tracing is on; a routing processor exports each span
+// only to the exporters the injected Decider selects for its request. When Init is not called, every helper is a cheap no-op (the
 // default tracer is the library no-op and an `enabled` guard skips header/context
 // work), so a deployment without an `otel` config is byte-for-byte unchanged.
 //
@@ -18,10 +20,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
@@ -46,49 +45,31 @@ var (
 	prop   propagation.TextMapPropagator = propagation.TraceContext{}
 )
 
-// Init installs the OTLP exporter + TracerProvider and the W3C propagator, and
-// returns the provider's Shutdown (the caller flushes it on teardown under a
-// bounded context). An unreachable collector is non-fatal — the OTLP exporter
-// connects lazily and the batch processor isolates export failures from serving.
+// Init is the legacy single-exporter setup (the `otel` config block): every
+// request span goes to cfg's collector with probability sample_ratio. It is
+// InitRouted with one exporter, named LegacyExporter, and a constant decider,
+// so the gateway's own draw — not the client's traceparent — decides export.
+// An unreachable collector is non-fatal: the exporter connects lazily.
 func Init(ctx context.Context, cfg Config) (func(context.Context) error, error) {
-	var (
-		exp sdktrace.SpanExporter
-		err error
-	)
-	switch cfg.Protocol {
-	case "grpc":
-		opts := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(cfg.Endpoint)}
-		if cfg.Insecure {
-			opts = append(opts, otlptracegrpc.WithInsecure())
-		}
-		exp, err = otlptracegrpc.New(ctx, opts...)
-	default: // "" | "http"
-		opts := []otlptracehttp.Option{otlptracehttp.WithEndpoint(cfg.Endpoint)}
-		if cfg.Insecure {
-			opts = append(opts, otlptracehttp.WithInsecure())
-		}
-		exp, err = otlptracehttp.New(ctx, opts...)
-	}
+	exp, err := NewExporter(ctx, ExporterConfig{Endpoint: cfg.Endpoint, Protocol: cfg.Protocol, Insecure: cfg.Insecure})
 	if err != nil {
 		return nil, err
 	}
+	targets := []Target{LegacyTarget(cfg.SampleRatio)}
+	return InitRouted(cfg.ServiceName, map[string]sdktrace.SpanExporter{LegacyExporter: exp},
+		func(context.Context) []Target { return targets }), nil
+}
 
+// LegacyExporter names the `otel` block's exporter among routed exporters.
+const LegacyExporter = "otel"
+
+// LegacyTarget is the `otel` block's baseline target (nil ratio → 1.0).
+func LegacyTarget(sampleRatio *float64) Target {
 	ratio := 1.0
-	if cfg.SampleRatio != nil {
-		ratio = *cfg.SampleRatio
+	if sampleRatio != nil {
+		ratio = *sampleRatio
 	}
-	svc := cfg.ServiceName
-	if svc == "" {
-		svc = "inferplane"
-	}
-	res := resource.NewSchemaless(attribute.String("service.name", svc))
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exp),
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(ratio))),
-		sdktrace.WithResource(res),
-	)
-	SetTracerProvider(tp)
-	return tp.Shutdown, nil
+	return Target{Exporter: LegacyExporter, Ratio: ratio}
 }
 
 // SetTracerProvider installs an explicit TracerProvider and enables tracing.
