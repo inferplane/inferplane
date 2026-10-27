@@ -511,17 +511,19 @@ type OTelConfig struct {
 }
 
 type Config struct {
-	Server              ServerConfig               `json:"server"`
-	Providers           map[string]ProviderConfig  `json:"providers"`
-	Models              map[string]ModelConfig     `json:"models"`
-	KeyStore            KeyStoreConfig             `json:"key_store"`
-	ProviderStore       *ProviderStoreConfig       `json:"provider_store,omitempty"`
-	GovernanceStore     *GovernanceStoreConfig     `json:"governance_store,omitempty"`
-	Audit               AuditConfig                `json:"audit"`
-	Teams               map[string]TeamConfig      `json:"teams"`
-	Pricing             PricingConfig              `json:"pricing"`
-	Plugins             []PluginConfig             `json:"plugins,omitempty"`
-	OTel                *OTelConfig                `json:"otel,omitempty"`
+	Server          ServerConfig              `json:"server"`
+	Providers       map[string]ProviderConfig `json:"providers"`
+	Models          map[string]ModelConfig    `json:"models"`
+	KeyStore        KeyStoreConfig            `json:"key_store"`
+	ProviderStore   *ProviderStoreConfig      `json:"provider_store,omitempty"`
+	GovernanceStore *GovernanceStoreConfig    `json:"governance_store,omitempty"`
+	Audit           AuditConfig               `json:"audit"`
+	Teams           map[string]TeamConfig     `json:"teams"`
+	Pricing         PricingConfig             `json:"pricing"`
+	Plugins         []PluginConfig            `json:"plugins,omitempty"`
+	OTel            *OTelConfig               `json:"otel,omitempty"`
+	// Observability is the local OTLP export ceiling policies select from.
+	Observability       *ObservabilityConfig       `json:"observability,omitempty"`
 	Probe               ProbeConfig                `json:"probe,omitempty"`
 	Analytics           AnalyticsConfig            `json:"analytics,omitempty"`
 	BudgetAlerts        *BudgetAlertsConfig        `json:"budget_alerts,omitempty"`
@@ -813,6 +815,9 @@ func LoadRaw(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := validateOTel(cfg.OTel); err != nil {
+		return nil, err
+	}
+	if err := validateObservability(cfg.Observability); err != nil {
 		return nil, err
 	}
 	if err := validateAnchor(cfg.Audit.Anchor); err != nil {
