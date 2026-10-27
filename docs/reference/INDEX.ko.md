@@ -1,6 +1,6 @@
 ---
 translation_source: reference/INDEX.md
-translation_source_sha256: 365c056abb1d4096b493c16f8be7e3943e928015a6520b4e872516f787e0d107
+translation_source_sha256: 53a88446f9c097477458b9d42eb269d08bcec0a5c0abe9006fa53883cd3ad72d
 ---
 
 # 구현 레퍼런스 색인 {#implementation-reference-index}
@@ -15,6 +15,9 @@ translation_source_sha256: 365c056abb1d4096b493c16f8be7e3943e928015a6520b4e87251
 | 데이터 | [data.md](data.md) | 키, 감사 체인, 거버넌스 저장소 |
 | 보안 | [security.md](security.md) | 인증, RBAC, 비밀 분리, 메트릭 |
 | 에이전트·LLM | [agent-llm.md](agent-llm.md) | 공급자 추상화, 정규 스키마 |
+| Bedrock 코딩 모델 | [bedrock-coding-models.md](bedrock-coding-models.md) | 모델 관찰과 검증 한계 |
+| 컨텍스트 윈도우 검증 | [context-window-validation.md](context-window-validation.md) | 게이트웨이·클라이언트 컨텍스트 검증 근거 |
+| 가격 | [pricing.md](pricing.md) | 가격표, 단위, 운영자 재정의 |
 <!-- /AUTO-MANAGED:reference-index -->
 
 project-init의 `/add-reference-doc <layer>`로 계층을 추가할 수 있습니다. 아직 없는 frontend·ui·iac 데이터 파생 계층은 이 Go 게이트웨이에 해당하지 않습니다.

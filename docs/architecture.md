@@ -111,6 +111,15 @@ control. See [provider reference](reference/agent-llm.md).
 
 ### Routing Layer (`internal/router`, `internal/sensitivity`, `internal/tier`)
 
+Ingress JSON parsing is required. Additional routing inspection is conditional:
+Messages, Chat and Bedrock InvokeModel skip it without applicable privacy/context rules or
+strict budget targets; Responses always uses it for transport compatibility.
+Native Bedrock Converse also always inspects structure before admission.
+The current inspector performs finite PII detection whenever it runs, even when
+only context or compatibility needs inspection. Learned classification and legacy
+masking are separate opt-ins. See [inspection conditions](policy-routing.md#when-inspection-runs);
+splitting structure checks from PII detection is planned, not current behavior.
+
 Routing composes public model resolution, allowed targets, budget tiers,
 sensitive-data decisions, context selection, and provider fallback. Every attempt
 must satisfy access, privacy, region, capacity and active strict-target constraints.

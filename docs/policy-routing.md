@@ -110,6 +110,30 @@ session identity or pinning inferred from client headers.
 
 ## Inspection and capability limits
 
+### When inspection runs
+
+Basic ingress JSON parsing is required for request validation and model routing.
+Additional request inspection is conditional on the ingress and effective policy:
+
+| Request path | Current additional inspection |
+| --- | --- |
+| Messages, Chat and Bedrock InvokeModel without applicable privacy/context rules or strict budget targets | Skip the routing inspector |
+| Applicable `sensitiveData`, context rules (including Shadow), or strict budget targets | Run the routing inspector |
+| Responses | Run the routing inspector even without policy, to preserve transport compatibility checks |
+| Native Bedrock Converse | Always inspect structure before admission; this currently also runs finite PII detection, independently of routing inspection |
+| Required `Mask` | Inspect original content, transform completely, and independently reinspect sanitized content |
+
+The current inspector combines JSON structure/capability inspection with finite
+PII detection. Whenever it runs, it also runs those detectors. Optional privacy
+enforcement therefore does not mean that detector CPU cost is absent from every
+unprotected request. Separating these operations is proposed performance work,
+not an implemented `pii_enabled` setting.
+
+The learned `pii_classification` block and the legacy masking plugin are separate
+opt-ins. A configured learned classifier runs only for applicable privacy-governed,
+non-count requests; count APIs never call it. An applicable `sensitiveData` rule
+requires its inspection and fail-closed behavior, including when context is Shadow.
+
 Inspection reads original bytes before masking or body capture and never changes
 them. JSON keys/strings, exact numeric scalar spellings, system/developer prompts,
 messages, metadata, tool definitions/results, and nested JSON tool arguments are

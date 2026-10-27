@@ -1,6 +1,6 @@
 ---
 translation_source: policy-routing.md
-translation_source_sha256: ea14e8c6e205b6f9d9dd5efdd19e2d99c10fc6c23a0dbda8d8e269cd669abecc
+translation_source_sha256: b0cdd18c88c0765548d7767cb70cbd603e25d9b0c7db22229ae7d6d33c4e2992
 ---
 
 # 정책 기반 라우팅 {#policy-aware-routing}
@@ -72,6 +72,29 @@ routing:
 `failurePolicy: FailOpen`을 유지하세요. Enforce는 assistant·도구 이력, 도구 스키마·호출, 미디어, 추론, 구조화 출력 요구가 없고 완전히 검사 가능한 단일 사용자 턴만 선택합니다. 여러 턴은 관측만 합니다. 개인정보 검사는 모든 턴에서 제출된 전체 이력에 적용됩니다. 클라이언트 헤더에서 영속 세션 신원이나 고정을 추론하지 않습니다.
 
 ## 검사와 기능 한계 {#inspection-and-capability-limits}
+
+### 검사 실행 조건 {#when-inspection-runs}
+
+기본 수신 JSON 파싱은 요청 검증과 모델 라우팅에 필요합니다. 추가 요청 검사는
+수신 경로와 해당 주체에 적용되는 정책에 따라 실행합니다.
+
+| 요청 경로 | 현재 추가 검사 |
+| --- | --- |
+| 적용되는 개인정보·컨텍스트 규칙과 엄격 예산 목적지가 없는 Messages·Chat·Bedrock InvokeModel | 라우팅 검사기를 생략합니다 |
+| 적용되는 `sensitiveData`, Shadow를 포함한 컨텍스트 규칙, 엄격 예산 목적지 | 라우팅 검사기를 실행합니다 |
+| Responses | 전송 호환성 검증을 유지하기 위해 정책이 없어도 라우팅 검사기를 실행합니다 |
+| 네이티브 Bedrock Converse | 입장 전에 항상 구조를 검사합니다. 현재는 라우팅 검사와 별개로 유한 PII 탐지도 함께 실행합니다 |
+| 필수 `Mask` | 원문 검사, 완전 변환, 정제된 내용의 독립 재검사를 수행합니다 |
+
+현재 검사기는 JSON 구조·기능 검사와 유한 PII 탐지를 함께 수행합니다. 검사기가
+실행되면 탐지기도 실행됩니다. 개인정보 집행이 선택적이라는 사실만으로 보호
+정책이 없는 모든 요청에서 탐지 CPU 비용이 사라지는 것은 아닙니다. 두 작업의
+분리는 성능 개선안이며, 구현된 `pii_enabled` 설정이 아닙니다.
+
+학습형 `pii_classification`과 기존 마스킹 플러그인은 별도의 선택적 기능입니다.
+설정한 학습형 분류기는 적용되는 개인정보 정책이 있는 비-count 요청에서만
+호출하며 count API는 호출하지 않습니다. `sensitiveData` 규칙이 적용되면
+컨텍스트가 Shadow여도 검사와 실패 시 거부 동작을 유지해야 합니다.
 
 마스킹·본문 수집 전에 원본 바이트를 읽으며 바꾸지 않습니다. JSON 키·문자열, 숫자의 정확한 표기, system/developer 프롬프트, 메시지, 메타데이터, 도구 정의·결과, 중첩 JSON 도구 인수를 검사합니다. 유한한 탐지 범위는 다음과 같습니다.
 

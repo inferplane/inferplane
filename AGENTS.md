@@ -1,4 +1,4 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 70cd870793a9 · generated-at: 2026-10-23 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: d5114ca8ef50 · generated-at: 2026-10-27 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
 > from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
 > per-AI copy).
@@ -117,6 +117,11 @@ credentials, or a real IdP (httptest fakes only).
   still require runtime revalidation and an upgraded producer/consumer/CRD set.
 - Rejected privacy or strict-budget distribution gates affected subjects until
   valid recovery. Count APIs stay local/200 on refusal or unready/stale gates.
+- Basic JSON parsing is required. The current inspector combines structure and
+  finite PII detection: Responses and native Converse inspect unconditionally;
+  other routing paths inspect for privacy/context/strict targets, including
+  context Shadow. Separation is planned, not implemented. Learned classifiers
+  and legacy masking are distinct opt-ins; applicable privacy remains mandatory.
 - Opt-in `pii_classification` adds learned signals to the same sensitiveData
   rules. `internal/classifier` is a stdlib leaf seam; concrete types live in
   `plugins/<type>` (e.g. `systemone/`, blank-imported). Only Enforce restricts:
@@ -140,7 +145,9 @@ credentials, or a real IdP (httptest fakes only).
   credential to clients.
 - Secrets or `key_id` values in `/metrics` (unauthenticated by design; labels
   must be config-bounded — never raw client input).
-- `count_tokens` returning non-200 (it crashes Claude Code).
+- Authenticated `count_tokens` handlers returning non-200 on policy/readiness
+  refusal. Missing/invalid virtual keys still return 401 before the handlers;
+  counts remain local and never call a learned classifier.
 - Float cost arithmetic — cost is integer microUSD, round-half-even.
 - Mutating same-protocol content outside documented model substitution or
   explicitly required, completely verified PII masking. Default RawBody
@@ -165,6 +172,13 @@ credentials, or a real IdP (httptest fakes only).
 - Audit chain: records are hashed as exact line bytes — new fields are
   append-only with `omitempty`, proven by a mixed-version fixture test.
 - Fail closed: missing identity/lookup errors deny, never default-allow.
+- ADR-054 default/local money reserves per provider attempt across applicable
+  hard scopes, with process-local enforcement. Missing/interrupted/invalid usage
+  retains uncertainty; soft switching meters cannot replace independent hard caps.
+  Do not describe this as fleet-global durable escrow.
+- Audit WAL failure or retained required-sink pressure latches new admission
+  closed. Preserve and repair retained evidence/storage before restart; restart
+  alone is not recovery, and startup must not blindly replay partial fan-out.
 - ADR-045 implements opt-in Postgres global GovernancePolicy monetary authority
   across node-local gateways and control-plane replicas. Every provider attempt
   reserves durable local credit; incomplete/unknown usage retains uncertainty.
