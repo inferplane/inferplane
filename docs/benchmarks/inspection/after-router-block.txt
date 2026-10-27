@@ -1,0 +1,23 @@
+File: after-router.test
+Build ID: 437a0fbc06aa7cfff403c96d93d0769515beb992
+Type: delay
+Time: 2026-10-27 09:43:09 UTC
+Showing nodes accounting for 242.04ms, 100% of 242.04ms total
+Dropped 11 nodes (cum <= 1.21ms)
+Showing top 15 nodes out of 19
+      flat  flat%   sum%        cum   cum%
+  172.17ms 71.13% 71.13%   172.17ms 71.13%  runtime.chanrecv1
+   69.87ms 28.87%   100%    69.87ms 28.87%  sync.(*WaitGroup).Wait
+         0     0%   100%    85.01ms 35.12%  github.com/inferplane/inferplane/internal/router.BenchmarkRouteRequestInspection
+         0     0%   100%    69.87ms 28.87%  github.com/inferplane/inferplane/internal/router.BenchmarkRouteRequestInspection.func1
+         0     0%   100%    69.87ms 28.87%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Run
+         0     0%   100%    87.16ms 36.01%  main.main
+         0     0%   100%    87.16ms 36.01%  runtime.main
+         0     0%   100%   171.40ms 70.81%  testing.(*B).Run
+         0     0%   100%    70.16ms 28.99%  testing.(*B).doBench
+         0     0%   100%    63.10ms 26.07%  testing.(*B).doBench.gowrap1
+         0     0%   100%    63.10ms 26.07%  testing.(*B).launch
+         0     0%   100%    70.16ms 28.99%  testing.(*B).run
+         0     0%   100%   101.23ms 41.83%  testing.(*B).run1
+         0     0%   100%    91.78ms 37.92%  testing.(*B).run1.func1
+         0     0%   100%   241.27ms 99.68%  testing.(*B).runN

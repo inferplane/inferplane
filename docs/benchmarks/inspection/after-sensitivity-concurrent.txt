@@ -1,0 +1,24 @@
+goos: linux
+goarch: arm64
+pkg: github.com/inferplane/inferplane/internal/sensitivity
+BenchmarkInspect/full/responses/bytes=204800/c=32-4         	      32	  12669798 ns/op	         0 failures	 260190972 p50_ns	 374989241 p95_ns	 378889378 p99_ns	  24354816 rss_bytes	        32.00 workers	  806765 B/op	      93 allocs/op
+BenchmarkInspect/full/responses/bytes=204800/c=32-4         	      32	  12794392 ns/op	         0 failures	 331320397 p50_ns	 395701673 p95_ns	 396137212 p99_ns	  24453120 rss_bytes	        32.00 workers	  816321 B/op	      99 allocs/op
+BenchmarkInspect/full/responses/bytes=204800/c=32-4         	      32	  12415718 ns/op	         0 failures	 316813617 p50_ns	 382374732 p95_ns	 390904623 p99_ns	  25206784 rss_bytes	        32.00 workers	  817375 B/op	     101 allocs/op
+BenchmarkInspect/full/responses/bytes=204800/c=32-4         	      32	  12415567 ns/op	         0 failures	 327157728 p50_ns	 393633753 p95_ns	 395226540 p99_ns	  25096192 rss_bytes	        32.00 workers	  824281 B/op	     100 allocs/op
+BenchmarkInspect/full/responses/bytes=204800/c=32-4         	      32	  12891695 ns/op	         0 failures	 341742285 p50_ns	 385177837 p95_ns	 395317533 p99_ns	  25448448 rss_bytes	        32.00 workers	  807981 B/op	      94 allocs/op
+BenchmarkInspect/full/responses/bytes=1048576/c=32-4        	      32	  63963876 ns/op	         0 failures	 995564169 p50_ns	1128522683 p95_ns	1155796951 p99_ns	  90681344 rss_bytes	        16.00 workers	 5331567 B/op	     101 allocs/op
+BenchmarkInspect/full/responses/bytes=1048576/c=32-4        	      32	  64073193 ns/op	         0 failures	 936441472 p50_ns	1188654578 p95_ns	1194598130 p99_ns	  94007296 rss_bytes	        16.00 workers	 5325075 B/op	      98 allocs/op
+BenchmarkInspect/full/responses/bytes=1048576/c=32-4        	      32	  64428029 ns/op	         0 failures	 958863399 p50_ns	1138349331 p95_ns	1212054275 p99_ns	  87805952 rss_bytes	        16.00 workers	 5329042 B/op	     103 allocs/op
+BenchmarkInspect/full/responses/bytes=1048576/c=32-4        	      32	  63927238 ns/op	         0 failures	 955402182 p50_ns	1145109850 p95_ns	1177177851 p99_ns	  90980352 rss_bytes	        16.00 workers	 5336422 B/op	     105 allocs/op
+BenchmarkInspect/full/responses/bytes=1048576/c=32-4        	      32	  64173987 ns/op	         0 failures	 963936298 p50_ns	1104472493 p95_ns	1131228301 p99_ns	  86831104 rss_bytes	        16.00 workers	 5339932 B/op	     106 allocs/op
+BenchmarkInspect/structure/responses/bytes=204800/c=32-4    	      32	    364674 ns/op	         0 failures	   5553057 p50_ns	   9540973 p95_ns	   9759888 p99_ns	  17383424 rss_bytes	        32.00 workers	  736836 B/op	      59 allocs/op
+BenchmarkInspect/structure/responses/bytes=204800/c=32-4    	      32	    357570 ns/op	         0 failures	   4153087 p50_ns	   7221818 p95_ns	   7251352 p99_ns	  16519168 rss_bytes	        32.00 workers	  736882 B/op	      59 allocs/op
+BenchmarkInspect/structure/responses/bytes=204800/c=32-4    	      32	    363876 ns/op	         0 failures	   5107272 p50_ns	   8072371 p95_ns	   8728624 p99_ns	  17219584 rss_bytes	        32.00 workers	  736839 B/op	      59 allocs/op
+BenchmarkInspect/structure/responses/bytes=204800/c=32-4    	      32	    362753 ns/op	         0 failures	   5014578 p50_ns	   9091364 p95_ns	   9227970 p99_ns	  19030016 rss_bytes	        32.00 workers	  736858 B/op	      59 allocs/op
+BenchmarkInspect/structure/responses/bytes=204800/c=32-4    	      32	    367663 ns/op	         0 failures	   6044981 p50_ns	   9118388 p95_ns	   9159224 p99_ns	  18604032 rss_bytes	        32.00 workers	  737111 B/op	      59 allocs/op
+BenchmarkInspect/structure/responses/bytes=1048576/c=32-4   	      32	   1716770 ns/op	         0 failures	  19578859 p50_ns	  49657066 p95_ns	  52489743 p99_ns	  55111680 rss_bytes	        16.00 workers	 5246475 B/op	      61 allocs/op
+BenchmarkInspect/structure/responses/bytes=1048576/c=32-4   	      32	   1713953 ns/op	         0 failures	  18751389 p50_ns	  45448278 p95_ns	  52912061 p99_ns	  52121600 rss_bytes	        16.00 workers	 5246473 B/op	      61 allocs/op
+BenchmarkInspect/structure/responses/bytes=1048576/c=32-4   	      32	   1665708 ns/op	         0 failures	  16984418 p50_ns	  38024823 p95_ns	  42478497 p99_ns	  44830720 rss_bytes	        16.00 workers	 5246473 B/op	      61 allocs/op
+BenchmarkInspect/structure/responses/bytes=1048576/c=32-4   	      32	   1699402 ns/op	         0 failures	  17936593 p50_ns	  46478358 p95_ns	  52820288 p99_ns	  26767360 rss_bytes	        16.00 workers	 5246483 B/op	      61 allocs/op
+BenchmarkInspect/structure/responses/bytes=1048576/c=32-4   	      32	   1677680 ns/op	         0 failures	  20127923 p50_ns	  44785972 p95_ns	  47825468 p99_ns	  48115712 rss_bytes	        16.00 workers	 5246472 B/op	      61 allocs/op
+PASS

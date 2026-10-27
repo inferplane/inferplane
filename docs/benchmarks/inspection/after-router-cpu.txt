@@ -1,0 +1,23 @@
+File: after-router.test
+Build ID: 437a0fbc06aa7cfff403c96d93d0769515beb992
+Type: cpu
+Time: 2026-10-27 09:43:09 UTC
+Duration: 87.14ms, Total samples = 80ms (91.80%)
+Showing nodes accounting for 80ms, 100% of 80ms total
+Showing top 15 nodes out of 26
+      flat  flat%   sum%        cum   cum%
+      30ms 37.50% 37.50%       30ms 37.50%  encoding/json.stateInString
+      20ms 25.00% 62.50%       20ms 25.00%  runtime.memmove
+      10ms 12.50% 75.00%       10ms 12.50%  encoding/json.(*decodeState).rescanLiteral
+      10ms 12.50% 87.50%       10ms 12.50%  encoding/json.unquoteBytes
+      10ms 12.50%   100%       10ms 12.50%  runtime.(*sweepLocked).sweep
+         0     0%   100%       70ms 87.50%  encoding/json.(*Decoder).Decode
+         0     0%   100%       70ms 87.50%  encoding/json.(*Decoder).Token
+         0     0%   100%       40ms 50.00%  encoding/json.(*Decoder).readValue
+         0     0%   100%       10ms 12.50%  encoding/json.(*Decoder).refill
+         0     0%   100%       20ms 25.00%  encoding/json.(*decodeState).literalStore
+         0     0%   100%       30ms 37.50%  encoding/json.(*decodeState).unmarshal
+         0     0%   100%       30ms 37.50%  encoding/json.(*decodeState).value
+         0     0%   100%       70ms 87.50%  github.com/inferplane/inferplane/internal/router.(*Router).RouteRequest
+         0     0%   100%       10ms 12.50%  github.com/inferplane/inferplane/internal/router.BenchmarkRouteRequestInspection.func1
+         0     0%   100%       60ms 75.00%  github.com/inferplane/inferplane/internal/router.BenchmarkRouteRequestInspection.func1.1

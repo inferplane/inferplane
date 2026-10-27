@@ -46,8 +46,11 @@ in the code and in `docs/decisions/`.
 `router.RouteRequest` reads one `Store.MatchingRoutingPolicies` snapshot and inspects
 original bytes when effective privacy/context rules or strict targets require it;
 Responses always inspects for compatibility. Native Converse independently checks
-structure before admission. These inspectors currently also run finite PII detection.
-Separation is planned; privacy enforcement cannot be bypassed by an optimization.
+structure before admission. Context/strict-only, unprotected Responses and native
+preflight use StructureOnly. Applicable privacy and independent mask reinspection
+require DetectSensitiveData with SensitiveDataInspected evidence (ADR-055). Full
+Inspector.Inspect and safe legacy fallback remain; selective missing evidence denies
+before classification. Structural mode retains the walker and all limits.
 Routing returns a complete retry chain tied to the supplied
 `live.State`. Lookup rejection must be checked even if there are no returned rules.
 Sensitive rules intersect; Block wins; no safe route denies before masking,

@@ -145,8 +145,11 @@ when a change spans packages:
    inspect original bytes when required; Responses always inspects for transport
    compatibility; native Bedrock Converse also inspects structure before admission.
    Messages, Chat and InvokeModel skip routing inspection without applicable privacy/context
-   rules or strict budget targets. The current inspector also runs finite PII
-   detectors whenever invoked; separating that cost is planned, not implemented.
+   rules or strict budget targets. Context/strict-only and unprotected Responses
+   inspection use StructureOnly; native Converse preflight also uses it. Applicable
+   privacy and independent mask reinspection require DetectSensitiveData plus full
+   evidence (ADR-055). Inspector.Inspect remains full; legacy injection falls back
+   to that contract, and selective full results without evidence refuse.
    Intersect sensitive-data and strict-budget restrictions;
    complete/reinspect required masking; revalidate session pins and optional
    context preferences; return the complete safe chain on one topology snapshot.

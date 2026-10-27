@@ -1,6 +1,6 @@
 ---
 translation_source: adaptive-routing.md
-translation_source_sha256: dd8f88d6c0c01043b50262e7235349d675fb0b30b8cc021c9fe5f4636e09615e
+translation_source_sha256: ca3159fd2a83069bae388993b995272bb2e6e748abff6853b053c6b66440db3b
 ---
 
 # 적응형 라우팅과 Codex {#adaptive-routing-and-codex}
@@ -161,12 +161,13 @@ SSE를 보존합니다. **별도 AWS Web Search 작업 요금은 토큰 기반 �
 
 ## 개인정보와 캐시 한계 {#privacy-and-cache-limits}
 
-PII 규칙은 옵트인이지만 현재 검사기는 구조·기능 검사와 유한 PII 탐지를 결합합니다.
-Responses와 네이티브 Bedrock Converse는 항상 호출하고, 다른 생성 경로는 라우팅 규칙이
-검사를 요구할 때 호출합니다. 따라서 컨텍스트 Shadow도 탐지 CPU 비용을 발생시킬 수 있습니다.
-[현재 검사 실행 조건](policy-routing.md#when-inspection-runs)을 참고하세요.
-탐지를 별도로 끄는 설정은 아직 없으며, 비용 절감을 위해 적용되는 개인정보 검사를
-우회해서는 안 됩니다.
+개인정보 집행·학습 분류·기존 마스킹은 각각 설정합니다. 컨텍스트·엄격 목적지 또는
+무보호 Responses 호환성만 필요하면 구조 검사는 유한 PII 탐지기 없이 JSON 순회와
+기능 검사를 유지합니다. 네이티브 Bedrock Converse 사전검사도 구조 모드입니다.
+컨텍스트 Shadow는 구조 검사 비용을 지불하며 개인정보가 적용되면 Shadow와 함께
+있어도 완전 탐지를 요구합니다.
+[검사 실행 조건](policy-routing.md#when-inspection-runs)을 참고하세요.
+적용되는 개인정보 의무를 우회하는 전역 설정은 없습니다.
 
 활성화된 기존 PII 필터도 완전 요청 변환기를 통해 Responses에 적용됩니다. 검사 가능한 깨끗한 요청은 사용할 수 있습니다. 보호 텍스트는 두 탐지기 집합을 모두 통과해야 하며 불투명·안전하지 않은 변환은 거부합니다.
 

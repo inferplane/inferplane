@@ -1,0 +1,5 @@
+goos: linux
+goarch: arm64
+pkg: github.com/inferplane/inferplane/internal/sensitivity
+BenchmarkInspect/structure/responses/bytes=1048576/c=1-4         	      10	   6297956 ns/op	         0 failures	   6142386 p50_ns	   6755638 p95_ns	   6755638 p99_ns	  17424384 rss_bytes	         1.000 workers	 5243152 B/op	      60 allocs/op
+PASS

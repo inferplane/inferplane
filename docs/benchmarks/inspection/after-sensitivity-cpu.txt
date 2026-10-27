@@ -1,0 +1,23 @@
+File: after-sensitivity.test
+Build ID: aeca8baf50b7f182758b86b646222b95cd5cc835
+Type: cpu
+Time: 2026-10-27 09:43:08 UTC
+Duration: 91ms, Total samples = 70ms (76.92%)
+Showing nodes accounting for 70ms, 100% of 70ms total
+Showing top 15 nodes out of 34
+      flat  flat%   sum%        cum   cum%
+      20ms 28.57% 28.57%       20ms 28.57%  encoding/json.stateInString
+      20ms 28.57% 57.14%       20ms 28.57%  encoding/json.unquoteBytes
+      10ms 14.29% 71.43%       40ms 57.14%  encoding/json.(*Decoder).readValue
+      10ms 14.29% 85.71%       10ms 14.29%  internal/runtime/atomic.(*Uint32).Add (inline)
+      10ms 14.29%   100%       10ms 14.29%  runtime.memmove
+         0     0%   100%       10ms 14.29%  bytes.(*Reader).Read (inline)
+         0     0%   100%       60ms 85.71%  encoding/json.(*Decoder).Decode
+         0     0%   100%       60ms 85.71%  encoding/json.(*Decoder).Token
+         0     0%   100%       10ms 14.29%  encoding/json.(*Decoder).refill
+         0     0%   100%       20ms 28.57%  encoding/json.(*decodeState).literalStore
+         0     0%   100%       20ms 28.57%  encoding/json.(*decodeState).unmarshal
+         0     0%   100%       20ms 28.57%  encoding/json.(*decodeState).value
+         0     0%   100%       10ms 14.29%  fmt.Sprintf
+         0     0%   100%       10ms 14.29%  fmt.newPrinter
+         0     0%   100%       10ms 14.29%  github.com/inferplane/inferplane/internal/sensitivity.(*contextReader).Read

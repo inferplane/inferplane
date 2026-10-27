@@ -115,10 +115,12 @@ Ingress JSON parsing is required. Additional routing inspection is conditional:
 Messages, Chat and Bedrock InvokeModel skip it without applicable privacy/context rules or
 strict budget targets; Responses always uses it for transport compatibility.
 Native Bedrock Converse also always inspects structure before admission.
-The current inspector performs finite PII detection whenever it runs, even when
-only context or compatibility needs inspection. Learned classification and legacy
-masking are separate opt-ins. See [inspection conditions](policy-routing.md#when-inspection-runs);
-splitting structure checks from PII detection is planned, not current behavior.
+Structural mode skips finite PII detectors when only context, strict targets or
+unprotected compatibility needs inspection. Effective privacy and independent
+masking reinspection require full detection evidence
+([ADR-055](decisions/ADR-055-selective-structural-inspection.md)). Learned
+classification and legacy masking are separate opt-ins.
+See [inspection conditions](policy-routing.md#when-inspection-runs).
 
 Routing composes public model resolution, allowed targets, budget tiers,
 sensitive-data decisions, context selection, and provider fallback. Every attempt

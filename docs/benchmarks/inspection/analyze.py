@@ -93,3 +93,11 @@ if __name__ == "__main__":
         changes = comparison(baseline, after)
         (directory / "comparison.json").write_text(json.dumps(changes, indent=2) + "\n")
         print(f"After: {sum(len(cases) for cases in after.values())} cases, five trials each.")
+    if (directory / "full-repeat-after.txt").is_file():
+        old = read_trials(directory / "full-repeat-baseline.txt")
+        current = read_trials(directory / "full-repeat-after.txt")
+        repeated = comparison({"full-repeat": old}, {"full-repeat": current})["full-repeat"]
+        (directory / "full-repeat-comparison.json").write_text(
+            json.dumps(repeated, indent=2) + "\n"
+        )
+        print(f"Interleaved full repeats: {len(repeated)} cases, five trials each.")

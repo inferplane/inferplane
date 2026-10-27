@@ -1,0 +1,50 @@
+goos: linux
+goarch: arm64
+pkg: github.com/inferplane/inferplane/internal/sensitivity
+BenchmarkInspect/anthropic/bytes=204800/c=8-4         	      32	  13011943 ns/op	         0 failures	  91504820 p50_ns	 137508212 p95_ns	 155864202 p99_ns	  15691776 rss_bytes	         8.000 workers	  777676 B/op	     108 allocs/op
+BenchmarkInspect/anthropic/bytes=204800/c=32-4        	      32	  12630082 ns/op	         0 failures	 271667230 p50_ns	 390430301 p95_ns	 398426581 p99_ns	  23506944 rss_bytes	        32.00 workers	  819054 B/op	     120 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=8-4         	      32	  13179374 ns/op	         0 failures	  91506372 p50_ns	 130746976 p95_ns	 134094136 p99_ns	  17522688 rss_bytes	         8.000 workers	  790064 B/op	      92 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=32-4        	      32	  12500382 ns/op	         0 failures	 274333708 p50_ns	 372339193 p95_ns	 385234587 p99_ns	  27676672 rss_bytes	        32.00 workers	  806304 B/op	      93 allocs/op
+BenchmarkInspect/bedrock-converse/bytes=204800/c=8-4  	      32	  13058831 ns/op	         0 failures	  99451459 p50_ns	 124024565 p95_ns	 138107804 p99_ns	  16007168 rss_bytes	         8.000 workers	  779540 B/op	     117 allocs/op
+BenchmarkInspect/bedrock-converse/bytes=204800/c=32-4 	      32	  12588235 ns/op	         0 failures	 351072416 p50_ns	 388964051 p95_ns	 395166131 p99_ns	  25395200 rss_bytes	        32.00 workers	  818101 B/op	     131 allocs/op
+PASS
+goos: linux
+goarch: arm64
+pkg: github.com/inferplane/inferplane/internal/sensitivity
+BenchmarkInspect/anthropic/bytes=204800/c=8-4         	      32	  13323255 ns/op	         0 failures	 101405730 p50_ns	 131888560 p95_ns	 134383959 p99_ns	  15585280 rss_bytes	         8.000 workers	  777246 B/op	     107 allocs/op
+BenchmarkInspect/anthropic/bytes=204800/c=32-4        	      32	  12542264 ns/op	         0 failures	 230255391 p50_ns	 359792381 p95_ns	 361610349 p99_ns	  23343104 rss_bytes	        32.00 workers	  804427 B/op	     116 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=8-4         	      32	  13077216 ns/op	         0 failures	  91020670 p50_ns	 144005222 p95_ns	 150721130 p99_ns	  15638528 rss_bytes	         8.000 workers	  788916 B/op	      91 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=32-4        	      32	  12922332 ns/op	         0 failures	 260372550 p50_ns	 383307766 p95_ns	 389496441 p99_ns	  22753280 rss_bytes	        32.00 workers	  798053 B/op	      89 allocs/op
+BenchmarkInspect/bedrock-converse/bytes=204800/c=8-4  	      32	  12928831 ns/op	         0 failures	  90750122 p50_ns	 129899873 p95_ns	 132469046 p99_ns	  16257024 rss_bytes	         8.000 workers	  770817 B/op	     114 allocs/op
+BenchmarkInspect/bedrock-converse/bytes=204800/c=32-4 	      32	  12500070 ns/op	         0 failures	 342900785 p50_ns	 380249242 p95_ns	 384698769 p99_ns	  25001984 rss_bytes	        32.00 workers	  810675 B/op	     127 allocs/op
+PASS
+goos: linux
+goarch: arm64
+pkg: github.com/inferplane/inferplane/internal/sensitivity
+BenchmarkInspect/anthropic/bytes=204800/c=8-4         	      32	  13361276 ns/op	         0 failures	  91562363 p50_ns	 141851111 p95_ns	 144066592 p99_ns	  16269312 rss_bytes	         8.000 workers	  785956 B/op	     112 allocs/op
+BenchmarkInspect/anthropic/bytes=204800/c=32-4        	      32	  12557885 ns/op	         0 failures	 290170137 p50_ns	 356265081 p95_ns	 360501446 p99_ns	  24743936 rss_bytes	        32.00 workers	  811906 B/op	     120 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=8-4         	      32	  12915725 ns/op	         0 failures	  92455402 p50_ns	 131572671 p95_ns	 141025657 p99_ns	  15904768 rss_bytes	         8.000 workers	  791477 B/op	      91 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=32-4        	      32	  12931664 ns/op	         0 failures	 328180105 p50_ns	 389319343 p95_ns	 391627376 p99_ns	  25108480 rss_bytes	        32.00 workers	  817873 B/op	      99 allocs/op
+BenchmarkInspect/bedrock-converse/bytes=204800/c=8-4  	      32	  12747725 ns/op	         0 failures	  90928359 p50_ns	 140225454 p95_ns	 140702589 p99_ns	  16142336 rss_bytes	         8.000 workers	  778668 B/op	     118 allocs/op
+BenchmarkInspect/bedrock-converse/bytes=204800/c=32-4 	      32	  12607032 ns/op	         0 failures	 273656747 p50_ns	 390240336 p95_ns	 390429054 p99_ns	  25063424 rss_bytes	        32.00 workers	  806670 B/op	     126 allocs/op
+PASS
+goos: linux
+goarch: arm64
+pkg: github.com/inferplane/inferplane/internal/sensitivity
+BenchmarkInspect/anthropic/bytes=204800/c=8-4         	      32	  12960900 ns/op	         0 failures	  91396901 p50_ns	 143070731 p95_ns	 179846115 p99_ns	  15953920 rss_bytes	         8.000 workers	  784689 B/op	     112 allocs/op
+BenchmarkInspect/anthropic/bytes=204800/c=32-4        	      32	  12801862 ns/op	         0 failures	 281963856 p50_ns	 389737091 p95_ns	 389960893 p99_ns	  24989696 rss_bytes	        32.00 workers	  807283 B/op	     118 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=8-4         	      32	  12857070 ns/op	         0 failures	  97621777 p50_ns	 131976146 p95_ns	 139112632 p99_ns	  14848000 rss_bytes	         8.000 workers	  783020 B/op	      85 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=32-4        	      32	  12401493 ns/op	         0 failures	 323251264 p50_ns	 375972621 p95_ns	 376194034 p99_ns	  24707072 rss_bytes	        32.00 workers	  804547 B/op	      94 allocs/op
+BenchmarkInspect/bedrock-converse/bytes=204800/c=8-4  	      32	  12927032 ns/op	         0 failures	  91719048 p50_ns	 141426850 p95_ns	 143230588 p99_ns	  16855040 rss_bytes	         8.000 workers	  773531 B/op	     117 allocs/op
+BenchmarkInspect/bedrock-converse/bytes=204800/c=32-4 	      32	  12815719 ns/op	         0 failures	 331369648 p50_ns	 392542281 p95_ns	 392696058 p99_ns	  28250112 rss_bytes	        32.00 workers	  804693 B/op	     125 allocs/op
+PASS
+goos: linux
+goarch: arm64
+pkg: github.com/inferplane/inferplane/internal/sensitivity
+BenchmarkInspect/anthropic/bytes=204800/c=8-4         	      32	  12952243 ns/op	         0 failures	  94945101 p50_ns	 136086766 p95_ns	 144288724 p99_ns	  14946304 rss_bytes	         8.000 workers	  776906 B/op	     108 allocs/op
+BenchmarkInspect/anthropic/bytes=204800/c=32-4        	      32	  12824625 ns/op	         0 failures	 291084046 p50_ns	 380200155 p95_ns	 395403963 p99_ns	  23011328 rss_bytes	        32.00 workers	  800773 B/op	     115 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=8-4         	      32	  13102428 ns/op	         0 failures	  90999631 p50_ns	 123421786 p95_ns	 123558600 p99_ns	  15142912 rss_bytes	         8.000 workers	  777473 B/op	      86 allocs/op
+BenchmarkInspect/responses/bytes=204800/c=32-4        	      32	  12910108 ns/op	         0 failures	 201957338 p50_ns	 291447221 p95_ns	 291719165 p99_ns	  18812928 rss_bytes	        32.00 workers	  783670 B/op	      87 allocs/op
+BenchmarkInspect/bedrock-converse/bytes=204800/c=8-4  	      32	  13125550 ns/op	         0 failures	  91169449 p50_ns	 158502522 p95_ns	 160617160 p99_ns	  15523840 rss_bytes	         8.000 workers	  794135 B/op	     122 allocs/op
+BenchmarkInspect/bedrock-converse/bytes=204800/c=32-4 	      32	  12533879 ns/op	         0 failures	 312401717 p50_ns	 393256175 p95_ns	 393941350 p99_ns	  25706496 rss_bytes	        32.00 workers	  818719 B/op	     129 allocs/op
+PASS

@@ -112,11 +112,15 @@ func localConverseMoneyMux(f *routingtest.Fixture, g *governance.Governor, keyDa
 }
 
 func TestNativeConverseLocalMoneyRetainsUnknownAndDebitsCompleteOnce(t *testing.T) {
-	for _, operation := range []string{"converse", "converse-stream"} {
+	for _, scenario := range liabilityInspectionScenarios([]policyIngress{
+		{"bedrock-converse", "/model/premium/converse", false},
+		{"bedrock-converse", "/model/premium/converse-stream", true},
+	}) {
 		for _, scope := range []string{"team-month", "key-day"} {
 			for _, kind := range []string{"missing-usage", "input-only", "complete"} {
-				t.Run(operation+"/"+scope+"/"+kind, func(t *testing.T) {
+				t.Run(scenario.ingress.name()+"/"+scenario.mode+"/"+scope+"/"+kind, func(t *testing.T) {
 					f := localConverseFixture(t)
+					inspection := qualifyLiabilityInspection(f, scenario.mode)
 					if kind != "missing-usage" {
 						in, out := int64(1), int64(1)
 						f.Public.Usage = &schema.Usage{InputTokens: &in}
@@ -134,11 +138,12 @@ func TestNativeConverseLocalMoneyRetainsUnknownAndDebitsCompleteOnce(t *testing.
 						"team": {BudgetMicrosPerMonth: teamLimit, BudgetExceeded: "block"},
 					}, limiter.NewMemory(), budget.NewMemory(), nil)
 					h := localConverseMoneyMux(f, g, keyDay)
-					path := "/model/premium/" + operation
+					path := scenario.ingress.path
 					first := policyDo(h, path, localConverseBody, true)
 					if first.Code != 200 || len(f.Public.Calls) != 1 || f.Public.Calls[0].Protocol != "bedrock-converse" {
 						t.Fatalf("native dispatch missing: status=%d calls=%+v body=%s", first.Code, f.Public.Calls, first.Body.String())
 					}
+					requireLiabilityInspection(t, inspection, "bedrock-converse", scenario.mode)
 					status := g.UsageOf(governance.Subject{Team: "team", KeyID: "opaque-key"},
 						governance.KeyPolicy{BudgetMicrosPerDay: keyDay})
 					wantSpent := map[string]int64{"missing-usage": 0, "input-only": 1, "complete": 3}[kind]
@@ -195,15 +200,17 @@ func TestNativeConverseEvaluationObserverDoesNotDoubleDebit(t *testing.T) {
 // wiring of every ingress. Losing a final usage observation must not permit
 // repeated billable requests against the same tiny blocking cap.
 func TestEveryStreamingIngressRetainsUnknownLocalMoney(t *testing.T) {
-	for _, ingress := range authorityIngresses() {
+	for _, scenario := range liabilityInspectionScenarios(authorityIngresses()) {
+		ingress := scenario.ingress
 		if !ingress.stream {
 			continue
 		}
 		for _, kind := range []string{"missing-usage", "interrupted-input-only", "complete"} {
-			t.Run(ingress.name()+"/"+kind, func(t *testing.T) {
+			t.Run(ingress.name()+"/"+scenario.mode+"/"+kind, func(t *testing.T) {
 				f := routingtest.New(t, func(cfg *config.Config) {
 					cfg.Pricing.Overrides["public"]["up"] = config.RateConfig{InputPerMTok: 1, OutputPerMTok: 2}
 				})
+				inspection := qualifyLiabilityInspection(f, scenario.mode)
 				if kind != "missing-usage" {
 					in, out := int64(1), int64(1)
 					f.Public.Usage = &schema.Usage{InputTokens: &in}
@@ -221,6 +228,7 @@ func TestEveryStreamingIngressRetainsUnknownLocalMoney(t *testing.T) {
 				if first.Code != http.StatusOK || len(f.Public.Calls) != 1 {
 					t.Fatalf("first below-cap attempt must dispatch: status=%d calls=%d body=%s", first.Code, len(f.Public.Calls), first.Body.String())
 				}
+				requireLiabilityInspection(t, inspection, ingress.protocol, scenario.mode)
 				status := g.UsageOf(governance.Subject{Team: "team"}, governance.KeyPolicy{}).TeamBudget
 				wantSpent := map[string]int64{"missing-usage": 0, "interrupted-input-only": 1, "complete": 3}[kind]
 				if status.SpentUSDMicros != wantSpent {

@@ -1,6 +1,6 @@
 ---
 translation_source: policy-routing.md
-translation_source_sha256: b0cdd18c88c0765548d7767cb70cbd603e25d9b0c7db22229ae7d6d33c4e2992
+translation_source_sha256: 74ca836e5f01542a145cee542f3263e2dd346bdb27af8ed3f525b2ff1ac83253
 ---
 
 # 정책 기반 라우팅 {#policy-aware-routing}
@@ -81,15 +81,17 @@ routing:
 | 요청 경로 | 현재 추가 검사 |
 | --- | --- |
 | 적용되는 개인정보·컨텍스트 규칙과 엄격 예산 목적지가 없는 Messages·Chat·Bedrock InvokeModel | 라우팅 검사기를 생략합니다 |
-| 적용되는 `sensitiveData`, Shadow를 포함한 컨텍스트 규칙, 엄격 예산 목적지 | 라우팅 검사기를 실행합니다 |
-| Responses | 전송 호환성 검증을 유지하기 위해 정책이 없어도 라우팅 검사기를 실행합니다 |
-| 네이티브 Bedrock Converse | 입장 전에 항상 구조를 검사합니다. 현재는 라우팅 검사와 별개로 유한 PII 탐지도 함께 실행합니다 |
-| 필수 `Mask` | 원문 검사, 완전 변환, 정제된 내용의 독립 재검사를 수행합니다 |
+| 컨텍스트 Shadow와 함께 적용되는 경우를 포함한 `sensitiveData` | 구조와 유한 PII를 완전 검사합니다 |
+| 개인정보 없이 컨텍스트 규칙(Shadow 포함) 또는 엄격 예산 목적지만 적용 | 유한 PII 탐지기 없이 구조·기능을 검사합니다 |
+| Responses | 구조·전송 호환성을 항상 검사하고 개인정보 정책이 적용되면 유한 PII도 탐지합니다 |
+| 네이티브 Bedrock Converse | 입장 전에 PII 탐지기 없이 항상 구조 검사하고 라우팅 개인정보가 적용되면 이어서 완전 검사합니다 |
+| 필수 `Mask` | 원문 완전 검사, 완전 변환, 정제된 내용의 독립 완전 재검사를 수행합니다 |
 
-현재 검사기는 JSON 구조·기능 검사와 유한 PII 탐지를 함께 수행합니다. 검사기가
-실행되면 탐지기도 실행됩니다. 개인정보 집행이 선택적이라는 사실만으로 보호
-정책이 없는 모든 요청에서 탐지 CPU 비용이 사라지는 것은 아닙니다. 두 작업의
-분리는 성능 개선안이며, 구현된 `pii_enabled` 설정이 아닙니다.
+[ADR-055](decisions/ADR-055-selective-structural-inspection.md)는 기존 JSON
+순회에서 탐지 작업을 분리합니다. 구조 모드도 중복 키·정확한 숫자·중첩 JSON·
+기능·출력 예산·자원·취소 검사를 유지합니다. 적용되는 개인정보에는 완전 검사
+근거가 필요하며 전역 `pii_enabled` 설정으로 끌 수 없습니다. 기존 검사 API는
+호환성 폴백으로 주입되는 경우를 포함해 완전 탐지를 수행합니다.
 
 학습형 `pii_classification`과 기존 마스킹 플러그인은 별도의 선택적 기능입니다.
 설정한 학습형 분류기는 적용되는 개인정보 정책이 있는 비-count 요청에서만

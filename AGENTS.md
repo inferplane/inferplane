@@ -1,4 +1,4 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: d5114ca8ef50 · generated-at: 2026-10-27 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: fdbf7d1640a4 · generated-at: 2026-10-27 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
 > from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
 > per-AI copy).
@@ -117,11 +117,13 @@ credentials, or a real IdP (httptest fakes only).
   still require runtime revalidation and an upgraded producer/consumer/CRD set.
 - Rejected privacy or strict-budget distribution gates affected subjects until
   valid recovery. Count APIs stay local/200 on refusal or unready/stale gates.
-- Basic JSON parsing is required. The current inspector combines structure and
-  finite PII detection: Responses and native Converse inspect unconditionally;
-  other routing paths inspect for privacy/context/strict targets, including
-  context Shadow. Separation is planned, not implemented. Learned classifiers
-  and legacy masking are distinct opt-ins; applicable privacy remains mandatory.
+- Basic JSON parsing is required. Context/strict-only and unprotected Responses
+  use StructureOnly; native Converse preflight also uses it. Preserve traversal,
+  exact numbers, nested/opaque input and all limits. Applicable privacy, including
+  beside Shadow, and independent mask reinspection require DetectSensitiveData
+  plus SensitiveDataInspected evidence (ADR-055). Inspector.Inspect remains full;
+  legacy injection uses that contract, selective missing evidence refuses before
+  classification. Learned classifiers and legacy masking remain separate opt-ins.
 - Opt-in `pii_classification` adds learned signals to the same sensitiveData
   rules. `internal/classifier` is a stdlib leaf seam; concrete types live in
   `plugins/<type>` (e.g. `systemone/`, blank-imported). Only Enforce restricts:

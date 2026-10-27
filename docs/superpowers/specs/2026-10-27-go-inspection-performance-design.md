@@ -11,11 +11,11 @@
 
 ## Status and outcome
 
-Proposed on 2026-10-27 against `0360e81f8ddecc21ccb8cc590cf6d4f5270a31de`.
-Keep Go and measure gateway overhead before changing execution. This design covers
-one implementation project: reproducible measurement and separation of structural
-inspection from finite deterministic PII detection. It does not implement that
-separation or claim a measured speedup. Publish results only after the comparison.
+Accepted and implemented on 2026-10-27 against runtime baseline
+`0360e81f8ddecc21ccb8cc590cf6d4f5270a31de`. Keep Go. Selective traversal and
+the synthetic comparison are implemented; [measurement results](../../benchmarks/inspection/results.md)
+qualify local inspection costs only. Full validation and independent review are
+recorded with the execution report.
 
 PII enforcement is optional configuration; applicable privacy obligations remain
 mandatory. Do not add a global `pii_enabled=false` override.
@@ -43,10 +43,10 @@ reproduced baselines.
 | --- | --- |
 | Rewrite in Rust | Deferred; no evidence that language overhead dominates upstream wait, allocations, locks or fsync |
 | Skip inspection when PII is disabled | Reject; Responses and native Converse still need structural/compatibility checks |
-| Keep the walker; make detector visits selective | Recommend; retain one source of structural truth and existing full-inspection API |
+| Keep the walker; make detector visits selective | Selected; retain one source of structural truth and existing full-inspection API |
 | Cache whole prompts or pool decoded request trees | Defer; introduces retention and lifetime risks before profiling proves need |
 
-## Proposed contract
+## Implemented contract
 
 Preserve `Inspector.Inspect` as full deterministic inspection. Add an optional
 capability without changing injected legacy implementations:
@@ -96,7 +96,7 @@ never downgrade it to an inferred clean result. Apply this evidence check before
 privacy decisions or learned classification. Errors follow existing ingress
 error/failure-policy behavior.
 
-| Effective request condition | Proposed behavior |
+| Effective request condition | Implemented behavior |
 | --- | --- |
 | No rules/strict target, Messages/Chat/InvokeModel | Preserve existing routing-inspection skip |
 | Responses without privacy | Structure-only routing inspection, including native opaque-content compatibility |
@@ -171,10 +171,10 @@ ADR-013's remaining fleet/HA qualification.
 
 ## 상태와 목표
 
-2026-10-27, 기준 `0360e81f8ddecc21ccb8cc590cf6d4f5270a31de`의 제안입니다.
-Go를 유지하고 실행 경로 변경 전에 게이트웨이 비용을 측정합니다. 이 설계의 구현
-범위는 재현 가능한 측정과 구조 검사·유한 결정적 PII 탐지 분리입니다. 분리는 아직
-구현하지 않았으며 성능 향상을 측정했다고 주장하지 않습니다. 비교 완료 후 결과를 게시합니다.
+2026-10-27 기준 런타임 `0360e81`에서 승인·구현했습니다. Go를 유지하고
+구조 검사와 유한한 결정론 PII 탐지를 선택합니다.
+[측정 결과](../../benchmarks/inspection/results.md)는 로컬 검사 비용만 검증합니다.
+전체 검증·독립 리뷰는 실행 보고서에 기록합니다.
 
 PII 집행은 선택적 설정이지만 적용되는 개인정보 의무는 필수입니다.
 전역 `pii_enabled=false` 우회 설정을 추가하지 않습니다.
@@ -201,10 +201,10 @@ Go/Rust 비교를 입증하지 않습니다. 이전 리뷰의 ms/MiB·SQL 수·�
 | --- | --- |
 | Rust 재작성 | 보류; 업스트림 대기·할당·잠금·fsync보다 언어 비용이 지배적이라는 근거 없음 |
 | PII가 꺼졌을 때 검사 생략 | 거부; Responses·네이티브 Converse의 구조·호환성 검사는 필요 |
-| 순회를 유지하고 탐지 콜백만 선택 실행 | 권고; 구조 검증의 단일 구현과 기존 완전 검사 API 유지 |
+| 순회를 유지하고 탐지 콜백만 선택 실행 | 선택; 구조 검증의 단일 구현과 기존 완전 검사 API 유지 |
 | 프롬프트 전체 캐시·해석 트리 풀 | 보류; 프로파일 근거 전에 보존·수명 위험을 추가하지 않음 |
 
-## 제안하는 계약
+## 구현 계약
 
 `Inspector.Inspect`는 완전한 결정적 검사로 유지합니다. 기존 주입 구현을 바꾸지
 않도록 다음 선택적 기능을 추가합니다.
@@ -251,7 +251,7 @@ func inspectForRoute(
 낮추지 않습니다. 개인정보 결정·학습 분류 전에 이 근거를 확인합니다.
 오류는 기존 수신 프로토콜·실패 정책을 따릅니다.
 
-| 유효한 요청 조건 | 제안 동작 |
+| 유효한 요청 조건 | 구현 동작 |
 | --- | --- |
 | 규칙·엄격 목적지가 없는 Messages/Chat/InvokeModel | 기존 라우팅 검사 생략 유지 |
 | 개인정보 규칙 없는 Responses | 네이티브 불투명 내용 호환성을 포함한 구조 전용 라우팅 검사 |

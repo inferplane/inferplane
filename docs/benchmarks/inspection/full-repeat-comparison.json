@@ -1,0 +1,134 @@
+{
+  "BenchmarkInspect/full/anthropic/bytes=204800/c=32": {
+    "baseline_ns_op": 12630082.0,
+    "after_ns_op": 12823202.0,
+    "ns_op_change_percent": 1.5290478715815237,
+    "baseline_bytes_op": 807283.0,
+    "after_bytes_op": 809648.0,
+    "bytes_op_change_percent": 0.29295798375539306,
+    "baseline_workers": [
+      32.0,
+      32.0,
+      32.0,
+      32.0,
+      32.0
+    ],
+    "after_workers": [
+      32.0,
+      32.0,
+      32.0,
+      32.0,
+      32.0
+    ]
+  },
+  "BenchmarkInspect/full/anthropic/bytes=204800/c=8": {
+    "baseline_ns_op": 13011943.0,
+    "after_ns_op": 12783369.0,
+    "ns_op_change_percent": -1.7566477197141106,
+    "baseline_bytes_op": 777676.0,
+    "after_bytes_op": 782942.0,
+    "bytes_op_change_percent": 0.6771457522155799,
+    "baseline_workers": [
+      8.0,
+      8.0,
+      8.0,
+      8.0,
+      8.0
+    ],
+    "after_workers": [
+      8.0,
+      8.0,
+      8.0,
+      8.0,
+      8.0
+    ]
+  },
+  "BenchmarkInspect/full/bedrock-converse/bytes=204800/c=32": {
+    "baseline_ns_op": 12588235.0,
+    "after_ns_op": 12459532.0,
+    "ns_op_change_percent": -1.0224070332338075,
+    "baseline_bytes_op": 810675.0,
+    "after_bytes_op": 810838.0,
+    "bytes_op_change_percent": 0.020106701205779842,
+    "baseline_workers": [
+      32.0,
+      32.0,
+      32.0,
+      32.0,
+      32.0
+    ],
+    "after_workers": [
+      32.0,
+      32.0,
+      32.0,
+      32.0,
+      32.0
+    ]
+  },
+  "BenchmarkInspect/full/bedrock-converse/bytes=204800/c=8": {
+    "baseline_ns_op": 12928831.0,
+    "after_ns_op": 13103754.0,
+    "ns_op_change_percent": 1.3529684160926925,
+    "baseline_bytes_op": 778668.0,
+    "after_bytes_op": 786046.0,
+    "bytes_op_change_percent": 0.9475155008296321,
+    "baseline_workers": [
+      8.0,
+      8.0,
+      8.0,
+      8.0,
+      8.0
+    ],
+    "after_workers": [
+      8.0,
+      8.0,
+      8.0,
+      8.0,
+      8.0
+    ]
+  },
+  "BenchmarkInspect/full/responses/bytes=204800/c=32": {
+    "baseline_ns_op": 12910108.0,
+    "after_ns_op": 12694368.0,
+    "ns_op_change_percent": -1.6710936887592287,
+    "baseline_bytes_op": 804547.0,
+    "after_bytes_op": 808316.0,
+    "bytes_op_change_percent": 0.46846237696491766,
+    "baseline_workers": [
+      32.0,
+      32.0,
+      32.0,
+      32.0,
+      32.0
+    ],
+    "after_workers": [
+      32.0,
+      32.0,
+      32.0,
+      32.0,
+      32.0
+    ]
+  },
+  "BenchmarkInspect/full/responses/bytes=204800/c=8": {
+    "baseline_ns_op": 13077216.0,
+    "after_ns_op": 13057247.0,
+    "ns_op_change_percent": -0.1527006971514422,
+    "baseline_bytes_op": 788916.0,
+    "after_bytes_op": 775801.0,
+    "bytes_op_change_percent": -1.6624076581030156,
+    "baseline_workers": [
+      8.0,
+      8.0,
+      8.0,
+      8.0,
+      8.0
+    ],
+    "after_workers": [
+      8.0,
+      8.0,
+      8.0,
+      8.0,
+      8.0
+    ]
+  }
+}

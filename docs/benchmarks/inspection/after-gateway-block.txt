@@ -1,0 +1,23 @@
+File: after-mayu.test
+Build ID: 9531acc8ea13fd0f59d2726d16f222a4bea948a4
+Type: delay
+Time: 2026-10-27 09:43:13 UTC
+Showing nodes accounting for 2264.14ms, 100% of 2264.14ms total
+Dropped 36 nodes (cum <= 11.32ms)
+Showing top 15 nodes out of 25
+      flat  flat%   sum%        cum   cum%
+  944.84ms 41.73% 41.73%   944.84ms 41.73%  runtime.chanrecv1
+  469.18ms 20.72% 62.45%   469.18ms 20.72%  runtime.selectgo
+  461.73ms 20.39% 82.85%   461.73ms 20.39%  runtime.chanrecv2
+  388.39ms 17.15%   100%   388.39ms 17.15%  sync.(*WaitGroup).Wait
+         0     0%   100%   469.18ms 20.72%  database/sql.(*DB).connectionOpener
+         0     0%   100%   469.18ms 20.72%  database/sql.OpenDB.gowrap1
+         0     0%   100%   471.54ms 20.83%  github.com/inferplane/inferplane/cmd/mayu.BenchmarkGatewayInspection
+         0     0%   100%   388.40ms 17.15%  github.com/inferplane/inferplane/cmd/mayu.BenchmarkGatewayInspection.func1
+         0     0%   100%   461.72ms 20.39%  github.com/inferplane/inferplane/internal/audit.(*Writer).loop
+         0     0%   100%   461.72ms 20.39%  github.com/inferplane/inferplane/internal/audit.NewWriter.gowrap1
+         0     0%   100%   388.39ms 17.15%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Run
+         0     0%   100%   473.30ms 20.90%  main.main
+         0     0%   100%   473.30ms 20.90%  runtime.main
+         0     0%   100%   944.39ms 41.71%  testing.(*B).Run
+         0     0%   100%   394.19ms 17.41%  testing.(*B).doBench

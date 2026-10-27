@@ -39,17 +39,18 @@ const (
 )
 
 type InvokeHandler struct {
-	r          *router.Router
-	holder     *live.Holder
-	aud        *audit.Writer
-	gov        *governance.Governor
-	metrics    *metrics.Metrics
-	mask       *filter.Masking
-	teamPolicy func(team string) (keystore.TeamRecord, bool)
-	bodies     *bodystore.Recorder
-	usage      *telemetry.Collector // nil-safe: usage telemetry off when nil (control-plane mode)
-	streaming  bool
-	converse   bool
+	r                  *router.Router
+	holder             *live.Holder
+	aud                *audit.Writer
+	gov                *governance.Governor
+	metrics            *metrics.Metrics
+	mask               *filter.Masking
+	teamPolicy         func(team string) (keystore.TeamRecord, bool)
+	bodies             *bodystore.Recorder
+	usage              *telemetry.Collector // nil-safe: usage telemetry off when nil (control-plane mode)
+	streaming          bool
+	converse           bool
+	preflightInspector sensitivity.Inspector // startup-only injection; nil uses the built-in inspector
 }
 
 // NewConverseHandlerMetrics shares the Invoke ingress's auth-independent
@@ -126,7 +127,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		// Reject ambiguous/malformed structures before financial admission.
 		// Incomplete inspection alone does NOT reject a native request; privacy
 		// rules below remain responsible for its opaque-content disposition.
-		if _, err := sensitivity.NewInspector().Inspect(req.Context(), "bedrock", raw); err != nil {
+		if _, err := h.inspectConverseStructure(req.Context(), raw); err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid Converse request structure")
 			return
 		}
@@ -398,6 +399,17 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		h.metrics.ObserveFallback(ct.Model, ct.ProviderName, chain[i+1].ProviderName, reason)
 	}
+}
+
+func (h *InvokeHandler) inspectConverseStructure(ctx context.Context, raw []byte) (sensitivity.Result, error) {
+	inspector := h.preflightInspector
+	if inspector == nil {
+		inspector = sensitivity.NewInspector()
+	}
+	if selective, ok := inspector.(sensitivity.SelectiveInspector); ok {
+		return selective.InspectWithMode(ctx, "bedrock", raw, sensitivity.StructureOnly)
+	}
+	return inspector.Inspect(ctx, "bedrock", raw)
 }
 
 // isModelNotFound reports whether an upstream response looks like a "model

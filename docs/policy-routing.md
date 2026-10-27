@@ -118,16 +118,18 @@ Additional request inspection is conditional on the ingress and effective policy
 | Request path | Current additional inspection |
 | --- | --- |
 | Messages, Chat and Bedrock InvokeModel without applicable privacy/context rules or strict budget targets | Skip the routing inspector |
-| Applicable `sensitiveData`, context rules (including Shadow), or strict budget targets | Run the routing inspector |
-| Responses | Run the routing inspector even without policy, to preserve transport compatibility checks |
-| Native Bedrock Converse | Always inspect structure before admission; this currently also runs finite PII detection, independently of routing inspection |
-| Required `Mask` | Inspect original content, transform completely, and independently reinspect sanitized content |
+| Applicable `sensitiveData`, including beside context Shadow | Run full structural and finite PII inspection |
+| Context rules (including Shadow) or strict budget targets, without privacy | Run structure/capability inspection without finite PII detectors |
+| Responses | Always inspect structure and transport compatibility; run finite PII detection when privacy applies |
+| Native Bedrock Converse | Always inspect structure before admission without PII detectors; applicable routing privacy then performs full inspection |
+| Required `Mask` | Fully inspect original content, transform completely, and independently fully reinspect sanitized content |
 
-The current inspector combines JSON structure/capability inspection with finite
-PII detection. Whenever it runs, it also runs those detectors. Optional privacy
-enforcement therefore does not mean that detector CPU cost is absent from every
-unprotected request. Separating these operations is proposed performance work,
-not an implemented `pii_enabled` setting.
+[ADR-055](decisions/ADR-055-selective-structural-inspection.md) separates detector
+work from the existing JSON traversal. Structural mode retains duplicate-key,
+exact-number, nested JSON, capability, output-budget, resource and cancellation
+checks. Effective privacy requires full inspection evidence; it cannot be
+disabled by a global `pii_enabled` setting. The old inspector API still performs
+full detection, including when supplied as a compatibility fallback.
 
 The learned `pii_classification` block and the legacy masking plugin are separate
 opt-ins. A configured learned classifier runs only for applicable privacy-governed,

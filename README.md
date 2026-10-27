@@ -83,8 +83,9 @@ more than one team is on it.
 
 Basic JSON parsing is required. Additional inspection is conditional on the
 ingress and effective rules; Responses performs compatibility inspection even
-without policy; native Bedrock Converse also always checks structure. These
-inspections currently also run finite PII detectors.
+without policy; native Bedrock Converse also always checks structure. Structure-only
+paths skip finite PII detectors; applicable privacy and verified masking retain
+full detection, including beside context Shadow.
 Learned classification and legacy masking are separate opt-ins. See
 [inspection conditions](docs/policy-routing.md#when-inspection-runs).
 

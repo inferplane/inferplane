@@ -1,6 +1,6 @@
 ---
 translation_source: architecture.md
-translation_source_sha256: aa03becf0317b9cf650a6ee51657a5c9af253e41e5f0f057679dc088815b3fd1
+translation_source_sha256: 96fd275132b4f12064c83265dae6a97bbc5bb5d14cc155679a32e8030eb5b1ab
 ---
 
 # 아키텍처 {#architecture}
@@ -71,10 +71,12 @@ Messages, Chat Completions, Responses, Bedrock 형식 생성 경로는 신원·�
 수신 JSON 파싱은 필수입니다. 추가 라우팅 검사는 조건부입니다. Messages·Chat·Bedrock
 InvokeModel은 적용되는 개인정보·컨텍스트 규칙이나 엄격한 예산 목적지가 없으면 건너뛰지만,
 Responses는 전송 호환성을 위해 항상 실행합니다. 네이티브 Bedrock Converse도 입장 전에
-항상 구조를 검사합니다. 현재 검사기는 실행될 때마다 유한 PII 탐지도 수행합니다.
-학습 분류기와 기존 마스킹 플러그인은 별도 옵트인입니다.
-[정확한 검사 실행 조건](policy-routing.md#when-inspection-runs)을 참고하세요.
-구조 검사와 선택적 PII 탐지의 분리는 계획 단계이며 현재 구현이 아닙니다.
+항상 구조를 검사합니다. 컨텍스트·엄격 목적지·무보호 호환성만 필요하면 구조
+모드에서 유한 PII 탐지기를 생략합니다. 적용 개인정보와 독립 마스킹 재검사는
+완전 탐지 근거를 요구합니다
+([ADR-055](decisions/ADR-055-selective-structural-inspection.md)).
+학습 분류기와 기존 마스킹은 별도 옵트인입니다.
+[검사 실행 조건](policy-routing.md#when-inspection-runs)을 참고하세요.
 
 공개 모델 해석, 허용 목적지, 예산 티어, 민감 정보, 컨텍스트, 공급자 폴백을 조합합니다. 모든 시도가 접근·개인정보·리전·용량·엄격 목적지 조건을 지켜야 합니다. 기존 선택적 티어는 대안을 못 쓰면 원래 모델을 유지하지만 명시적 엄격 티어는 거부할 수 있습니다. Shadow도 개인정보를 집행합니다. 세션 안정성은 유한한 로컬 상태이며 공유 세션 권한이 아닙니다.
 

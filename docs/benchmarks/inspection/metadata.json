@@ -63,5 +63,37 @@
     "router": "4785666b830df08e7ca2f11a66ce31ed2f1b17a6c001ea824e4e8207f411cf4c",
     "mayu": "6d01cf71e0352c83a3267ea1d0da7cd67c87155398de447312e9e01d6b5285e4"
   },
-  "cpu_model": "model not exposed; linux/arm64, Go runtime reports 16 CPUs"
+  "cpu_model": "model not exposed; linux/arm64, Go runtime reports 16 CPUs",
+  "after_binary_sha256": {
+    "sensitivity": "4ed88df6bb404c143895fc322dcbb83d8df9d2cc0804457a55cd87286ad4e03b",
+    "router": "29ff100e414085d14f27f4a45d036c7de4877ed15932e9516d164d917d9b83dd",
+    "mayu": "85964e371060685f5638686c440f451b6298f27b2ac8b5a92051b3378852a1aa"
+  },
+  "after_production_source_sha256": {
+    "internal/sensitivity/inspect.go": "948b249be0da6b086e8f6bc3d081899b20d7144fbd93a28319043f2fd722d663",
+    "internal/sensitivity/inspection_mode.go": "9276577d3e420d3ac1daebf8d235bf523e9751558d697fa8d3c830350027ed87",
+    "internal/router/inspection.go": "3d4018246132c99032cfbce9822b4bb85caa75fb4440bafdf00495eb9af1313d",
+    "internal/router/request_routing.go": "d44d054b4313982a5ba9b39748adcb636eb6be6467225b2a8c5d74af9d2e56c7",
+    "internal/server/bedrockapi/invoke.go": "bd372cdfa69db70256eb1a6d91f8888177965ec05c7ab58858636e51d53b4c0a"
+  },
+  "after_source_state": "Task 2\u20134 working-tree production changes; hashes pin sources independently of subsequent DCO commits/rebase",
+  "full_repeat": {
+    "body_bytes": 204800,
+    "protocols": [
+      "anthropic",
+      "responses",
+      "bedrock-converse"
+    ],
+    "requested_concurrency": [
+      8,
+      32
+    ],
+    "benchtime": "32x",
+    "trials": 5,
+    "order": "baseline then after, interleaved per trial",
+    "actual_workers": "same as requested, identical between binaries"
+  },
+  "final_build_flags": "CGO_ENABLED=0 go build -buildvcs=false -trimpath (temporary linked-worktree VCS discovery limitation)",
+  "benchmark_cgo_enabled": 1,
+  "production_build_cgo_enabled": 0
 }
