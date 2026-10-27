@@ -36,7 +36,7 @@ func (a AdminIdentity) HumanIdentity(organization string) (identity.ID, error) {
 // AuditRef is the adapter for inference ingresses. audit remains independent of
 // keystore and server; no raw identity or legacy account reference is appended.
 func AuditRef(p keystore.Principal) audit.PrincipalRef {
-	ref := audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team}
+	ref := audit.PrincipalRef{KeyID: p.KeyID, Team: p.Team, Account: p.AccountSubject()}
 	if p.Identity != nil && p.Identity.Validate() == nil {
 		evidence := p.Identity.Audit()
 		ref.Identity = &evidence

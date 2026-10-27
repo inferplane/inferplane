@@ -65,3 +65,12 @@ func TestAdminIdentityEntitled(t *testing.T) {
 		})
 	}
 }
+
+// Observability decisions match user subjects against the accounting
+// reference, so the in-memory audit principal must carry it (never serialized).
+func TestAuditRefCarriesAccountSubject(t *testing.T) {
+	ref := AuditRef(keystore.Principal{KeyID: "ik_x", Team: "eng", KeyOptions: keystore.KeyOptions{Owner: "alice"}})
+	if ref.Account != "alice" || ref.Team != "eng" || ref.KeyID != "ik_x" {
+		t.Fatalf("AuditRef = %+v", ref)
+	}
+}

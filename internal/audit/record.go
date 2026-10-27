@@ -24,6 +24,10 @@ type PrincipalRef struct {
 	AuthMethod *string `json:"auth_method,omitempty"`
 	// Append-only, digest-only evidence. Nil preserves historical line bytes.
 	Identity *identity.AuditRef `json:"identity,omitempty"`
+	// Account is the request's accounting subject, in memory only: never
+	// serialized, so chain bytes are unchanged. Record sinks use it to match
+	// user-subject export policy (data-plane records carry no `user` field).
+	Account string `json:"-"`
 }
 
 type RequestRef struct {
