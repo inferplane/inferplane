@@ -44,7 +44,8 @@ func responsesContextSetup(t *testing.T, cfg *config.Config, tools bool) (*Route
 	}
 	view, err := sensitivity.NewInspector().Inspect(context.Background(), "responses", raw)
 	if err != nil || !view.Complete || view.InputTokens <= 4096 || view.OutputTokens != 64 ||
-		view.HasTools != tools || view.HasVision || view.HasReasoning || view.HasStructuredOutput {
+		view.HasTools != tools || view.HasVision || view.HasReasoning || view.HasStructuredOutput ||
+		!view.SensitiveDataInspected || !slices.Contains(view.Categories, "email") {
 		t.Fatalf("fixture must exceed conservative capacity with portable content: %+v, %v", view, err)
 	}
 	in.Protocol, in.RawBody = "responses", raw
@@ -67,7 +68,7 @@ func TestResponsesRequestedContextUsesIngressEstimate(t *testing.T) {
 				t.Fatalf("explicit portable request lost its route: %+v, %v", got, err)
 			}
 			if !bytes.Equal(in.RawBody, before) || got.State != in.State ||
-				got.Decision.Inspection != "complete" || !slices.Contains(got.Decision.Categories, "email") {
+				got.Decision.Inspection != "complete" || len(got.Decision.Categories) != 0 {
 				t.Fatal("capacity adjustment changed request bytes, topology or inspection evidence")
 			}
 		})
