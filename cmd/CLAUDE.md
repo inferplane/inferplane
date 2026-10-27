@@ -55,3 +55,17 @@ evaluation uses the referenced period, configured timezone and integer
 utilization. Soft switching meters do not lower independent hard caps or issue
 admission leases. `TestE2ECodexCLI*` is opt-in local fake-upstream acceptance,
 not a network/model-quality test.
+
+## Governed observability assembly
+
+`mayu/observability.go` turns `observability.exporters` into an `otelexport.Set`
+right after metrics, before any policy revalidation, and `gateway.go` installs
+`polStore.SetObservabilityCeiling(obsSet.Allows)` next to `SetRoutedAndPriced` even
+when the block is absent (a nil set refuses observability rules). Audit copies join
+`sinks` before `audit.NewWriter`; content export is a `server.WithContentExport`
+DataMux option; traces use `tracing.InitExporters` over the legacy `otel` exporter
+and governed trace exporters, so `cmd/mayu` never imports the OTel SDK. Header refs
+resolve once at boot; config changes need a restart. Shutdown registers the set's
+bounded flush before `aud.Close` so the writer's last records drain first.
+`observability_acceptance_test.go` drives the real gateway against fake OTLP
+collectors.

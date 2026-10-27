@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: 79adf31679ee6e95a52071667daeab0305ee2dd6fcc87dcf6374578125da10d7
+translation_source_sha256: 277b5d2a94e750b9d13fcf16c2a63bdafeffbc6047d200d22bdea65460e63ea4
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -14,7 +14,8 @@ translation_source_sha256: 79adf31679ee6e95a52071667daeab0305ee2dd6fcc87dcf63745
 | 프로세스 생존 | `GET :9090/healthz` | 프로세스가 응답하는가? |
 | 준비 상태 | `GET :9090/readyz` | 현재 의존성과 조건에서 요청을 승인할 수 있는가? |
 | 메트릭 | `GET :9090/metrics`, Prometheus | 지연·요청·비용 추정·거부·감사 상태 |
-| 트레이스 | 선택적 `otel`, OTLP HTTP/gRPC | 요청·시도별 시간과 제한된 메타데이터 |
+| 트레이스 | 선택적 `otel` 또는 정책이 고른 exporter, OTLP HTTP/gRPC | 요청·시도별 시간과 제한된 메타데이터 |
+| 정책 기반 내보내기 | `observability.exporters` + 정책, OTLP 로그 | 팀·사용자별 감사 기록 사본과 송신 본문 ([자세히](#governed-otlp-export)) |
 | 사용량 윈도 | 게이트웨이 → CP `/v1alpha1/usage` | 제어 영역 분석, OTLP와 별개 |
 | 감사 | 인스턴스별 저장 대상·WAL | 요청 증거와 정확한 바이트 체인 검증 |
 
@@ -153,3 +154,69 @@ WAL은 데이터 볼륨에 두며 로컬 분석 인덱스는 비활성화합니�
 2026-09-25 otelcol-contrib 0.119.0으로, 분할(partial) 줄을 포함한 CRI 형식 로그에서 검증했습니다.
 기록 41건이 바이트 단위로 동일하게 내보내졌고 수집 파일이 `mayu audit verify`를 통과했습니다.
 S3 업로드 자체는 실행하지 않았습니다.
+
+## 정책 기반 OTLP 내보내기 {#governed-otlp-export}
+
+mayu는 트레이스, 감사 기록 사본, 송신 본문을 OTLP 수집기로 직접 보낼 수 있습니다. 무엇을 어디로 보낼지는 두 층이 정합니다.
+
+- **로컬 상한**: mayu 설정의 `observability.exporters`에 정책이 고를 수 있는 수집기를 모두 선언합니다. endpoint, 프로토콜, TLS, 헤더 자격 증명(`env`·`file` 참조만), 실을 수 있는 신호를 여기서 정합니다. 목적지를 추가할 수 있는 곳은 이 파일뿐입니다.
+- **정책 선택**: GovernancePolicy의 `observability` 규칙(로컬 파일 또는 제어 영역)이 팀·사용자별로 어떤 신호를 어느 선언된 exporter로 보낼지 고릅니다.
+
+제어 영역은 이 경로에 없습니다. 제어 영역은 지금처럼 소비 보고, lease, 사용량 윈도만 전용 채널로 받습니다.
+
+```json
+"observability": {
+  "service_name": "inferplane",
+  "exporters": {
+    "corp": {
+      "endpoint": "otel-collector.internal:4318",
+      "signals": ["traces", "audit"],
+      "headers": { "authorization": { "env": "OTEL_COLLECTOR_AUTH" } }
+    },
+    "vault": {
+      "endpoint": "secure-collector.internal:4317",
+      "protocol": "grpc",
+      "signals": ["content"],
+      "data_boundary": "internal",
+      "max_content_bytes": 2097152
+    }
+  }
+}
+```
+
+```yaml
+apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata:
+  name: engineering-observability
+spec:
+  subject:
+    team: engineering
+  rules:
+  - name: export
+    failurePolicy: FailOpen
+    observability:
+      traces: { exporter: corp, samplePercent: 20 }
+      audit: { exporter: corp }
+      content: { exporter: vault }
+```
+
+| 신호 | 내보내는 내용 | 참고 |
+| --- | --- | --- |
+| `traces` | 요청 span(GenAI·`inferplane.*` 속성) | `samplePercent` 1–100, 기본 100 |
+| `audit` | 감사 기록마다 OTLP 로그 하나(`event_name` `inferplane.audit`) | 본문은 체인의 정규 줄 그대로입니다. `inferplane.audit.hash`는 다음 기록의 `prev_hash`와 같습니다 |
+| `content` | 송신 요청 본문과, 버퍼링된 경우 응답(`inferplane.content`) | 본문 캡처와 같은 바이트입니다. 라우팅·마스킹 뒤의 본문이며 공급자에 도달한 요청만 대상입니다. 스트림에는 응답이 없습니다 |
+
+데이터 영역이 지키는 규칙:
+
+- observability 규칙은 `FailOpen`이어야 합니다. 내보내기는 최선 노력이고, 증거의 원본은 WAL과 필수 감사 저장 대상입니다.
+- 선언되지 않은 exporter나 그 exporter가 허용하지 않는 신호를 지정한 규칙은 거부됩니다. 로컬 정책 파일이면 부팅·리로드가 실패합니다. 제어 영역 문서는 문서 단위로 거부되고 `Rejections`로 보고됩니다. `observability` 블록이 없는 데이터 영역은 모든 observability 규칙을 거부합니다.
+- observability 규칙은 별도 문서에 두세요. 거부된 문서는 그 안의 예산 규칙까지 통째로 빠집니다. required identity 모드에서는 거부가 하나라도 있으면 이전에 배포된 정책 세트를 유지합니다.
+- 한 요청에 여러 정책이 맞으면 트레이스와 감사는 지정된 exporter의 합집합으로 갑니다(트레이스는 exporter별 가장 높은 `samplePercent`). 본문은 맞는 규칙이 모두 같은 exporter를 지정할 때만 내보냅니다.
+- 본문 exporter는 `data_boundary: internal`을 선언해야 하고, endpoint가 loopback이 아니면 TLS를 써야 합니다. `max_content_bytes`(기본 2 MiB)를 넘는 기록은 잘라 보내지 않고 버립니다.
+- 샘플링은 게이트웨이가 결정합니다. 들어온 `traceparent`로 클라이언트의 trace id에는 계속 합류하지만, sampled 플래그로 내보내기를 막거나 강제할 수는 없습니다. 기존 `otel` 블록은 로컬 기본 exporter로 계속 동작하며, `otel`이라는 이름은 예약돼 있습니다.
+- 수집기가 느리면 exporter마다 최대 `queue_bytes`(기본 64 MiB)까지만 보관하고 나머지는 버립니다. 배치는 1초마다 또는 512건이 모이면 보냅니다. HTTP 429/502/503/504와 gRPC `Unavailable`, `ResourceExhausted`, `DeadlineExceeded`, `Aborted`는 두 번 재시도합니다. `inferplane_otel_export_records_total{exporter,signal,outcome}`를 지켜보세요.
+- `observability` 변경은 재시작해야 반영됩니다. SIGHUP 리로드는 exporter를 다시 만들지 않습니다. 종료 시에는 감사 writer를 먼저 비우고, 그다음 exporter를 최대 5초 동안 flush합니다.
+
+한계: 메트릭은 계속 Prometheus 노출 방식이며 OTLP 메트릭 내보내기는 없습니다. mayu 호스트를 관리하는 사람은 로컬 상한을 고칠 수 있습니다. 사용자가 끌 수 없는 내보내기가 필요하면 사용자가 관리하지 않는 호스트에서 mayu를 운영해야 합니다.
+

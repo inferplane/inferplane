@@ -102,11 +102,13 @@ config:
   # and grows with traffic; keep it off here and query the collected records,
   # or use the shared Postgres store (analytics.mode_b, ADR-015).
   analytics: { disabled: true }
-  # Opt-in OTLP TRACE export (ADR-011). Traces are the only signal mayu speaks
-  # OTLP: metrics stay Prometheus exposition on the admin port (scrape
-  # http://<svc>:9090/metrics — the Service's named `admin` port), and usage
-  # windows go to inferplaned over `POST /v1alpha1/usage`, not OTLP. Absent
-  # (the default) → no tracer, request path byte-identical.
+  # Opt-in OTLP TRACE export (ADR-011). Metrics stay Prometheus exposition on
+  # the admin port (scrape http://<svc>:9090/metrics — the Service's named
+  # `admin` port), and usage windows go to inferplaned over
+  # `POST /v1alpha1/usage`, not OTLP. Absent (the default) → no tracer, request
+  # path byte-identical. Governed export (traces, audit copies, egress content
+  # selected per team/user by `observability` policy rules) uses a separate
+  # `observability.exporters` block — see docs/operations/observability.md.
   # otel:
   #   endpoint: otel-collector.observability.svc.cluster.local:4318
   #   protocol: http        # or grpc (:4317)

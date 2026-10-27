@@ -9,7 +9,8 @@ Use readiness for admission, metrics for trends, and audit/authority records for
 | Process liveness | `GET :9090/healthz` | Is the gateway process serving? |
 | Readiness | `GET :9090/readyz` | Can this profile admit traffic under its current dependencies/gates? |
 | Metrics | `GET :9090/metrics`, Prometheus | Latency, requests, cost estimates, refusals, audit health |
-| Traces | Opt-in `otel`, OTLP HTTP/gRPC | Request/attempt timing and bounded metadata |
+| Traces | Opt-in `otel` or governed exporters, OTLP HTTP/gRPC | Request/attempt timing and bounded metadata |
+| Governed export | `observability.exporters` + policy, OTLP logs | Audit-record copies and egress content per team/user ([details](#governed-otlp-export)) |
 | Usage windows | Gateway to CP `/v1alpha1/usage` | Control-plane analytics; not OTLP |
 | Audit | Configured per-instance sinks/WAL | Request evidence and exact-byte chain verification |
 
@@ -160,3 +161,97 @@ Verified on 2026-09-25 with otelcol-contrib 0.119.0 against a CRI-format log tha
 included a split (partial) line: 41 records exported byte-identically and the
 collected file verified with `mayu audit verify`. The S3 upload itself was not
 exercised.
+
+## Governed OTLP export
+
+mayu can send traces, audit-record copies and egress content directly to OTLP
+collectors. Two layers decide what goes where:
+
+- **Local ceiling** — `observability.exporters` in mayu's config declares every
+  collector a policy may select: endpoint, protocol, TLS, header credentials
+  (`env`/`file` refs only) and the signals it may carry. Only this file can add a
+  destination.
+- **Policy choice** — an `observability` rule in a GovernancePolicy (local files or
+  the control plane) selects, per team or user, which declared exporter receives
+  which signal.
+
+The control plane is not on this path. It keeps receiving only consumption reports,
+leases and usage windows on its own channels.
+
+```json
+"observability": {
+  "service_name": "inferplane",
+  "exporters": {
+    "corp": {
+      "endpoint": "otel-collector.internal:4318",
+      "signals": ["traces", "audit"],
+      "headers": { "authorization": { "env": "OTEL_COLLECTOR_AUTH" } }
+    },
+    "vault": {
+      "endpoint": "secure-collector.internal:4317",
+      "protocol": "grpc",
+      "signals": ["content"],
+      "data_boundary": "internal",
+      "max_content_bytes": 2097152
+    }
+  }
+}
+```
+
+```yaml
+apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata:
+  name: engineering-observability
+spec:
+  subject:
+    team: engineering
+  rules:
+  - name: export
+    failurePolicy: FailOpen
+    observability:
+      traces: { exporter: corp, samplePercent: 20 }
+      audit: { exporter: corp }
+      content: { exporter: vault }
+```
+
+| Signal | What is exported | Notes |
+| --- | --- | --- |
+| `traces` | The request span (GenAI and `inferplane.*` attributes) | `samplePercent` 1–100, default 100 |
+| `audit` | Each audit record as an OTLP log (`event_name` `inferplane.audit`) | Body is the canonical chain line; `inferplane.audit.hash` equals the next record's `prev_hash` |
+| `content` | Egress request body and, when buffered, the response (`inferplane.content`) | Same bytes as body capture: after routing and masking, only for requests that reached a provider; streams carry no response |
+
+Rules a data plane enforces:
+
+- An observability rule must be `FailOpen`. Export is best-effort; the WAL and
+  required audit sinks remain the evidence of record.
+- A rule that names an undeclared exporter, or a signal the exporter does not allow,
+  is refused. Local policy files fail the boot or reload. Control-plane documents
+  are rejected per document and reported in `Rejections`. A data plane without an
+  `observability` block refuses every observability rule.
+- Keep observability rules in their own documents: a rejected document is removed
+  whole, including any budget rule in it. In required-identity mode one rejection
+  keeps the previous distributed set.
+- When several policies match a request, traces and audit go to the union of the
+  named exporters (traces at the highest `samplePercent` per exporter). Content is
+  exported only when every matching rule names the same exporter.
+- A content exporter must declare `data_boundary: internal` and use TLS unless its
+  endpoint is loopback. Records larger than `max_content_bytes` (default 2 MiB) are
+  dropped, never truncated.
+- The gateway draws the sampling decision. An incoming `traceparent` still joins the
+  client's trace id, but its sampled flag neither suppresses nor forces export. The
+  legacy `otel` block keeps working as a local baseline exporter; the name `otel` is
+  reserved.
+- Each exporter holds at most `queue_bytes` (default 64 MiB) while its collector is
+  slow; further records are dropped. Batches are sent every second or at 512
+  records. HTTP 429/502/503/504 and gRPC `Unavailable`, `ResourceExhausted`,
+  `DeadlineExceeded` and `Aborted` are retried twice. Watch
+  `inferplane_otel_export_records_total{exporter,signal,outcome}`.
+- Changes to `observability` need a restart; SIGHUP reload does not rebuild
+  exporters. Shutdown drains the audit writer first, then flushes exporters for up
+  to 5 seconds.
+
+Limits: metrics stay Prometheus exposition; there is no OTLP metric export. An
+operator who controls mayu's host can edit the local ceiling, so export that users
+cannot turn off requires mayu to run on a host they do not administer.
+

@@ -203,3 +203,15 @@ func TestPoliciesCopyDoesNotAliasObservability(t *testing.T) {
 		t.Fatalf("mutating Policies() changed the live snapshot: percent = %d", got)
 	}
 }
+
+// The shipped example must stay a valid document (docs link to it).
+func TestObservabilityExampleParses(t *testing.T) {
+	policies, _, err := LoadPaths("../../examples/observability/policy.yaml")
+	if err != nil {
+		t.Fatalf("example: %v", err)
+	}
+	o := policies[0].Rules[0].Observability
+	if o == nil || o.Traces.Exporter != "corp" || o.Traces.SamplePercent != 20 || o.Audit != "corp" || o.Content != "vault" {
+		t.Fatalf("example rule = %+v", o)
+	}
+}

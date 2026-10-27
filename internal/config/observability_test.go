@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,5 +91,24 @@ func TestObservabilityHeaderErrorNeverEchoesRef(t *testing.T) {
 	_, err := loadObservability(t, `{"observability":{"exporters":{"corp":{"endpoint":"h:1","signals":["traces"],"headers":{"authorization":{"env":"Bearer sk-live-value"}}}}}}`)
 	if err == nil || strings.Contains(err.Error(), "sk-live-value") {
 		t.Fatalf("err = %v: a malformed ref must be refused without echoing it", err)
+	}
+}
+
+// The example config's commented-out block must be a valid ceiling once renamed.
+func TestObservabilityExampleBlockValidates(t *testing.T) {
+	raw, err := os.ReadFile("../../examples/config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	block, ok := doc["_observability_example"]
+	if !ok {
+		t.Fatal("examples/config.json lost _observability_example")
+	}
+	if _, err := loadObservability(t, `{"observability":`+string(block)+`}`); err != nil {
+		t.Fatalf("example block: %v", err)
 	}
 }

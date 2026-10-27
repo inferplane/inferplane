@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: 26d5decf9bf63faee3b7d8b5be65531a0b45f6aad8f9fa1c608499f635a3d3c4
+translation_source_sha256: 9147ab5273d6d6e2e64c9c17c8150e1f9914c40b52523db08397adff184906dc
 ---
 
 # API 구현 {#api}
@@ -83,6 +83,10 @@ Messages에서 OpenAI 호환 업스트림의 HTTP 400 오류는 Anthropic `inval
 ### 5. 관련 문서 {#5-cross-references}
 
 router·tier·governance·alert·bodystore·providers와 ADR-016/017/018/021/028/029/040/041/042를 참고하세요. [운영 절차](../runbooks/)와 [CLI 로그인](../runbooks/cli-login.md)이 실무 흐름을 설명합니다.
+
+### observability 규칙 스키마 {#observability-rule-schema}
+
+`GovernancePolicy.spec.rules[].observability`는 해당 주체의 정책 기반 OTLP 내보내기를 고릅니다. `traces`(`exporter`, 선택 `samplePercent` 1–100, 기본 100), `audit`(`exporter`), `content`(`exporter`) 중 하나 이상을 지정하며 FailOpen이어야 합니다. exporter 이름은 데이터 영역의 로컬 `observability.exporters` 상한을 가리킵니다. 데이터 영역은 선언되지 않은 exporter나 그 exporter가 허용하지 않는 신호를 지정한 규칙을 거부하고, 상한을 선언하지 않았으면 이런 규칙을 모두 거부합니다. [정책 기반 OTLP 내보내기](../operations/observability.md#governed-otlp-export)를 참고하세요.
 
 ### 정책 라우팅 스키마와 증거 · ADR-043 {#policy-routing-schema-and-evidence-adr-043}
 
