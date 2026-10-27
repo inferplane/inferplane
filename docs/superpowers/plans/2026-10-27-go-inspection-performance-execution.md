@@ -11,7 +11,7 @@
 
 ## Status and result
 
-Implemented and validated on 2026-10-27; final fresh-context review pending.
+Implemented, validated and independently reviewed on 2026-10-27.
 [Plan](2026-10-27-go-inspection-performance.md),
 [design](../specs/2026-10-27-go-inspection-performance-design.md),
 [measurements](../../benchmarks/inspection/results.md),
@@ -51,7 +51,19 @@ classifier networking and shared/journal performance remain unqualified.
 
 ## Review
 
-Pending the single whole-branch independent review. No final merge claim yet.
+One fresh-context Astra whole-branch review of `0360e81..2c2bfdc` found zero
+Critical, Important or Minor issues and judged the change ready to merge. It
+independently verified production hashes, raw trial counts, race and fuzz results.
+The reviewer set aside the pre-existing native classifier alias refusal and
+unmeasured production/real-client/profile behavior; both decisions and their
+costs are recorded below. No code changed after this review; final documentation
+and PR bookkeeping are separate. CI DB sentinel: all seven required tests pass;
+CGO-disabled `go build ./...` and all DCO sign-offs also pass.
+
+- Final ruling: retain the pre-existing native classifier alias refusal as a separate compatibility issue — unchanged fail-closed behavior and explicit limitations fit this change — cost if wrong: native learned classification still needs a fix before qualification.
+- Final ruling: leave production throughput, peak memory, real clients/classifiers and ADR-045/046 performance unqualified — local synthetic evidence cannot prove those claims — cost if wrong: separate deployment qualification is required before capacity claims.
+
+Deferred minors: none.
 
 ---
 
@@ -61,7 +73,7 @@ Pending the single whole-branch independent review. No final merge claim yet.
 
 ## 상태와 결과
 
-2026-10-27 구현·검증을 마쳤으며 새로운 컨텍스트의 최종 독립 리뷰가 남았습니다.
+2026-10-27 구현·검증과 새로운 컨텍스트의 독립 최종 리뷰를 마쳤습니다.
 [계획](2026-10-27-go-inspection-performance.md),
 [설계](../specs/2026-10-27-go-inspection-performance-design.md),
 [측정](../../benchmarks/inspection/results.md),
@@ -99,4 +111,12 @@ C1·200 KiB/1 MiB 합성 게이트웨이 시간이 Responses 약 87%, 네이티�
 
 ## 리뷰
 
-전체 브랜치의 독립 리뷰가 남아 있으며 최종 병합 완료를 주장하지 않습니다.
+Astra가 `0360e81..2c2bfdc`를 새 컨텍스트에서 독립 리뷰해 Critical·Important·Minor
+모두 0건, 병합 가능으로 판정했습니다. 소스 해시·원시 표본 수·race·fuzz 근거를
+독립 확인했습니다. 리뷰 후 코드 변경은 없고 최종 문서/PR 기록만 갱신합니다.
+CI DB sentinel 7개 필수 테스트, CGO를 끈 전체 패키지 빌드, 모든 DCO 서명도 통과했습니다.
+
+- 최종 판단: 기존 네이티브 분류기 별칭 오류는 fail-closed와 명시한 검증 범위를 유지한 별도 호환성 이슈입니다. 실제 학습 분류 검증 전 수정이 필요합니다.
+- 최종 판단: 운영 처리량·최대 메모리·실제 클라이언트/분류기·ADR-045/046 성능은 합성 자료로 입증하지 않습니다. 용량 주장 전에 별도 배포 검증이 필요합니다.
+
+보류한 Minor: 없음.

@@ -130,7 +130,7 @@ Native privacy routing still requests full mode before admission.
 - [x] Apply the spec's correctness and recommended performance gates. Investigate noisy or >5% full-mode regressions; do not claim gains without raw evidence or merge a failed performance proposal.
 - [x] Update public bilingual behavior only after implementation; record measured scope/limitations, approved ADR and regenerated AI context. Preserve reference bodies under `/sync-docs` restrictions.
 - [x] Run both `CGO_ENABLED=0 go build` commands, `go test ./... -race`, `go vet ./...`, formatting, `bash tests/run-all.sh`, translation checks, strict MkDocs and site-link checks. Optional profile coverage must name the fixtures actually exercised.
-- [ ] Review the final diff independently and commit with DCO sign-off; publish only within the session's authorized PR scope.
+- [x] Review the final diff independently and commit with DCO sign-off; publish only within the session's authorized PR scope.
 
 ## Later projects and plan self-review
 
@@ -259,7 +259,7 @@ ADR-055는 비어 있을 때만 배정하고 실제 승인 상태를 적용합�
 - [x] 명세의 정확성·권고 성능 기준을 적용합니다. 잡음·완전 모드 5% 초과 회귀를 조사하고 원시 근거 없이 향상을 주장하거나 목표 미달 성능안을 병합하지 않습니다.
 - [x] 구현 후 공개 양언어 동작을 갱신하고 측정 범위/한계·승인 ADR·재생성 AI 컨텍스트를 기록합니다. `/sync-docs`의 reference 본문 수정 금지 범위를 지킵니다.
 - [x] 두 `CGO_ENABLED=0 go build`, `go test ./... -race`, `go vet ./...`, 포맷, `bash tests/run-all.sh`, 번역 검사·strict MkDocs·사이트 링크 검사를 실행합니다. 실제 fixture가 있는 선택 프로필만 검증했다고 명시합니다.
-- [ ] 최종 diff를 독립 검토하고 DCO 서명으로 커밋합니다. 게시 시 세션에서 허용된 PR 범위를 따릅니다.
+- [x] 최종 diff를 독립 검토하고 DCO 서명으로 커밋합니다. 게시 시 세션에서 허용된 PR 범위를 따릅니다.
 
 ## 후속 프로젝트와 계획 자체 점검
 
