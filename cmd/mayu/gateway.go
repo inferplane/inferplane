@@ -34,6 +34,7 @@ import (
 	"github.com/inferplane/inferplane/internal/limiter"
 	"github.com/inferplane/inferplane/internal/live"
 	"github.com/inferplane/inferplane/internal/metrics"
+	"github.com/inferplane/inferplane/internal/otelexport"
 	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/providerstore"
 	"github.com/inferplane/inferplane/internal/proxy"
@@ -45,7 +46,6 @@ import (
 	"github.com/inferplane/inferplane/internal/server/configapi"
 	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/internal/tier"
-	"github.com/inferplane/inferplane/internal/tracing"
 	"github.com/inferplane/inferplane/pkg/ulid"
 	"github.com/inferplane/inferplane/providers"
 )
@@ -66,6 +66,7 @@ type gateway struct {
 	analyticsIdx     *analytics.Index            // nil unless the analytics index is enabled (spec §4 / D1)
 	analyticsSink    audit.Sink                  // async ingestion sink; drained+closed before analyticsIdx on shutdown
 	otelDown         func(context.Context) error // OTel TracerProvider shutdown (nil unless otel configured, ADR-011)
+	otelSet          *otelexport.Set             // governed OTLP log export (nil unless observability is configured)
 	instance         string                      // audit chain instance id (matches the audit Writer)
 	anchorer         audit.Anchorer              // nil unless audit.anchor is configured (ADR-012)
 	anchorEvery      time.Duration               // anchor interval
@@ -142,6 +143,14 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// Prometheus metrics sink: owned by main, threaded into the audit writer,
 	// router, governor, and ingress handlers, and exposed on the admin /metrics.
 	m := metrics.New()
+
+	// Governed observability export: the local exporter ceiling and its log
+	// pipelines. Built before policy revalidation, which checks every
+	// observability rule against it (a nil set refuses all such rules).
+	obsSet, err := buildObservability(raw, m)
+	if err != nil {
+		return nil, fmt.Errorf("observability: %w", err)
+	}
 
 	// Virtual-key store: KeyAuth resolves client keys against it (§5.1).
 	store, err := openGatewayKeys(context.Background(), raw.KeyStore)
@@ -232,6 +241,11 @@ func newGateway(cfgPath string) (*gateway, error) {
 	if err != nil {
 		store.Close()
 		return nil, fmt.Errorf("audit sinks: %w", err)
+	}
+	// Governed audit copies: a best-effort, non-required sink whose targets
+	// come from observability rules; the WAL chain stays the record.
+	if obsSet.Has(otelexport.SignalAudit) {
+		sinks = append(sinks, obsSet.AuditSink(auditTargets(polStore)))
 	}
 	// Analytics index (Mode A, spec §4): a DERIVED read-model fed as a best-effort
 	// audit Sink, so it must join `sinks` BEFORE NewWriter fans out to them. At
@@ -392,6 +406,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 	m.RetainPIIClassifiers(classifierRevisions(st))
 	if polStore != nil {
 		polStore.SetRoutedAndPriced(holder.RoutedAndPriced)
+		polStore.SetObservabilityCeiling(obsSet.Allows)
 		// The initial file load precedes topology construction. Revalidate now,
 		// before listeners or policy delivery start, against effective DB/file
 		// routes and prices. Future Reload/ApplyWire calls use the same holder.
@@ -839,18 +854,15 @@ func newGateway(cfgPath string) (*gateway, error) {
 		fmt.Println("inferplane: body logging enabled")
 	}
 
-	// OpenTelemetry tracing (ADR-011): opt-in. Init failure is NON-FATAL — tracing
-	// is best-effort observability and must never block boot; the exporter
-	// connects lazily so an unreachable collector at boot is fine.
-	var otelDown func(context.Context) error
-	if cfg.OTel != nil {
-		sd, terr := tracing.Init(context.Background(), tracingConfig(cfg.OTel))
-		if terr != nil {
-			fmt.Fprintln(os.Stderr, "inferplane: otel init failed (tracing disabled):", terr)
-		} else {
-			otelDown = sd
-			fmt.Println("inferplane: otel tracing enabled →", cfg.OTel.Endpoint)
-		}
+	// OpenTelemetry tracing (ADR-011): opt-in, via the legacy `otel` block
+	// and/or governed exporters that allow traces. Init failure is NON-FATAL —
+	// tracing is best-effort observability and must never block boot; the
+	// exporters connect lazily so an unreachable collector at boot is fine.
+	otelDown, terr := initTracing(context.Background(), cfg, obsSet, polStore)
+	if terr != nil {
+		fmt.Fprintln(os.Stderr, "inferplane: otel init failed (tracing disabled):", terr)
+	} else if otelDown != nil {
+		fmt.Println("inferplane: otel tracing enabled")
 	}
 
 	// Audit anchoring (ADR-012): opt-in. Init failure is NON-FATAL (best-effort
@@ -887,6 +899,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		analyticsIdx:     analyticsIdx,
 		analyticsSink:    analyticsSink,
 		otelDown:         otelDown,
+		otelSet:          obsSet,
 		notifier:         notifier,
 		instance:         inst,
 		anchorer:         anchorer,
@@ -923,7 +936,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		maxAge := raw.ControlPlane.MaxPolicyAgeDuration
 		governanceGate = func() (bool, string) { return syncer.GovernanceReady(maxAge) }
 	}
-	g.dataSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol), server.WithMaxRequestBytes(cfg.Server.MaxRequestBytes), server.WithGovernanceGate(governanceGate))}
+	g.dataSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol), server.WithMaxRequestBytes(cfg.Server.MaxRequestBytes), server.WithGovernanceGate(governanceGate), contentOption(obsSet, polStore))}
 	if authority != nil || shared != nil {
 		next := g.dataSrv.Handler
 		g.dataSrv.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -1137,18 +1150,6 @@ func buildMasking(cfg *config.Config) (*filter.Masking, error) {
 		fmt.Fprintf(os.Stderr, "inferplane: plugin %q enabled (%s) — WARNING: masked traffic re-serializes the body, abandoning verbatim forwarding, so prompt-cache hits are lost (up to ~10x cost); this is opt-in by design (ADR-009)\n", pc.Name, scope)
 	}
 	return masking, nil
-}
-
-// tracingConfig maps the file config block to the tracing package's mirror type
-// (tracing imports no config — ADR-011 gate).
-func tracingConfig(o *config.OTelConfig) tracing.Config {
-	return tracing.Config{
-		Endpoint:    o.Endpoint,
-		Protocol:    o.Protocol,
-		Insecure:    o.Insecure,
-		SampleRatio: o.SampleRatio,
-		ServiceName: o.ServiceName,
-	}
 }
 
 // closeAll closes the partially-opened resources on a newGateway error path
@@ -1490,6 +1491,17 @@ func (g *gateway) serve(ctx context.Context) error {
 	}
 	if g.analyticsSink != nil {
 		defer g.analyticsSink.Close()
+	}
+	// Registered before aud.Close so it runs after: the writer's last records
+	// reach the audit-copy queue first, then the exporters flush (bounded).
+	if g.otelSet != nil {
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := g.otelSet.Shutdown(ctx); err != nil {
+				fmt.Fprintln(os.Stderr, "inferplane: otel export shutdown:", err)
+			}
+		}()
 	}
 	defer g.aud.Close()
 	if g.pstore != nil {

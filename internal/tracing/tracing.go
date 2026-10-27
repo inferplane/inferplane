@@ -21,7 +21,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 )
@@ -51,13 +50,9 @@ var (
 // so the gateway's own draw — not the client's traceparent — decides export.
 // An unreachable collector is non-fatal: the exporter connects lazily.
 func Init(ctx context.Context, cfg Config) (func(context.Context) error, error) {
-	exp, err := NewExporter(ctx, ExporterConfig{Endpoint: cfg.Endpoint, Protocol: cfg.Protocol, Insecure: cfg.Insecure})
-	if err != nil {
-		return nil, err
-	}
 	targets := []Target{LegacyTarget(cfg.SampleRatio)}
-	return InitRouted(cfg.ServiceName, map[string]sdktrace.SpanExporter{LegacyExporter: exp},
-		func(context.Context) []Target { return targets }), nil
+	return InitExporters(ctx, cfg.ServiceName, map[string]ExporterConfig{LegacyExporter: {Endpoint: cfg.Endpoint, Protocol: cfg.Protocol, Insecure: cfg.Insecure}},
+		func(context.Context) []Target { return targets })
 }
 
 // LegacyExporter names the `otel` block's exporter among routed exporters.

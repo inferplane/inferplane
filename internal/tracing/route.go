@@ -84,6 +84,23 @@ func InitRouted(serviceName string, exporters map[string]sdktrace.SpanExporter, 
 	return tp.Shutdown
 }
 
+// InitExporters builds one OTLP exporter per entry and installs InitRouted
+// over them, so callers outside this package never import the SDK.
+func InitExporters(ctx context.Context, serviceName string, exporters map[string]ExporterConfig, decide Decider) (func(context.Context) error, error) {
+	built := make(map[string]sdktrace.SpanExporter, len(exporters))
+	for name, c := range exporters {
+		exp, err := NewExporter(ctx, c)
+		if err != nil {
+			for _, b := range built {
+				_ = b.Shutdown(ctx)
+			}
+			return nil, err
+		}
+		built[name] = exp
+	}
+	return InitRouted(serviceName, built, decide), nil
+}
+
 // routingProcessor forwards each ended span to the batch processors chosen
 // for it when it started.
 type routingProcessor struct {
