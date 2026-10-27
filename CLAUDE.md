@@ -112,12 +112,16 @@ Default and node-local profiles retain their separate limits (`docs/roadmap.md`)
 ## Tech Stack
 
 - **Language:** Go 1.26.10 (module `github.com/inferplane/inferplane`)
-- **Build:** single static binary, `CGO_ENABLED=0` (every dependency is pure-Go)
-- **Storage:** `modernc.org/sqlite` (cgo-free SQLite) for the key store; disk WAL for audit
+- **Build:** two independently static binaries, `CGO_ENABLED=0` (every dependency is pure-Go)
+- **Storage:** `modernc.org/sqlite` (cgo-free SQLite) by default; explicit shared Postgres stores (ADR-046); disk WAL for audit
 - **AWS:** `aws-sdk-go-v2` (`config` + `bedrockruntime`) for the Bedrock provider
 - **Policy files:** `sigs.k8s.io/yaml` (pure Go) for CRD-style GovernancePolicy documents (`policies` config key, ADR-033)
 - **Observability:** `prometheus/client_golang`; OpenTelemetry GenAI semantic conventions for metric naming
 - **Packaging:** multi-stage Dockerfile → `distroless/static:nonroot`; Helm chart in `charts/inferplane`
+
+Audit readiness gates new generation on WAL failure or retained required-sink
+pressure. Repair storage and preserve/repair retained evidence before restart;
+restart alone is not recovery. See [recovery](docs/runbooks/recovery.md).
 
 ## Request Flow (the big picture across packages)
 
@@ -138,7 +142,15 @@ when a change spans packages:
    original allow-list check is otherwise unchecked (see internal/CLAUDE.md
    Invariants).
 5. **Policy-aware request routing** (`internal/router.RouteRequest`, ADR-043/044) —
-   inspect original bytes; intersect sensitive-data and strict-budget restrictions;
+   inspect original bytes when required; Responses always inspects for transport
+   compatibility; native Bedrock Converse also inspects structure before admission.
+   Messages, Chat and InvokeModel skip routing inspection without applicable privacy/context
+   rules or strict budget targets. Context/strict-only and unprotected Responses
+   inspection use StructureOnly; native Converse preflight also uses it. Applicable
+   privacy and independent mask reinspection require DetectSensitiveData plus full
+   evidence (ADR-055). Inspector.Inspect remains full; legacy injection falls back
+   to that contract, and selective full results without evidence refuse.
+   Intersect sensitive-data and strict-budget restrictions;
    complete/reinspect required masking; revalidate session pins and optional
    context preferences; return the complete safe chain on one topology snapshot.
    Privacy enforces even in Shadow. Original-model RBAC must pass. Passive results
@@ -149,13 +161,16 @@ when a change spans packages:
    Context preflight uses the returned topology.
    Governance PreCheck (`internal/governance`, `internal/proxy.LeaseTable`) runs
    before provider billing; body capture cannot precede the routing decision.
-7. **Provider** (`providers/<name>`) — verbatim `RawBody` when protocols
-   match (the cache invariant); Bedrock routes Claude models via
+7. **Provider** (`providers/<name>`) — preserve same-protocol `RawBody` by default;
+   documented model/usage/guardrail changes and verified masking are bounded
+   exceptions. Bedrock routes Claude models via
    InvokeModel and every other model family (GPT, GLM, …) via Converse
    with schema translation.
 8. **Settle** (`internal/governance`) — actual usage debits quota (cache
    tiers included), trues up TPM against the PreCheck estimate (ADR-039),
-   computes integer-µUSD cost.
+   computes integer-µUSD cost. Local/legacy attempts reserve process-local money
+   before dispatch; incomplete usage retains liability without invented spend
+   (ADR-054). Durable/shared authority retains its separate guarantees.
 9. **Audit + analytics** (`internal/audit`, `internal/analytics`) —
    hash-chained `request_started`/`request_completed` records; the
    analytics index feeds `GET /admin/logs` and the console.
@@ -169,7 +184,7 @@ except the broker, the bearer token.
 ## Project Structure
 
 ```
-cmd/mayu/          - Data plane binary (node-local proxy): serve / keys / audit / report / bodies / pricing / login / token / logout
+cmd/mayu/          - Data plane binary (node-local proxy): serve / config validate / keys / audit / report / bodies / pricing / login / token / logout
 cmd/inferplaned/   - Control plane binary: policy distribution + budget leases (ADR-034); credential broker (ADR-040, opt-in via INFERPLANED_BROKER_ROLE_ARN)
 api/v1alpha1/      - Versioned config API wire types (CRD-style shape, gRPC/HTTP delivery)
 internal/          - Private packages (gateway internals)
@@ -185,7 +200,7 @@ internal/          - Private packages (gateway internals)
   responses/       - Responses observation, stateless tool adapters, native/translated SSE
   tier/            - ADR-041 budget-tier substitution: per-team Table, window-latched activation, shared by controlplane/ and proxy/
   governance/      - Rate / quota / budget enforcement (PreCheck + Settle)
-  keystore/        - Virtual-key store (SQLite), Principal + RBAC
+  keystore/        - Virtual-key/team stores (SQLite default, explicit shared Postgres), Principal + RBAC
   providerstore/   - Opt-in DB-authoritative provider/model topology (ADR-008)
   audit/           - Tamper-evident hash-chain audit writer, WAL, verify
   bodystore/       - Opt-in encrypted request/response body capture (ADR-018)
@@ -241,11 +256,13 @@ tests/             - Harness tests (hooks, secret patterns, structure) — bash,
 
 ### Security mandates (non-negotiable)
 
-- Secrets are referenced only via `env:` / `file:` / `secret:` refs — **never inline** in config (config rejects inline `api_key`).
+- Secrets are referenced only via `env:` / `file:` refs — **never inline** in config (config rejects inline `api_key`); `secret:` is unsupported.
 - Virtual keys are SHA-256 hashed at rest; the plaintext `ik_...` is shown **once** and is never recoverable.
 - The client never sees the gateway's upstream provider key; the gateway never forwards the client's key.
 - `/metrics` is unauthenticated but must leak **no** secret or `key_id` (cardinality-bounded labels only).
-- `count_tokens` must **never** return a non-200 (a non-200 crashes Claude Code).
+- Authenticated `count_tokens` handler results must stay HTTP 200, including
+  policy/readiness refusal. Shared authentication still returns 401 for missing
+  or invalid keys before those handlers; no learned classifier runs for counts.
 - Every commit is DCO signed off (`git commit -s`). License: Apache-2.0.
 
 ## Key Commands
@@ -265,6 +282,9 @@ go test ./internal/policy/... -run TestModelAllowed -v
 
 # Run the gateway (data plane :8080, admin plane + console :9090/admin/ui/)
 go run ./cmd/mayu serve --config examples/config.json
+
+# Validate config syntax and supported settings without opening stores/providers
+INFERPLANE_ADMIN_TOKEN=lint go run ./cmd/mayu config validate --config examples/config.json
 
 # Run the control plane (health :7601; policy sync needs --policies; env-only config, no file)
 INFERPLANED_TOKEN=dev go run ./cmd/inferplaned --policies examples/policies/

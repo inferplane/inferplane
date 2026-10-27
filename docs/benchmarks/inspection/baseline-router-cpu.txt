@@ -1,0 +1,24 @@
+File: baseline-router.test
+Build ID: cf7782ce44117026e36f95515093fdf856ac78c6
+Type: cpu
+Time: 2026-10-27 09:18:20 UTC
+Duration: 3.31s, Total samples = 3.25s (98.21%)
+Showing nodes accounting for 3.22s, 99.08% of 3.25s total
+Dropped 7 nodes (cum <= 0.02s)
+Showing top 15 nodes out of 36
+      flat  flat%   sum%        cum   cum%
+     0.75s 23.08% 23.08%      0.85s 26.15%  regexp.(*machine).add
+     0.62s 19.08% 42.15%      1.21s 37.23%  regexp.(*Regexp).tryBacktrack
+     0.44s 13.54% 55.69%      1.29s 39.69%  regexp.(*machine).step
+     0.44s 13.54% 69.23%      0.44s 13.54%  regexp/syntax.(*Inst).MatchRunePos
+     0.19s  5.85% 75.08%      0.22s  6.77%  regexp.(*bitState).push (inline)
+     0.16s  4.92% 80.00%      0.16s  4.92%  regexp.(*bitState).shouldVisit (inline)
+     0.14s  4.31% 84.31%      0.21s  6.46%  regexp.(*inputString).step
+     0.14s  4.31% 88.62%      1.79s 55.08%  regexp.(*machine).match
+     0.10s  3.08% 91.69%      1.39s 42.77%  regexp.(*Regexp).backtrack
+     0.09s  2.77% 94.46%      0.09s  2.77%  runtime.memmove
+     0.07s  2.15% 96.62%      0.07s  2.15%  unicode/utf8.DecodeRuneInString (inline)
+     0.03s  0.92% 97.54%      0.04s  1.23%  encoding/json.unquoteBytes
+     0.03s  0.92% 98.46%      0.03s  0.92%  github.com/inferplane/inferplane/internal/sensitivity.containsCard
+     0.02s  0.62% 99.08%      0.46s 14.15%  regexp/syntax.(*Inst).MatchRune (inline)
+         0     0% 99.08%      0.04s  1.23%  encoding/json.(*Decoder).Decode

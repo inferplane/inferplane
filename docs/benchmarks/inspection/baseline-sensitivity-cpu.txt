@@ -1,0 +1,24 @@
+File: baseline-sensitivity.test
+Build ID: 9a8632e3f867d0577cd192f74245fc5a0c247cd8
+Type: cpu
+Time: 2026-10-27 09:17:59 UTC
+Duration: 2.80s, Total samples = 2.73s (97.60%)
+Showing nodes accounting for 2.68s, 98.17% of 2.73s total
+Dropped 23 nodes (cum <= 0.01s)
+Showing top 15 nodes out of 38
+      flat  flat%   sum%        cum   cum%
+     0.56s 20.51% 20.51%      0.96s 35.16%  regexp.(*Regexp).tryBacktrack
+     0.46s 16.85% 37.36%      0.60s 21.98%  regexp.(*machine).add
+     0.44s 16.12% 53.48%      1.15s 42.12%  regexp.(*machine).step
+     0.42s 15.38% 68.86%      0.42s 15.38%  regexp/syntax.(*Inst).MatchRunePos
+     0.16s  5.86% 74.73%      0.18s  6.59%  regexp.(*inputString).step
+     0.12s  4.40% 79.12%      0.12s  4.40%  regexp.(*bitState).shouldVisit (inline)
+     0.12s  4.40% 83.52%      0.12s  4.40%  runtime.memmove
+     0.11s  4.03% 87.55%      1.53s 56.04%  regexp.(*machine).match
+     0.10s  3.66% 91.21%      0.13s  4.76%  regexp.(*bitState).push (inline)
+     0.09s  3.30% 94.51%      1.11s 40.66%  regexp.(*Regexp).backtrack
+     0.03s  1.10% 95.60%      0.03s  1.10%  regexp.(*machine).alloc (inline)
+     0.02s  0.73% 96.34%      0.02s  0.73%  encoding/json.stateInString
+     0.02s  0.73% 97.07%      0.44s 16.12%  regexp/syntax.(*Inst).MatchRune (inline)
+     0.02s  0.73% 97.80%      0.02s  0.73%  unicode/utf8.DecodeRuneInString (inline)
+     0.01s  0.37% 98.17%      0.02s  0.73%  encoding/json.unquoteBytes

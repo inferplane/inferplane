@@ -1,6 +1,6 @@
 ---
 translation_source: adaptive-routing.md
-translation_source_sha256: 6800e59e50c3b94f1b0cdd25c793b7b906fcba0bc41926239cee369b577c78e1
+translation_source_sha256: ca3159fd2a83069bae388993b995272bb2e6e748abff6853b053c6b66440db3b
 ---
 
 # 적응형 라우팅과 Codex {#adaptive-routing-and-codex}
@@ -160,6 +160,14 @@ SSE를 보존합니다. **별도 AWS Web Search 작업 요금은 토큰 기반 �
 이식 가능한 클라이언트는 상속된 네이티브 추론 선호를 해제하려고 `reasoning: {"effort": "none"}`을 보낼 수 있습니다. 백엔드 추론 강도 제어를 요구하지 않으며 브리지는 텍스트·도구 결과를 전달하고 생성 동작은 공급자가 정합니다. 명시적 추론 요구와 암호화 이력에는 호환 네이티브 목적지가 필요합니다.
 
 ## 개인정보와 캐시 한계 {#privacy-and-cache-limits}
+
+개인정보 집행·학습 분류·기존 마스킹은 각각 설정합니다. 컨텍스트·엄격 목적지 또는
+무보호 Responses 호환성만 필요하면 구조 검사는 유한 PII 탐지기 없이 JSON 순회와
+기능 검사를 유지합니다. 네이티브 Bedrock Converse 사전검사도 구조 모드입니다.
+컨텍스트 Shadow는 구조 검사 비용을 지불하며 개인정보가 적용되면 Shadow와 함께
+있어도 완전 탐지를 요구합니다.
+[검사 실행 조건](policy-routing.md#when-inspection-runs)을 참고하세요.
+적용되는 개인정보 의무를 우회하는 전역 설정은 없습니다.
 
 활성화된 기존 PII 필터도 완전 요청 변환기를 통해 Responses에 적용됩니다. 검사 가능한 깨끗한 요청은 사용할 수 있습니다. 보호 텍스트는 두 탐지기 집합을 모두 통과해야 하며 불투명·안전하지 않은 변환은 거부합니다.
 

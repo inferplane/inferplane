@@ -1,0 +1,23 @@
+File: after-mayu.test
+Build ID: 9531acc8ea13fd0f59d2726d16f222a4bea948a4
+Type: alloc_space
+Time: 2026-10-27 09:43:13 UTC
+Showing nodes accounting for 269.53MB, 97.49% of 276.45MB total
+Dropped 47 nodes (cum <= 1.38MB)
+Showing top 15 nodes out of 45
+      flat  flat%   sum%        cum   cum%
+  156.35MB 56.56% 56.56%   156.35MB 56.56%  encoding/json.(*Decoder).refill
+   53.20MB 19.24% 75.80%    79.80MB 28.87%  encoding/json.(*decodeState).literalStore
+   29.34MB 10.61% 86.41%    29.34MB 10.61%  io.ReadAll
+   26.60MB  9.62% 96.03%    26.60MB  9.62%  encoding/json.(*RawMessage).UnmarshalJSON
+    2.31MB  0.84% 96.87%     3.47MB  1.26%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Request
+    1.72MB  0.62% 97.49%     1.72MB  0.62%  runtime/pprof.StartCPUProfile
+         0     0% 97.49%   194.52MB 70.36%  encoding/json.(*Decoder).Decode
+         0     0% 97.49%   194.52MB 70.36%  encoding/json.(*Decoder).Token
+         0     0% 97.49%   156.35MB 56.56%  encoding/json.(*Decoder).readValue
+         0     0% 97.49%    26.60MB  9.62%  encoding/json.(*decodeState).object
+         0     0% 97.49%    79.80MB 28.87%  encoding/json.(*decodeState).unmarshal
+         0     0% 97.49%    79.80MB 28.87%  encoding/json.(*decodeState).value
+         0     0% 97.49%    41.63MB 15.06%  encoding/json.Unmarshal
+         0     0% 97.49%    46.77MB 16.92%  github.com/inferplane/inferplane/cmd/mayu.BenchmarkGatewayInspection.func1
+         0     0% 97.49%   265.49MB 96.03%  github.com/inferplane/inferplane/cmd/mayu.BenchmarkGatewayInspection.func1.1 (inline)

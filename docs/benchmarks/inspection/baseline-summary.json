@@ -1,0 +1,8890 @@
+{
+  "sensitivity": {
+    "BenchmarkInspect/anthropic/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 252004654.0,
+        "failures": 0.0,
+        "p50_ns": 251993369.0,
+        "p95_ns": 251993369.0,
+        "p99_ns": 251993369.0,
+        "rss_bytes": 12201984.0,
+        "workers": 1.0,
+        "B/op": 5549328.0,
+        "allocs/op": 220.0
+      },
+      "ns_op_range": [
+        251284255.0,
+        257399946.0
+      ]
+    },
+    "BenchmarkInspect/anthropic/bytes=1048576/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 254469249.0,
+        "failures": 0.0,
+        "p50_ns": 254459335.0,
+        "p95_ns": 254459335.0,
+        "p99_ns": 254459335.0,
+        "rss_bytes": 12099584.0,
+        "workers": 1.0,
+        "B/op": 5632632.0,
+        "allocs/op": 257.0
+      },
+      "ns_op_range": [
+        253623465.0,
+        255408796.0
+      ]
+    },
+    "BenchmarkInspect/anthropic/bytes=1048576/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 255388801.0,
+        "failures": 0.0,
+        "p50_ns": 255377044.0,
+        "p95_ns": 255377044.0,
+        "p99_ns": 255377044.0,
+        "rss_bytes": 12697600.0,
+        "workers": 1.0,
+        "B/op": 5670056.0,
+        "allocs/op": 266.0
+      },
+      "ns_op_range": [
+        250351014.0,
+        255909884.0
+      ]
+    },
+    "BenchmarkInspect/anthropic/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        24,
+        24,
+        24,
+        24,
+        24
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 4773484.0,
+        "failures": 0.0,
+        "p50_ns": 4771631.0,
+        "p95_ns": 4798036.0,
+        "p99_ns": 4799349.0,
+        "rss_bytes": 7565312.0,
+        "workers": 1.0,
+        "B/op": 91993.0,
+        "allocs/op": 85.0
+      },
+      "ns_op_range": [
+        4768012.0,
+        4825725.0
+      ]
+    },
+    "BenchmarkInspect/anthropic/bytes=20480/c=32": {
+      "trials": 5,
+      "operations": [
+        97,
+        88,
+        97,
+        94,
+        96
+      ],
+      "workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "median": {
+        "ns/op": 1237747.0,
+        "failures": 0.0,
+        "p50_ns": 4927884.0,
+        "p95_ns": 55228129.0,
+        "p99_ns": 80868444.0,
+        "rss_bytes": 10993664.0,
+        "workers": 32.0,
+        "B/op": 105054.0,
+        "allocs/op": 90.0
+      },
+      "ns_op_range": [
+        1235595.0,
+        1250121.0
+      ]
+    },
+    "BenchmarkInspect/anthropic/bytes=20480/c=8": {
+      "trials": 5,
+      "operations": [
+        96,
+        94,
+        94,
+        92,
+        88
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 1236651.0,
+        "failures": 0.0,
+        "p50_ns": 4867136.0,
+        "p95_ns": 24932598.0,
+        "p99_ns": 35292631.0,
+        "rss_bytes": 9961472.0,
+        "workers": 8.0,
+        "B/op": 92904.0,
+        "allocs/op": 86.0
+      },
+      "ns_op_range": [
+        1224472.0,
+        1256533.0
+      ]
+    },
+    "BenchmarkInspect/anthropic/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        2,
+        3,
+        3,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 49717877.0,
+        "failures": 0.0,
+        "p50_ns": 49693631.0,
+        "p95_ns": 49693631.0,
+        "p99_ns": 49693631.0,
+        "rss_bytes": 9179136.0,
+        "workers": 1.0,
+        "B/op": 792021.0,
+        "allocs/op": 119.0
+      },
+      "ns_op_range": [
+        48986461.0,
+        50167659.0
+      ]
+    },
+    "BenchmarkInspect/anthropic/bytes=204800/c=32": {
+      "trials": 5,
+      "operations": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 13178024.0,
+        "failures": 0.0,
+        "p50_ns": 92198397.0,
+        "p95_ns": 101090480.0,
+        "p99_ns": 101090480.0,
+        "rss_bytes": 12492800.0,
+        "workers": 8.0,
+        "B/op": 799084.0,
+        "allocs/op": 122.0
+      },
+      "ns_op_range": [
+        12835680.0,
+        14419648.0
+      ]
+    },
+    "BenchmarkInspect/anthropic/bytes=204800/c=8": {
+      "trials": 5,
+      "operations": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 13791588.0,
+        "failures": 0.0,
+        "p50_ns": 85150944.0,
+        "p95_ns": 97945137.0,
+        "p99_ns": 97945137.0,
+        "rss_bytes": 12611584.0,
+        "workers": 8.0,
+        "B/op": 809423.0,
+        "allocs/op": 125.0
+      },
+      "ns_op_range": [
+        13688755.0,
+        14293723.0
+      ]
+    },
+    "BenchmarkInspect/anthropic/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2015384573.0,
+        "failures": 0.0,
+        "p50_ns": 2015372061.0,
+        "p95_ns": 2015372061.0,
+        "p99_ns": 2015372061.0,
+        "rss_bytes": 57196544.0,
+        "workers": 1.0,
+        "B/op": 42333144.0,
+        "allocs/op": 264.0
+      },
+      "ns_op_range": [
+        2000874146.0,
+        2033907726.0
+      ]
+    },
+    "BenchmarkInspect/anthropic/bytes=8388608/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2018902302.0,
+        "failures": 0.0,
+        "p50_ns": 2018888995.0,
+        "p95_ns": 2018888995.0,
+        "p99_ns": 2018888995.0,
+        "rss_bytes": 57511936.0,
+        "workers": 1.0,
+        "B/op": 42333496.0,
+        "allocs/op": 268.0
+      },
+      "ns_op_range": [
+        2009407598.0,
+        2047085891.0
+      ]
+    },
+    "BenchmarkInspect/anthropic/bytes=8388608/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2013080423.0,
+        "failures": 0.0,
+        "p50_ns": 2013067194.0,
+        "p95_ns": 2013067194.0,
+        "p99_ns": 2013067194.0,
+        "rss_bytes": 57368576.0,
+        "workers": 1.0,
+        "B/op": 42250016.0,
+        "allocs/op": 229.0
+      },
+      "ns_op_range": [
+        2000332227.0,
+        2027975189.0
+      ]
+    },
+    "BenchmarkInspect/bedrock-converse/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 252663333.0,
+        "failures": 0.0,
+        "p50_ns": 252645699.0,
+        "p95_ns": 252645699.0,
+        "p99_ns": 252645699.0,
+        "rss_bytes": 13996032.0,
+        "workers": 1.0,
+        "B/op": 5633920.0,
+        "allocs/op": 275.0
+      },
+      "ns_op_range": [
+        250099450.0,
+        257434431.0
+      ]
+    },
+    "BenchmarkInspect/bedrock-converse/bytes=1048576/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 252164016.0,
+        "failures": 0.0,
+        "p50_ns": 252149407.0,
+        "p95_ns": 252149407.0,
+        "p99_ns": 252149407.0,
+        "rss_bytes": 13352960.0,
+        "workers": 1.0,
+        "B/op": 5467664.0,
+        "allocs/op": 205.0
+      },
+      "ns_op_range": [
+        250122803.0,
+        252853067.0
+      ]
+    },
+    "BenchmarkInspect/bedrock-converse/bytes=1048576/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 249657411.0,
+        "failures": 0.0,
+        "p50_ns": 249644059.0,
+        "p95_ns": 249644059.0,
+        "p99_ns": 249644059.0,
+        "rss_bytes": 14045184.0,
+        "workers": 1.0,
+        "B/op": 5501480.0,
+        "allocs/op": 207.0
+      },
+      "ns_op_range": [
+        249364806.0,
+        252745770.0
+      ]
+    },
+    "BenchmarkInspect/bedrock-converse/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        24,
+        24,
+        24,
+        24,
+        24
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 4870271.0,
+        "failures": 0.0,
+        "p50_ns": 4830619.0,
+        "p95_ns": 4894086.0,
+        "p99_ns": 4911313.0,
+        "rss_bytes": 8855552.0,
+        "workers": 1.0,
+        "B/op": 98316.0,
+        "allocs/op": 96.0
+      },
+      "ns_op_range": [
+        4836693.0,
+        4914295.0
+      ]
+    },
+    "BenchmarkInspect/bedrock-converse/bytes=20480/c=32": {
+      "trials": 5,
+      "operations": [
+        92,
+        92,
+        91,
+        97,
+        97
+      ],
+      "workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "median": {
+        "ns/op": 1240329.0,
+        "failures": 0.0,
+        "p50_ns": 4909330.0,
+        "p95_ns": 61741062.0,
+        "p99_ns": 82417917.0,
+        "rss_bytes": 11890688.0,
+        "workers": 32.0,
+        "B/op": 107843.0,
+        "allocs/op": 99.0
+      },
+      "ns_op_range": [
+        1233388.0,
+        1250328.0
+      ]
+    },
+    "BenchmarkInspect/bedrock-converse/bytes=20480/c=8": {
+      "trials": 5,
+      "operations": [
+        96,
+        94,
+        96,
+        94,
+        97
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 1243452.0,
+        "failures": 0.0,
+        "p50_ns": 4875793.0,
+        "p95_ns": 25005889.0,
+        "p99_ns": 38626221.0,
+        "rss_bytes": 10354688.0,
+        "workers": 8.0,
+        "B/op": 95272.0,
+        "allocs/op": 94.0
+      },
+      "ns_op_range": [
+        1230396.0,
+        1257708.0
+      ]
+    },
+    "BenchmarkInspect/bedrock-converse/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 48737473.0,
+        "failures": 0.0,
+        "p50_ns": 48741866.0,
+        "p95_ns": 48741866.0,
+        "p99_ns": 48741866.0,
+        "rss_bytes": 9404416.0,
+        "workers": 1.0,
+        "B/op": 761306.0,
+        "allocs/op": 111.0
+      },
+      "ns_op_range": [
+        48266350.0,
+        49440198.0
+      ]
+    },
+    "BenchmarkInspect/bedrock-converse/bytes=204800/c=32": {
+      "trials": 5,
+      "operations": [
+        8,
+        8,
+        8,
+        7,
+        7
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        7.0,
+        7.0
+      ],
+      "median": {
+        "ns/op": 13935354.0,
+        "failures": 0.0,
+        "p50_ns": 89541378.0,
+        "p95_ns": 99624196.0,
+        "p99_ns": 99624196.0,
+        "rss_bytes": 12926976.0,
+        "workers": 8.0,
+        "B/op": 798558.0,
+        "allocs/op": 128.0
+      },
+      "ns_op_range": [
+        12836078.0,
+        14510870.0
+      ]
+    },
+    "BenchmarkInspect/bedrock-converse/bytes=204800/c=8": {
+      "trials": 5,
+      "operations": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 13222853.0,
+        "failures": 0.0,
+        "p50_ns": 91464495.0,
+        "p95_ns": 101683228.0,
+        "p99_ns": 101683228.0,
+        "rss_bytes": 12726272.0,
+        "workers": 8.0,
+        "B/op": 815539.0,
+        "allocs/op": 133.0
+      },
+      "ns_op_range": [
+        12658733.0,
+        13840918.0
+      ]
+    },
+    "BenchmarkInspect/bedrock-converse/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2022787468.0,
+        "failures": 0.0,
+        "p50_ns": 2022773004.0,
+        "p95_ns": 2022773004.0,
+        "p99_ns": 2022773004.0,
+        "rss_bytes": 55746560.0,
+        "workers": 1.0,
+        "B/op": 42370928.0,
+        "allocs/op": 286.0
+      },
+      "ns_op_range": [
+        2018432663.0,
+        2038787570.0
+      ]
+    },
+    "BenchmarkInspect/bedrock-converse/bytes=8388608/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2020779237.0,
+        "failures": 0.0,
+        "p50_ns": 2020765287.0,
+        "p95_ns": 2020765287.0,
+        "p99_ns": 2020765287.0,
+        "rss_bytes": 55734272.0,
+        "workers": 1.0,
+        "B/op": 42334784.0,
+        "allocs/op": 286.0
+      },
+      "ns_op_range": [
+        2007195000.0,
+        2031089686.0
+      ]
+    },
+    "BenchmarkInspect/bedrock-converse/bytes=8388608/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2009682129.0,
+        "failures": 0.0,
+        "p50_ns": 2009668289.0,
+        "p95_ns": 2009668289.0,
+        "p99_ns": 2009668289.0,
+        "rss_bytes": 55742464.0,
+        "workers": 1.0,
+        "B/op": 42334256.0,
+        "allocs/op": 280.0
+      },
+      "ns_op_range": [
+        2008041147.0,
+        2034878280.0
+      ]
+    },
+    "BenchmarkInspect/bedrock/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 252411122.0,
+        "failures": 0.0,
+        "p50_ns": 252398971.0,
+        "p95_ns": 252398971.0,
+        "p99_ns": 252398971.0,
+        "rss_bytes": 13197312.0,
+        "workers": 1.0,
+        "B/op": 5632344.0,
+        "allocs/op": 252.0
+      },
+      "ns_op_range": [
+        251429688.0,
+        256168314.0
+      ]
+    },
+    "BenchmarkInspect/bedrock/bytes=1048576/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 252830249.0,
+        "failures": 0.0,
+        "p50_ns": 252816801.0,
+        "p95_ns": 252816801.0,
+        "p99_ns": 252816801.0,
+        "rss_bytes": 13430784.0,
+        "workers": 1.0,
+        "B/op": 5506360.0,
+        "allocs/op": 204.0
+      },
+      "ns_op_range": [
+        250653393.0,
+        254662309.0
+      ]
+    },
+    "BenchmarkInspect/bedrock/bytes=1048576/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 252949269.0,
+        "failures": 0.0,
+        "p50_ns": 252936233.0,
+        "p95_ns": 252936233.0,
+        "p99_ns": 252936233.0,
+        "rss_bytes": 13504512.0,
+        "workers": 1.0,
+        "B/op": 5595160.0,
+        "allocs/op": 246.0
+      },
+      "ns_op_range": [
+        250512445.0,
+        261163062.0
+      ]
+    },
+    "BenchmarkInspect/bedrock/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        24,
+        24,
+        24,
+        24,
+        24
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 4803962.0,
+        "failures": 0.0,
+        "p50_ns": 4767643.0,
+        "p95_ns": 4831167.0,
+        "p99_ns": 4837364.0,
+        "rss_bytes": 8773632.0,
+        "workers": 1.0,
+        "B/op": 96996.0,
+        "allocs/op": 87.0
+      },
+      "ns_op_range": [
+        4730435.0,
+        4837438.0
+      ]
+    },
+    "BenchmarkInspect/bedrock/bytes=20480/c=32": {
+      "trials": 5,
+      "operations": [
+        94,
+        91,
+        93,
+        96,
+        91
+      ],
+      "workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "median": {
+        "ns/op": 1250303.0,
+        "failures": 0.0,
+        "p50_ns": 4956479.0,
+        "p95_ns": 70861523.0,
+        "p99_ns": 89123249.0,
+        "rss_bytes": 11849728.0,
+        "workers": 32.0,
+        "B/op": 106075.0,
+        "allocs/op": 90.0
+      },
+      "ns_op_range": [
+        1234568.0,
+        1258617.0
+      ]
+    },
+    "BenchmarkInspect/bedrock/bytes=20480/c=8": {
+      "trials": 5,
+      "operations": [
+        98,
+        97,
+        96,
+        88,
+        94
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 1248428.0,
+        "failures": 0.0,
+        "p50_ns": 4913530.0,
+        "p95_ns": 25021013.0,
+        "p99_ns": 43256307.0,
+        "rss_bytes": 10416128.0,
+        "workers": 8.0,
+        "B/op": 93222.0,
+        "allocs/op": 85.0
+      },
+      "ns_op_range": [
+        1239135.0,
+        1258626.0
+      ]
+    },
+    "BenchmarkInspect/bedrock/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        3,
+        3,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50079356.0,
+        "failures": 0.0,
+        "p50_ns": 50139660.0,
+        "p95_ns": 50139660.0,
+        "p99_ns": 50139660.0,
+        "rss_bytes": 9269248.0,
+        "workers": 1.0,
+        "B/op": 774725.0,
+        "allocs/op": 106.0
+      },
+      "ns_op_range": [
+        49300974.0,
+        50947049.0
+      ]
+    },
+    "BenchmarkInspect/bedrock/bytes=204800/c=32": {
+      "trials": 5,
+      "operations": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 13567942.0,
+        "failures": 0.0,
+        "p50_ns": 92361175.0,
+        "p95_ns": 100536912.0,
+        "p99_ns": 100536912.0,
+        "rss_bytes": 12582912.0,
+        "workers": 8.0,
+        "B/op": 802162.0,
+        "allocs/op": 119.0
+      },
+      "ns_op_range": [
+        13191921.0,
+        14025120.0
+      ]
+    },
+    "BenchmarkInspect/bedrock/bytes=204800/c=8": {
+      "trials": 5,
+      "operations": [
+        7,
+        8,
+        8,
+        8,
+        8
+      ],
+      "workers": [
+        7.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 13456015.0,
+        "failures": 0.0,
+        "p50_ns": 89640042.0,
+        "p95_ns": 101456696.0,
+        "p99_ns": 101456696.0,
+        "rss_bytes": 12554240.0,
+        "workers": 8.0,
+        "B/op": 823685.0,
+        "allocs/op": 129.0
+      },
+      "ns_op_range": [
+        12971787.0,
+        14916300.0
+      ]
+    },
+    "BenchmarkInspect/bedrock/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2025476504.0,
+        "failures": 0.0,
+        "p50_ns": 2025462693.0,
+        "p95_ns": 2025462693.0,
+        "p99_ns": 2025462693.0,
+        "rss_bytes": 57712640.0,
+        "workers": 1.0,
+        "B/op": 42333320.0,
+        "allocs/op": 266.0
+      },
+      "ns_op_range": [
+        2022080519.0,
+        2037872366.0
+      ]
+    },
+    "BenchmarkInspect/bedrock/bytes=8388608/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2027635627.0,
+        "failures": 0.0,
+        "p50_ns": 2027620870.0,
+        "p95_ns": 2027620870.0,
+        "p99_ns": 2027620870.0,
+        "rss_bytes": 57716736.0,
+        "workers": 1.0,
+        "B/op": 42333848.0,
+        "allocs/op": 272.0
+      },
+      "ns_op_range": [
+        1993983097.0,
+        2046161824.0
+      ]
+    },
+    "BenchmarkInspect/bedrock/bytes=8388608/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2021817817.0,
+        "failures": 0.0,
+        "p50_ns": 2021804596.0,
+        "p95_ns": 2021804596.0,
+        "p99_ns": 2021804596.0,
+        "rss_bytes": 57663488.0,
+        "workers": 1.0,
+        "B/op": 42333672.0,
+        "allocs/op": 270.0
+      },
+      "ns_op_range": [
+        2006238333.0,
+        2058999567.0
+      ]
+    },
+    "BenchmarkInspect/openai/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 250725081.0,
+        "failures": 0.0,
+        "p50_ns": 250710476.0,
+        "p95_ns": 250710476.0,
+        "p99_ns": 250710476.0,
+        "rss_bytes": 13217792.0,
+        "workers": 1.0,
+        "B/op": 5392184.0,
+        "allocs/op": 175.0
+      },
+      "ns_op_range": [
+        248458909.0,
+        253713220.0
+      ]
+    },
+    "BenchmarkInspect/openai/bytes=1048576/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 253689334.0,
+        "failures": 0.0,
+        "p50_ns": 253675064.0,
+        "p95_ns": 253675064.0,
+        "p99_ns": 253675064.0,
+        "rss_bytes": 13242368.0,
+        "workers": 1.0,
+        "B/op": 5678640.0,
+        "allocs/op": 285.0
+      },
+      "ns_op_range": [
+        252595403.0,
+        257639390.0
+      ]
+    },
+    "BenchmarkInspect/openai/bytes=1048576/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 254264751.0,
+        "failures": 0.0,
+        "p50_ns": 254254581.0,
+        "p95_ns": 254254581.0,
+        "p99_ns": 254254581.0,
+        "rss_bytes": 12517376.0,
+        "workers": 1.0,
+        "B/op": 5632632.0,
+        "allocs/op": 257.0
+      },
+      "ns_op_range": [
+        252962077.0,
+        256116511.0
+      ]
+    },
+    "BenchmarkInspect/openai/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        25,
+        24,
+        24,
+        24,
+        24
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 4756490.0,
+        "failures": 0.0,
+        "p50_ns": 4741557.0,
+        "p95_ns": 4816284.0,
+        "p99_ns": 4820976.0,
+        "rss_bytes": 8577024.0,
+        "workers": 1.0,
+        "B/op": 97050.0,
+        "allocs/op": 87.0
+      },
+      "ns_op_range": [
+        4728443.0,
+        4842769.0
+      ]
+    },
+    "BenchmarkInspect/openai/bytes=20480/c=32": {
+      "trials": 5,
+      "operations": [
+        96,
+        94,
+        96,
+        92,
+        92
+      ],
+      "workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "median": {
+        "ns/op": 1250737.0,
+        "failures": 0.0,
+        "p50_ns": 4970128.0,
+        "p95_ns": 75434356.0,
+        "p99_ns": 88692251.0,
+        "rss_bytes": 11591680.0,
+        "workers": 32.0,
+        "B/op": 106183.0,
+        "allocs/op": 90.0
+      },
+      "ns_op_range": [
+        1236538.0,
+        1267980.0
+      ]
+    },
+    "BenchmarkInspect/openai/bytes=20480/c=8": {
+      "trials": 5,
+      "operations": [
+        97,
+        90,
+        96,
+        96,
+        93
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 1242926.0,
+        "failures": 0.0,
+        "p50_ns": 4877967.0,
+        "p95_ns": 27897821.0,
+        "p99_ns": 35077758.0,
+        "rss_bytes": 10227712.0,
+        "workers": 8.0,
+        "B/op": 93203.0,
+        "allocs/op": 86.0
+      },
+      "ns_op_range": [
+        1222466.0,
+        1259999.0
+      ]
+    },
+    "BenchmarkInspect/openai/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 49547212.0,
+        "failures": 0.0,
+        "p50_ns": 49546678.0,
+        "p95_ns": 49546678.0,
+        "p99_ns": 49546678.0,
+        "rss_bytes": 9269248.0,
+        "workers": 1.0,
+        "B/op": 774725.0,
+        "allocs/op": 106.0
+      },
+      "ns_op_range": [
+        48879863.0,
+        49602750.0
+      ]
+    },
+    "BenchmarkInspect/openai/bytes=204800/c=32": {
+      "trials": 5,
+      "operations": [
+        8,
+        8,
+        8,
+        7,
+        8
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        7.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 13757905.0,
+        "failures": 0.0,
+        "p50_ns": 89708068.0,
+        "p95_ns": 105153147.0,
+        "p99_ns": 105153147.0,
+        "rss_bytes": 12460032.0,
+        "workers": 8.0,
+        "B/op": 797586.0,
+        "allocs/op": 118.0
+      },
+      "ns_op_range": [
+        13621402.0,
+        14511466.0
+      ]
+    },
+    "BenchmarkInspect/openai/bytes=204800/c=8": {
+      "trials": 5,
+      "operations": [
+        8,
+        8,
+        7,
+        8,
+        8
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        7.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 14068718.0,
+        "failures": 0.0,
+        "p50_ns": 81359002.0,
+        "p95_ns": 100192667.0,
+        "p99_ns": 100192667.0,
+        "rss_bytes": 12546048.0,
+        "workers": 8.0,
+        "B/op": 797524.0,
+        "allocs/op": 118.0
+      },
+      "ns_op_range": [
+        13768035.0,
+        15368131.0
+      ]
+    },
+    "BenchmarkInspect/openai/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2022485598.0,
+        "failures": 0.0,
+        "p50_ns": 2022473767.0,
+        "p95_ns": 2022473767.0,
+        "p99_ns": 2022473767.0,
+        "rss_bytes": 54714368.0,
+        "workers": 1.0,
+        "B/op": 42333320.0,
+        "allocs/op": 266.0
+      },
+      "ns_op_range": [
+        2013874553.0,
+        2042202741.0
+      ]
+    },
+    "BenchmarkInspect/openai/bytes=8388608/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2021512111.0,
+        "failures": 0.0,
+        "p50_ns": 2021498650.0,
+        "p95_ns": 2021498650.0,
+        "p99_ns": 2021498650.0,
+        "rss_bytes": 54575104.0,
+        "workers": 1.0,
+        "B/op": 42333496.0,
+        "allocs/op": 268.0
+      },
+      "ns_op_range": [
+        2007371190.0,
+        2040393525.0
+      ]
+    },
+    "BenchmarkInspect/openai/bytes=8388608/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2026237852.0,
+        "failures": 0.0,
+        "p50_ns": 2026226581.0,
+        "p95_ns": 2026226581.0,
+        "p99_ns": 2026226581.0,
+        "rss_bytes": 54358016.0,
+        "workers": 1.0,
+        "B/op": 42333496.0,
+        "allocs/op": 268.0
+      },
+      "ns_op_range": [
+        2013262012.0,
+        2036828863.0
+      ]
+    },
+    "BenchmarkInspect/responses/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 251945972.0,
+        "failures": 0.0,
+        "p50_ns": 251932527.0,
+        "p95_ns": 251932527.0,
+        "p99_ns": 251932527.0,
+        "rss_bytes": 13705216.0,
+        "workers": 1.0,
+        "B/op": 5594912.0,
+        "allocs/op": 232.0
+      },
+      "ns_op_range": [
+        250582260.0,
+        259468676.0
+      ]
+    },
+    "BenchmarkInspect/responses/bytes=1048576/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 253578664.0,
+        "failures": 0.0,
+        "p50_ns": 253568144.0,
+        "p95_ns": 253568144.0,
+        "p99_ns": 253568144.0,
+        "rss_bytes": 13258752.0,
+        "workers": 1.0,
+        "B/op": 5386024.0,
+        "allocs/op": 153.0
+      },
+      "ns_op_range": [
+        247823867.0,
+        254558652.0
+      ]
+    },
+    "BenchmarkInspect/responses/bytes=1048576/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 252742400.0,
+        "failures": 0.0,
+        "p50_ns": 252731119.0,
+        "p95_ns": 252731119.0,
+        "p99_ns": 252731119.0,
+        "rss_bytes": 13443072.0,
+        "workers": 1.0,
+        "B/op": 5632432.0,
+        "allocs/op": 245.0
+      },
+      "ns_op_range": [
+        249038829.0,
+        254716673.0
+      ]
+    },
+    "BenchmarkInspect/responses/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        25,
+        24,
+        24,
+        25,
+        24
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 4803829.0,
+        "failures": 0.0,
+        "p50_ns": 4785181.0,
+        "p95_ns": 4872359.0,
+        "p99_ns": 4876927.0,
+        "rss_bytes": 8683520.0,
+        "workers": 1.0,
+        "B/op": 98314.0,
+        "allocs/op": 62.0
+      },
+      "ns_op_range": [
+        4725364.0,
+        4881200.0
+      ]
+    },
+    "BenchmarkInspect/responses/bytes=20480/c=32": {
+      "trials": 5,
+      "operations": [
+        93,
+        90,
+        98,
+        88,
+        97
+      ],
+      "workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "median": {
+        "ns/op": 1234532.0,
+        "failures": 0.0,
+        "p50_ns": 4882578.0,
+        "p95_ns": 76688900.0,
+        "p99_ns": 87287237.0,
+        "rss_bytes": 11984896.0,
+        "workers": 32.0,
+        "B/op": 105811.0,
+        "allocs/op": 65.0
+      },
+      "ns_op_range": [
+        1225120.0,
+        1252067.0
+      ]
+    },
+    "BenchmarkInspect/responses/bytes=20480/c=8": {
+      "trials": 5,
+      "operations": [
+        97,
+        87,
+        97,
+        97,
+        94
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 1227418.0,
+        "failures": 0.0,
+        "p50_ns": 4843699.0,
+        "p95_ns": 27126322.0,
+        "p99_ns": 44857060.0,
+        "rss_bytes": 10391552.0,
+        "workers": 8.0,
+        "B/op": 94262.0,
+        "allocs/op": 60.0
+      },
+      "ns_op_range": [
+        1218716.0,
+        1237436.0
+      ]
+    },
+    "BenchmarkInspect/responses/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 49556602.0,
+        "failures": 0.0,
+        "p50_ns": 49579794.0,
+        "p95_ns": 49579794.0,
+        "p99_ns": 49579794.0,
+        "rss_bytes": 9629696.0,
+        "workers": 1.0,
+        "B/op": 816885.0,
+        "allocs/op": 109.0
+      },
+      "ns_op_range": [
+        48879981.0,
+        49870060.0
+      ]
+    },
+    "BenchmarkInspect/responses/bytes=204800/c=32": {
+      "trials": 5,
+      "operations": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 13294079.0,
+        "failures": 0.0,
+        "p50_ns": 89054407.0,
+        "p95_ns": 100616265.0,
+        "p99_ns": 100616265.0,
+        "rss_bytes": 12660736.0,
+        "workers": 8.0,
+        "B/op": 807427.0,
+        "allocs/op": 102.0
+      },
+      "ns_op_range": [
+        12710168.0,
+        14825863.0
+      ]
+    },
+    "BenchmarkInspect/responses/bytes=204800/c=8": {
+      "trials": 5,
+      "operations": [
+        7,
+        8,
+        8,
+        9,
+        8
+      ],
+      "workers": [
+        7.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 14332508.0,
+        "failures": 0.0,
+        "p50_ns": 90229588.0,
+        "p95_ns": 102803050.0,
+        "p99_ns": 102803050.0,
+        "rss_bytes": 12705792.0,
+        "workers": 8.0,
+        "B/op": 817792.0,
+        "allocs/op": 103.0
+      },
+      "ns_op_range": [
+        13197755.0,
+        15621239.0
+      ]
+    },
+    "BenchmarkInspect/responses/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2026997012.0,
+        "failures": 0.0,
+        "p50_ns": 2026983366.0,
+        "p95_ns": 2026983366.0,
+        "p99_ns": 2026983366.0,
+        "rss_bytes": 57602048.0,
+        "workers": 1.0,
+        "B/op": 42333296.0,
+        "allocs/op": 256.0
+      },
+      "ns_op_range": [
+        2016461055.0,
+        2033180440.0
+      ]
+    },
+    "BenchmarkInspect/responses/bytes=8388608/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2035229366.0,
+        "failures": 0.0,
+        "p50_ns": 2035216596.0,
+        "p95_ns": 2035216596.0,
+        "p99_ns": 2035216596.0,
+        "rss_bytes": 57790464.0,
+        "workers": 1.0,
+        "B/op": 42333120.0,
+        "allocs/op": 254.0
+      },
+      "ns_op_range": [
+        2004297637.0,
+        2076737904.0
+      ]
+    },
+    "BenchmarkInspect/responses/bytes=8388608/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2032428247.0,
+        "failures": 0.0,
+        "p50_ns": 2032414976.0,
+        "p95_ns": 2032414976.0,
+        "p99_ns": 2032414976.0,
+        "rss_bytes": 57540608.0,
+        "workers": 1.0,
+        "B/op": 42332944.0,
+        "allocs/op": 252.0
+      },
+      "ns_op_range": [
+        1994532609.0,
+        2068019104.0
+      ]
+    }
+  },
+  "sensitivity-concurrent": {
+    "BenchmarkInspect/responses/bytes=1048576/c=32": {
+      "trials": 5,
+      "operations": [
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ],
+      "median": {
+        "ns/op": 64128808.0,
+        "failures": 0.0,
+        "p50_ns": 974815040.0,
+        "p95_ns": 1130511800.0,
+        "p99_ns": 1160967879.0,
+        "rss_bytes": 92393472.0,
+        "workers": 16.0,
+        "B/op": 5327068.0,
+        "allocs/op": 101.0
+      },
+      "ns_op_range": [
+        63839174.0,
+        64211234.0
+      ]
+    },
+    "BenchmarkInspect/responses/bytes=204800/c=32": {
+      "trials": 5,
+      "operations": [
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "median": {
+        "ns/op": 12543352.0,
+        "failures": 0.0,
+        "p50_ns": 316635256.0,
+        "p95_ns": 384636916.0,
+        "p99_ns": 389508104.0,
+        "rss_bytes": 25276416.0,
+        "workers": 32.0,
+        "B/op": 814442.0,
+        "allocs/op": 95.0
+      },
+      "ns_op_range": [
+        12496948.0,
+        12896080.0
+      ]
+    }
+  },
+  "router": {
+    "BenchmarkRouteRequestInspection/anthropic/block/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 148380826.0,
+        "failures": 0.0,
+        "p50_ns": 148353407.0,
+        "p95_ns": 148353407.0,
+        "p99_ns": 148353407.0,
+        "rss_bytes": 25657344.0,
+        "workers": 1.0,
+        "B/op": 5381872.0,
+        "allocs/op": 190.0
+      },
+      "ns_op_range": [
+        147501546.0,
+        149250087.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/block/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 30249876.0,
+        "failures": 0.0,
+        "p50_ns": 30185333.0,
+        "p95_ns": 30260003.0,
+        "p99_ns": 30260003.0,
+        "rss_bytes": 21278720.0,
+        "workers": 1.0,
+        "B/op": 790450.0,
+        "allocs/op": 151.0
+      },
+      "ns_op_range": [
+        30184830.0,
+        30279842.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/classifier/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 263954106.0,
+        "failures": 0.0,
+        "p50_ns": 263943198.0,
+        "p95_ns": 263943198.0,
+        "p99_ns": 263943198.0,
+        "rss_bytes": 27766784.0,
+        "workers": 1.0,
+        "B/op": 10664472.0,
+        "allocs/op": 300.0
+      },
+      "ns_op_range": [
+        260848497.0,
+        267627007.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/classifier/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50917718.0,
+        "failures": 0.0,
+        "p50_ns": 50390804.0,
+        "p95_ns": 50390804.0,
+        "p99_ns": 50390804.0,
+        "rss_bytes": 20733952.0,
+        "workers": 1.0,
+        "B/op": 1552320.0,
+        "allocs/op": 263.0
+      },
+      "ns_op_range": [
+        50833714.0,
+        51291150.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/enforce/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 256897918.0,
+        "failures": 0.0,
+        "p50_ns": 256878410.0,
+        "p95_ns": 256878410.0,
+        "p99_ns": 256878410.0,
+        "rss_bytes": 24907776.0,
+        "workers": 1.0,
+        "B/op": 5423448.0,
+        "allocs/op": 189.0
+      },
+      "ns_op_range": [
+        255046442.0,
+        260581744.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/enforce/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50218156.0,
+        "failures": 0.0,
+        "p50_ns": 50203031.0,
+        "p95_ns": 50203031.0,
+        "p99_ns": 50203031.0,
+        "rss_bytes": 21065728.0,
+        "workers": 1.0,
+        "B/op": 735048.0,
+        "allocs/op": 111.0
+      },
+      "ns_op_range": [
+        50092050.0,
+        50648038.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/internal/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 255637695.0,
+        "failures": 0.0,
+        "p50_ns": 255614390.0,
+        "p95_ns": 255614390.0,
+        "p99_ns": 255614390.0,
+        "rss_bytes": 25030656.0,
+        "workers": 1.0,
+        "B/op": 5380352.0,
+        "allocs/op": 173.0
+      },
+      "ns_op_range": [
+        253797359.0,
+        258020295.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/internal/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        2,
+        3,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50248446.0,
+        "failures": 0.0,
+        "p50_ns": 50067009.0,
+        "p95_ns": 50067009.0,
+        "p99_ns": 50067009.0,
+        "rss_bytes": 21164032.0,
+        "workers": 1.0,
+        "B/op": 790269.0,
+        "allocs/op": 135.0
+      },
+      "ns_op_range": [
+        50011011.0,
+        50542643.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/mask/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 1062427878.0,
+        "failures": 0.0,
+        "p50_ns": 1062410786.0,
+        "p95_ns": 1062410786.0,
+        "p99_ns": 1062410786.0,
+        "rss_bytes": 27754496.0,
+        "workers": 1.0,
+        "B/op": 35265872.0,
+        "allocs/op": 887.0
+      },
+      "ns_op_range": [
+        1056263683.0,
+        1064585364.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/mask/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 208833728.0,
+        "failures": 0.0,
+        "p50_ns": 208821673.0,
+        "p95_ns": 208821673.0,
+        "p99_ns": 208821673.0,
+        "rss_bytes": 21405696.0,
+        "workers": 1.0,
+        "B/op": 5677400.0,
+        "allocs/op": 710.0
+      },
+      "ns_op_range": [
+        207922327.0,
+        210490930.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/none/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        386505,
+        379353,
+        379140,
+        383458,
+        384944
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 306.8,
+        "failures": 0.0,
+        "p50_ns": 257.0,
+        "p95_ns": 321.0,
+        "p99_ns": 708.0,
+        "rss_bytes": 19439616.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        301.2,
+        308.9
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/none/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        380883,
+        379143,
+        380330,
+        380152,
+        380288
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 304.5,
+        "failures": 0.0,
+        "p50_ns": 255.0,
+        "p95_ns": 333.0,
+        "p99_ns": 741.0,
+        "rss_bytes": 19275776.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        302.5,
+        309.7
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/none/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        387465,
+        383352,
+        380402,
+        378286,
+        380146
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 304.5,
+        "failures": 0.0,
+        "p50_ns": 256.0,
+        "p95_ns": 342.0,
+        "p99_ns": 727.0,
+        "rss_bytes": 19697664.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        300.3,
+        312.8
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/none/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        357685,
+        364600,
+        366152,
+        357979,
+        349911
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 301.4,
+        "failures": 0.0,
+        "p50_ns": 251.0,
+        "p95_ns": 345.0,
+        "p99_ns": 775.0,
+        "rss_bytes": 34430976.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        299.2,
+        304.7
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/shadow/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 257209113.0,
+        "failures": 0.0,
+        "p50_ns": 257184733.0,
+        "p95_ns": 257184733.0,
+        "p99_ns": 257184733.0,
+        "rss_bytes": 24821760.0,
+        "workers": 1.0,
+        "B/op": 5380368.0,
+        "allocs/op": 172.0
+      },
+      "ns_op_range": [
+        253414464.0,
+        259870939.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/shadow/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 49486266.0,
+        "failures": 0.0,
+        "p50_ns": 49311902.0,
+        "p95_ns": 49311902.0,
+        "p99_ns": 49311902.0,
+        "rss_bytes": 19689472.0,
+        "workers": 1.0,
+        "B/op": 748258.0,
+        "allocs/op": 117.0
+      },
+      "ns_op_range": [
+        49140625.0,
+        50233718.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/strict/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 256554245.0,
+        "failures": 0.0,
+        "p50_ns": 256535622.0,
+        "p95_ns": 256535622.0,
+        "p99_ns": 256535622.0,
+        "rss_bytes": 25096192.0,
+        "workers": 1.0,
+        "B/op": 5341240.0,
+        "allocs/op": 182.0
+      },
+      "ns_op_range": [
+        254402328.0,
+        260618457.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/strict/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        3,
+        2,
+        2,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50000202.0,
+        "failures": 0.0,
+        "p50_ns": 49941925.0,
+        "p95_ns": 49941925.0,
+        "p99_ns": 49941925.0,
+        "rss_bytes": 20987904.0,
+        "workers": 1.0,
+        "B/op": 761973.0,
+        "allocs/op": 142.0
+      },
+      "ns_op_range": [
+        49642923.0,
+        50410752.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/block/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 153222162.0,
+        "failures": 0.0,
+        "p50_ns": 153189488.0,
+        "p95_ns": 153189488.0,
+        "p99_ns": 153189488.0,
+        "rss_bytes": 27459584.0,
+        "workers": 1.0,
+        "B/op": 5421912.0,
+        "allocs/op": 210.0
+      },
+      "ns_op_range": [
+        149780626.0,
+        156503791.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/block/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 30504374.0,
+        "failures": 0.0,
+        "p50_ns": 30394898.0,
+        "p95_ns": 30540490.0,
+        "p99_ns": 30540490.0,
+        "rss_bytes": 23871488.0,
+        "workers": 1.0,
+        "B/op": 767432.0,
+        "allocs/op": 142.0
+      },
+      "ns_op_range": [
+        29846807.0,
+        30700606.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/classifier/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 258636460.0,
+        "failures": 0.0,
+        "p50_ns": 258617675.0,
+        "p95_ns": 258617675.0,
+        "p99_ns": 258617675.0,
+        "rss_bytes": 27799552.0,
+        "workers": 1.0,
+        "B/op": 5301248.0,
+        "allocs/op": 179.0
+      },
+      "ns_op_range": [
+        256463910.0,
+        260973053.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/classifier/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        3,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50238632.0,
+        "failures": 0.0,
+        "p50_ns": 50049646.0,
+        "p95_ns": 50049646.0,
+        "p99_ns": 50049646.0,
+        "rss_bytes": 22245376.0,
+        "workers": 1.0,
+        "B/op": 738616.0,
+        "allocs/op": 152.0
+      },
+      "ns_op_range": [
+        50146052.0,
+        50479413.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/enforce/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 260462526.0,
+        "failures": 0.0,
+        "p50_ns": 260441814.0,
+        "p95_ns": 260441814.0,
+        "p99_ns": 260441814.0,
+        "rss_bytes": 27119616.0,
+        "workers": 1.0,
+        "B/op": 5293304.0,
+        "allocs/op": 153.0
+      },
+      "ns_op_range": [
+        255720183.0,
+        262343402.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/enforce/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        3,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50703191.0,
+        "failures": 0.0,
+        "p50_ns": 50528030.0,
+        "p95_ns": 50528030.0,
+        "p99_ns": 50528030.0,
+        "rss_bytes": 23826432.0,
+        "workers": 1.0,
+        "B/op": 735608.0,
+        "allocs/op": 119.0
+      },
+      "ns_op_range": [
+        50140977.0,
+        50753368.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/internal/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 257496420.0,
+        "failures": 0.0,
+        "p50_ns": 257476259.0,
+        "p95_ns": 257476259.0,
+        "p99_ns": 257476259.0,
+        "rss_bytes": 27148288.0,
+        "workers": 1.0,
+        "B/op": 5381720.0,
+        "allocs/op": 193.0
+      },
+      "ns_op_range": [
+        253841698.0,
+        264259501.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/internal/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50255152.0,
+        "failures": 0.0,
+        "p50_ns": 50176630.0,
+        "p95_ns": 50176630.0,
+        "p99_ns": 50176630.0,
+        "rss_bytes": 23875584.0,
+        "workers": 1.0,
+        "B/op": 777000.0,
+        "allocs/op": 143.0
+      },
+      "ns_op_range": [
+        50025428.0,
+        51203013.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/mask/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 1070831402.0,
+        "failures": 0.0,
+        "p50_ns": 1070808420.0,
+        "p95_ns": 1070808420.0,
+        "p99_ns": 1070808420.0,
+        "rss_bytes": 28229632.0,
+        "workers": 1.0,
+        "B/op": 35105720.0,
+        "allocs/op": 867.0
+      },
+      "ns_op_range": [
+        1066700574.0,
+        1076755103.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/mask/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 208525448.0,
+        "failures": 0.0,
+        "p50_ns": 208510925.0,
+        "p95_ns": 208510925.0,
+        "p99_ns": 208510925.0,
+        "rss_bytes": 24600576.0,
+        "workers": 1.0,
+        "B/op": 5721648.0,
+        "allocs/op": 786.0
+      },
+      "ns_op_range": [
+        208091535.0,
+        210775422.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/none/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        383943,
+        380509,
+        381368,
+        379102,
+        381765
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 309.2,
+        "failures": 0.0,
+        "p50_ns": 257.0,
+        "p95_ns": 341.0,
+        "p99_ns": 742.0,
+        "rss_bytes": 25100288.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        307.1,
+        310.4
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/none/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        378897,
+        378862,
+        387108,
+        386310,
+        386637
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 306.0,
+        "failures": 0.0,
+        "p50_ns": 254.0,
+        "p95_ns": 332.0,
+        "p99_ns": 723.0,
+        "rss_bytes": 25174016.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        303.6,
+        308.3
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/none/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        381181,
+        376044,
+        381181,
+        382682,
+        381882
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 306.7,
+        "failures": 0.0,
+        "p50_ns": 255.0,
+        "p95_ns": 339.0,
+        "p99_ns": 760.0,
+        "rss_bytes": 24969216.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        305.2,
+        309.7
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/none/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        346418,
+        364328,
+        366136,
+        348596,
+        360842
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 302.0,
+        "failures": 0.0,
+        "p50_ns": 252.0,
+        "p95_ns": 323.0,
+        "p99_ns": 767.0,
+        "rss_bytes": 36888576.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        301.6,
+        303.6
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/shadow/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 257351236.0,
+        "failures": 0.0,
+        "p50_ns": 257333774.0,
+        "p95_ns": 257333774.0,
+        "p99_ns": 257333774.0,
+        "rss_bytes": 27000832.0,
+        "workers": 1.0,
+        "B/op": 5255160.0,
+        "allocs/op": 129.0
+      },
+      "ns_op_range": [
+        254622512.0,
+        260653843.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/shadow/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50540594.0,
+        "failures": 0.0,
+        "p50_ns": 50330813.0,
+        "p95_ns": 50330813.0,
+        "p99_ns": 50330813.0,
+        "rss_bytes": 22298624.0,
+        "workers": 1.0,
+        "B/op": 735608.0,
+        "allocs/op": 119.0
+      },
+      "ns_op_range": [
+        50016226.0,
+        50649469.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/strict/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 256362872.0,
+        "failures": 0.0,
+        "p50_ns": 256345164.0,
+        "p95_ns": 256345164.0,
+        "p99_ns": 256345164.0,
+        "rss_bytes": 27123712.0,
+        "workers": 1.0,
+        "B/op": 5348024.0,
+        "allocs/op": 212.0
+      },
+      "ns_op_range": [
+        255363068.0,
+        257851764.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/strict/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        3,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50632748.0,
+        "failures": 0.0,
+        "p50_ns": 50541937.0,
+        "p95_ns": 50541937.0,
+        "p99_ns": 50541937.0,
+        "rss_bytes": 23760896.0,
+        "workers": 1.0,
+        "B/op": 738968.0,
+        "allocs/op": 144.0
+      },
+      "ns_op_range": [
+        50012154.0,
+        50665848.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/block/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 150852444.0,
+        "failures": 0.0,
+        "p50_ns": 150829212.0,
+        "p95_ns": 150829212.0,
+        "p99_ns": 150829212.0,
+        "rss_bytes": 26976256.0,
+        "workers": 1.0,
+        "B/op": 5419336.0,
+        "allocs/op": 196.0
+      },
+      "ns_op_range": [
+        148751716.0,
+        152415793.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/block/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 30282182.0,
+        "failures": 0.0,
+        "p50_ns": 30204689.0,
+        "p95_ns": 30243541.0,
+        "p99_ns": 30243541.0,
+        "rss_bytes": 23724032.0,
+        "workers": 1.0,
+        "B/op": 754300.0,
+        "allocs/op": 126.0
+      },
+      "ns_op_range": [
+        30008809.0,
+        30828641.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/classifier/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 262021093.0,
+        "failures": 0.0,
+        "p50_ns": 262008352.0,
+        "p95_ns": 262008352.0,
+        "p99_ns": 262008352.0,
+        "rss_bytes": 29802496.0,
+        "workers": 1.0,
+        "B/op": 10747376.0,
+        "allocs/op": 331.0
+      },
+      "ns_op_range": [
+        261642727.0,
+        264770222.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/classifier/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50892762.0,
+        "failures": 0.0,
+        "p50_ns": 50424431.0,
+        "p95_ns": 50424431.0,
+        "p99_ns": 50424431.0,
+        "rss_bytes": 22679552.0,
+        "workers": 1.0,
+        "B/op": 1530780.0,
+        "allocs/op": 255.0
+      },
+      "ns_op_range": [
+        50458700.0,
+        51682446.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/enforce/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 257080830.0,
+        "failures": 0.0,
+        "p50_ns": 257055516.0,
+        "p95_ns": 257055516.0,
+        "p99_ns": 257055516.0,
+        "rss_bytes": 27541504.0,
+        "workers": 1.0,
+        "B/op": 5423576.0,
+        "allocs/op": 189.0
+      },
+      "ns_op_range": [
+        255468153.0,
+        257869482.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/enforce/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        3,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50124371.0,
+        "failures": 0.0,
+        "p50_ns": 50006577.0,
+        "p95_ns": 50006577.0,
+        "p99_ns": 50006577.0,
+        "rss_bytes": 23781376.0,
+        "workers": 1.0,
+        "B/op": 779312.0,
+        "allocs/op": 134.0
+      },
+      "ns_op_range": [
+        49429807.0,
+        50545441.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/internal/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 257470970.0,
+        "failures": 0.0,
+        "p50_ns": 257451870.0,
+        "p95_ns": 257451870.0,
+        "p99_ns": 257451870.0,
+        "rss_bytes": 27176960.0,
+        "workers": 1.0,
+        "B/op": 5380352.0,
+        "allocs/op": 173.0
+      },
+      "ns_op_range": [
+        254030406.0,
+        260418316.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/internal/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        3,
+        3,
+        3,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50038219.0,
+        "failures": 0.0,
+        "p50_ns": 50128426.0,
+        "p95_ns": 50128426.0,
+        "p99_ns": 50128426.0,
+        "rss_bytes": 23584768.0,
+        "workers": 1.0,
+        "B/op": 775909.0,
+        "allocs/op": 130.0
+      },
+      "ns_op_range": [
+        49997706.0,
+        50572101.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/mask/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 1062872722.0,
+        "failures": 0.0,
+        "p50_ns": 1062853457.0,
+        "p95_ns": 1062853457.0,
+        "p99_ns": 1062853457.0,
+        "rss_bytes": 30298112.0,
+        "workers": 1.0,
+        "B/op": 35323576.0,
+        "allocs/op": 941.0
+      },
+      "ns_op_range": [
+        1059216863.0,
+        1072142252.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/mask/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 208086859.0,
+        "failures": 0.0,
+        "p50_ns": 208068081.0,
+        "p95_ns": 208068081.0,
+        "p99_ns": 208068081.0,
+        "rss_bytes": 22700032.0,
+        "workers": 1.0,
+        "B/op": 5678016.0,
+        "allocs/op": 706.0
+      },
+      "ns_op_range": [
+        206535727.0,
+        209521383.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/none/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        380443,
+        373753,
+        384928,
+        382684,
+        377500
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 308.8,
+        "failures": 0.0,
+        "p50_ns": 256.0,
+        "p95_ns": 344.0,
+        "p99_ns": 710.0,
+        "rss_bytes": 25243648.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        305.0,
+        309.9
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/none/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        383072,
+        380856,
+        383043,
+        383228,
+        379180
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 307.6,
+        "failures": 0.0,
+        "p50_ns": 253.0,
+        "p95_ns": 345.0,
+        "p99_ns": 809.0,
+        "rss_bytes": 25083904.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        303.5,
+        308.8
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/none/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        381522,
+        380612,
+        383650,
+        383083,
+        382468
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 308.4,
+        "failures": 0.0,
+        "p50_ns": 254.0,
+        "p95_ns": 340.0,
+        "p99_ns": 735.0,
+        "rss_bytes": 24539136.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        308.1,
+        309.8
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/none/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        357393,
+        359539,
+        357207,
+        349950,
+        348289
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 303.7,
+        "failures": 0.0,
+        "p50_ns": 251.0,
+        "p95_ns": 340.0,
+        "p99_ns": 813.0,
+        "rss_bytes": 36868096.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        302.0,
+        305.6
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/shadow/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 257577367.0,
+        "failures": 0.0,
+        "p50_ns": 257552508.0,
+        "p95_ns": 257552508.0,
+        "p99_ns": 257552508.0,
+        "rss_bytes": 27230208.0,
+        "workers": 1.0,
+        "B/op": 5380368.0,
+        "allocs/op": 172.0
+      },
+      "ns_op_range": [
+        253019936.0,
+        259006314.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/shadow/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        3,
+        3,
+        2,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 49934961.0,
+        "failures": 0.0,
+        "p50_ns": 49913571.0,
+        "p95_ns": 49913571.0,
+        "p99_ns": 49913571.0,
+        "rss_bytes": 22052864.0,
+        "workers": 1.0,
+        "B/op": 748258.0,
+        "allocs/op": 117.0
+      },
+      "ns_op_range": [
+        49765930.0,
+        50077862.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/strict/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 256966180.0,
+        "failures": 0.0,
+        "p50_ns": 256949967.0,
+        "p95_ns": 256949967.0,
+        "p99_ns": 256949967.0,
+        "rss_bytes": 27402240.0,
+        "workers": 1.0,
+        "B/op": 5340648.0,
+        "allocs/op": 180.0
+      },
+      "ns_op_range": [
+        256116162.0,
+        259451285.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/strict/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        3,
+        2,
+        2,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50142913.0,
+        "failures": 0.0,
+        "p50_ns": 49923257.0,
+        "p95_ns": 49923257.0,
+        "p99_ns": 49923257.0,
+        "rss_bytes": 23711744.0,
+        "workers": 1.0,
+        "B/op": 794578.0,
+        "allocs/op": 163.0
+      },
+      "ns_op_range": [
+        49492281.0,
+        50339335.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/block/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 149992467.0,
+        "failures": 0.0,
+        "p50_ns": 149968518.0,
+        "p95_ns": 149968518.0,
+        "p99_ns": 149968518.0,
+        "rss_bytes": 26214400.0,
+        "workers": 1.0,
+        "B/op": 5387224.0,
+        "allocs/op": 199.0
+      },
+      "ns_op_range": [
+        148496174.0,
+        152067558.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/block/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 30132770.0,
+        "failures": 0.0,
+        "p50_ns": 30111026.0,
+        "p95_ns": 30237171.0,
+        "p99_ns": 30237171.0,
+        "rss_bytes": 21762048.0,
+        "workers": 1.0,
+        "B/op": 768074.0,
+        "allocs/op": 136.0
+      },
+      "ns_op_range": [
+        30092854.0,
+        30733709.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/classifier/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 263047625.0,
+        "failures": 0.0,
+        "p50_ns": 263039818.0,
+        "p95_ns": 263039818.0,
+        "p99_ns": 263039818.0,
+        "rss_bytes": 27557888.0,
+        "workers": 1.0,
+        "B/op": 10753432.0,
+        "allocs/op": 345.0
+      },
+      "ns_op_range": [
+        260645674.0,
+        263646714.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/classifier/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 51180421.0,
+        "failures": 0.0,
+        "p50_ns": 51027132.0,
+        "p95_ns": 51027132.0,
+        "p99_ns": 51027132.0,
+        "rss_bytes": 20353024.0,
+        "workers": 1.0,
+        "B/op": 1546312.0,
+        "allocs/op": 256.0
+      },
+      "ns_op_range": [
+        50943421.0,
+        51513977.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/enforce/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 253131147.0,
+        "failures": 0.0,
+        "p50_ns": 253111354.0,
+        "p95_ns": 253111354.0,
+        "p99_ns": 253111354.0,
+        "rss_bytes": 25686016.0,
+        "workers": 1.0,
+        "B/op": 5380368.0,
+        "allocs/op": 172.0
+      },
+      "ns_op_range": [
+        252542288.0,
+        257795842.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/enforce/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        3,
+        3,
+        3,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 49927505.0,
+        "failures": 0.0,
+        "p50_ns": 49789079.0,
+        "p95_ns": 49789079.0,
+        "p99_ns": 49789079.0,
+        "rss_bytes": 20557824.0,
+        "workers": 1.0,
+        "B/op": 775925.0,
+        "allocs/op": 127.0
+      },
+      "ns_op_range": [
+        49338802.0,
+        51122085.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/internal/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 255511582.0,
+        "failures": 0.0,
+        "p50_ns": 255493385.0,
+        "p95_ns": 255493385.0,
+        "p99_ns": 255493385.0,
+        "rss_bytes": 25743360.0,
+        "workers": 1.0,
+        "B/op": 5374408.0,
+        "allocs/op": 164.0
+      },
+      "ns_op_range": [
+        253042023.0,
+        257044917.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/internal/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        3,
+        3,
+        2,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50156106.0,
+        "failures": 0.0,
+        "p50_ns": 50038030.0,
+        "p95_ns": 50038030.0,
+        "p99_ns": 50038030.0,
+        "rss_bytes": 20729856.0,
+        "workers": 1.0,
+        "B/op": 762602.0,
+        "allocs/op": 126.0
+      },
+      "ns_op_range": [
+        49912426.0,
+        50595310.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/mask/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 1061850987.0,
+        "failures": 0.0,
+        "p50_ns": 1061827018.0,
+        "p95_ns": 1061827018.0,
+        "p99_ns": 1061827018.0,
+        "rss_bytes": 27066368.0,
+        "workers": 1.0,
+        "B/op": 35363648.0,
+        "allocs/op": 926.0
+      },
+      "ns_op_range": [
+        1059495256.0,
+        1068099569.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/mask/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 209230271.0,
+        "failures": 0.0,
+        "p50_ns": 209215325.0,
+        "p95_ns": 209215325.0,
+        "p99_ns": 209215325.0,
+        "rss_bytes": 21909504.0,
+        "workers": 1.0,
+        "B/op": 5645216.0,
+        "allocs/op": 702.0
+      },
+      "ns_op_range": [
+        207431627.0,
+        211005038.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/none/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        374810,
+        377432,
+        376458,
+        383008,
+        379510
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 311.7,
+        "failures": 0.0,
+        "p50_ns": 259.0,
+        "p95_ns": 340.0,
+        "p99_ns": 746.0,
+        "rss_bytes": 24018944.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        310.1,
+        313.3
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/none/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        379122,
+        384044,
+        376627,
+        383480,
+        382634
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 307.1,
+        "failures": 0.0,
+        "p50_ns": 255.0,
+        "p95_ns": 341.0,
+        "p99_ns": 710.0,
+        "rss_bytes": 23265280.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        306.9,
+        309.2
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/none/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        381031,
+        383581,
+        378735,
+        386391,
+        379550
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 308.1,
+        "failures": 0.0,
+        "p50_ns": 254.0,
+        "p95_ns": 332.0,
+        "p99_ns": 602.0,
+        "rss_bytes": 23568384.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        306.8,
+        311.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/none/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        354124,
+        361784,
+        358154,
+        360387,
+        340194
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 303.3,
+        "failures": 0.0,
+        "p50_ns": 253.0,
+        "p95_ns": 340.0,
+        "p99_ns": 789.0,
+        "rss_bytes": 35876864.0,
+        "workers": 1.0,
+        "B/op": 112.0,
+        "allocs/op": 1.0
+      },
+      "ns_op_range": [
+        303.2,
+        305.8
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/shadow/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 256605189.0,
+        "failures": 0.0,
+        "p50_ns": 256579472.0,
+        "p95_ns": 256579472.0,
+        "p99_ns": 256579472.0,
+        "rss_bytes": 25587712.0,
+        "workers": 1.0,
+        "B/op": 5380368.0,
+        "allocs/op": 172.0
+      },
+      "ns_op_range": [
+        252596317.0,
+        257334002.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/shadow/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        3,
+        3,
+        3,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50121945.0,
+        "failures": 0.0,
+        "p50_ns": 50009978.0,
+        "p95_ns": 50009978.0,
+        "p99_ns": 50009978.0,
+        "rss_bytes": 20537344.0,
+        "workers": 1.0,
+        "B/op": 766757.0,
+        "allocs/op": 129.0
+      },
+      "ns_op_range": [
+        50003197.0,
+        50214569.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/strict/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 256340887.0,
+        "failures": 0.0,
+        "p50_ns": 256323565.0,
+        "p95_ns": 256323565.0,
+        "p99_ns": 256323565.0,
+        "rss_bytes": 25772032.0,
+        "workers": 1.0,
+        "B/op": 5383728.0,
+        "allocs/op": 197.0
+      },
+      "ns_op_range": [
+        252862297.0,
+        257663544.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/strict/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 49937459.0,
+        "failures": 0.0,
+        "p50_ns": 49792785.0,
+        "p95_ns": 49792785.0,
+        "p99_ns": 49792785.0,
+        "rss_bytes": 21786624.0,
+        "workers": 1.0,
+        "B/op": 779285.0,
+        "allocs/op": 154.0
+      },
+      "ns_op_range": [
+        49242978.0,
+        50255896.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/block/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 149459957.0,
+        "failures": 0.0,
+        "p50_ns": 149435801.0,
+        "p95_ns": 149435801.0,
+        "p99_ns": 149435801.0,
+        "rss_bytes": 27082752.0,
+        "workers": 1.0,
+        "B/op": 5386592.0,
+        "allocs/op": 172.0
+      },
+      "ns_op_range": [
+        148282386.0,
+        152760650.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/block/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 30302574.0,
+        "failures": 0.0,
+        "p50_ns": 30290599.0,
+        "p95_ns": 30403701.0,
+        "p99_ns": 30403701.0,
+        "rss_bytes": 23842816.0,
+        "workers": 1.0,
+        "B/op": 795746.0,
+        "allocs/op": 113.0
+      },
+      "ns_op_range": [
+        29845802.0,
+        30537780.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/classifier/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 262847148.0,
+        "failures": 0.0,
+        "p50_ns": 262839475.0,
+        "p95_ns": 262839475.0,
+        "p99_ns": 262839475.0,
+        "rss_bytes": 28221440.0,
+        "workers": 1.0,
+        "B/op": 10662480.0,
+        "allocs/op": 254.0
+      },
+      "ns_op_range": [
+        258118432.0,
+        268276945.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/classifier/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50918941.0,
+        "failures": 0.0,
+        "p50_ns": 50139741.0,
+        "p95_ns": 50139741.0,
+        "p99_ns": 50139741.0,
+        "rss_bytes": 21970944.0,
+        "workers": 1.0,
+        "B/op": 1528460.0,
+        "allocs/op": 200.0
+      },
+      "ns_op_range": [
+        50137842.0,
+        51622146.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/enforce/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 256600174.0,
+        "failures": 0.0,
+        "p50_ns": 256577193.0,
+        "p95_ns": 256577193.0,
+        "p99_ns": 256577193.0,
+        "rss_bytes": 26906624.0,
+        "workers": 1.0,
+        "B/op": 5380552.0,
+        "allocs/op": 167.0
+      },
+      "ns_op_range": [
+        253473544.0,
+        258667600.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/enforce/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        3,
+        2,
+        2,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50136552.0,
+        "failures": 0.0,
+        "p50_ns": 49933292.0,
+        "p95_ns": 49933292.0,
+        "p99_ns": 49933292.0,
+        "rss_bytes": 23871488.0,
+        "workers": 1.0,
+        "B/op": 801568.0,
+        "allocs/op": 133.0
+      },
+      "ns_op_range": [
+        49712362.0,
+        51339887.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/internal/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 257760707.0,
+        "failures": 0.0,
+        "p50_ns": 257746864.0,
+        "p95_ns": 257746864.0,
+        "p99_ns": 257746864.0,
+        "rss_bytes": 27086848.0,
+        "workers": 1.0,
+        "B/op": 5469080.0,
+        "allocs/op": 203.0
+      },
+      "ns_op_range": [
+        254486835.0,
+        260883088.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/internal/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50576354.0,
+        "failures": 0.0,
+        "p50_ns": 50478661.0,
+        "p95_ns": 50478661.0,
+        "p99_ns": 50478661.0,
+        "rss_bytes": 24018944.0,
+        "workers": 1.0,
+        "B/op": 755452.0,
+        "allocs/op": 89.0
+      },
+      "ns_op_range": [
+        49117608.0,
+        50860783.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/mask/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 1060311874.0,
+        "failures": 0.0,
+        "p50_ns": 1060294892.0,
+        "p95_ns": 1060294892.0,
+        "p99_ns": 1060294892.0,
+        "rss_bytes": 28725248.0,
+        "workers": 1.0,
+        "B/op": 35305528.0,
+        "allocs/op": 791.0
+      },
+      "ns_op_range": [
+        1059015017.0,
+        1065894316.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/mask/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 210597599.0,
+        "failures": 0.0,
+        "p50_ns": 210578800.0,
+        "p95_ns": 210578800.0,
+        "p99_ns": 210578800.0,
+        "rss_bytes": 24014848.0,
+        "workers": 1.0,
+        "B/op": 5432392.0,
+        "allocs/op": 477.0
+      },
+      "ns_op_range": [
+        209326909.0,
+        211260598.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 252776732.0,
+        "failures": 0.0,
+        "p50_ns": 252761496.0,
+        "p95_ns": 252761496.0,
+        "p99_ns": 252761496.0,
+        "rss_bytes": 26832896.0,
+        "workers": 1.0,
+        "B/op": 5379560.0,
+        "allocs/op": 149.0
+      },
+      "ns_op_range": [
+        250279906.0,
+        259798029.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 253840676.0,
+        "failures": 0.0,
+        "p50_ns": 253821885.0,
+        "p95_ns": 253821885.0,
+        "p99_ns": 253821885.0,
+        "rss_bytes": 26796032.0,
+        "workers": 1.0,
+        "B/op": 5336480.0,
+        "allocs/op": 132.0
+      },
+      "ns_op_range": [
+        251350988.0,
+        259739945.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 251740122.0,
+        "failures": 0.0,
+        "p50_ns": 251718227.0,
+        "p95_ns": 251718227.0,
+        "p99_ns": 251718227.0,
+        "rss_bytes": 27037696.0,
+        "workers": 1.0,
+        "B/op": 5548848.0,
+        "allocs/op": 218.0
+      },
+      "ns_op_range": [
+        250525151.0,
+        252532699.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        24,
+        24,
+        24,
+        25,
+        24
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 4721094.0,
+        "failures": 0.0,
+        "p50_ns": 4709876.0,
+        "p95_ns": 4751951.0,
+        "p99_ns": 4763030.0,
+        "rss_bytes": 19333120.0,
+        "workers": 1.0,
+        "B/op": 86474.0,
+        "allocs/op": 68.0
+      },
+      "ns_op_range": [
+        4701031.0,
+        4809248.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=20480/c=32": {
+      "trials": 5,
+      "operations": [
+        96,
+        88,
+        94,
+        91,
+        93
+      ],
+      "workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "median": {
+        "ns/op": 1252568.0,
+        "failures": 0.0,
+        "p50_ns": 4997800.0,
+        "p95_ns": 77812178.0,
+        "p99_ns": 82530498.0,
+        "rss_bytes": 23158784.0,
+        "workers": 32.0,
+        "B/op": 107757.0,
+        "allocs/op": 78.0
+      },
+      "ns_op_range": [
+        1245720.0,
+        1259718.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=20480/c=8": {
+      "trials": 5,
+      "operations": [
+        96,
+        96,
+        96,
+        92,
+        92
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 1249469.0,
+        "failures": 0.0,
+        "p50_ns": 4916638.0,
+        "p95_ns": 24944470.0,
+        "p99_ns": 35113859.0,
+        "rss_bytes": 20889600.0,
+        "workers": 8.0,
+        "B/op": 93705.0,
+        "allocs/op": 72.0
+      },
+      "ns_op_range": [
+        1240341.0,
+        1254184.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        2,
+        3,
+        3,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 49682194.0,
+        "failures": 0.0,
+        "p50_ns": 49715370.0,
+        "p95_ns": 49715370.0,
+        "p99_ns": 49715370.0,
+        "rss_bytes": 20574208.0,
+        "workers": 1.0,
+        "B/op": 772720.0,
+        "allocs/op": 92.0
+      },
+      "ns_op_range": [
+        48853980.0,
+        50738136.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=204800/c=32": {
+      "trials": 5,
+      "operations": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 13701671.0,
+        "failures": 0.0,
+        "p50_ns": 91341718.0,
+        "p95_ns": 103393195.0,
+        "p99_ns": 103393195.0,
+        "rss_bytes": 23531520.0,
+        "workers": 8.0,
+        "B/op": 854885.0,
+        "allocs/op": 131.0
+      },
+      "ns_op_range": [
+        13260190.0,
+        13899086.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=204800/c=8": {
+      "trials": 5,
+      "operations": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 13229120.0,
+        "failures": 0.0,
+        "p50_ns": 90325935.0,
+        "p95_ns": 100367204.0,
+        "p99_ns": 100367204.0,
+        "rss_bytes": 23429120.0,
+        "workers": 8.0,
+        "B/op": 820220.0,
+        "allocs/op": 112.0
+      },
+      "ns_op_range": [
+        12805103.0,
+        14985406.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2014786387.0,
+        "failures": 0.0,
+        "p50_ns": 2014768086.0,
+        "p95_ns": 2014768086.0,
+        "p99_ns": 2014768086.0,
+        "rss_bytes": 80773120.0,
+        "workers": 1.0,
+        "B/op": 42110848.0,
+        "allocs/op": 152.0
+      },
+      "ns_op_range": [
+        1994061400.0,
+        2028465510.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=8388608/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2020965684.0,
+        "failures": 0.0,
+        "p50_ns": 2020944230.0,
+        "p95_ns": 2020944230.0,
+        "p99_ns": 2020944230.0,
+        "rss_bytes": 80973824.0,
+        "workers": 1.0,
+        "B/op": 42169384.0,
+        "allocs/op": 205.0
+      },
+      "ns_op_range": [
+        1986217682.0,
+        2050877973.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=8388608/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2045868211.0,
+        "failures": 0.0,
+        "p50_ns": 2045847926.0,
+        "p95_ns": 2045847926.0,
+        "p99_ns": 2045847926.0,
+        "rss_bytes": 80920576.0,
+        "workers": 1.0,
+        "B/op": 42117496.0,
+        "allocs/op": 165.0
+      },
+      "ns_op_range": [
+        2031254734.0,
+        2083762112.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/shadow/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 258161423.0,
+        "failures": 0.0,
+        "p50_ns": 258138268.0,
+        "p95_ns": 258138268.0,
+        "p99_ns": 258138268.0,
+        "rss_bytes": 27308032.0,
+        "workers": 1.0,
+        "B/op": 5375424.0,
+        "allocs/op": 165.0
+      },
+      "ns_op_range": [
+        252586526.0,
+        263295783.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/shadow/bytes=1048576/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 257843143.0,
+        "failures": 0.0,
+        "p50_ns": 257821380.0,
+        "p95_ns": 257821380.0,
+        "p99_ns": 257821380.0,
+        "rss_bytes": 27381760.0,
+        "workers": 1.0,
+        "B/op": 5337648.0,
+        "allocs/op": 152.0
+      },
+      "ns_op_range": [
+        254829665.0,
+        259378727.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/shadow/bytes=1048576/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 257737184.0,
+        "failures": 0.0,
+        "p50_ns": 257718573.0,
+        "p95_ns": 257718573.0,
+        "p99_ns": 257718573.0,
+        "rss_bytes": 26927104.0,
+        "workers": 1.0,
+        "B/op": 5385920.0,
+        "allocs/op": 162.0
+      },
+      "ns_op_range": [
+        255188187.0,
+        260057781.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/shadow/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        3,
+        3,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50276377.0,
+        "failures": 0.0,
+        "p50_ns": 50070750.0,
+        "p95_ns": 50070750.0,
+        "p99_ns": 50070750.0,
+        "rss_bytes": 21848064.0,
+        "workers": 1.0,
+        "B/op": 734344.0,
+        "allocs/op": 90.0
+      },
+      "ns_op_range": [
+        49478171.0,
+        51230130.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/shadow/bytes=204800/c=32": {
+      "trials": 5,
+      "operations": [
+        8,
+        8,
+        7,
+        7,
+        8
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        7.0,
+        7.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 13679702.0,
+        "failures": 0.0,
+        "p50_ns": 89841229.0,
+        "p95_ns": 102169530.0,
+        "p99_ns": 102169530.0,
+        "rss_bytes": 24944640.0,
+        "workers": 8.0,
+        "B/op": 840196.0,
+        "allocs/op": 137.0
+      },
+      "ns_op_range": [
+        13408743.0,
+        14536989.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/shadow/bytes=204800/c=8": {
+      "trials": 5,
+      "operations": [
+        8,
+        7,
+        8,
+        8,
+        8
+      ],
+      "workers": [
+        8.0,
+        7.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 13797000.0,
+        "failures": 0.0,
+        "p50_ns": 92132866.0,
+        "p95_ns": 102779037.0,
+        "p99_ns": 102779037.0,
+        "rss_bytes": 24788992.0,
+        "workers": 8.0,
+        "B/op": 813581.0,
+        "allocs/op": 132.0
+      },
+      "ns_op_range": [
+        13360767.0,
+        14448161.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/strict/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 256068975.0,
+        "failures": 0.0,
+        "p50_ns": 256046438.0,
+        "p95_ns": 256046438.0,
+        "p99_ns": 256046438.0,
+        "rss_bytes": 27324416.0,
+        "workers": 1.0,
+        "B/op": 5383672.0,
+        "allocs/op": 184.0
+      },
+      "ns_op_range": [
+        254920868.0,
+        269840550.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/strict/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        2,
+        3,
+        3,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 49736067.0,
+        "failures": 0.0,
+        "p50_ns": 49747375.0,
+        "p95_ns": 49747375.0,
+        "p99_ns": 49747375.0,
+        "rss_bytes": 23814144.0,
+        "workers": 1.0,
+        "B/op": 750794.0,
+        "allocs/op": 112.0
+      },
+      "ns_op_range": [
+        48529228.0,
+        50492494.0
+      ]
+    }
+  },
+  "router-concurrent": {
+    "BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=32": {
+      "trials": 5,
+      "operations": [
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ],
+      "median": {
+        "ns/op": 64078717.0,
+        "failures": 0.0,
+        "p50_ns": 981254267.0,
+        "p95_ns": 1137854574.0,
+        "p99_ns": 1142995991.0,
+        "rss_bytes": 99762176.0,
+        "workers": 16.0,
+        "B/op": 5326157.0,
+        "allocs/op": 112.0
+      },
+      "ns_op_range": [
+        63608011.0,
+        64897823.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=204800/c=32": {
+      "trials": 5,
+      "operations": [
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "median": {
+        "ns/op": 12770480.0,
+        "failures": 0.0,
+        "p50_ns": 333575108.0,
+        "p95_ns": 390326773.0,
+        "p99_ns": 392807845.0,
+        "rss_bytes": 34885632.0,
+        "workers": 32.0,
+        "B/op": 809269.0,
+        "allocs/op": 104.0
+      },
+      "ns_op_range": [
+        12519321.0,
+        13011837.0
+      ]
+    }
+  },
+  "gateway": {
+    "BenchmarkGatewayInspection/anthropic/block/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 174947500.0,
+        "dispatches/op": 0.0,
+        "failures": 0.0,
+        "p50_ns": 174933842.0,
+        "p95_ns": 174933842.0,
+        "p99_ns": 174933842.0,
+        "rss_bytes": 50376704.0,
+        "workers": 1.0,
+        "B/op": 11949416.0,
+        "allocs/op": 568.0
+      },
+      "ns_op_range": [
+        173793192.0,
+        178503543.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/block/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 35478029.0,
+        "dispatches/op": 0.0,
+        "failures": 0.0,
+        "p50_ns": 35369760.0,
+        "p95_ns": 35369760.0,
+        "p99_ns": 35369760.0,
+        "rss_bytes": 41172992.0,
+        "workers": 1.0,
+        "B/op": 2177677.0,
+        "allocs/op": 526.0
+      },
+      "ns_op_range": [
+        35308569.0,
+        35837624.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/classifier/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 290273440.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 290258395.0,
+        "p95_ns": 290258395.0,
+        "p99_ns": 290258395.0,
+        "rss_bytes": 49082368.0,
+        "workers": 1.0,
+        "B/op": 17263304.0,
+        "allocs/op": 914.0
+      },
+      "ns_op_range": [
+        287263839.0,
+        293488320.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/classifier/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 56984930.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 56678637.0,
+        "p95_ns": 56678637.0,
+        "p99_ns": 56678637.0,
+        "rss_bytes": 40947712.0,
+        "workers": 1.0,
+        "B/op": 2911820.0,
+        "allocs/op": 813.0
+      },
+      "ns_op_range": [
+        56068802.0,
+        57866956.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/enforce/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 283888931.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 283869039.0,
+        "p95_ns": 283869039.0,
+        "p99_ns": 283869039.0,
+        "rss_bytes": 47915008.0,
+        "workers": 1.0,
+        "B/op": 11887576.0,
+        "allocs/op": 733.0
+      },
+      "ns_op_range": [
+        280671416.0,
+        285571196.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/enforce/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 56055792.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 55703924.0,
+        "p95_ns": 55703924.0,
+        "p99_ns": 55703924.0,
+        "rss_bytes": 40177664.0,
+        "workers": 1.0,
+        "B/op": 2140068.0,
+        "allocs/op": 688.0
+      },
+      "ns_op_range": [
+        54838242.0,
+        56437604.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/internal/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 280919836.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 280896643.0,
+        "p95_ns": 280896643.0,
+        "p99_ns": 280896643.0,
+        "rss_bytes": 49070080.0,
+        "workers": 1.0,
+        "B/op": 11964512.0,
+        "allocs/op": 754.0
+      },
+      "ns_op_range": [
+        278046442.0,
+        282668053.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/internal/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 55236973.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 55008000.0,
+        "p95_ns": 55008000.0,
+        "p99_ns": 55008000.0,
+        "rss_bytes": 41598976.0,
+        "workers": 1.0,
+        "B/op": 2177396.0,
+        "allocs/op": 695.0
+      },
+      "ns_op_range": [
+        54981683.0,
+        56189072.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/legacy/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 250594541.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 250578604.0,
+        "p95_ns": 250578604.0,
+        "p99_ns": 250578604.0,
+        "rss_bytes": 55484416.0,
+        "workers": 1.0,
+        "B/op": 31685600.0,
+        "allocs/op": 703.0
+      },
+      "ns_op_range": [
+        248771981.0,
+        253002779.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/legacy/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        3,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 50689165.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 50428241.0,
+        "p95_ns": 50428241.0,
+        "p99_ns": 50428241.0,
+        "rss_bytes": 44314624.0,
+        "workers": 1.0,
+        "B/op": 6281768.0,
+        "allocs/op": 684.0
+      },
+      "ns_op_range": [
+        50096088.0,
+        51010408.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/mask/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 1113654849.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 1113639840.0,
+        "p95_ns": 1113639840.0,
+        "p99_ns": 1113639840.0,
+        "rss_bytes": 52609024.0,
+        "workers": 1.0,
+        "B/op": 46082344.0,
+        "allocs/op": 1527.0
+      },
+      "ns_op_range": [
+        1103587082.0,
+        1184346496.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/mask/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 219086681.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 219067521.0,
+        "p95_ns": 219067521.0,
+        "p99_ns": 219067521.0,
+        "rss_bytes": 42696704.0,
+        "workers": 1.0,
+        "B/op": 7826584.0,
+        "allocs/op": 1326.0
+      },
+      "ns_op_range": [
+        218661638.0,
+        220941058.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/none/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 26264458.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 25927922.0,
+        "p95_ns": 26537090.0,
+        "p99_ns": 26537090.0,
+        "rss_bytes": 44867584.0,
+        "workers": 1.0,
+        "B/op": 6497006.0,
+        "allocs/op": 528.0
+      },
+      "ns_op_range": [
+        26050430.0,
+        26667372.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/none/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        152,
+        100,
+        164,
+        165,
+        160
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 737842.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 693008.0,
+        "p95_ns": 1036912.0,
+        "p99_ns": 1153739.0,
+        "rss_bytes": 36175872.0,
+        "workers": 1.0,
+        "B/op": 168298.0,
+        "allocs/op": 482.0
+      },
+      "ns_op_range": [
+        724651.0,
+        1046877.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/none/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 5516417.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 5562280.0,
+        "p95_ns": 5784826.0,
+        "p99_ns": 5784826.0,
+        "rss_bytes": 37498880.0,
+        "workers": 1.0,
+        "B/op": 1332369.0,
+        "allocs/op": 504.0
+      },
+      "ns_op_range": [
+        5479040.0,
+        5584741.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/none/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 208802286.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 208786924.0,
+        "p95_ns": 208786924.0,
+        "p99_ns": 208786924.0,
+        "rss_bytes": 110489600.0,
+        "workers": 1.0,
+        "B/op": 50699504.0,
+        "allocs/op": 527.0
+      },
+      "ns_op_range": [
+        206792987.0,
+        209351032.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/shadow/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 283765872.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 283744925.0,
+        "p95_ns": 283744925.0,
+        "p99_ns": 283744925.0,
+        "rss_bytes": 50143232.0,
+        "workers": 1.0,
+        "B/op": 11970528.0,
+        "allocs/op": 768.0
+      },
+      "ns_op_range": [
+        281328904.0,
+        285511365.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/shadow/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 55696910.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 55401853.0,
+        "p95_ns": 55401853.0,
+        "p99_ns": 55401853.0,
+        "rss_bytes": 39710720.0,
+        "workers": 1.0,
+        "B/op": 2197336.0,
+        "allocs/op": 697.0
+      },
+      "ns_op_range": [
+        55419826.0,
+        56580423.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/strict/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 282096717.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 282078662.0,
+        "p95_ns": 282078662.0,
+        "p99_ns": 282078662.0,
+        "rss_bytes": 50434048.0,
+        "workers": 1.0,
+        "B/op": 11970704.0,
+        "allocs/op": 775.0
+      },
+      "ns_op_range": [
+        281109408.0,
+        284338124.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/strict/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 55329846.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 54943440.0,
+        "p95_ns": 54943440.0,
+        "p99_ns": 54943440.0,
+        "rss_bytes": 40996864.0,
+        "workers": 1.0,
+        "B/op": 2183360.0,
+        "allocs/op": 705.0
+      },
+      "ns_op_range": [
+        55095984.0,
+        55634056.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/block/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 342010010.0,
+        "dispatches/op": 0.0,
+        "failures": 0.0,
+        "p50_ns": 341999857.0,
+        "p95_ns": 341999857.0,
+        "p99_ns": 341999857.0,
+        "rss_bytes": 50753536.0,
+        "workers": 1.0,
+        "B/op": 19553968.0,
+        "allocs/op": 844.0
+      },
+      "ns_op_range": [
+        338471845.0,
+        343328640.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/block/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 68461591.0,
+        "dispatches/op": 0.0,
+        "failures": 0.0,
+        "p50_ns": 68072923.0,
+        "p95_ns": 68072923.0,
+        "p99_ns": 68072923.0,
+        "rss_bytes": 44060672.0,
+        "workers": 1.0,
+        "B/op": 3383868.0,
+        "allocs/op": 711.0
+      },
+      "ns_op_range": [
+        68239463.0,
+        68864188.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/classifier/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 553425889.0,
+        "dispatches/op": 0.0,
+        "failures": 0.0,
+        "p50_ns": 553409352.0,
+        "p95_ns": 553409352.0,
+        "p99_ns": 553409352.0,
+        "rss_bytes": 52572160.0,
+        "workers": 1.0,
+        "B/op": 19376232.0,
+        "allocs/op": 780.0
+      },
+      "ns_op_range": [
+        550155097.0,
+        556468991.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/classifier/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 109265967.0,
+        "dispatches/op": 0.0,
+        "failures": 0.0,
+        "p50_ns": 109253329.0,
+        "p95_ns": 109253329.0,
+        "p99_ns": 109253329.0,
+        "rss_bytes": 49098752.0,
+        "workers": 1.0,
+        "B/op": 3368936.0,
+        "allocs/op": 688.0
+      },
+      "ns_op_range": [
+        107974880.0,
+        117322313.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/enforce/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 554767248.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 554748640.0,
+        "p95_ns": 554748640.0,
+        "p99_ns": 554748640.0,
+        "rss_bytes": 51159040.0,
+        "workers": 1.0,
+        "B/op": 19429840.0,
+        "allocs/op": 955.0
+      },
+      "ns_op_range": [
+        552990677.0,
+        579913513.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/enforce/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 107714631.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 107694962.0,
+        "p95_ns": 107694962.0,
+        "p99_ns": 107694962.0,
+        "rss_bytes": 42713088.0,
+        "workers": 1.0,
+        "B/op": 3295128.0,
+        "allocs/op": 845.0
+      },
+      "ns_op_range": [
+        107436263.0,
+        109902044.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/internal/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 548767199.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 548750988.0,
+        "p95_ns": 548750988.0,
+        "p99_ns": 548750988.0,
+        "rss_bytes": 52097024.0,
+        "workers": 1.0,
+        "B/op": 19527456.0,
+        "allocs/op": 1029.0
+      },
+      "ns_op_range": [
+        547739424.0,
+        552841353.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/internal/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 108381671.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 108364599.0,
+        "p95_ns": 108364599.0,
+        "p99_ns": 108364599.0,
+        "rss_bytes": 43089920.0,
+        "workers": 1.0,
+        "B/op": 3327104.0,
+        "allocs/op": 859.0
+      },
+      "ns_op_range": [
+        106732963.0,
+        111197513.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/mask/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 1291007504.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 1290987165.0,
+        "p95_ns": 1290987165.0,
+        "p99_ns": 1290987165.0,
+        "rss_bytes": 54910976.0,
+        "workers": 1.0,
+        "B/op": 54699608.0,
+        "allocs/op": 1860.0
+      },
+      "ns_op_range": [
+        1276600062.0,
+        1297652402.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/mask/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 253146562.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 253127945.0,
+        "p95_ns": 253127945.0,
+        "p99_ns": 253127945.0,
+        "rss_bytes": 44638208.0,
+        "workers": 1.0,
+        "B/op": 9216080.0,
+        "allocs/op": 1542.0
+      },
+      "ns_op_range": [
+        251968944.0,
+        255888126.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/none/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 294575326.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 294565317.0,
+        "p95_ns": 294565317.0,
+        "p99_ns": 294565317.0,
+        "rss_bytes": 51023872.0,
+        "workers": 1.0,
+        "B/op": 14226440.0,
+        "allocs/op": 844.0
+      },
+      "ns_op_range": [
+        292763048.0,
+        296557151.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/none/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        19,
+        19,
+        19,
+        19,
+        19
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 5967132.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 5899891.0,
+        "p95_ns": 6358286.0,
+        "p99_ns": 6358286.0,
+        "rss_bytes": 41570304.0,
+        "workers": 1.0,
+        "B/op": 322890.0,
+        "allocs/op": 633.0
+      },
+      "ns_op_range": [
+        5943762.0,
+        5972912.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/none/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 58250068.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 58051361.0,
+        "p95_ns": 58051361.0,
+        "p99_ns": 58051361.0,
+        "rss_bytes": 42389504.0,
+        "workers": 1.0,
+        "B/op": 2586180.0,
+        "allocs/op": 715.0
+      },
+      "ns_op_range": [
+        57416392.0,
+        58525224.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/none/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2354229063.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 2354213131.0,
+        "p95_ns": 2354213131.0,
+        "p99_ns": 2354213131.0,
+        "rss_bytes": 117796864.0,
+        "workers": 1.0,
+        "B/op": 109922120.0,
+        "allocs/op": 888.0
+      },
+      "ns_op_range": [
+        2337806962.0,
+        2370904650.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/shadow/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 553744044.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 553724654.0,
+        "p95_ns": 553724654.0,
+        "p99_ns": 553724654.0,
+        "rss_bytes": 50376704.0,
+        "workers": 1.0,
+        "B/op": 19372184.0,
+        "allocs/op": 995.0
+      },
+      "ns_op_range": [
+        549462441.0,
+        594708316.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/shadow/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 108955039.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 108933533.0,
+        "p95_ns": 108933533.0,
+        "p99_ns": 108933533.0,
+        "rss_bytes": 43122688.0,
+        "workers": 1.0,
+        "B/op": 3417976.0,
+        "allocs/op": 914.0
+      },
+      "ns_op_range": [
+        107999098.0,
+        109227304.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/strict/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 555099954.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 555082159.0,
+        "p95_ns": 555082159.0,
+        "p99_ns": 555082159.0,
+        "rss_bytes": 51863552.0,
+        "workers": 1.0,
+        "B/op": 19649384.0,
+        "allocs/op": 1078.0
+      },
+      "ns_op_range": [
+        548167977.0,
+        574589746.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/strict/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 108165998.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 108149214.0,
+        "p95_ns": 108149214.0,
+        "p99_ns": 108149214.0,
+        "rss_bytes": 45568000.0,
+        "workers": 1.0,
+        "B/op": 3333944.0,
+        "allocs/op": 878.0
+      },
+      "ns_op_range": [
+        106576678.0,
+        109513708.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/block/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 176212871.0,
+        "dispatches/op": 0.0,
+        "failures": 0.0,
+        "p50_ns": 176200540.0,
+        "p95_ns": 176200540.0,
+        "p99_ns": 176200540.0,
+        "rss_bytes": 49172480.0,
+        "workers": 1.0,
+        "B/op": 11949720.0,
+        "allocs/op": 574.0
+      },
+      "ns_op_range": [
+        174476072.0,
+        178753427.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/block/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 34846619.0,
+        "dispatches/op": 0.0,
+        "failures": 0.0,
+        "p50_ns": 34834599.0,
+        "p95_ns": 34834599.0,
+        "p99_ns": 34834599.0,
+        "rss_bytes": 40570880.0,
+        "workers": 1.0,
+        "B/op": 2133112.0,
+        "allocs/op": 505.0
+      },
+      "ns_op_range": [
+        34746032.0,
+        35105069.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/classifier/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 286730386.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 286716314.0,
+        "p95_ns": 286716314.0,
+        "p99_ns": 286716314.0,
+        "rss_bytes": 50597888.0,
+        "workers": 1.0,
+        "B/op": 17212032.0,
+        "allocs/op": 899.0
+      },
+      "ns_op_range": [
+        285180067.0,
+        290052055.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/classifier/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 56804871.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 56626758.0,
+        "p95_ns": 56626758.0,
+        "p99_ns": 56626758.0,
+        "rss_bytes": 43147264.0,
+        "workers": 1.0,
+        "B/op": 2989092.0,
+        "allocs/op": 834.0
+      },
+      "ns_op_range": [
+        56559259.0,
+        57414518.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/enforce/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 281000591.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 280985131.0,
+        "p95_ns": 280985131.0,
+        "p99_ns": 280985131.0,
+        "rss_bytes": 50020352.0,
+        "workers": 1.0,
+        "B/op": 11845856.0,
+        "allocs/op": 732.0
+      },
+      "ns_op_range": [
+        279460290.0,
+        283269483.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/enforce/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 55387727.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 54914955.0,
+        "p95_ns": 54914955.0,
+        "p99_ns": 54914955.0,
+        "rss_bytes": 42299392.0,
+        "workers": 1.0,
+        "B/op": 2114380.0,
+        "allocs/op": 665.0
+      },
+      "ns_op_range": [
+        55272606.0,
+        55978008.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/internal/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 281590784.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 281569535.0,
+        "p95_ns": 281569535.0,
+        "p99_ns": 281569535.0,
+        "rss_bytes": 49889280.0,
+        "workers": 1.0,
+        "B/op": 12096776.0,
+        "allocs/op": 832.0
+      },
+      "ns_op_range": [
+        279451525.0,
+        283552422.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/internal/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 55672076.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 55378795.0,
+        "p95_ns": 55378795.0,
+        "p99_ns": 55378795.0,
+        "rss_bytes": 42356736.0,
+        "workers": 1.0,
+        "B/op": 2234840.0,
+        "allocs/op": 716.0
+      },
+      "ns_op_range": [
+        55405446.0,
+        56474058.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/mask/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 1107548929.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 1107533890.0,
+        "p95_ns": 1107533890.0,
+        "p99_ns": 1107533890.0,
+        "rss_bytes": 54829056.0,
+        "workers": 1.0,
+        "B/op": 46046160.0,
+        "allocs/op": 1523.0
+      },
+      "ns_op_range": [
+        1098510779.0,
+        1111451403.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/mask/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 218354346.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 218344895.0,
+        "p95_ns": 218344895.0,
+        "p99_ns": 218344895.0,
+        "rss_bytes": 42913792.0,
+        "workers": 1.0,
+        "B/op": 7740472.0,
+        "allocs/op": 1284.0
+      },
+      "ns_op_range": [
+        216345192.0,
+        219976535.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/none/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 26193686.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 25941157.0,
+        "p95_ns": 26538478.0,
+        "p99_ns": 26538478.0,
+        "rss_bytes": 46661632.0,
+        "workers": 1.0,
+        "B/op": 6497848.0,
+        "allocs/op": 541.0
+      },
+      "ns_op_range": [
+        25966284.0,
+        26418512.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/none/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        164,
+        168,
+        164,
+        168,
+        166
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 716401.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 678399.0,
+        "p95_ns": 958489.0,
+        "p99_ns": 1032399.0,
+        "rss_bytes": 39362560.0,
+        "workers": 1.0,
+        "B/op": 168097.0,
+        "allocs/op": 492.0
+      },
+      "ns_op_range": [
+        713764.0,
+        721782.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/none/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        21,
+        19,
+        20,
+        20,
+        20
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 5336638.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 5338893.0,
+        "p95_ns": 5545592.0,
+        "p99_ns": 5545592.0,
+        "rss_bytes": 40390656.0,
+        "workers": 1.0,
+        "B/op": 1324699.0,
+        "allocs/op": 511.0
+      },
+      "ns_op_range": [
+        5297660.0,
+        5370310.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/none/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 204283172.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 204268548.0,
+        "p95_ns": 204268548.0,
+        "p99_ns": 204268548.0,
+        "rss_bytes": 110247936.0,
+        "workers": 1.0,
+        "B/op": 50699624.0,
+        "allocs/op": 545.0
+      },
+      "ns_op_range": [
+        201233712.0,
+        206672143.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/shadow/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 280651381.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 280628818.0,
+        "p95_ns": 280628818.0,
+        "p99_ns": 280628818.0,
+        "rss_bytes": 50630656.0,
+        "workers": 1.0,
+        "B/op": 11957336.0,
+        "allocs/op": 773.0
+      },
+      "ns_op_range": [
+        279182471.0,
+        285176156.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/shadow/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 55028869.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 54930382.0,
+        "p95_ns": 54930382.0,
+        "p99_ns": 54930382.0,
+        "rss_bytes": 40329216.0,
+        "workers": 1.0,
+        "B/op": 2186680.0,
+        "allocs/op": 719.0
+      },
+      "ns_op_range": [
+        54918544.0,
+        55778484.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/strict/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 281280388.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 281261919.0,
+        "p95_ns": 281261919.0,
+        "p99_ns": 281261919.0,
+        "rss_bytes": 50409472.0,
+        "workers": 1.0,
+        "B/op": 12060864.0,
+        "allocs/op": 834.0
+      },
+      "ns_op_range": [
+        278853644.0,
+        283290675.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/strict/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 56068574.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 55410309.0,
+        "p95_ns": 55410309.0,
+        "p99_ns": 55410309.0,
+        "rss_bytes": 43536384.0,
+        "workers": 1.0,
+        "B/op": 2197572.0,
+        "allocs/op": 707.0
+      },
+      "ns_op_range": [
+        55431356.0,
+        59986164.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/block/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 160548359.0,
+        "dispatches/op": 0.0,
+        "failures": 0.0,
+        "p50_ns": 160537260.0,
+        "p95_ns": 160537260.0,
+        "p99_ns": 160537260.0,
+        "rss_bytes": 47976448.0,
+        "workers": 1.0,
+        "B/op": 9888904.0,
+        "allocs/op": 550.0
+      },
+      "ns_op_range": [
+        159322945.0,
+        161531057.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/block/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 32372491.0,
+        "dispatches/op": 0.0,
+        "failures": 0.0,
+        "p50_ns": 32377699.0,
+        "p95_ns": 32560025.0,
+        "p99_ns": 32560025.0,
+        "rss_bytes": 41295872.0,
+        "workers": 1.0,
+        "B/op": 1739398.0,
+        "allocs/op": 471.0
+      },
+      "ns_op_range": [
+        31955518.0,
+        32713772.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/classifier/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 269661506.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 269652236.0,
+        "p95_ns": 269652236.0,
+        "p99_ns": 269652236.0,
+        "rss_bytes": 52125696.0,
+        "workers": 1.0,
+        "B/op": 15080672.0,
+        "allocs/op": 885.0
+      },
+      "ns_op_range": [
+        268173054.0,
+        273777940.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/classifier/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 53318694.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 53245488.0,
+        "p95_ns": 53245488.0,
+        "p99_ns": 53245488.0,
+        "rss_bytes": 40996864.0,
+        "workers": 1.0,
+        "B/op": 2544376.0,
+        "allocs/op": 846.0
+      },
+      "ns_op_range": [
+        52980202.0,
+        53798624.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/enforce/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 264554011.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 264536644.0,
+        "p95_ns": 264536644.0,
+        "p99_ns": 264536644.0,
+        "rss_bytes": 49745920.0,
+        "workers": 1.0,
+        "B/op": 9750360.0,
+        "allocs/op": 734.0
+      },
+      "ns_op_range": [
+        260184668.0,
+        268535477.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/enforce/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 51833511.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 51560712.0,
+        "p95_ns": 51560712.0,
+        "p99_ns": 51560712.0,
+        "rss_bytes": 39895040.0,
+        "workers": 1.0,
+        "B/op": 1731348.0,
+        "allocs/op": 694.0
+      },
+      "ns_op_range": [
+        51591828.0,
+        52330081.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/internal/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 266252469.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 266233812.0,
+        "p95_ns": 266233812.0,
+        "p99_ns": 266233812.0,
+        "rss_bytes": 48836608.0,
+        "workers": 1.0,
+        "B/op": 9757472.0,
+        "allocs/op": 731.0
+      },
+      "ns_op_range": [
+        262659849.0,
+        267696768.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/internal/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 52545680.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 52083925.0,
+        "p95_ns": 52083925.0,
+        "p99_ns": 52083925.0,
+        "rss_bytes": 40738816.0,
+        "workers": 1.0,
+        "B/op": 1707604.0,
+        "allocs/op": 681.0
+      },
+      "ns_op_range": [
+        52085776.0,
+        66445840.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/mask/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 1076484679.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 1076473936.0,
+        "p95_ns": 1076473936.0,
+        "p99_ns": 1076473936.0,
+        "rss_bytes": 53608448.0,
+        "workers": 1.0,
+        "B/op": 41958856.0,
+        "allocs/op": 1537.0
+      },
+      "ns_op_range": [
+        1064926569.0,
+        1121733476.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/mask/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 212846845.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 212827520.0,
+        "p95_ns": 212827520.0,
+        "p99_ns": 212827520.0,
+        "rss_bytes": 43700224.0,
+        "workers": 1.0,
+        "B/op": 6878584.0,
+        "allocs/op": 1250.0
+      },
+      "ns_op_range": [
+        211157927.0,
+        221146760.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/none/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        13,
+        13,
+        12,
+        12,
+        12
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 8958800.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 8907151.0,
+        "p95_ns": 9343302.0,
+        "p99_ns": 9343302.0,
+        "rss_bytes": 44212224.0,
+        "workers": 1.0,
+        "B/op": 4380376.0,
+        "allocs/op": 529.0
+      },
+      "ns_op_range": [
+        8891909.0,
+        9250917.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/none/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        310,
+        316,
+        320,
+        318,
+        314
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 377856.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 344393.0,
+        "p95_ns": 647210.0,
+        "p99_ns": 758340.0,
+        "rss_bytes": 40722432.0,
+        "workers": 1.0,
+        "B/op": 126525.0,
+        "allocs/op": 492.0
+      },
+      "ns_op_range": [
+        375065.0,
+        383482.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/none/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        56,
+        55,
+        55,
+        57,
+        56
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 1988110.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 2002754.0,
+        "p95_ns": 2203192.0,
+        "p99_ns": 2265468.0,
+        "rss_bytes": 41439232.0,
+        "workers": 1.0,
+        "B/op": 915190.0,
+        "allocs/op": 512.0
+      },
+      "ns_op_range": [
+        1984015.0,
+        2003821.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/none/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 65794541.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 65471048.0,
+        "p95_ns": 65471048.0,
+        "p99_ns": 65471048.0,
+        "rss_bytes": 71884800.0,
+        "workers": 1.0,
+        "B/op": 33919912.0,
+        "allocs/op": 553.0
+      },
+      "ns_op_range": [
+        65545560.0,
+        68455551.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/shadow/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 265666204.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 265647897.0,
+        "p95_ns": 265647897.0,
+        "p99_ns": 265647897.0,
+        "rss_bytes": 49217536.0,
+        "workers": 1.0,
+        "B/op": 9910656.0,
+        "allocs/op": 783.0
+      },
+      "ns_op_range": [
+        262437311.0,
+        267145914.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/shadow/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 52397348.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 51926566.0,
+        "p95_ns": 51926566.0,
+        "p99_ns": 51926566.0,
+        "rss_bytes": 39665664.0,
+        "workers": 1.0,
+        "B/op": 1691960.0,
+        "allocs/op": 685.0
+      },
+      "ns_op_range": [
+        51801361.0,
+        52659040.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/strict/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 265111888.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 265090609.0,
+        "p95_ns": 265090609.0,
+        "p99_ns": 265090609.0,
+        "rss_bytes": 50212864.0,
+        "workers": 1.0,
+        "B/op": 9965040.0,
+        "allocs/op": 825.0
+      },
+      "ns_op_range": [
+        264158623.0,
+        266857619.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/strict/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 51988318.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 51866415.0,
+        "p95_ns": 51866415.0,
+        "p99_ns": 51866415.0,
+        "rss_bytes": 41418752.0,
+        "workers": 1.0,
+        "B/op": 1685132.0,
+        "allocs/op": 669.0
+      },
+      "ns_op_range": [
+        51666128.0,
+        52300074.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/block/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 177708027.0,
+        "dispatches/op": 0.0,
+        "failures": 0.0,
+        "p50_ns": 177691183.0,
+        "p95_ns": 177691183.0,
+        "p99_ns": 177691183.0,
+        "rss_bytes": 50311168.0,
+        "workers": 1.0,
+        "B/op": 21312856.0,
+        "allocs/op": 646.0
+      },
+      "ns_op_range": [
+        176385989.0,
+        179293650.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/block/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 36238127.0,
+        "dispatches/op": 0.0,
+        "failures": 0.0,
+        "p50_ns": 36231429.0,
+        "p95_ns": 36231429.0,
+        "p99_ns": 36231429.0,
+        "rss_bytes": 41287680.0,
+        "workers": 1.0,
+        "B/op": 3427376.0,
+        "allocs/op": 601.0
+      },
+      "ns_op_range": [
+        35989730.0,
+        36457671.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/classifier/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 290214952.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 290202114.0,
+        "p95_ns": 290202114.0,
+        "p99_ns": 290202114.0,
+        "rss_bytes": 49659904.0,
+        "workers": 1.0,
+        "B/op": 26605056.0,
+        "allocs/op": 914.0
+      },
+      "ns_op_range": [
+        289761490.0,
+        296313007.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/classifier/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 57991686.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 57832890.0,
+        "p95_ns": 57832890.0,
+        "p99_ns": 57832890.0,
+        "rss_bytes": 41455616.0,
+        "workers": 1.0,
+        "B/op": 4202460.0,
+        "allocs/op": 879.0
+      },
+      "ns_op_range": [
+        57792350.0,
+        60380610.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/enforce/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 287277254.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 287248318.0,
+        "p95_ns": 287248318.0,
+        "p99_ns": 287248318.0,
+        "rss_bytes": 50855936.0,
+        "workers": 1.0,
+        "B/op": 21496128.0,
+        "allocs/op": 886.0
+      },
+      "ns_op_range": [
+        281329222.0,
+        290617239.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/enforce/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 56277824.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 55829955.0,
+        "p95_ns": 55829955.0,
+        "p99_ns": 55829955.0,
+        "rss_bytes": 41070592.0,
+        "workers": 1.0,
+        "B/op": 3451768.0,
+        "allocs/op": 798.0
+      },
+      "ns_op_range": [
+        56047971.0,
+        56807756.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/internal/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 284168802.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 284150204.0,
+        "p95_ns": 284150204.0,
+        "p99_ns": 284150204.0,
+        "rss_bytes": 51789824.0,
+        "workers": 1.0,
+        "B/op": 21449128.0,
+        "allocs/op": 872.0
+      },
+      "ns_op_range": [
+        282103802.0,
+        286407478.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/internal/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 56073400.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 55844848.0,
+        "p95_ns": 55844848.0,
+        "p99_ns": 55844848.0,
+        "rss_bytes": 41504768.0,
+        "workers": 1.0,
+        "B/op": 3451824.0,
+        "allocs/op": 784.0
+      },
+      "ns_op_range": [
+        55757338.0,
+        56633405.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/legacy/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 1338653305.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 1338635047.0,
+        "p95_ns": 1338635047.0,
+        "p99_ns": 1338635047.0,
+        "rss_bytes": 53313536.0,
+        "workers": 1.0,
+        "B/op": 88206648.0,
+        "allocs/op": 1847.0
+      },
+      "ns_op_range": [
+        1333071001.0,
+        1344570613.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/legacy/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 262406802.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 262391638.0,
+        "p95_ns": 262391638.0,
+        "p99_ns": 262391638.0,
+        "rss_bytes": 42213376.0,
+        "workers": 1.0,
+        "B/op": 15118088.0,
+        "allocs/op": 1501.0
+      },
+      "ns_op_range": [
+        260732683.0,
+        264120010.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/mask/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 1102660241.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 1102647426.0,
+        "p95_ns": 1102647426.0,
+        "p99_ns": 1102647426.0,
+        "rss_bytes": 53178368.0,
+        "workers": 1.0,
+        "B/op": 58626640.0,
+        "allocs/op": 1536.0
+      },
+      "ns_op_range": [
+        1096678617.0,
+        1104566745.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/mask/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 216274759.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 216260354.0,
+        "p95_ns": 216260354.0,
+        "p99_ns": 216260354.0,
+        "rss_bytes": 41869312.0,
+        "workers": 1.0,
+        "B/op": 9446904.0,
+        "allocs/op": 1330.0
+      },
+      "ns_op_range": [
+        215190043.0,
+        223116578.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 285404356.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 285382064.0,
+        "p95_ns": 285382064.0,
+        "p99_ns": 285382064.0,
+        "rss_bytes": 50679808.0,
+        "workers": 1.0,
+        "B/op": 21393544.0,
+        "allocs/op": 812.0
+      },
+      "ns_op_range": [
+        281111954.0,
+        288564834.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=1048576/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 282672501.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 282650490.0,
+        "p95_ns": 282650490.0,
+        "p99_ns": 282650490.0,
+        "rss_bytes": 51924992.0,
+        "workers": 1.0,
+        "B/op": 21441840.0,
+        "allocs/op": 843.0
+      },
+      "ns_op_range": [
+        280726770.0,
+        286135694.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=1048576/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 283751860.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 283735374.0,
+        "p95_ns": 283735374.0,
+        "p99_ns": 283735374.0,
+        "rss_bytes": 51863552.0,
+        "workers": 1.0,
+        "B/op": 21443104.0,
+        "allocs/op": 849.0
+      },
+      "ns_op_range": [
+        281739535.0,
+        288959614.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=20480/c=1": {
+      "trials": 5,
+      "operations": [
+        20,
+        20,
+        20,
+        20,
+        19
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 5804490.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 5687654.0,
+        "p95_ns": 6142670.0,
+        "p99_ns": 6142670.0,
+        "rss_bytes": 41287680.0,
+        "workers": 1.0,
+        "B/op": 427353.0,
+        "allocs/op": 655.0
+      },
+      "ns_op_range": [
+        5763157.0,
+        5918512.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=20480/c=32": {
+      "trials": 5,
+      "operations": [
+        68,
+        68,
+        69,
+        69,
+        72
+      ],
+      "workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "median": {
+        "ns/op": 1631870.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 47882399.0,
+        "p95_ns": 82566766.0,
+        "p99_ns": 100612057.0,
+        "rss_bytes": 46800896.0,
+        "workers": 32.0,
+        "B/op": 424215.0,
+        "allocs/op": 664.0
+      },
+      "ns_op_range": [
+        1607726.0,
+        1872988.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=20480/c=8": {
+      "trials": 5,
+      "operations": [
+        68,
+        69,
+        69,
+        68,
+        72
+      ],
+      "workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "median": {
+        "ns/op": 1637131.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 12651115.0,
+        "p95_ns": 18761157.0,
+        "p99_ns": 20133293.0,
+        "rss_bytes": 44769280.0,
+        "workers": 8.0,
+        "B/op": 431326.0,
+        "allocs/op": 671.0
+      },
+      "ns_op_range": [
+        1629081.0,
+        1655553.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 55825862.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 55450045.0,
+        "p95_ns": 55450045.0,
+        "p99_ns": 55450045.0,
+        "rss_bytes": 42856448.0,
+        "workers": 1.0,
+        "B/op": 3469776.0,
+        "allocs/op": 777.0
+      },
+      "ns_op_range": [
+        55620230.0,
+        56043334.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=204800/c=32": {
+      "trials": 5,
+      "operations": [
+        7,
+        7,
+        7,
+        7,
+        7
+      ],
+      "workers": [
+        7.0,
+        7.0,
+        7.0,
+        7.0,
+        7.0
+      ],
+      "median": {
+        "ns/op": 16180453.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 93433446.0,
+        "p95_ns": 99620917.0,
+        "p99_ns": 99620917.0,
+        "rss_bytes": 50176000.0,
+        "workers": 7.0,
+        "B/op": 3468716.0,
+        "allocs/op": 739.0
+      },
+      "ns_op_range": [
+        14629609.0,
+        17896977.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=204800/c=8": {
+      "trials": 5,
+      "operations": [
+        7,
+        7,
+        7,
+        7,
+        7
+      ],
+      "workers": [
+        7.0,
+        7.0,
+        7.0,
+        7.0,
+        7.0
+      ],
+      "median": {
+        "ns/op": 16034721.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 89529706.0,
+        "p95_ns": 103678326.0,
+        "p99_ns": 103678326.0,
+        "rss_bytes": 50188288.0,
+        "workers": 7.0,
+        "B/op": 3447779.0,
+        "allocs/op": 728.0
+      },
+      "ns_op_range": [
+        15079065.0,
+        18224283.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=8388608/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2254037728.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 2254015998.0,
+        "p95_ns": 2254015998.0,
+        "p99_ns": 2254015998.0,
+        "rss_bytes": 146763776.0,
+        "workers": 1.0,
+        "B/op": 168565144.0,
+        "allocs/op": 924.0
+      },
+      "ns_op_range": [
+        2223830362.0,
+        2260992740.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=8388608/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2234026610.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 2234007084.0,
+        "p95_ns": 2234007084.0,
+        "p99_ns": 2234007084.0,
+        "rss_bytes": 146931712.0,
+        "workers": 1.0,
+        "B/op": 168601040.0,
+        "allocs/op": 929.0
+      },
+      "ns_op_range": [
+        2229834844.0,
+        2242217855.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=8388608/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 2244084678.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 2244062007.0,
+        "p95_ns": 2244062007.0,
+        "p99_ns": 2244062007.0,
+        "rss_bytes": 146968576.0,
+        "workers": 1.0,
+        "B/op": 168602928.0,
+        "allocs/op": 937.0
+      },
+      "ns_op_range": [
+        2220353692.0,
+        2264320127.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/shadow/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 284684061.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 284668716.0,
+        "p95_ns": 284668716.0,
+        "p99_ns": 284668716.0,
+        "rss_bytes": 50249728.0,
+        "workers": 1.0,
+        "B/op": 21413744.0,
+        "allocs/op": 877.0
+      },
+      "ns_op_range": [
+        282636345.0,
+        286349834.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/shadow/bytes=1048576/c=32": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 283619326.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 283603321.0,
+        "p95_ns": 283603321.0,
+        "p99_ns": 283603321.0,
+        "rss_bytes": 51449856.0,
+        "workers": 1.0,
+        "B/op": 21400384.0,
+        "allocs/op": 857.0
+      },
+      "ns_op_range": [
+        281218917.0,
+        289546686.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/shadow/bytes=1048576/c=8": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 287072690.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 287050213.0,
+        "p95_ns": 287050213.0,
+        "p99_ns": 287050213.0,
+        "rss_bytes": 51204096.0,
+        "workers": 1.0,
+        "B/op": 21369600.0,
+        "allocs/op": 848.0
+      },
+      "ns_op_range": [
+        283126552.0,
+        290137423.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/shadow/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 56233180.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 55859685.0,
+        "p95_ns": 55859685.0,
+        "p99_ns": 55859685.0,
+        "rss_bytes": 40943616.0,
+        "workers": 1.0,
+        "B/op": 3517484.0,
+        "allocs/op": 817.0
+      },
+      "ns_op_range": [
+        55492668.0,
+        56726519.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/shadow/bytes=204800/c=32": {
+      "trials": 5,
+      "operations": [
+        7,
+        7,
+        7,
+        7,
+        6
+      ],
+      "workers": [
+        7.0,
+        7.0,
+        7.0,
+        7.0,
+        6.0
+      ],
+      "median": {
+        "ns/op": 16114211.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 91713083.0,
+        "p95_ns": 101049385.0,
+        "p99_ns": 101049385.0,
+        "rss_bytes": 48578560.0,
+        "workers": 7.0,
+        "B/op": 3470717.0,
+        "allocs/op": 777.0
+      },
+      "ns_op_range": [
+        15681036.0,
+        17120370.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/shadow/bytes=204800/c=8": {
+      "trials": 5,
+      "operations": [
+        7,
+        7,
+        7,
+        7,
+        6
+      ],
+      "workers": [
+        7.0,
+        7.0,
+        7.0,
+        7.0,
+        6.0
+      ],
+      "median": {
+        "ns/op": 16417171.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 90257548.0,
+        "p95_ns": 98763973.0,
+        "p99_ns": 98763973.0,
+        "rss_bytes": 46649344.0,
+        "workers": 7.0,
+        "B/op": 3464539.0,
+        "allocs/op": 773.0
+      },
+      "ns_op_range": [
+        14746397.0,
+        17351397.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/strict/bytes=1048576/c=1": {
+      "trials": 5,
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 285466240.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 285446787.0,
+        "p95_ns": 285446787.0,
+        "p99_ns": 285446787.0,
+        "rss_bytes": 51781632.0,
+        "workers": 1.0,
+        "B/op": 21410360.0,
+        "allocs/op": 866.0
+      },
+      "ns_op_range": [
+        282826468.0,
+        287641846.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/strict/bytes=204800/c=1": {
+      "trials": 5,
+      "operations": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "median": {
+        "ns/op": 55963332.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 55637427.0,
+        "p95_ns": 55637427.0,
+        "p99_ns": 55637427.0,
+        "rss_bytes": 40914944.0,
+        "workers": 1.0,
+        "B/op": 3475732.0,
+        "allocs/op": 808.0
+      },
+      "ns_op_range": [
+        55355340.0,
+        56251213.0
+      ]
+    }
+  },
+  "gateway-concurrent": {
+    "BenchmarkGatewayInspection/responses/none/bytes=1048576/c=32": {
+      "trials": 5,
+      "operations": [
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ],
+      "median": {
+        "ns/op": 70944321.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 1061743818.0,
+        "p95_ns": 1314191370.0,
+        "p99_ns": 1349789602.0,
+        "rss_bytes": 192659456.0,
+        "workers": 16.0,
+        "B/op": 21234204.0,
+        "allocs/op": 722.0
+      },
+      "ns_op_range": [
+        70777995.0,
+        71543829.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=204800/c=32": {
+      "trials": 5,
+      "operations": [
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "median": {
+        "ns/op": 14722461.0,
+        "dispatches/op": 1.0,
+        "failures": 0.0,
+        "p50_ns": 421426769.0,
+        "p95_ns": 443026025.0,
+        "p99_ns": 447608768.0,
+        "rss_bytes": 68247552.0,
+        "workers": 32.0,
+        "B/op": 3349077.0,
+        "allocs/op": 694.0
+      },
+      "ns_op_range": [
+        14521017.0,
+        14972003.0
+      ]
+    }
+  }
+}

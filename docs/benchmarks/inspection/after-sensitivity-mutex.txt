@@ -1,0 +1,23 @@
+File: after-sensitivity.test
+Build ID: aeca8baf50b7f182758b86b646222b95cd5cc835
+Type: delay
+Time: 2026-10-27 09:43:08 UTC
+Showing nodes accounting for 415.73us, 100% of 415.73us total
+Dropped 16 nodes (cum <= 2.08us)
+Showing top 15 nodes out of 69
+      flat  flat%   sum%        cum   cum%
+  401.85us 96.66% 96.66%   401.85us 96.66%  runtime.unlock (partial-inline)
+   13.88us  3.34%   100%    13.88us  3.34%  runtime._LostContendedRuntimeLock
+         0     0%   100%    41.27us  9.93%  github.com/inferplane/inferplane/internal/sensitivity.BenchmarkInspect
+         0     0%   100%    41.27us  9.93%  github.com/inferplane/inferplane/internal/sensitivity.inspectionBenchmarkFixture (inline)
+         0     0%   100%    41.27us  9.93%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Request
+         0     0%   100%    21.85us  5.26%  internal/bytealg.MakeNoZero
+         0     0%   100%     7.79us  1.87%  main.main
+         0     0%   100%    40.88us  9.83%  runtime.(*mcache).allocLarge
+         0     0%   100%    40.67us  9.78%  runtime.(*mheap).alloc
+         0     0%   100%    40.67us  9.78%  runtime.(*mheap).alloc.func1
+         0     0%   100%    40.67us  9.78%  runtime.(*mheap).allocSpan
+         0     0%   100%     4.02us  0.97%  runtime.(*spanSet).push
+         0     0%   100%    29.06us  6.99%  runtime.(*sweepLocked).sweep
+         0     0%   100%     9.48us  2.28%  runtime.GC
+         0     0%   100%     2.33us  0.56%  runtime.ReadMemStats

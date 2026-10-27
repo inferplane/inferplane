@@ -110,6 +110,32 @@ session identity or pinning inferred from client headers.
 
 ## Inspection and capability limits
 
+### When inspection runs
+
+Basic ingress JSON parsing is required for request validation and model routing.
+Additional request inspection is conditional on the ingress and effective policy:
+
+| Request path | Current additional inspection |
+| --- | --- |
+| Messages, Chat and Bedrock InvokeModel without applicable privacy/context rules or strict budget targets | Skip the routing inspector |
+| Applicable `sensitiveData`, including beside context Shadow | Run full structural and finite PII inspection |
+| Context rules (including Shadow) or strict budget targets, without privacy | Run structure/capability inspection without finite PII detectors |
+| Responses | Always inspect structure and transport compatibility; run finite PII detection when privacy applies |
+| Native Bedrock Converse | Always inspect structure before admission without PII detectors; applicable routing privacy then performs full inspection |
+| Required `Mask` | Fully inspect original content, transform completely, and independently fully reinspect sanitized content |
+
+[ADR-055](decisions/ADR-055-selective-structural-inspection.md) separates detector
+work from the existing JSON traversal. Structural mode retains duplicate-key,
+exact-number, nested JSON, capability, output-budget, resource and cancellation
+checks. Effective privacy requires full inspection evidence; it cannot be
+disabled by a global `pii_enabled` setting. The old inspector API still performs
+full detection, including when supplied as a compatibility fallback.
+
+The learned `pii_classification` block and the legacy masking plugin are separate
+opt-ins. A configured learned classifier runs only for applicable privacy-governed,
+non-count requests; count APIs never call it. An applicable `sensitiveData` rule
+requires its inspection and fail-closed behavior, including when context is Shadow.
+
 Inspection reads original bytes before masking or body capture and never changes
 them. JSON keys/strings, exact numeric scalar spellings, system/developer prompts,
 messages, metadata, tool definitions/results, and nested JSON tool arguments are

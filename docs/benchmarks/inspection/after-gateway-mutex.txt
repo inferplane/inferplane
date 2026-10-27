@@ -1,0 +1,23 @@
+File: after-mayu.test
+Build ID: 9531acc8ea13fd0f59d2726d16f222a4bea948a4
+Type: delay
+Time: 2026-10-27 09:43:13 UTC
+Showing nodes accounting for 873.70us, 100% of 873.70us total
+Dropped 38 nodes (cum <= 4.37us)
+Showing top 15 nodes out of 63
+      flat  flat%   sum%        cum   cum%
+  716.46us 82.00% 82.00%   716.46us 82.00%  runtime.unlock (partial-inline)
+  157.24us 18.00%   100%   157.24us 18.00%  runtime._LostContendedRuntimeLock
+         0     0%   100%    29.81us  3.41%  github.com/inferplane/inferplane/cmd/mayu.BenchmarkGatewayInspection.func1
+         0     0%   100%    18.54us  2.12%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Request
+         0     0%   100%    11.27us  1.29%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Run
+         0     0%   100%    10.66us  1.22%  main.main
+         0     0%   100%    29.50us  3.38%  runtime.(*mcache).prepareForSweep
+         0     0%   100%    29.50us  3.38%  runtime.(*mcache).releaseAll
+         0     0%   100%    29.50us  3.38%  runtime.(*mcentral).uncacheSpan
+         0     0%   100%     8.47us  0.97%  runtime.(*spanSet).push
+         0     0%   100%    34.77us  3.98%  runtime.(*sweepLocked).sweep
+         0     0%   100%    18.25us  2.09%  runtime.ReadMemStats
+         0     0%   100%    17.02us  1.95%  runtime.acquirep
+         0     0%   100%    17.02us  1.95%  runtime.acquirepNoTrace
+         0     0%   100%    15.12us  1.73%  runtime.asyncPreempt2.func1

@@ -14,6 +14,9 @@ key decisions, and code pointers. The current architecture overview is
 | Data | [data.md](data.md) | Key store, audit chain, governance stores |
 | Security | [security.md](security.md) | Auth, RBAC, secret isolation, metrics safety |
 | Agent · LLM | [agent-llm.md](agent-llm.md) | Provider abstraction, canonical schema |
+| Bedrock coding models | [bedrock-coding-models.md](bedrock-coding-models.md) | Model observations and qualification limits |
+| Context-window validation | [context-window-validation.md](context-window-validation.md) | Gateway/client context validation evidence |
+| Pricing | [pricing.md](pricing.md) | Rate tables, units and operator overrides |
 <!-- /AUTO-MANAGED:reference-index -->
 
 Add a layer with `/add-reference-doc <layer>` (project-init). Available layers not yet

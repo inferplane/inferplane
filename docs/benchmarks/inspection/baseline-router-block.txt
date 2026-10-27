@@ -1,0 +1,23 @@
+File: baseline-router.test
+Build ID: cf7782ce44117026e36f95515093fdf856ac78c6
+Type: delay
+Time: 2026-10-27 09:18:24 UTC
+Showing nodes accounting for 9.41s, 100% of 9.41s total
+Dropped 11 nodes (cum <= 0.05s)
+Showing top 15 nodes out of 19
+      flat  flat%   sum%        cum   cum%
+     6.62s 70.30% 70.30%      6.62s 70.30%  runtime.chanrecv1
+     2.79s 29.70%   100%      2.79s 29.70%  sync.(*WaitGroup).Wait
+         0     0%   100%      3.31s 35.14%  github.com/inferplane/inferplane/internal/router.BenchmarkRouteRequestInspection
+         0     0%   100%      2.79s 29.70%  github.com/inferplane/inferplane/internal/router.BenchmarkRouteRequestInspection.func1
+         0     0%   100%      2.79s 29.70%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Run
+         0     0%   100%      3.31s 35.16%  main.main
+         0     0%   100%      3.31s 35.16%  runtime.main
+         0     0%   100%      6.62s 70.30%  testing.(*B).Run
+         0     0%   100%      2.80s 29.76%  testing.(*B).doBench
+         0     0%   100%      2.54s 27.03%  testing.(*B).doBench.gowrap1
+         0     0%   100%      2.54s 27.03%  testing.(*B).launch
+         0     0%   100%      2.80s 29.76%  testing.(*B).run
+         0     0%   100%      3.81s 40.54%  testing.(*B).run1
+         0     0%   100%      3.56s 37.80%  testing.(*B).run1.func1
+         0     0%   100%      9.41s   100%  testing.(*B).runN

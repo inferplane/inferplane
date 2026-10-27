@@ -1,0 +1,23 @@
+File: after-mayu.test
+Build ID: 9531acc8ea13fd0f59d2726d16f222a4bea948a4
+Type: cpu
+Time: 2026-10-27 09:43:12 UTC
+Duration: 474.26ms, Total samples = 400ms (84.34%)
+Showing nodes accounting for 400ms, 100% of 400ms total
+Showing top 15 nodes out of 56
+      flat  flat%   sum%        cum   cum%
+      90ms 22.50% 22.50%       90ms 22.50%  encoding/json.stateInString
+      80ms 20.00% 42.50%       80ms 20.00%  encoding/json.(*decodeState).rescanLiteral
+      70ms 17.50% 60.00%       80ms 20.00%  encoding/json.checkValid
+      50ms 12.50% 72.50%       70ms 17.50%  encoding/json.unquoteBytes
+      40ms 10.00% 82.50%      140ms 35.00%  encoding/json.(*Decoder).readValue
+      20ms  5.00% 87.50%       20ms  5.00%  runtime.memclrNoHeapPointers
+      20ms  5.00% 92.50%       20ms  5.00%  unicode/utf8.DecodeRune (inline)
+      10ms  2.50% 95.00%       10ms  2.50%  runtime.(*lfstack).pop
+      10ms  2.50% 97.50%       10ms  2.50%  runtime.memmove
+      10ms  2.50%   100%       10ms  2.50%  runtime.scanObjectsSmall
+         0     0%   100%       10ms  2.50%  bytes.(*Reader).Read
+         0     0%   100%      210ms 52.50%  encoding/json.(*Decoder).Decode
+         0     0%   100%      210ms 52.50%  encoding/json.(*Decoder).Token
+         0     0%   100%       20ms  5.00%  encoding/json.(*Decoder).refill
+         0     0%   100%       70ms 17.50%  encoding/json.(*decodeState).literalStore

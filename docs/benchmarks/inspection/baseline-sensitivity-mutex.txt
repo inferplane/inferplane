@@ -1,0 +1,23 @@
+File: baseline-sensitivity.test
+Build ID: 9a8632e3f867d0577cd192f74245fc5a0c247cd8
+Type: delay
+Time: 2026-10-27 09:18:02 UTC
+Showing nodes accounting for 641.99us, 100% of 641.99us total
+Dropped 12 nodes (cum <= 3.21us)
+Showing top 15 nodes out of 65
+      flat  flat%   sum%        cum   cum%
+  631.64us 98.39% 98.39%   631.64us 98.39%  runtime.unlock (inline)
+   10.36us  1.61%   100%    10.36us  1.61%  runtime._LostContendedRuntimeLock
+         0     0%   100%     3.74us  0.58%  compress/gzip.NewWriterLevel
+         0     0%   100%    23.66us  3.69%  github.com/inferplane/inferplane/internal/sensitivity.BenchmarkInspect
+         0     0%   100%    23.66us  3.69%  github.com/inferplane/inferplane/internal/sensitivity.inspectionBenchmarkFixture (inline)
+         0     0%   100%    23.66us  3.69%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Request
+         0     0%   100%    17.95us  2.80%  internal/bytealg.MakeNoZero
+         0     0%   100%    23.66us  3.69%  runtime.(*mcache).allocLarge
+         0     0%   100%     3.74us  0.58%  runtime.(*mcache).nextFree
+         0     0%   100%     3.74us  0.58%  runtime.(*mcache).refill
+         0     0%   100%     3.74us  0.58%  runtime.(*mcentral).cacheSpan
+         0     0%   100%     3.74us  0.58%  runtime.(*mcentral).grow
+         0     0%   100%    27.40us  4.27%  runtime.(*mheap).alloc
+         0     0%   100%    27.40us  4.27%  runtime.(*mheap).alloc.func1
+         0     0%   100%    27.40us  4.27%  runtime.(*mheap).allocSpan

@@ -1,0 +1,24 @@
+File: baseline-mayu.test
+Build ID: 364c6ddc1af850d80fd624f63fb52433eab88e57
+Type: cpu
+Time: 2026-10-27 09:18:43 UTC
+Duration: 3.67s, Total samples = 3600ms (98.07%)
+Showing nodes accounting for 3430ms, 95.28% of 3600ms total
+Dropped 18 nodes (cum <= 18ms)
+Showing top 15 nodes out of 53
+      flat  flat%   sum%        cum   cum%
+     710ms 19.72% 19.72%     1160ms 32.22%  regexp.(*Regexp).tryBacktrack
+     680ms 18.89% 38.61%      830ms 23.06%  regexp.(*machine).add
+     530ms 14.72% 53.33%     1410ms 39.17%  regexp.(*machine).step
+     490ms 13.61% 66.94%      490ms 13.61%  regexp/syntax.(*Inst).MatchRunePos
+     130ms  3.61% 70.56%     1350ms 37.50%  regexp.(*Regexp).backtrack
+     120ms  3.33% 73.89%      120ms  3.33%  regexp.(*bitState).shouldVisit (inline)
+     120ms  3.33% 77.22%     1860ms 51.67%  regexp.(*machine).match
+     110ms  3.06% 80.28%      110ms  3.06%  encoding/json.stateInString
+     110ms  3.06% 83.33%      110ms  3.06%  runtime.memmove
+      90ms  2.50% 85.83%       90ms  2.50%  encoding/json.unquoteBytes
+      80ms  2.22% 88.06%      110ms  3.06%  regexp.(*bitState).push (inline)
+      80ms  2.22% 90.28%      150ms  4.17%  regexp.(*inputString).step
+      70ms  1.94% 92.22%       70ms  1.94%  unicode/utf8.DecodeRuneInString (inline)
+      60ms  1.67% 93.89%       60ms  1.67%  encoding/json.(*decodeState).rescanLiteral
+      50ms  1.39% 95.28%      120ms  3.33%  encoding/json.(*Decoder).readValue

@@ -1,0 +1,14 @@
+goos: linux
+goarch: arm64
+pkg: github.com/inferplane/inferplane/cmd/mayu
+BenchmarkGatewayInspection/responses/none/bytes=204800/c=32-4         	      32	  14521017 ns/op	         1.000 dispatches/op	         0 failures	 428602982 p50_ns	 445797177 p95_ns	 453628087 p99_ns	  72265728 rss_bytes	        32.00 workers	 3362362 B/op	     699 allocs/op
+BenchmarkGatewayInspection/responses/none/bytes=204800/c=32-4         	      32	  14719880 ns/op	         1.000 dispatches/op	         0 failures	 421426769 p50_ns	 434286379 p95_ns	 447608768 p99_ns	  68247552 rss_bytes	        32.00 workers	 3349077 B/op	     698 allocs/op
+BenchmarkGatewayInspection/responses/none/bytes=204800/c=32-4         	      32	  14722461 ns/op	         1.000 dispatches/op	         0 failures	 388618610 p50_ns	 443026025 p95_ns	 444259268 p99_ns	  66531328 rss_bytes	        32.00 workers	 3344120 B/op	     693 allocs/op
+BenchmarkGatewayInspection/responses/none/bytes=204800/c=32-4         	      32	  14972003 ns/op	         1.000 dispatches/op	         0 failures	 430178478 p50_ns	 436664309 p95_ns	 441343978 p99_ns	  70987776 rss_bytes	        32.00 workers	 3340497 B/op	     693 allocs/op
+BenchmarkGatewayInspection/responses/none/bytes=204800/c=32-4         	      32	  14728725 ns/op	         1.000 dispatches/op	         0 failures	 421277721 p50_ns	 446356726 p95_ns	 455561722 p99_ns	  66998272 rss_bytes	        32.00 workers	 3351700 B/op	     694 allocs/op
+BenchmarkGatewayInspection/responses/none/bytes=1048576/c=32-4        	      32	  71198054 ns/op	         1.000 dispatches/op	         0 failures	1034780334 p50_ns	1314075391 p95_ns	1349789602 p99_ns	 194289664 rss_bytes	        16.00 workers	21239166 B/op	     726 allocs/op
+BenchmarkGatewayInspection/responses/none/bytes=1048576/c=32-4        	      32	  70944321 ns/op	         1.000 dispatches/op	         0 failures	1104220805 p50_ns	1264636386 p95_ns	1308191200 p99_ns	 189034496 rss_bytes	        16.00 workers	21234204 B/op	     722 allocs/op
+BenchmarkGatewayInspection/responses/none/bytes=1048576/c=32-4        	      32	  71543829 ns/op	         1.000 dispatches/op	         0 failures	1084404378 p50_ns	1317180231 p95_ns	1329450989 p99_ns	 192659456 rss_bytes	        16.00 workers	21221888 B/op	     713 allocs/op
+BenchmarkGatewayInspection/responses/none/bytes=1048576/c=32-4        	      32	  70777995 ns/op	         1.000 dispatches/op	         0 failures	1013549539 p50_ns	1385949131 p95_ns	1405862162 p99_ns	 184377344 rss_bytes	        16.00 workers	21224131 B/op	     721 allocs/op
+BenchmarkGatewayInspection/responses/none/bytes=1048576/c=32-4        	      32	  70869993 ns/op	         1.000 dispatches/op	         0 failures	1061743818 p50_ns	1314191370 p95_ns	1362325947 p99_ns	 193994752 rss_bytes	        16.00 workers	21239752 B/op	     725 allocs/op
+PASS

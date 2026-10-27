@@ -241,6 +241,15 @@ compatible native target.
 
 ## Privacy and cache limits
 
+Privacy enforcement, learned classification and legacy masking are configured
+separately. Structural inspection preserves JSON traversal and capability checks
+without finite PII detectors when only context, strict targets or unprotected
+Responses compatibility needs it. Native Bedrock Converse preflight also uses
+structural mode. Context Shadow still pays structural inspection cost; applicable
+privacy requires full detection even beside Shadow. See
+[inspection conditions](policy-routing.md#when-inspection-runs). No global setting
+bypasses an applicable privacy obligation.
+
 An enabled legacy PII filter also applies to Responses through the complete
 request transformer. Clean inspectable requests remain usable; protected text
 must satisfy both detector sets, and opaque/unsafe transformations still refuse.

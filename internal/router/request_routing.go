@@ -187,13 +187,17 @@ func (r *Router) RouteRequest(ctx context.Context, in RequestRoutingInput) (Requ
 	if inspector == nil {
 		inspector = sensitivity.NewInspector()
 	}
+	mode := sensitivity.StructureOnly
+	if hasPrivacy {
+		mode = sensitivity.DetectSensitiveData
+	}
 	// Responses has no pre-existing permissive legacy transport path. Inspect
 	// once even without policy so canonical adapters can never infer that an
 	// opaque native request is portable. Native providers may retain opaque
 	// content; malformed inspection still refuses.
 	var responsesInspection *sensitivity.Result
 	if in.Protocol == "responses" {
-		result, err := inspector.Inspect(ctx, in.Protocol, in.RawBody)
+		result, err := inspectForRoute(ctx, inspector, in.Protocol, in.RawBody, mode)
 		if err != nil {
 			out.Decision.Inspection = "failed"
 			return denyRouting(out, "inspection_failed", nil)
@@ -230,7 +234,7 @@ func (r *Router) RouteRequest(ctx context.Context, in RequestRoutingInput) (Requ
 	if responsesInspection != nil {
 		inspected = *responsesInspection
 	} else {
-		inspected, err = inspector.Inspect(ctx, in.Protocol, in.RawBody)
+		inspected, err = inspectForRoute(ctx, inspector, in.Protocol, in.RawBody, mode)
 	}
 	if err != nil {
 		out.Decision.Inspection = "failed"
@@ -328,7 +332,7 @@ func (r *Router) RouteRequest(ctx context.Context, in RequestRoutingInput) (Requ
 		}
 		// Keep the original categories and obligations for audit and routing.
 		// Only the final body supplies compatibility and context-size signals.
-		checked, inspectErr := inspector.Inspect(ctx, in.Protocol, sanitized)
+		checked, inspectErr := inspectForRoute(ctx, inspector, in.Protocol, sanitized, sensitivity.DetectSensitiveData)
 		if inspectErr != nil || !checked.Complete || len(checked.Categories) != 0 || ctx.Err() != nil {
 			return denyRouting(out, "mask_failed", nil)
 		}

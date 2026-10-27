@@ -1,0 +1,23 @@
+File: baseline-mayu.test
+Build ID: 364c6ddc1af850d80fd624f63fb52433eab88e57
+Type: delay
+Time: 2026-10-27 09:18:47 UTC
+Showing nodes accounting for 866.94us, 100% of 866.94us total
+Dropped 33 nodes (cum <= 4.33us)
+Showing top 15 nodes out of 47
+      flat  flat%   sum%        cum   cum%
+  753.74us 86.94% 86.94%   753.74us 86.94%  runtime.unlock (partial-inline)
+  113.19us 13.06%   100%   113.19us 13.06%  runtime._LostContendedRuntimeLock
+         0     0%   100%    16.66us  1.92%  github.com/inferplane/inferplane/cmd/mayu.BenchmarkGatewayInspection.func1
+         0     0%   100%    16.66us  1.92%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Run
+         0     0%   100%     6.19us  0.71%  main.main
+         0     0%   100%    10.59us  1.22%  runtime.(*scavengerState).wake
+         0     0%   100%     7.94us  0.92%  runtime.(*sweepLocked).sweep
+         0     0%   100%    21.47us  2.48%  runtime.ReadMemStats
+         0     0%   100%     6.43us  0.74%  runtime.bgsweep
+         0     0%   100%   138.55us 15.98%  runtime.findRunnable
+         0     0%   100%   542.50us 62.58%  runtime.forEachP (inline)
+         0     0%   100%   542.50us 62.58%  runtime.forEachPInternal
+         0     0%   100%   556.01us 64.14%  runtime.gcBgMarkWorker
+         0     0%   100%   556.01us 64.14%  runtime.gcMarkDone
+         0     0%   100%   216.56us 24.98%  runtime.gcMarkDone.forEachP.func5

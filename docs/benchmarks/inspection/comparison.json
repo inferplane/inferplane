@@ -1,0 +1,7406 @@
+{
+  "sensitivity": {
+    "BenchmarkInspect/full/anthropic/bytes=1048576/c=1": {
+      "baseline_ns_op": 252004654.0,
+      "after_ns_op": 253454428.0,
+      "ns_op_change_percent": 0.575296518134949,
+      "baseline_bytes_op": 5549328.0,
+      "after_bytes_op": 5632344.0,
+      "bytes_op_change_percent": 1.4959649168331701,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/anthropic/bytes=1048576/c=32": {
+      "baseline_ns_op": 254469249.0,
+      "after_ns_op": 250656296.0,
+      "ns_op_change_percent": -1.498394409141357,
+      "baseline_bytes_op": 5632632.0,
+      "after_bytes_op": 5475488.0,
+      "bytes_op_change_percent": -2.7898857940657273,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/anthropic/bytes=1048576/c=8": {
+      "baseline_ns_op": 255388801.0,
+      "after_ns_op": 252122884.0,
+      "ns_op_change_percent": -1.2788019628159009,
+      "baseline_bytes_op": 5670056.0,
+      "after_bytes_op": 5549328.0,
+      "bytes_op_change_percent": -2.129220593235759,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/anthropic/bytes=20480/c=1": {
+      "baseline_ns_op": 4773484.0,
+      "after_ns_op": 4809536.0,
+      "ns_op_change_percent": 0.7552554905389863,
+      "baseline_bytes_op": 91993.0,
+      "after_bytes_op": 99069.0,
+      "bytes_op_change_percent": 7.691889600295676,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/anthropic/bytes=20480/c=32": {
+      "baseline_ns_op": 1237747.0,
+      "after_ns_op": 1236234.0,
+      "ns_op_change_percent": -0.12223822800621065,
+      "baseline_bytes_op": 105054.0,
+      "after_bytes_op": 105902.0,
+      "bytes_op_change_percent": 0.8072039141774789,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/full/anthropic/bytes=20480/c=8": {
+      "baseline_ns_op": 1236651.0,
+      "after_ns_op": 1235108.0,
+      "ns_op_change_percent": -0.12477247016337012,
+      "baseline_bytes_op": 92904.0,
+      "after_bytes_op": 93158.0,
+      "bytes_op_change_percent": 0.27340049944029055,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/full/anthropic/bytes=204800/c=1": {
+      "baseline_ns_op": 49717877.0,
+      "after_ns_op": 49299532.0,
+      "ns_op_change_percent": -0.8414377790105565,
+      "baseline_bytes_op": 792021.0,
+      "after_bytes_op": 846506.0,
+      "bytes_op_change_percent": 6.879236787913445,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/anthropic/bytes=204800/c=32": {
+      "baseline_ns_op": 13178024.0,
+      "after_ns_op": 13998195.0,
+      "ns_op_change_percent": 6.2237783145637104,
+      "baseline_bytes_op": 799084.0,
+      "after_bytes_op": 803247.0,
+      "bytes_op_change_percent": 0.5209715123816849,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/full/anthropic/bytes=204800/c=8": {
+      "baseline_ns_op": 13791588.0,
+      "after_ns_op": 13600845.0,
+      "ns_op_change_percent": -1.3830387044624581,
+      "baseline_bytes_op": 809423.0,
+      "after_bytes_op": 812567.0,
+      "bytes_op_change_percent": 0.38842484090517715,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/full/anthropic/bytes=8388608/c=1": {
+      "baseline_ns_op": 2015384573.0,
+      "after_ns_op": 1998330034.0,
+      "ns_op_change_percent": -0.8462176017658751,
+      "baseline_bytes_op": 42333144.0,
+      "after_bytes_op": 42333496.0,
+      "bytes_op_change_percent": 0.0008314997818281711,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/anthropic/bytes=8388608/c=32": {
+      "baseline_ns_op": 2018902302.0,
+      "after_ns_op": 2018846926.0,
+      "ns_op_change_percent": -0.002742876658523574,
+      "baseline_bytes_op": 42333496.0,
+      "after_bytes_op": 42333320.0,
+      "bytes_op_change_percent": -0.0004157464339793471,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/anthropic/bytes=8388608/c=8": {
+      "baseline_ns_op": 2013080423.0,
+      "after_ns_op": 2017237322.0,
+      "ns_op_change_percent": 0.20649443273632606,
+      "baseline_bytes_op": 42250016.0,
+      "after_bytes_op": 42295896.0,
+      "bytes_op_change_percent": 0.1085916748528648,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock-converse/bytes=1048576/c=1": {
+      "baseline_ns_op": 252663333.0,
+      "after_ns_op": 251851348.0,
+      "ns_op_change_percent": -0.3213703351249597,
+      "baseline_bytes_op": 5633920.0,
+      "after_bytes_op": 5381504.0,
+      "bytes_op_change_percent": -4.480290809951148,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock-converse/bytes=1048576/c=32": {
+      "baseline_ns_op": 252164016.0,
+      "after_ns_op": 253207723.0,
+      "ns_op_change_percent": 0.4139000546374616,
+      "baseline_bytes_op": 5467664.0,
+      "after_bytes_op": 5501480.0,
+      "bytes_op_change_percent": 0.6184725323282514,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock-converse/bytes=1048576/c=8": {
+      "baseline_ns_op": 249657411.0,
+      "after_ns_op": 253716684.0,
+      "ns_op_change_percent": 1.625937312952419,
+      "baseline_bytes_op": 5501480.0,
+      "after_bytes_op": 5501480.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock-converse/bytes=20480/c=1": {
+      "baseline_ns_op": 4870271.0,
+      "after_ns_op": 4768339.0,
+      "ns_op_change_percent": -2.0929430826333917,
+      "baseline_bytes_op": 98316.0,
+      "after_bytes_op": 92790.0,
+      "bytes_op_change_percent": -5.620651775906261,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock-converse/bytes=20480/c=32": {
+      "baseline_ns_op": 1240329.0,
+      "after_ns_op": 1248677.0,
+      "ns_op_change_percent": 0.6730472318231762,
+      "baseline_bytes_op": 107843.0,
+      "after_bytes_op": 107722.0,
+      "bytes_op_change_percent": -0.11220014280017843,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock-converse/bytes=20480/c=8": {
+      "baseline_ns_op": 1243452.0,
+      "after_ns_op": 1243386.0,
+      "ns_op_change_percent": -0.0053078044025878235,
+      "baseline_bytes_op": 95272.0,
+      "after_bytes_op": 95691.0,
+      "bytes_op_change_percent": 0.43979343353766076,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock-converse/bytes=204800/c=1": {
+      "baseline_ns_op": 48737473.0,
+      "after_ns_op": 49616321.0,
+      "ns_op_change_percent": 1.803228493196607,
+      "baseline_bytes_op": 761306.0,
+      "after_bytes_op": 775666.0,
+      "bytes_op_change_percent": 1.8862323428424421,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock-converse/bytes=204800/c=32": {
+      "baseline_ns_op": 13935354.0,
+      "after_ns_op": 14768138.0,
+      "ns_op_change_percent": 5.976051989780817,
+      "baseline_bytes_op": 798558.0,
+      "after_bytes_op": 798250.0,
+      "bytes_op_change_percent": -0.03856952156261473,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        7.0,
+        7.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock-converse/bytes=204800/c=8": {
+      "baseline_ns_op": 13222853.0,
+      "after_ns_op": 14094012.0,
+      "ns_op_change_percent": 6.5882831791293395,
+      "baseline_bytes_op": 815539.0,
+      "after_bytes_op": 843166.0,
+      "bytes_op_change_percent": 3.3875755788502993,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        7.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock-converse/bytes=8388608/c=1": {
+      "baseline_ns_op": 2022787468.0,
+      "after_ns_op": 2012698933.0,
+      "ns_op_change_percent": -0.49874419134972037,
+      "baseline_bytes_op": 42370928.0,
+      "after_bytes_op": 42334784.0,
+      "bytes_op_change_percent": -0.08530377243566312,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock-converse/bytes=8388608/c=32": {
+      "baseline_ns_op": 2020779237.0,
+      "after_ns_op": 2045560039.0,
+      "ns_op_change_percent": 1.2262993179199988,
+      "baseline_bytes_op": 42334784.0,
+      "after_bytes_op": 42335136.0,
+      "bytes_op_change_percent": 0.0008314675705056729,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock-converse/bytes=8388608/c=8": {
+      "baseline_ns_op": 2009682129.0,
+      "after_ns_op": 2050908518.0,
+      "ns_op_change_percent": 2.051388545735544,
+      "baseline_bytes_op": 42334256.0,
+      "after_bytes_op": 42213704.0,
+      "bytes_op_change_percent": -0.2847622974642583,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock/bytes=1048576/c=1": {
+      "baseline_ns_op": 252411122.0,
+      "after_ns_op": 254073035.0,
+      "ns_op_change_percent": 0.6584151232448487,
+      "baseline_bytes_op": 5632344.0,
+      "after_bytes_op": 5589152.0,
+      "bytes_op_change_percent": -0.7668565698401908,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock/bytes=1048576/c=32": {
+      "baseline_ns_op": 252830249.0,
+      "after_ns_op": 252954620.0,
+      "ns_op_change_percent": 0.04919150318916099,
+      "baseline_bytes_op": 5506360.0,
+      "after_bytes_op": 5463120.0,
+      "bytes_op_change_percent": -0.7852737561655942,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock/bytes=1048576/c=8": {
+      "baseline_ns_op": 252949269.0,
+      "after_ns_op": 252352714.0,
+      "ns_op_change_percent": -0.2358397801892842,
+      "baseline_bytes_op": 5595160.0,
+      "after_bytes_op": 5595560.0,
+      "bytes_op_change_percent": 0.007149035952491722,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock/bytes=20480/c=1": {
+      "baseline_ns_op": 4803962.0,
+      "after_ns_op": 4842517.0,
+      "ns_op_change_percent": 0.8025667147242288,
+      "baseline_bytes_op": 96996.0,
+      "after_bytes_op": 91993.0,
+      "bytes_op_change_percent": -5.157944657511648,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock/bytes=20480/c=32": {
+      "baseline_ns_op": 1250303.0,
+      "after_ns_op": 1248537.0,
+      "ns_op_change_percent": -0.14124576202728667,
+      "baseline_bytes_op": 106075.0,
+      "after_bytes_op": 103600.0,
+      "bytes_op_change_percent": -2.333254772566584,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock/bytes=20480/c=8": {
+      "baseline_ns_op": 1248428.0,
+      "after_ns_op": 1250244.0,
+      "ns_op_change_percent": 0.14546293418602474,
+      "baseline_bytes_op": 93222.0,
+      "after_bytes_op": 95583.0,
+      "bytes_op_change_percent": 2.5326639634421166,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock/bytes=204800/c=1": {
+      "baseline_ns_op": 50079356.0,
+      "after_ns_op": 49134891.0,
+      "ns_op_change_percent": -1.885936791998688,
+      "baseline_bytes_op": 774725.0,
+      "after_bytes_op": 774725.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock/bytes=204800/c=32": {
+      "baseline_ns_op": 13567942.0,
+      "after_ns_op": 13629225.0,
+      "ns_op_change_percent": 0.4516749850493218,
+      "baseline_bytes_op": 802162.0,
+      "after_bytes_op": 819810.0,
+      "bytes_op_change_percent": 2.2000543531107253,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock/bytes=204800/c=8": {
+      "baseline_ns_op": 13456015.0,
+      "after_ns_op": 13616709.0,
+      "ns_op_change_percent": 1.1942168613813253,
+      "baseline_bytes_op": 823685.0,
+      "after_bytes_op": 809097.0,
+      "bytes_op_change_percent": -1.7710653951449884,
+      "baseline_workers": [
+        7.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock/bytes=8388608/c=1": {
+      "baseline_ns_op": 2025476504.0,
+      "after_ns_op": 2013628972.0,
+      "ns_op_change_percent": -0.5849256694216431,
+      "baseline_bytes_op": 42333320.0,
+      "after_bytes_op": 42370920.0,
+      "bytes_op_change_percent": 0.08881892561225513,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock/bytes=8388608/c=32": {
+      "baseline_ns_op": 2027635627.0,
+      "after_ns_op": 2027592480.0,
+      "ns_op_change_percent": -0.002127946433050365,
+      "baseline_bytes_op": 42333848.0,
+      "after_bytes_op": 42295320.0,
+      "bytes_op_change_percent": -0.09100991717077012,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/bedrock/bytes=8388608/c=8": {
+      "baseline_ns_op": 2021817817.0,
+      "after_ns_op": 2041292003.0,
+      "ns_op_change_percent": 0.9632018194842162,
+      "baseline_bytes_op": 42333672.0,
+      "after_bytes_op": 42333848.0,
+      "bytes_op_change_percent": 0.0004157447055286312,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/openai/bytes=1048576/c=1": {
+      "baseline_ns_op": 250725081.0,
+      "after_ns_op": 251193832.0,
+      "ns_op_change_percent": 0.186958160759354,
+      "baseline_bytes_op": 5392184.0,
+      "after_bytes_op": 5500192.0,
+      "bytes_op_change_percent": 2.0030473737543186,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/openai/bytes=1048576/c=32": {
+      "baseline_ns_op": 253689334.0,
+      "after_ns_op": 251962125.0,
+      "ns_op_change_percent": -0.6808362703967674,
+      "baseline_bytes_op": 5678640.0,
+      "after_bytes_op": 5595912.0,
+      "bytes_op_change_percent": -1.456827691137319,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/openai/bytes=1048576/c=8": {
+      "baseline_ns_op": 254264751.0,
+      "after_ns_op": 254012062.0,
+      "ns_op_change_percent": -0.09938027155010909,
+      "baseline_bytes_op": 5632632.0,
+      "after_bytes_op": 5506424.0,
+      "bytes_op_change_percent": -2.2406576534735434,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/openai/bytes=20480/c=1": {
+      "baseline_ns_op": 4756490.0,
+      "after_ns_op": 4793616.0,
+      "ns_op_change_percent": 0.7805335446936734,
+      "baseline_bytes_op": 97050.0,
+      "after_bytes_op": 91993.0,
+      "bytes_op_change_percent": -5.210716125708393,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/openai/bytes=20480/c=32": {
+      "baseline_ns_op": 1250737.0,
+      "after_ns_op": 1247033.0,
+      "ns_op_change_percent": -0.29614539267648343,
+      "baseline_bytes_op": 106183.0,
+      "after_bytes_op": 104643.0,
+      "bytes_op_change_percent": -1.4503263234227681,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/full/openai/bytes=20480/c=8": {
+      "baseline_ns_op": 1242926.0,
+      "after_ns_op": 1237604.0,
+      "ns_op_change_percent": -0.428183174219543,
+      "baseline_bytes_op": 93203.0,
+      "after_bytes_op": 92378.0,
+      "bytes_op_change_percent": -0.8851646406231595,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/full/openai/bytes=204800/c=1": {
+      "baseline_ns_op": 49547212.0,
+      "after_ns_op": 48087272.0,
+      "ns_op_change_percent": -2.9465633707099426,
+      "baseline_bytes_op": 774725.0,
+      "after_bytes_op": 760365.0,
+      "bytes_op_change_percent": -1.8535609409790599,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/openai/bytes=204800/c=32": {
+      "baseline_ns_op": 13757905.0,
+      "after_ns_op": 13639888.0,
+      "ns_op_change_percent": -0.8578122904613794,
+      "baseline_bytes_op": 797586.0,
+      "after_bytes_op": 819826.0,
+      "bytes_op_change_percent": 2.7884140393637846,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        7.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        7.0
+      ]
+    },
+    "BenchmarkInspect/full/openai/bytes=204800/c=8": {
+      "baseline_ns_op": 14068718.0,
+      "after_ns_op": 13812849.0,
+      "ns_op_change_percent": -1.8187087124782786,
+      "baseline_bytes_op": 797524.0,
+      "after_bytes_op": 786486.0,
+      "bytes_op_change_percent": -1.3840335839423012,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        7.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        7.0
+      ]
+    },
+    "BenchmarkInspect/full/openai/bytes=8388608/c=1": {
+      "baseline_ns_op": 2022485598.0,
+      "after_ns_op": 2008144876.0,
+      "ns_op_change_percent": -0.7090642333464015,
+      "baseline_bytes_op": 42333320.0,
+      "after_bytes_op": 42212416.0,
+      "bytes_op_change_percent": -0.28560008995278663,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/openai/bytes=8388608/c=32": {
+      "baseline_ns_op": 2021512111.0,
+      "after_ns_op": 2017187954.0,
+      "ns_op_change_percent": -0.21390705385687658,
+      "baseline_bytes_op": 42333496.0,
+      "after_bytes_op": 42333320.0,
+      "bytes_op_change_percent": -0.0004157464339793471,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/openai/bytes=8388608/c=8": {
+      "baseline_ns_op": 2026237852.0,
+      "after_ns_op": 2022035507.0,
+      "ns_op_change_percent": -0.20739643156167942,
+      "baseline_bytes_op": 42333496.0,
+      "after_bytes_op": 42333672.0,
+      "bytes_op_change_percent": 0.0004157464339904493,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/responses/bytes=1048576/c=1": {
+      "baseline_ns_op": 251945972.0,
+      "after_ns_op": 250769993.0,
+      "ns_op_change_percent": -0.46675840485356224,
+      "baseline_bytes_op": 5594912.0,
+      "after_bytes_op": 5468976.0,
+      "bytes_op_change_percent": -2.250902248328479,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/responses/bytes=1048576/c=32": {
+      "baseline_ns_op": 253578664.0,
+      "after_ns_op": 249846760.0,
+      "ns_op_change_percent": -1.471694795268741,
+      "baseline_bytes_op": 5386024.0,
+      "after_bytes_op": 5499944.0,
+      "bytes_op_change_percent": 2.1151038316947757,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/responses/bytes=1048576/c=8": {
+      "baseline_ns_op": 252742400.0,
+      "after_ns_op": 249436306.0,
+      "ns_op_change_percent": -1.3080883935580268,
+      "baseline_bytes_op": 5632432.0,
+      "after_bytes_op": 5499944.0,
+      "bytes_op_change_percent": -2.352234345660986,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/responses/bytes=20480/c=1": {
+      "baseline_ns_op": 4803829.0,
+      "after_ns_op": 4806555.0,
+      "ns_op_change_percent": 0.056746399590834606,
+      "baseline_bytes_op": 98314.0,
+      "after_bytes_op": 97228.0,
+      "bytes_op_change_percent": -1.104623959965012,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/responses/bytes=20480/c=32": {
+      "baseline_ns_op": 1234532.0,
+      "after_ns_op": 1242174.0,
+      "ns_op_change_percent": 0.6190200011016334,
+      "baseline_bytes_op": 105811.0,
+      "after_bytes_op": 105041.0,
+      "bytes_op_change_percent": -0.7277126196709172,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/full/responses/bytes=20480/c=8": {
+      "baseline_ns_op": 1227418.0,
+      "after_ns_op": 1226313.0,
+      "ns_op_change_percent": -0.09002638058102086,
+      "baseline_bytes_op": 94262.0,
+      "after_bytes_op": 92177.0,
+      "bytes_op_change_percent": -2.211919967749465,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/full/responses/bytes=204800/c=1": {
+      "baseline_ns_op": 49556602.0,
+      "after_ns_op": 49114403.0,
+      "ns_op_change_percent": -0.8923109780610061,
+      "baseline_bytes_op": 816885.0,
+      "after_bytes_op": 824920.0,
+      "bytes_op_change_percent": 0.9836145846722655,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/responses/bytes=204800/c=32": {
+      "baseline_ns_op": 13294079.0,
+      "after_ns_op": 14410791.0,
+      "ns_op_change_percent": 8.40007043737292,
+      "baseline_bytes_op": 807427.0,
+      "after_bytes_op": 802853.0,
+      "bytes_op_change_percent": -0.5664908406580405,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        7.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/full/responses/bytes=204800/c=8": {
+      "baseline_ns_op": 14332508.0,
+      "after_ns_op": 14368293.0,
+      "ns_op_change_percent": 0.2496771674573628,
+      "baseline_bytes_op": 817792.0,
+      "after_bytes_op": 814017.0,
+      "bytes_op_change_percent": -0.46160881984661506,
+      "baseline_workers": [
+        7.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        7.0
+      ]
+    },
+    "BenchmarkInspect/full/responses/bytes=8388608/c=1": {
+      "baseline_ns_op": 2026997012.0,
+      "after_ns_op": 2027325617.0,
+      "ns_op_change_percent": 0.016211420049194736,
+      "baseline_bytes_op": 42333296.0,
+      "after_bytes_op": 42333120.0,
+      "bytes_op_change_percent": -0.0004157483981415133,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/responses/bytes=8388608/c=32": {
+      "baseline_ns_op": 2035229366.0,
+      "after_ns_op": 2022500316.0,
+      "ns_op_change_percent": -0.6254356493006652,
+      "baseline_bytes_op": 42333120.0,
+      "after_bytes_op": 42332944.0,
+      "bytes_op_change_percent": -0.00041575012661443367,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/full/responses/bytes=8388608/c=8": {
+      "baseline_ns_op": 2032428247.0,
+      "after_ns_op": 2014845509.0,
+      "ns_op_change_percent": -0.8651099012205399,
+      "baseline_bytes_op": 42332944.0,
+      "after_bytes_op": 42280352.0,
+      "bytes_op_change_percent": -0.12423421342961927,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/anthropic/bytes=1048576/c=1": {
+      "baseline_ns_op": 252004654.0,
+      "after_ns_op": 6021588.0,
+      "ns_op_change_percent": -97.6105250818106,
+      "baseline_bytes_op": 5549328.0,
+      "after_bytes_op": 5243549.0,
+      "bytes_op_change_percent": -5.510198712348591,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/anthropic/bytes=1048576/c=32": {
+      "baseline_ns_op": 254469249.0,
+      "after_ns_op": 1612046.0,
+      "ns_op_change_percent": -99.3665065596983,
+      "baseline_bytes_op": 5632632.0,
+      "after_bytes_op": 5245103.0,
+      "bytes_op_change_percent": -6.880069566057223,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ]
+    },
+    "BenchmarkInspect/structure/anthropic/bytes=1048576/c=8": {
+      "baseline_ns_op": 255388801.0,
+      "after_ns_op": 1648894.0,
+      "ns_op_change_percent": -99.35435931664051,
+      "baseline_bytes_op": 5670056.0,
+      "after_bytes_op": 5244093.0,
+      "bytes_op_change_percent": -7.512500758369933,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/anthropic/bytes=20480/c=1": {
+      "baseline_ns_op": 4773484.0,
+      "after_ns_op": 125302.0,
+      "ns_op_change_percent": -97.37504095541118,
+      "baseline_bytes_op": 91993.0,
+      "after_bytes_op": 86257.0,
+      "bytes_op_change_percent": -6.235257030426233,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/anthropic/bytes=20480/c=32": {
+      "baseline_ns_op": 1237747.0,
+      "after_ns_op": 42305.0,
+      "ns_op_change_percent": -96.58209634117473,
+      "baseline_bytes_op": 105054.0,
+      "after_bytes_op": 86337.0,
+      "bytes_op_change_percent": -17.816551487806276,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/structure/anthropic/bytes=20480/c=8": {
+      "baseline_ns_op": 1236651.0,
+      "after_ns_op": 36930.0,
+      "ns_op_change_percent": -97.01370879900635,
+      "baseline_bytes_op": 92904.0,
+      "after_bytes_op": 86269.0,
+      "bytes_op_change_percent": -7.1417807629380885,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/anthropic/bytes=204800/c=1": {
+      "baseline_ns_op": 49717877.0,
+      "after_ns_op": 1181832.0,
+      "ns_op_change_percent": -97.62292344059664,
+      "baseline_bytes_op": 792021.0,
+      "after_bytes_op": 729403.0,
+      "bytes_op_change_percent": -7.9061034997809365,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/anthropic/bytes=204800/c=32": {
+      "baseline_ns_op": 13178024.0,
+      "after_ns_op": 312193.0,
+      "ns_op_change_percent": -97.63095741819866,
+      "baseline_bytes_op": 799084.0,
+      "after_bytes_op": 730055.0,
+      "bytes_op_change_percent": -8.638516100935567,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/structure/anthropic/bytes=204800/c=8": {
+      "baseline_ns_op": 13791588.0,
+      "after_ns_op": 348856.0,
+      "ns_op_change_percent": -97.47051608560233,
+      "baseline_bytes_op": 809423.0,
+      "after_bytes_op": 729517.0,
+      "bytes_op_change_percent": -9.871970527153294,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/anthropic/bytes=8388608/c=1": {
+      "baseline_ns_op": 2015384573.0,
+      "after_ns_op": 50889482.0,
+      "ns_op_change_percent": -97.47494931330904,
+      "baseline_bytes_op": 42333144.0,
+      "after_bytes_op": 41947424.0,
+      "bytes_op_change_percent": -0.911153681380239,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/anthropic/bytes=8388608/c=32": {
+      "baseline_ns_op": 2018902302.0,
+      "after_ns_op": 26238041.0,
+      "ns_op_change_percent": -98.70038084685882,
+      "baseline_bytes_op": 42333496.0,
+      "after_bytes_op": 41947424.0,
+      "bytes_op_change_percent": -0.9119775980703348,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    "BenchmarkInspect/structure/anthropic/bytes=8388608/c=8": {
+      "baseline_ns_op": 2013080423.0,
+      "after_ns_op": 33366727.0,
+      "ns_op_change_percent": -98.34250402424186,
+      "baseline_bytes_op": 42250016.0,
+      "after_bytes_op": 41948808.0,
+      "bytes_op_change_percent": -0.7129180732144524,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock-converse/bytes=1048576/c=1": {
+      "baseline_ns_op": 252663333.0,
+      "after_ns_op": 6117872.0,
+      "ns_op_change_percent": -97.57864668079876,
+      "baseline_bytes_op": 5633920.0,
+      "after_bytes_op": 5244365.0,
+      "bytes_op_change_percent": -6.91445742928547,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock-converse/bytes=1048576/c=32": {
+      "baseline_ns_op": 252164016.0,
+      "after_ns_op": 1640567.0,
+      "ns_op_change_percent": -99.34940479374345,
+      "baseline_bytes_op": 5467664.0,
+      "after_bytes_op": 5245978.0,
+      "bytes_op_change_percent": -4.054492009750421,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock-converse/bytes=1048576/c=8": {
+      "baseline_ns_op": 249657411.0,
+      "after_ns_op": 1667443.0,
+      "ns_op_change_percent": -99.3321075495732,
+      "baseline_bytes_op": 5501480.0,
+      "after_bytes_op": 5244941.0,
+      "bytes_op_change_percent": -4.663090659240787,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock-converse/bytes=20480/c=1": {
+      "baseline_ns_op": 4870271.0,
+      "after_ns_op": 127661.0,
+      "ns_op_change_percent": -97.37877009308106,
+      "baseline_bytes_op": 98316.0,
+      "after_bytes_op": 87033.0,
+      "bytes_op_change_percent": -11.476260222140855,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock-converse/bytes=20480/c=32": {
+      "baseline_ns_op": 1240329.0,
+      "after_ns_op": 41745.0,
+      "ns_op_change_percent": -96.63436072203423,
+      "baseline_bytes_op": 107843.0,
+      "after_bytes_op": 87116.0,
+      "bytes_op_change_percent": -19.2196062794989,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock-converse/bytes=20480/c=8": {
+      "baseline_ns_op": 1243452.0,
+      "after_ns_op": 37898.0,
+      "ns_op_change_percent": -96.95219437501407,
+      "baseline_bytes_op": 95272.0,
+      "after_bytes_op": 87048.0,
+      "bytes_op_change_percent": -8.632126962801244,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock-converse/bytes=204800/c=1": {
+      "baseline_ns_op": 48737473.0,
+      "after_ns_op": 1199261.0,
+      "ns_op_change_percent": -97.53934513592857,
+      "baseline_bytes_op": 761306.0,
+      "after_bytes_op": 730183.0,
+      "bytes_op_change_percent": -4.08810649068837,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock-converse/bytes=204800/c=32": {
+      "baseline_ns_op": 13935354.0,
+      "after_ns_op": 315088.0,
+      "ns_op_change_percent": -97.73893077994286,
+      "baseline_bytes_op": 798558.0,
+      "after_bytes_op": 730840.0,
+      "bytes_op_change_percent": -8.480035263562568,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        7.0,
+        7.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock-converse/bytes=204800/c=8": {
+      "baseline_ns_op": 13222853.0,
+      "after_ns_op": 354016.0,
+      "ns_op_change_percent": -97.32269579038653,
+      "baseline_bytes_op": 815539.0,
+      "after_bytes_op": 730309.0,
+      "bytes_op_change_percent": -10.45075710664971,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock-converse/bytes=8388608/c=1": {
+      "baseline_ns_op": 2022787468.0,
+      "after_ns_op": 51252235.0,
+      "ns_op_change_percent": -97.46625704327332,
+      "baseline_bytes_op": 42370928.0,
+      "after_bytes_op": 41948216.0,
+      "bytes_op_change_percent": -0.9976463106968092,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock-converse/bytes=8388608/c=32": {
+      "baseline_ns_op": 2020779237.0,
+      "after_ns_op": 26411532.0,
+      "ns_op_change_percent": -98.69300260432159,
+      "baseline_bytes_op": 42334784.0,
+      "after_bytes_op": 41948216.0,
+      "bytes_op_change_percent": -0.9131214653179787,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock-converse/bytes=8388608/c=8": {
+      "baseline_ns_op": 2009682129.0,
+      "after_ns_op": 33374830.0,
+      "ns_op_change_percent": -98.33929806518174,
+      "baseline_bytes_op": 42334256.0,
+      "after_bytes_op": 41949600.0,
+      "bytes_op_change_percent": -0.9086164169272326,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock/bytes=1048576/c=1": {
+      "baseline_ns_op": 252411122.0,
+      "after_ns_op": 6268089.0,
+      "ns_op_change_percent": -97.51671441799621,
+      "baseline_bytes_op": 5632344.0,
+      "after_bytes_op": 5243573.0,
+      "bytes_op_change_percent": -6.902472576248897,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock/bytes=1048576/c=32": {
+      "baseline_ns_op": 252830249.0,
+      "after_ns_op": 1614696.0,
+      "ns_op_change_percent": -99.36135173445959,
+      "baseline_bytes_op": 5506360.0,
+      "after_bytes_op": 5245188.0,
+      "bytes_op_change_percent": -4.7430970732026285,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock/bytes=1048576/c=8": {
+      "baseline_ns_op": 252949269.0,
+      "after_ns_op": 1670034.0,
+      "ns_op_change_percent": -99.33977512305047,
+      "baseline_bytes_op": 5595160.0,
+      "after_bytes_op": 5244095.0,
+      "bytes_op_change_percent": -6.2744407666626145,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock/bytes=20480/c=1": {
+      "baseline_ns_op": 4803962.0,
+      "after_ns_op": 127935.0,
+      "ns_op_change_percent": -97.33688567894583,
+      "baseline_bytes_op": 96996.0,
+      "after_bytes_op": 86257.0,
+      "bytes_op_change_percent": -11.071590581054892,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock/bytes=20480/c=32": {
+      "baseline_ns_op": 1250303.0,
+      "after_ns_op": 41494.0,
+      "ns_op_change_percent": -96.6812844566477,
+      "baseline_bytes_op": 106075.0,
+      "after_bytes_op": 86339.0,
+      "bytes_op_change_percent": -18.60570351166627,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock/bytes=20480/c=8": {
+      "baseline_ns_op": 1248428.0,
+      "after_ns_op": 37697.0,
+      "ns_op_change_percent": -96.98044260461957,
+      "baseline_bytes_op": 93222.0,
+      "after_bytes_op": 86269.0,
+      "bytes_op_change_percent": -7.458539829653943,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock/bytes=204800/c=1": {
+      "baseline_ns_op": 50079356.0,
+      "after_ns_op": 1214911.0,
+      "ns_op_change_percent": -97.5740283081915,
+      "baseline_bytes_op": 774725.0,
+      "after_bytes_op": 729403.0,
+      "bytes_op_change_percent": -5.850075833360224,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock/bytes=204800/c=32": {
+      "baseline_ns_op": 13567942.0,
+      "after_ns_op": 318448.0,
+      "ns_op_change_percent": -97.6529380800714,
+      "baseline_bytes_op": 802162.0,
+      "after_bytes_op": 730057.0,
+      "bytes_op_change_percent": -8.988832679683156,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock/bytes=204800/c=8": {
+      "baseline_ns_op": 13456015.0,
+      "after_ns_op": 357208.0,
+      "ns_op_change_percent": -97.34536562273452,
+      "baseline_bytes_op": 823685.0,
+      "after_bytes_op": 729519.0,
+      "bytes_op_change_percent": -11.43228297225274,
+      "baseline_workers": [
+        7.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock/bytes=8388608/c=1": {
+      "baseline_ns_op": 2025476504.0,
+      "after_ns_op": 51248196.0,
+      "ns_op_change_percent": -97.4698202670437,
+      "baseline_bytes_op": 42333320.0,
+      "after_bytes_op": 41947424.0,
+      "bytes_op_change_percent": -0.9115656414379947,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock/bytes=8388608/c=32": {
+      "baseline_ns_op": 2027635627.0,
+      "after_ns_op": 26796097.0,
+      "ns_op_change_percent": -98.67845599854415,
+      "baseline_bytes_op": 42333848.0,
+      "after_bytes_op": 41947424.0,
+      "bytes_op_change_percent": -0.912801501058913,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    "BenchmarkInspect/structure/bedrock/bytes=8388608/c=8": {
+      "baseline_ns_op": 2021817817.0,
+      "after_ns_op": 26411782.0,
+      "ns_op_change_percent": -98.69366162579425,
+      "baseline_bytes_op": 42333672.0,
+      "after_bytes_op": 41947424.0,
+      "bytes_op_change_percent": -0.9123895512772928,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    "BenchmarkInspect/structure/openai/bytes=1048576/c=1": {
+      "baseline_ns_op": 250725081.0,
+      "after_ns_op": 6159563.0,
+      "ns_op_change_percent": -97.54330002589569,
+      "baseline_bytes_op": 5392184.0,
+      "after_bytes_op": 5243555.0,
+      "bytes_op_change_percent": -2.756378491535161,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/openai/bytes=1048576/c=32": {
+      "baseline_ns_op": 253689334.0,
+      "after_ns_op": 1623331.0,
+      "ns_op_change_percent": -99.36011066196421,
+      "baseline_bytes_op": 5678640.0,
+      "after_bytes_op": 5245096.0,
+      "bytes_op_change_percent": -7.6346449149796385,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ]
+    },
+    "BenchmarkInspect/structure/openai/bytes=1048576/c=8": {
+      "baseline_ns_op": 254264751.0,
+      "after_ns_op": 1665530.0,
+      "ns_op_change_percent": -99.3449622908997,
+      "baseline_bytes_op": 5632632.0,
+      "after_bytes_op": 5244152.0,
+      "bytes_op_change_percent": -6.896953324839972,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/openai/bytes=20480/c=1": {
+      "baseline_ns_op": 4756490.0,
+      "after_ns_op": 128142.0,
+      "ns_op_change_percent": -97.30595460097678,
+      "baseline_bytes_op": 97050.0,
+      "after_bytes_op": 86256.0,
+      "bytes_op_change_percent": -11.122102009273572,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/openai/bytes=20480/c=32": {
+      "baseline_ns_op": 1250737.0,
+      "after_ns_op": 40834.0,
+      "ns_op_change_percent": -96.73520492317729,
+      "baseline_bytes_op": 106183.0,
+      "after_bytes_op": 86336.0,
+      "bytes_op_change_percent": -18.69131593569592,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/structure/openai/bytes=20480/c=8": {
+      "baseline_ns_op": 1242926.0,
+      "after_ns_op": 37656.0,
+      "ns_op_change_percent": -96.97037474475552,
+      "baseline_bytes_op": 93203.0,
+      "after_bytes_op": 86269.0,
+      "bytes_op_change_percent": -7.439674688582986,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/openai/bytes=204800/c=1": {
+      "baseline_ns_op": 49547212.0,
+      "after_ns_op": 1205433.0,
+      "ns_op_change_percent": -97.56710226197994,
+      "baseline_bytes_op": 774725.0,
+      "after_bytes_op": 729408.0,
+      "bytes_op_change_percent": -5.849430443060443,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/openai/bytes=204800/c=32": {
+      "baseline_ns_op": 13757905.0,
+      "after_ns_op": 315497.0,
+      "ns_op_change_percent": -97.70679474818296,
+      "baseline_bytes_op": 797586.0,
+      "after_bytes_op": 730061.0,
+      "bytes_op_change_percent": -8.466171673023348,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        7.0,
+        8.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/structure/openai/bytes=204800/c=8": {
+      "baseline_ns_op": 14068718.0,
+      "after_ns_op": 353334.0,
+      "ns_op_change_percent": -97.48851316800862,
+      "baseline_bytes_op": 797524.0,
+      "after_bytes_op": 729519.0,
+      "bytes_op_change_percent": -8.52701611487554,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        7.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/openai/bytes=8388608/c=1": {
+      "baseline_ns_op": 2022485598.0,
+      "after_ns_op": 51607486.0,
+      "ns_op_change_percent": -97.44831379511261,
+      "baseline_bytes_op": 42333320.0,
+      "after_bytes_op": 41947424.0,
+      "bytes_op_change_percent": -0.9115656414379947,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/openai/bytes=8388608/c=32": {
+      "baseline_ns_op": 2021512111.0,
+      "after_ns_op": 25962744.0,
+      "ns_op_change_percent": -98.7156770489415,
+      "baseline_bytes_op": 42333496.0,
+      "after_bytes_op": 41947424.0,
+      "bytes_op_change_percent": -0.9119775980703348,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    "BenchmarkInspect/structure/openai/bytes=8388608/c=8": {
+      "baseline_ns_op": 2026237852.0,
+      "after_ns_op": 26225868.0,
+      "ns_op_change_percent": -98.7056866016932,
+      "baseline_bytes_op": 42333496.0,
+      "after_bytes_op": 41947424.0,
+      "bytes_op_change_percent": -0.9119775980703348,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=1048576/c=1": {
+      "baseline_ns_op": 251945972.0,
+      "after_ns_op": 6035132.0,
+      "ns_op_change_percent": -97.60459278150317,
+      "baseline_bytes_op": 5594912.0,
+      "after_bytes_op": 5242781.0,
+      "bytes_op_change_percent": -6.293771912766455,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=1048576/c=32": {
+      "baseline_ns_op": 253578664.0,
+      "after_ns_op": 1598856.0,
+      "ns_op_change_percent": -99.36948323065539,
+      "baseline_bytes_op": 5386024.0,
+      "after_bytes_op": 5244282.0,
+      "bytes_op_change_percent": -2.631662985534411,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=1048576/c=8": {
+      "baseline_ns_op": 252742400.0,
+      "after_ns_op": 1642030.0,
+      "ns_op_change_percent": -99.35031478691347,
+      "baseline_bytes_op": 5632432.0,
+      "after_bytes_op": 5243326.0,
+      "bytes_op_change_percent": -6.90831243058061,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=20480/c=1": {
+      "baseline_ns_op": 4803829.0,
+      "after_ns_op": 122133.0,
+      "ns_op_change_percent": -97.4575906011642,
+      "baseline_bytes_op": 98314.0,
+      "after_bytes_op": 85464.0,
+      "bytes_op_change_percent": -13.070366377118214,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=20480/c=32": {
+      "baseline_ns_op": 1234532.0,
+      "after_ns_op": 39941.0,
+      "ns_op_change_percent": -96.76468491703739,
+      "baseline_bytes_op": 105811.0,
+      "after_bytes_op": 85543.0,
+      "bytes_op_change_percent": -19.154908279857487,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=20480/c=8": {
+      "baseline_ns_op": 1227418.0,
+      "after_ns_op": 36355.0,
+      "ns_op_change_percent": -97.03809134296549,
+      "baseline_bytes_op": 94262.0,
+      "after_bytes_op": 85477.0,
+      "bytes_op_change_percent": -9.319768305361652,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=204800/c=1": {
+      "baseline_ns_op": 49556602.0,
+      "after_ns_op": 1165172.0,
+      "ns_op_change_percent": -97.64880570302216,
+      "baseline_bytes_op": 816885.0,
+      "after_bytes_op": 728611.0,
+      "bytes_op_change_percent": -10.806172227424915,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=204800/c=32": {
+      "baseline_ns_op": 13294079.0,
+      "after_ns_op": 312199.0,
+      "ns_op_change_percent": -97.65159361547347,
+      "baseline_bytes_op": 807427.0,
+      "after_bytes_op": 729263.0,
+      "bytes_op_change_percent": -9.680627474681923,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=204800/c=8": {
+      "baseline_ns_op": 14332508.0,
+      "after_ns_op": 346935.0,
+      "ns_op_change_percent": -97.57938387335979,
+      "baseline_bytes_op": 817792.0,
+      "after_bytes_op": 728725.0,
+      "bytes_op_change_percent": -10.89115569729222,
+      "baseline_workers": [
+        7.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=8388608/c=1": {
+      "baseline_ns_op": 2026997012.0,
+      "after_ns_op": 51106827.0,
+      "ns_op_change_percent": -97.47869253395821,
+      "baseline_bytes_op": 42333296.0,
+      "after_bytes_op": 41946632.0,
+      "bytes_op_change_percent": -0.9133803330598211,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=8388608/c=32": {
+      "baseline_ns_op": 2035229366.0,
+      "after_ns_op": 34087283.0,
+      "ns_op_change_percent": -98.32513801297029,
+      "baseline_bytes_op": 42333120.0,
+      "after_bytes_op": 41948016.0,
+      "bytes_op_change_percent": -0.9096990724992593,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=8388608/c=8": {
+      "baseline_ns_op": 2032428247.0,
+      "after_ns_op": 34156581.0,
+      "ns_op_change_percent": -98.31942008036853,
+      "baseline_bytes_op": 42332944.0,
+      "after_bytes_op": 41948016.0,
+      "bytes_op_change_percent": -0.9092871027349236,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    }
+  },
+  "sensitivity-concurrent": {
+    "BenchmarkInspect/full/responses/bytes=1048576/c=32": {
+      "baseline_ns_op": 64128808.0,
+      "after_ns_op": 64073193.0,
+      "ns_op_change_percent": -0.08672389482118348,
+      "baseline_bytes_op": 5327068.0,
+      "after_bytes_op": 5331567.0,
+      "bytes_op_change_percent": 0.08445546405639881,
+      "baseline_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ],
+      "after_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ]
+    },
+    "BenchmarkInspect/full/responses/bytes=204800/c=32": {
+      "baseline_ns_op": 12543352.0,
+      "after_ns_op": 12669798.0,
+      "ns_op_change_percent": 1.0080718455481419,
+      "baseline_bytes_op": 814442.0,
+      "after_bytes_op": 816321.0,
+      "bytes_op_change_percent": 0.2307101058147687,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=1048576/c=32": {
+      "baseline_ns_op": 64128808.0,
+      "after_ns_op": 1699402.0,
+      "ns_op_change_percent": -97.35001779543447,
+      "baseline_bytes_op": 5327068.0,
+      "after_bytes_op": 5246473.0,
+      "bytes_op_change_percent": -1.51293356870984,
+      "baseline_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ],
+      "after_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ]
+    },
+    "BenchmarkInspect/structure/responses/bytes=204800/c=32": {
+      "baseline_ns_op": 12543352.0,
+      "after_ns_op": 363876.0,
+      "ns_op_change_percent": -97.09905294852604,
+      "baseline_bytes_op": 814442.0,
+      "after_bytes_op": 736858.0,
+      "bytes_op_change_percent": -9.526031319602868,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    }
+  },
+  "router": {
+    "BenchmarkRouteRequestInspection/anthropic/block/bytes=1048576/c=1": {
+      "baseline_ns_op": 148380826.0,
+      "after_ns_op": 148636576.0,
+      "ns_op_change_percent": 0.17236054475124885,
+      "baseline_bytes_op": 5381872.0,
+      "after_bytes_op": 5381216.0,
+      "bytes_op_change_percent": -0.012189067298518097,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/block/bytes=204800/c=1": {
+      "baseline_ns_op": 30249876.0,
+      "after_ns_op": 30268608.0,
+      "ns_op_change_percent": 0.06192422078028503,
+      "baseline_bytes_op": 790450.0,
+      "after_bytes_op": 793830.0,
+      "bytes_op_change_percent": 0.4276045290657171,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/classifier/bytes=1048576/c=1": {
+      "baseline_ns_op": 263954106.0,
+      "after_ns_op": 262966206.0,
+      "ns_op_change_percent": -0.3742696088235853,
+      "baseline_bytes_op": 10664472.0,
+      "after_bytes_op": 10747376.0,
+      "bytes_op_change_percent": 0.7773849469528304,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/classifier/bytes=204800/c=1": {
+      "baseline_ns_op": 50917718.0,
+      "after_ns_op": 50941706.0,
+      "ns_op_change_percent": 0.04711130219936521,
+      "baseline_bytes_op": 1552320.0,
+      "after_bytes_op": 1530780.0,
+      "bytes_op_change_percent": -1.3876004947433573,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/enforce/bytes=1048576/c=1": {
+      "baseline_ns_op": 256897918.0,
+      "after_ns_op": 9205705.0,
+      "ns_op_change_percent": -96.41659026602154,
+      "baseline_bytes_op": 5423448.0,
+      "after_bytes_op": 5245013.0,
+      "bytes_op_change_percent": -3.2900656556493213,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/enforce/bytes=204800/c=1": {
+      "baseline_ns_op": 50218156.0,
+      "after_ns_op": 1794338.0,
+      "ns_op_change_percent": -96.42691380384417,
+      "baseline_bytes_op": 735048.0,
+      "after_bytes_op": 730644.0,
+      "bytes_op_change_percent": -0.5991445456623223,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/internal/bytes=1048576/c=1": {
+      "baseline_ns_op": 255637695.0,
+      "after_ns_op": 256718128.0,
+      "ns_op_change_percent": 0.4226422867722901,
+      "baseline_bytes_op": 5380352.0,
+      "after_bytes_op": 5457648.0,
+      "bytes_op_change_percent": 1.4366346291097676,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/internal/bytes=204800/c=1": {
+      "baseline_ns_op": 50248446.0,
+      "after_ns_op": 49422427.0,
+      "ns_op_change_percent": -1.6438697427578197,
+      "baseline_bytes_op": 790269.0,
+      "after_bytes_op": 775909.0,
+      "bytes_op_change_percent": -1.8171027839887444,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/mask/bytes=1048576/c=1": {
+      "baseline_ns_op": 1062427878.0,
+      "after_ns_op": 1056947925.0,
+      "ns_op_change_percent": -0.5157952942947852,
+      "baseline_bytes_op": 35265872.0,
+      "after_bytes_op": 35391888.0,
+      "bytes_op_change_percent": 0.3573313031930647,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/mask/bytes=204800/c=1": {
+      "baseline_ns_op": 208833728.0,
+      "after_ns_op": 207772913.0,
+      "ns_op_change_percent": -0.5079711070426374,
+      "baseline_bytes_op": 5677400.0,
+      "after_bytes_op": 5593504.0,
+      "bytes_op_change_percent": -1.4777186740409287,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/none/bytes=1048576/c=1": {
+      "baseline_ns_op": 306.8,
+      "after_ns_op": 307.8,
+      "ns_op_change_percent": 0.32594524119948787,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/none/bytes=20480/c=1": {
+      "baseline_ns_op": 304.5,
+      "after_ns_op": 305.0,
+      "ns_op_change_percent": 0.16420361247948545,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/none/bytes=204800/c=1": {
+      "baseline_ns_op": 304.5,
+      "after_ns_op": 301.9,
+      "ns_op_change_percent": -0.8538587848932799,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/none/bytes=8388608/c=1": {
+      "baseline_ns_op": 301.4,
+      "after_ns_op": 300.1,
+      "ns_op_change_percent": -0.4313205043131929,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/shadow/bytes=1048576/c=1": {
+      "baseline_ns_op": 257209113.0,
+      "after_ns_op": 9202313.0,
+      "ns_op_change_percent": -96.42224457264857,
+      "baseline_bytes_op": 5380368.0,
+      "after_bytes_op": 5245013.0,
+      "bytes_op_change_percent": -2.5157201143118813,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/shadow/bytes=204800/c=1": {
+      "baseline_ns_op": 49486266.0,
+      "after_ns_op": 1791721.0,
+      "ns_op_change_percent": -96.37935705231831,
+      "baseline_bytes_op": 748258.0,
+      "after_bytes_op": 730645.0,
+      "bytes_op_change_percent": -2.353867248996999,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/strict/bytes=1048576/c=1": {
+      "baseline_ns_op": 256554245.0,
+      "after_ns_op": 9223054.0,
+      "ns_op_change_percent": -96.40502771645816,
+      "baseline_bytes_op": 5341240.0,
+      "after_bytes_op": 5248364.0,
+      "bytes_op_change_percent": -1.7388471590866539,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/anthropic/strict/bytes=204800/c=1": {
+      "baseline_ns_op": 50000202.0,
+      "after_ns_op": 1806663.0,
+      "ns_op_change_percent": -96.38668859777808,
+      "baseline_bytes_op": 761973.0,
+      "after_bytes_op": 734003.0,
+      "bytes_op_change_percent": -3.6707337399094153,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/block/bytes=1048576/c=1": {
+      "baseline_ns_op": 153222162.0,
+      "after_ns_op": 153580433.0,
+      "ns_op_change_percent": 0.23382452990057256,
+      "baseline_bytes_op": 5421912.0,
+      "after_bytes_op": 5418568.0,
+      "bytes_op_change_percent": -0.06167565980413903,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/block/bytes=204800/c=1": {
+      "baseline_ns_op": 30504374.0,
+      "after_ns_op": 30430049.0,
+      "ns_op_change_percent": -0.243653582269876,
+      "baseline_bytes_op": 767432.0,
+      "after_bytes_op": 786856.0,
+      "bytes_op_change_percent": 2.5310385806169178,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/classifier/bytes=1048576/c=1": {
+      "baseline_ns_op": 258636460.0,
+      "after_ns_op": 256607283.0,
+      "ns_op_change_percent": -0.7845672648009505,
+      "baseline_bytes_op": 5301248.0,
+      "after_bytes_op": 5471080.0,
+      "bytes_op_change_percent": 3.203622995943589,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/classifier/bytes=204800/c=1": {
+      "baseline_ns_op": 50238632.0,
+      "after_ns_op": 50381664.0,
+      "ns_op_change_percent": 0.2847052045525489,
+      "baseline_bytes_op": 738616.0,
+      "after_bytes_op": 784180.0,
+      "bytes_op_change_percent": 6.168834685411628,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/enforce/bytes=1048576/c=1": {
+      "baseline_ns_op": 260462526.0,
+      "after_ns_op": 11031587.0,
+      "ns_op_change_percent": -95.76461644236683,
+      "baseline_bytes_op": 5293304.0,
+      "after_bytes_op": 5246014.0,
+      "bytes_op_change_percent": -0.8933928601115637,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/enforce/bytes=204800/c=1": {
+      "baseline_ns_op": 50703191.0,
+      "after_ns_op": 2155190.0,
+      "ns_op_change_percent": -95.74939967782305,
+      "baseline_bytes_op": 735608.0,
+      "after_bytes_op": 731533.0,
+      "bytes_op_change_percent": -0.5539635240508489,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/internal/bytes=1048576/c=1": {
+      "baseline_ns_op": 257496420.0,
+      "after_ns_op": 257456760.0,
+      "ns_op_change_percent": -0.015402155882404678,
+      "baseline_bytes_op": 5381720.0,
+      "after_bytes_op": 5342200.0,
+      "bytes_op_change_percent": -0.7343377210259905,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/internal/bytes=204800/c=1": {
+      "baseline_ns_op": 50255152.0,
+      "after_ns_op": 50233266.0,
+      "ns_op_change_percent": -0.04354976381326647,
+      "baseline_bytes_op": 777000.0,
+      "after_bytes_op": 791541.0,
+      "bytes_op_change_percent": 1.8714285714285683,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/mask/bytes=1048576/c=1": {
+      "baseline_ns_op": 1070831402.0,
+      "after_ns_op": 1063391674.0,
+      "ns_op_change_percent": -0.694761844498093,
+      "baseline_bytes_op": 35105720.0,
+      "after_bytes_op": 35354488.0,
+      "bytes_op_change_percent": 0.7086252610685628,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/mask/bytes=204800/c=1": {
+      "baseline_ns_op": 208525448.0,
+      "after_ns_op": 209522898.0,
+      "ns_op_change_percent": 0.47833490327759964,
+      "baseline_bytes_op": 5721648.0,
+      "after_bytes_op": 5688480.0,
+      "bytes_op_change_percent": -0.5796931233798319,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/none/bytes=1048576/c=1": {
+      "baseline_ns_op": 309.2,
+      "after_ns_op": 310.6,
+      "ns_op_change_percent": 0.4527813712807305,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/none/bytes=20480/c=1": {
+      "baseline_ns_op": 306.0,
+      "after_ns_op": 306.6,
+      "ns_op_change_percent": 0.19607843137254832,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/none/bytes=204800/c=1": {
+      "baseline_ns_op": 306.7,
+      "after_ns_op": 308.6,
+      "ns_op_change_percent": 0.6194978806651541,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/none/bytes=8388608/c=1": {
+      "baseline_ns_op": 302.0,
+      "after_ns_op": 302.4,
+      "ns_op_change_percent": 0.13245033112581073,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/shadow/bytes=1048576/c=1": {
+      "baseline_ns_op": 257351236.0,
+      "after_ns_op": 10960193.0,
+      "ns_op_change_percent": -95.74115393018747,
+      "baseline_bytes_op": 5255160.0,
+      "after_bytes_op": 5246014.0,
+      "bytes_op_change_percent": -0.1740384688572738,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/shadow/bytes=204800/c=1": {
+      "baseline_ns_op": 50540594.0,
+      "after_ns_op": 2170333.0,
+      "ns_op_change_percent": -95.70576277754076,
+      "baseline_bytes_op": 735608.0,
+      "after_bytes_op": 731525.0,
+      "bytes_op_change_percent": -0.5550510598035907,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/strict/bytes=1048576/c=1": {
+      "baseline_ns_op": 256362872.0,
+      "after_ns_op": 11028765.0,
+      "ns_op_change_percent": -95.69798664137294,
+      "baseline_bytes_op": 5348024.0,
+      "after_bytes_op": 5249374.0,
+      "bytes_op_change_percent": -1.8446065313095117,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock-converse/strict/bytes=204800/c=1": {
+      "baseline_ns_op": 50632748.0,
+      "after_ns_op": 2161267.0,
+      "ns_op_change_percent": -95.73148390049855,
+      "baseline_bytes_op": 738968.0,
+      "after_bytes_op": 734893.0,
+      "bytes_op_change_percent": -0.5514447174979176,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/block/bytes=1048576/c=1": {
+      "baseline_ns_op": 150852444.0,
+      "after_ns_op": 151712509.0,
+      "ns_op_change_percent": 0.5701366031563904,
+      "baseline_bytes_op": 5419336.0,
+      "after_bytes_op": 5430480.0,
+      "bytes_op_change_percent": 0.20563404815645558,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/block/bytes=204800/c=1": {
+      "baseline_ns_op": 30282182.0,
+      "after_ns_op": 29871396.0,
+      "ns_op_change_percent": -1.356527082493597,
+      "baseline_bytes_op": 754300.0,
+      "after_bytes_op": 788948.0,
+      "bytes_op_change_percent": 4.593397852313408,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/classifier/bytes=1048576/c=1": {
+      "baseline_ns_op": 262021093.0,
+      "after_ns_op": 262308825.0,
+      "ns_op_change_percent": 0.1098125332986033,
+      "baseline_bytes_op": 10747376.0,
+      "after_bytes_op": 10836336.0,
+      "bytes_op_change_percent": 0.8277369285302649,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/classifier/bytes=204800/c=1": {
+      "baseline_ns_op": 50892762.0,
+      "after_ns_op": 50862388.0,
+      "ns_op_change_percent": -0.059682357188628465,
+      "baseline_bytes_op": 1530780.0,
+      "after_bytes_op": 1530780.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/enforce/bytes=1048576/c=1": {
+      "baseline_ns_op": 257080830.0,
+      "after_ns_op": 9495719.0,
+      "ns_op_change_percent": -96.30632941398235,
+      "baseline_bytes_op": 5423576.0,
+      "after_bytes_op": 5245004.0,
+      "bytes_op_change_percent": -3.292514016582415,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/enforce/bytes=204800/c=1": {
+      "baseline_ns_op": 50124371.0,
+      "after_ns_op": 1855922.0,
+      "ns_op_change_percent": -96.29736600584972,
+      "baseline_bytes_op": 779312.0,
+      "after_bytes_op": 730651.0,
+      "bytes_op_change_percent": -6.2440973576693315,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/internal/bytes=1048576/c=1": {
+      "baseline_ns_op": 257470970.0,
+      "after_ns_op": 254726941.0,
+      "ns_op_change_percent": -1.0657624818829037,
+      "baseline_bytes_op": 5380352.0,
+      "after_bytes_op": 5423432.0,
+      "bytes_op_change_percent": 0.8006911071989364,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/internal/bytes=204800/c=1": {
+      "baseline_ns_op": 50038219.0,
+      "after_ns_op": 50110418.0,
+      "ns_op_change_percent": 0.14428770936072421,
+      "baseline_bytes_op": 775909.0,
+      "after_bytes_op": 737852.0,
+      "bytes_op_change_percent": -4.90482775686324,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/mask/bytes=1048576/c=1": {
+      "baseline_ns_op": 1062872722.0,
+      "after_ns_op": 1059428696.0,
+      "ns_op_change_percent": -0.32402995473619356,
+      "baseline_bytes_op": 35323576.0,
+      "after_bytes_op": 35393032.0,
+      "bytes_op_change_percent": 0.19662788388128405,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/mask/bytes=204800/c=1": {
+      "baseline_ns_op": 208086859.0,
+      "after_ns_op": 208605174.0,
+      "ns_op_change_percent": 0.24908588773497886,
+      "baseline_bytes_op": 5678016.0,
+      "after_bytes_op": 5817128.0,
+      "bytes_op_change_percent": 2.4500107079655997,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/none/bytes=1048576/c=1": {
+      "baseline_ns_op": 308.8,
+      "after_ns_op": 310.8,
+      "ns_op_change_percent": 0.6476683937823857,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/none/bytes=20480/c=1": {
+      "baseline_ns_op": 307.6,
+      "after_ns_op": 309.2,
+      "ns_op_change_percent": 0.5201560468140354,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/none/bytes=204800/c=1": {
+      "baseline_ns_op": 308.4,
+      "after_ns_op": 309.4,
+      "ns_op_change_percent": 0.3242542153047978,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/none/bytes=8388608/c=1": {
+      "baseline_ns_op": 303.7,
+      "after_ns_op": 302.4,
+      "ns_op_change_percent": -0.4280540006585509,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/shadow/bytes=1048576/c=1": {
+      "baseline_ns_op": 257577367.0,
+      "after_ns_op": 9516308.0,
+      "ns_op_change_percent": -96.30545644951795,
+      "baseline_bytes_op": 5380368.0,
+      "after_bytes_op": 5245004.0,
+      "bytes_op_change_percent": -2.51588738911539,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/shadow/bytes=204800/c=1": {
+      "baseline_ns_op": 49934961.0,
+      "after_ns_op": 1855723.0,
+      "ns_op_change_percent": -96.28371993721994,
+      "baseline_bytes_op": 748258.0,
+      "after_bytes_op": 730653.0,
+      "bytes_op_change_percent": -2.352798099051401,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/strict/bytes=1048576/c=1": {
+      "baseline_ns_op": 256966180.0,
+      "after_ns_op": 9610177.0,
+      "ns_op_change_percent": -96.26013936931311,
+      "baseline_bytes_op": 5340648.0,
+      "after_bytes_op": 5248364.0,
+      "bytes_op_change_percent": -1.7279551095672252,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/bedrock/strict/bytes=204800/c=1": {
+      "baseline_ns_op": 50142913.0,
+      "after_ns_op": 1854093.0,
+      "ns_op_change_percent": -96.30238275147677,
+      "baseline_bytes_op": 794578.0,
+      "after_bytes_op": 734013.0,
+      "bytes_op_change_percent": -7.622285036837162,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/block/bytes=1048576/c=1": {
+      "baseline_ns_op": 149992467.0,
+      "after_ns_op": 148916488.0,
+      "ns_op_change_percent": -0.7173553589194581,
+      "baseline_bytes_op": 5387224.0,
+      "after_bytes_op": 5297720.0,
+      "bytes_op_change_percent": -1.6614122598206382,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/block/bytes=204800/c=1": {
+      "baseline_ns_op": 30132770.0,
+      "after_ns_op": 30059472.0,
+      "ns_op_change_percent": -0.24325012270693946,
+      "baseline_bytes_op": 768074.0,
+      "after_bytes_op": 785944.0,
+      "bytes_op_change_percent": 2.3265987391839937,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/classifier/bytes=1048576/c=1": {
+      "baseline_ns_op": 263047625.0,
+      "after_ns_op": 262895332.0,
+      "ns_op_change_percent": -0.057895599703661205,
+      "baseline_bytes_op": 10753432.0,
+      "after_bytes_op": 10759728.0,
+      "bytes_op_change_percent": 0.05854874983168834,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/classifier/bytes=204800/c=1": {
+      "baseline_ns_op": 51180421.0,
+      "after_ns_op": 51189890.0,
+      "ns_op_change_percent": 0.018501215533173188,
+      "baseline_bytes_op": 1546312.0,
+      "after_bytes_op": 1564848.0,
+      "bytes_op_change_percent": 1.1987231554821953,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/enforce/bytes=1048576/c=1": {
+      "baseline_ns_op": 253131147.0,
+      "after_ns_op": 9183708.0,
+      "ns_op_change_percent": -96.37195654946407,
+      "baseline_bytes_op": 5380368.0,
+      "after_bytes_op": 5245006.0,
+      "bytes_op_change_percent": -2.5158502169368324,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/enforce/bytes=204800/c=1": {
+      "baseline_ns_op": 49927505.0,
+      "after_ns_op": 1792937.0,
+      "ns_op_change_percent": -96.40891929208159,
+      "baseline_bytes_op": 775925.0,
+      "after_bytes_op": 730647.0,
+      "bytes_op_change_percent": -5.835357798756324,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/internal/bytes=1048576/c=1": {
+      "baseline_ns_op": 255511582.0,
+      "after_ns_op": 254028542.0,
+      "ns_op_change_percent": -0.5804198730999244,
+      "baseline_bytes_op": 5374408.0,
+      "after_bytes_op": 5423432.0,
+      "bytes_op_change_percent": 0.91217488512223,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/internal/bytes=204800/c=1": {
+      "baseline_ns_op": 50156106.0,
+      "after_ns_op": 49888463.0,
+      "ns_op_change_percent": -0.5336199744055081,
+      "baseline_bytes_op": 762602.0,
+      "after_bytes_op": 748242.0,
+      "bytes_op_change_percent": -1.8830267951041257,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/mask/bytes=1048576/c=1": {
+      "baseline_ns_op": 1061850987.0,
+      "after_ns_op": 1057214250.0,
+      "ns_op_change_percent": -0.43666550737970766,
+      "baseline_bytes_op": 35363648.0,
+      "after_bytes_op": 35380872.0,
+      "bytes_op_change_percent": 0.048705382431135646,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/mask/bytes=204800/c=1": {
+      "baseline_ns_op": 209230271.0,
+      "after_ns_op": 206925110.0,
+      "ns_op_change_percent": -1.10173398379817,
+      "baseline_bytes_op": 5645216.0,
+      "after_bytes_op": 5556496.0,
+      "bytes_op_change_percent": -1.571596197559133,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/none/bytes=1048576/c=1": {
+      "baseline_ns_op": 311.7,
+      "after_ns_op": 308.7,
+      "ns_op_change_percent": -0.9624639076034613,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/none/bytes=20480/c=1": {
+      "baseline_ns_op": 307.1,
+      "after_ns_op": 307.5,
+      "ns_op_change_percent": 0.13025073266035303,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/none/bytes=204800/c=1": {
+      "baseline_ns_op": 308.1,
+      "after_ns_op": 306.8,
+      "ns_op_change_percent": -0.42194092827004814,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/none/bytes=8388608/c=1": {
+      "baseline_ns_op": 303.3,
+      "after_ns_op": 303.3,
+      "ns_op_change_percent": 0.0,
+      "baseline_bytes_op": 112.0,
+      "after_bytes_op": 112.0,
+      "bytes_op_change_percent": 0.0,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/shadow/bytes=1048576/c=1": {
+      "baseline_ns_op": 256605189.0,
+      "after_ns_op": 9197932.0,
+      "ns_op_change_percent": -96.41553156588739,
+      "baseline_bytes_op": 5380368.0,
+      "after_bytes_op": 5245006.0,
+      "bytes_op_change_percent": -2.5158502169368324,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/shadow/bytes=204800/c=1": {
+      "baseline_ns_op": 50121945.0,
+      "after_ns_op": 1815673.0,
+      "ns_op_change_percent": -96.37748894221883,
+      "baseline_bytes_op": 766757.0,
+      "after_bytes_op": 730647.0,
+      "bytes_op_change_percent": -4.7094451045116,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/strict/bytes=1048576/c=1": {
+      "baseline_ns_op": 256340887.0,
+      "after_ns_op": 9253423.0,
+      "ns_op_change_percent": -96.39018842905072,
+      "baseline_bytes_op": 5383728.0,
+      "after_bytes_op": 5248373.0,
+      "bytes_op_change_percent": -2.514150046213326,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/openai/strict/bytes=204800/c=1": {
+      "baseline_ns_op": 49937459.0,
+      "after_ns_op": 1812882.0,
+      "ns_op_change_percent": -96.36969514207762,
+      "baseline_bytes_op": 779285.0,
+      "after_bytes_op": 734009.0,
+      "bytes_op_change_percent": -5.809941164015731,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/block/bytes=1048576/c=1": {
+      "baseline_ns_op": 149459957.0,
+      "after_ns_op": 151950338.0,
+      "ns_op_change_percent": 1.6662529884174937,
+      "baseline_bytes_op": 5386592.0,
+      "after_bytes_op": 5343336.0,
+      "bytes_op_change_percent": -0.8030309331020447,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/block/bytes=204800/c=1": {
+      "baseline_ns_op": 30302574.0,
+      "after_ns_op": 30310688.0,
+      "ns_op_change_percent": 0.026776603202094407,
+      "baseline_bytes_op": 795746.0,
+      "after_bytes_op": 784300.0,
+      "bytes_op_change_percent": -1.4383986850075248,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/classifier/bytes=1048576/c=1": {
+      "baseline_ns_op": 262847148.0,
+      "after_ns_op": 262295409.0,
+      "ns_op_change_percent": -0.20990868807143626,
+      "baseline_bytes_op": 10662480.0,
+      "after_bytes_op": 10840544.0,
+      "bytes_op_change_percent": 1.6700054771497719,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/classifier/bytes=204800/c=1": {
+      "baseline_ns_op": 50918941.0,
+      "after_ns_op": 50989472.0,
+      "ns_op_change_percent": 0.1385162350489466,
+      "baseline_bytes_op": 1528460.0,
+      "after_bytes_op": 1550008.0,
+      "bytes_op_change_percent": 1.4097850123653943,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/enforce/bytes=1048576/c=1": {
+      "baseline_ns_op": 256600174.0,
+      "after_ns_op": 9549619.0,
+      "ns_op_change_percent": -96.27840509570348,
+      "baseline_bytes_op": 5380552.0,
+      "after_bytes_op": 5244596.0,
+      "bytes_op_change_percent": -2.5268039413056553,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/enforce/bytes=204800/c=1": {
+      "baseline_ns_op": 50136552.0,
+      "after_ns_op": 1847258.0,
+      "ns_op_change_percent": -96.31554639018654,
+      "baseline_bytes_op": 801568.0,
+      "after_bytes_op": 730246.0,
+      "bytes_op_change_percent": -8.897810291828012,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/internal/bytes=1048576/c=1": {
+      "baseline_ns_op": 257760707.0,
+      "after_ns_op": 256438238.0,
+      "ns_op_change_percent": -0.5130607435833934,
+      "baseline_bytes_op": 5469080.0,
+      "after_bytes_op": 5337040.0,
+      "bytes_op_change_percent": -2.414300028523997,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/internal/bytes=204800/c=1": {
+      "baseline_ns_op": 50576354.0,
+      "after_ns_op": 49576141.0,
+      "ns_op_change_percent": -1.977629704189432,
+      "baseline_bytes_op": 755452.0,
+      "after_bytes_op": 775320.0,
+      "bytes_op_change_percent": 2.6299486929679095,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/mask/bytes=1048576/c=1": {
+      "baseline_ns_op": 1060311874.0,
+      "after_ns_op": 1068903916.0,
+      "ns_op_change_percent": 0.8103315836298863,
+      "baseline_bytes_op": 35305528.0,
+      "after_bytes_op": 35420576.0,
+      "bytes_op_change_percent": 0.3258639836798416,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/mask/bytes=204800/c=1": {
+      "baseline_ns_op": 210597599.0,
+      "after_ns_op": 208695315.0,
+      "ns_op_change_percent": -0.9032790540028923,
+      "baseline_bytes_op": 5432392.0,
+      "after_bytes_op": 5603080.0,
+      "bytes_op_change_percent": 3.14204129598894,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=1": {
+      "baseline_ns_op": 252776732.0,
+      "after_ns_op": 6093955.0,
+      "ns_op_change_percent": -97.58919464153844,
+      "baseline_bytes_op": 5379560.0,
+      "after_bytes_op": 5243373.0,
+      "bytes_op_change_percent": -2.5315639197257767,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=32": {
+      "baseline_ns_op": 253840676.0,
+      "after_ns_op": 1616209.0,
+      "ns_op_change_percent": -99.36329786641444,
+      "baseline_bytes_op": 5336480.0,
+      "after_bytes_op": 5244870.0,
+      "bytes_op_change_percent": -1.7166746619494466,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=8": {
+      "baseline_ns_op": 251740122.0,
+      "after_ns_op": 1640706.0,
+      "ns_op_change_percent": -99.34825406972672,
+      "baseline_bytes_op": 5548848.0,
+      "after_bytes_op": 5243888.0,
+      "bytes_op_change_percent": -5.495915548596752,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=20480/c=1": {
+      "baseline_ns_op": 4721094.0,
+      "after_ns_op": 126362.0,
+      "ns_op_change_percent": -97.32345935073523,
+      "baseline_bytes_op": 86474.0,
+      "after_bytes_op": 86057.0,
+      "bytes_op_change_percent": -0.4822258713601757,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=20480/c=32": {
+      "baseline_ns_op": 1252568.0,
+      "after_ns_op": 43161.0,
+      "ns_op_change_percent": -96.55419905346456,
+      "baseline_bytes_op": 107757.0,
+      "after_bytes_op": 86145.0,
+      "bytes_op_change_percent": -20.05623764581419,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=20480/c=8": {
+      "baseline_ns_op": 1249469.0,
+      "after_ns_op": 40376.0,
+      "ns_op_change_percent": -96.76854727888407,
+      "baseline_bytes_op": 93705.0,
+      "after_bytes_op": 86071.0,
+      "bytes_op_change_percent": -8.146843818366145,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=204800/c=1": {
+      "baseline_ns_op": 49682194.0,
+      "after_ns_op": 1178477.0,
+      "ns_op_change_percent": -97.62796908687245,
+      "baseline_bytes_op": 772720.0,
+      "after_bytes_op": 729203.0,
+      "bytes_op_change_percent": -5.63166476860959,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=204800/c=32": {
+      "baseline_ns_op": 13701671.0,
+      "after_ns_op": 322900.0,
+      "ns_op_change_percent": -97.6433531355409,
+      "baseline_bytes_op": 854885.0,
+      "after_bytes_op": 729867.0,
+      "bytes_op_change_percent": -14.62395526883733,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=204800/c=8": {
+      "baseline_ns_op": 13229120.0,
+      "after_ns_op": 369713.0,
+      "ns_op_change_percent": -97.20530919668126,
+      "baseline_bytes_op": 820220.0,
+      "after_bytes_op": 729324.0,
+      "bytes_op_change_percent": -11.081904854795056,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=8388608/c=1": {
+      "baseline_ns_op": 2014786387.0,
+      "after_ns_op": 49221871.0,
+      "ns_op_change_percent": -97.55696825640703,
+      "baseline_bytes_op": 42110848.0,
+      "after_bytes_op": 41945840.0,
+      "bytes_op_change_percent": -0.39184202607366325,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=8388608/c=32": {
+      "baseline_ns_op": 2020965684.0,
+      "after_ns_op": 34240817.0,
+      "ns_op_change_percent": -98.30572001934101,
+      "baseline_bytes_op": 42169384.0,
+      "after_bytes_op": 41948608.0,
+      "bytes_op_change_percent": -0.5235457079477368,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=8388608/c=8": {
+      "baseline_ns_op": 2045868211.0,
+      "after_ns_op": 34240528.0,
+      "ns_op_change_percent": -98.3263571027743,
+      "baseline_bytes_op": 42117496.0,
+      "after_bytes_op": 41948608.0,
+      "bytes_op_change_percent": -0.4009924996490777,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/shadow/bytes=1048576/c=1": {
+      "baseline_ns_op": 258161423.0,
+      "after_ns_op": 9206284.0,
+      "ns_op_change_percent": -96.43390406939305,
+      "baseline_bytes_op": 5375424.0,
+      "after_bytes_op": 5244596.0,
+      "bytes_op_change_percent": -2.433817313759812,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/shadow/bytes=1048576/c=32": {
+      "baseline_ns_op": 257843143.0,
+      "after_ns_op": 2476236.0,
+      "ns_op_change_percent": -99.03963472862259,
+      "baseline_bytes_op": 5337648.0,
+      "after_bytes_op": 5246932.0,
+      "bytes_op_change_percent": -1.699550063998223,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/shadow/bytes=1048576/c=8": {
+      "baseline_ns_op": 257737184.0,
+      "after_ns_op": 2505456.0,
+      "ns_op_change_percent": -99.02790278022127,
+      "baseline_bytes_op": 5385920.0,
+      "after_bytes_op": 5245457.0,
+      "bytes_op_change_percent": -2.607966698354225,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/shadow/bytes=204800/c=1": {
+      "baseline_ns_op": 50276377.0,
+      "after_ns_op": 1792730.0,
+      "ns_op_change_percent": -96.43424982671284,
+      "baseline_bytes_op": 734344.0,
+      "after_bytes_op": 730236.0,
+      "bytes_op_change_percent": -0.5594108483217619,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/shadow/bytes=204800/c=32": {
+      "baseline_ns_op": 13679702.0,
+      "after_ns_op": 477148.0,
+      "ns_op_change_percent": -96.51200004210618,
+      "baseline_bytes_op": 840196.0,
+      "after_bytes_op": 731230.0,
+      "bytes_op_change_percent": -12.969116729905883,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        7.0,
+        7.0,
+        8.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/shadow/bytes=204800/c=8": {
+      "baseline_ns_op": 13797000.0,
+      "after_ns_op": 523281.0,
+      "ns_op_change_percent": -96.20728419221571,
+      "baseline_bytes_op": 813581.0,
+      "after_bytes_op": 730405.0,
+      "bytes_op_change_percent": -10.223444254474966,
+      "baseline_workers": [
+        8.0,
+        7.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/strict/bytes=1048576/c=1": {
+      "baseline_ns_op": 256068975.0,
+      "after_ns_op": 9524250.0,
+      "ns_op_change_percent": -96.2805919772202,
+      "baseline_bytes_op": 5383672.0,
+      "after_bytes_op": 5247540.0,
+      "bytes_op_change_percent": -2.528608726534598,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/strict/bytes=204800/c=1": {
+      "baseline_ns_op": 49736067.0,
+      "after_ns_op": 1859945.0,
+      "ns_op_change_percent": -96.26036976345557,
+      "baseline_bytes_op": 750794.0,
+      "after_bytes_op": 733190.0,
+      "bytes_op_change_percent": -2.3447177255012663,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    }
+  },
+  "router-concurrent": {
+    "BenchmarkRouteRequestInspection/responses/none/bytes=1048576/c=32": {
+      "baseline_ns_op": 64078717.0,
+      "after_ns_op": 1705518.0,
+      "ns_op_change_percent": -97.33840176606532,
+      "baseline_bytes_op": 5326157.0,
+      "after_bytes_op": 5247067.0,
+      "bytes_op_change_percent": -1.484935573622781,
+      "baseline_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ],
+      "after_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ]
+    },
+    "BenchmarkRouteRequestInspection/responses/none/bytes=204800/c=32": {
+      "baseline_ns_op": 12770480.0,
+      "after_ns_op": 360409.0,
+      "ns_op_change_percent": -97.17779597947766,
+      "baseline_bytes_op": 809269.0,
+      "after_bytes_op": 737820.0,
+      "bytes_op_change_percent": -8.828831945867199,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    }
+  },
+  "gateway": {
+    "BenchmarkGatewayInspection/anthropic/block/bytes=1048576/c=1": {
+      "baseline_ns_op": 174947500.0,
+      "after_ns_op": 177967324.0,
+      "ns_op_change_percent": 1.7261315537518307,
+      "baseline_bytes_op": 11949416.0,
+      "after_bytes_op": 11842312.0,
+      "bytes_op_change_percent": -0.8963115854364712,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/block/bytes=204800/c=1": {
+      "baseline_ns_op": 35478029.0,
+      "after_ns_op": 35262304.0,
+      "ns_op_change_percent": -0.608052380812929,
+      "baseline_bytes_op": 2177677.0,
+      "after_bytes_op": 2125066.0,
+      "bytes_op_change_percent": -2.4159230225602735,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/classifier/bytes=1048576/c=1": {
+      "baseline_ns_op": 290273440.0,
+      "after_ns_op": 287547564.0,
+      "ns_op_change_percent": -0.9390717938230986,
+      "baseline_bytes_op": 17263304.0,
+      "after_bytes_op": 17271984.0,
+      "bytes_op_change_percent": 0.05028006226386328,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/classifier/bytes=204800/c=1": {
+      "baseline_ns_op": 56984930.0,
+      "after_ns_op": 56862442.0,
+      "ns_op_change_percent": -0.21494805731971933,
+      "baseline_bytes_op": 2911820.0,
+      "after_bytes_op": 2932128.0,
+      "bytes_op_change_percent": 0.6974332204600531,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/enforce/bytes=1048576/c=1": {
+      "baseline_ns_op": 283888931.0,
+      "after_ns_op": 35967256.0,
+      "ns_op_change_percent": -87.33051835684287,
+      "baseline_bytes_op": 11887576.0,
+      "after_bytes_op": 11748053.0,
+      "bytes_op_change_percent": -1.1736875541321412,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/enforce/bytes=204800/c=1": {
+      "baseline_ns_op": 56055792.0,
+      "after_ns_op": 7349807.0,
+      "ns_op_change_percent": -86.88840753512143,
+      "baseline_bytes_op": 2140068.0,
+      "after_bytes_op": 2075608.0,
+      "bytes_op_change_percent": -3.0120538225888116,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/internal/bytes=1048576/c=1": {
+      "baseline_ns_op": 280919836.0,
+      "after_ns_op": 283090050.0,
+      "ns_op_change_percent": 0.772538540140677,
+      "baseline_bytes_op": 11964512.0,
+      "after_bytes_op": 11846392.0,
+      "bytes_op_change_percent": -0.9872529694483156,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/internal/bytes=204800/c=1": {
+      "baseline_ns_op": 55236973.0,
+      "after_ns_op": 55775920.0,
+      "ns_op_change_percent": 0.975699736479041,
+      "baseline_bytes_op": 2177396.0,
+      "after_bytes_op": 2246480.0,
+      "bytes_op_change_percent": 3.172780697677413,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/legacy/bytes=1048576/c=1": {
+      "baseline_ns_op": 250594541.0,
+      "after_ns_op": 249459925.0,
+      "ns_op_change_percent": -0.45276963954294924,
+      "baseline_bytes_op": 31685600.0,
+      "after_bytes_op": 31687048.0,
+      "bytes_op_change_percent": 0.004569899260231658,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/legacy/bytes=204800/c=1": {
+      "baseline_ns_op": 50689165.0,
+      "after_ns_op": 50387226.0,
+      "ns_op_change_percent": -0.5956677329366111,
+      "baseline_bytes_op": 6281768.0,
+      "after_bytes_op": 6143282.0,
+      "bytes_op_change_percent": -2.204570433037323,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/mask/bytes=1048576/c=1": {
+      "baseline_ns_op": 1113654849.0,
+      "after_ns_op": 1112478608.0,
+      "ns_op_change_percent": -0.10561988762103347,
+      "baseline_bytes_op": 46082344.0,
+      "after_bytes_op": 46132048.0,
+      "bytes_op_change_percent": 0.1078590967508175,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/mask/bytes=204800/c=1": {
+      "baseline_ns_op": 219086681.0,
+      "after_ns_op": 217186344.0,
+      "ns_op_change_percent": -0.8673904736363203,
+      "baseline_bytes_op": 7826584.0,
+      "after_bytes_op": 7779752.0,
+      "bytes_op_change_percent": -0.5983708856890813,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/none/bytes=1048576/c=1": {
+      "baseline_ns_op": 26264458.0,
+      "after_ns_op": 26194178.0,
+      "ns_op_change_percent": -0.267585952087801,
+      "baseline_bytes_op": 6497006.0,
+      "after_bytes_op": 6496658.0,
+      "bytes_op_change_percent": -0.005356313354176745,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/none/bytes=20480/c=1": {
+      "baseline_ns_op": 737842.0,
+      "after_ns_op": 719579.0,
+      "ns_op_change_percent": -2.4751911655882974,
+      "baseline_bytes_op": 168298.0,
+      "after_bytes_op": 167597.0,
+      "bytes_op_change_percent": -0.4165230721696056,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/none/bytes=204800/c=1": {
+      "baseline_ns_op": 5516417.0,
+      "after_ns_op": 5388148.0,
+      "ns_op_change_percent": -2.3252230569226318,
+      "baseline_bytes_op": 1332369.0,
+      "after_bytes_op": 1330816.0,
+      "bytes_op_change_percent": -0.11655930151481808,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/none/bytes=8388608/c=1": {
+      "baseline_ns_op": 208802286.0,
+      "after_ns_op": 206970851.0,
+      "ns_op_change_percent": -0.8771144392547559,
+      "baseline_bytes_op": 50699504.0,
+      "after_bytes_op": 50699536.0,
+      "bytes_op_change_percent": 6.311698828032064e-05,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/shadow/bytes=1048576/c=1": {
+      "baseline_ns_op": 283765872.0,
+      "after_ns_op": 35754464.0,
+      "ns_op_change_percent": -87.40001264140741,
+      "baseline_bytes_op": 11970528.0,
+      "after_bytes_op": 11747698.0,
+      "bytes_op_change_percent": -1.861488482379392,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/shadow/bytes=204800/c=1": {
+      "baseline_ns_op": 55696910.0,
+      "after_ns_op": 7390367.0,
+      "ns_op_change_percent": -86.73110052245268,
+      "baseline_bytes_op": 2197336.0,
+      "after_bytes_op": 2072914.0,
+      "bytes_op_change_percent": -5.662402108735309,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/strict/bytes=1048576/c=1": {
+      "baseline_ns_op": 282096717.0,
+      "after_ns_op": 36060275.0,
+      "ns_op_change_percent": -87.21705258271403,
+      "baseline_bytes_op": 11970704.0,
+      "after_bytes_op": 11746506.0,
+      "bytes_op_change_percent": -1.8728890130438436,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/anthropic/strict/bytes=204800/c=1": {
+      "baseline_ns_op": 55329846.0,
+      "after_ns_op": 7371853.0,
+      "ns_op_change_percent": -86.67653439700518,
+      "baseline_bytes_op": 2183360.0,
+      "after_bytes_op": 2073556.0,
+      "bytes_op_change_percent": -5.0291294152132515,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/block/bytes=1048576/c=1": {
+      "baseline_ns_op": 342010010.0,
+      "after_ns_op": 198367135.0,
+      "ns_op_change_percent": -41.99961135640445,
+      "baseline_bytes_op": 19553968.0,
+      "after_bytes_op": 19293560.0,
+      "bytes_op_change_percent": -1.331739931250786,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/block/bytes=204800/c=1": {
+      "baseline_ns_op": 68461591.0,
+      "after_ns_op": 40243812.0,
+      "ns_op_change_percent": -41.216948931262785,
+      "baseline_bytes_op": 3383868.0,
+      "after_bytes_op": 3320682.0,
+      "bytes_op_change_percent": -1.8672714183886607,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/classifier/bytes=1048576/c=1": {
+      "baseline_ns_op": 553425889.0,
+      "after_ns_op": 305259122.0,
+      "ns_op_change_percent": -44.84191504817729,
+      "baseline_bytes_op": 19376232.0,
+      "after_bytes_op": 19293832.0,
+      "bytes_op_change_percent": -0.4252632813232182,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/classifier/bytes=204800/c=1": {
+      "baseline_ns_op": 109265967.0,
+      "after_ns_op": 59717576.0,
+      "ns_op_change_percent": -45.34659085568702,
+      "baseline_bytes_op": 3368936.0,
+      "after_bytes_op": 3389860.0,
+      "bytes_op_change_percent": 0.6210863014316725,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/enforce/bytes=1048576/c=1": {
+      "baseline_ns_op": 554767248.0,
+      "after_ns_op": 59178262.0,
+      "ns_op_change_percent": -89.33277654487635,
+      "baseline_bytes_op": 19429840.0,
+      "after_bytes_op": 19093680.0,
+      "bytes_op_change_percent": -1.73012232730686,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/enforce/bytes=204800/c=1": {
+      "baseline_ns_op": 107714631.0,
+      "after_ns_op": 11843777.0,
+      "ns_op_change_percent": -89.00448630789998,
+      "baseline_bytes_op": 3295128.0,
+      "after_bytes_op": 3220114.0,
+      "bytes_op_change_percent": -2.276512475387904,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/internal/bytes=1048576/c=1": {
+      "baseline_ns_op": 548767199.0,
+      "after_ns_op": 304741484.0,
+      "ns_op_change_percent": -44.46798486583744,
+      "baseline_bytes_op": 19527456.0,
+      "after_bytes_op": 19441112.0,
+      "bytes_op_change_percent": -0.4421671722112719,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/internal/bytes=204800/c=1": {
+      "baseline_ns_op": 108381671.0,
+      "after_ns_op": 59970691.0,
+      "ns_op_change_percent": -44.6671282637818,
+      "baseline_bytes_op": 3327104.0,
+      "after_bytes_op": 3361976.0,
+      "bytes_op_change_percent": 1.0481187242719292,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/mask/bytes=1048576/c=1": {
+      "baseline_ns_op": 1291007504.0,
+      "after_ns_op": 1150815363.0,
+      "ns_op_change_percent": -10.859126733627411,
+      "baseline_bytes_op": 54699608.0,
+      "after_bytes_op": 54482000.0,
+      "bytes_op_change_percent": -0.39782369189921285,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/mask/bytes=204800/c=1": {
+      "baseline_ns_op": 253146562.0,
+      "after_ns_op": 226380914.0,
+      "ns_op_change_percent": -10.573182502869628,
+      "baseline_bytes_op": 9216080.0,
+      "after_bytes_op": 9225104.0,
+      "bytes_op_change_percent": 0.09791581670297589,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/none/bytes=1048576/c=1": {
+      "baseline_ns_op": 294575326.0,
+      "after_ns_op": 48212357.0,
+      "ns_op_change_percent": -83.63326703065415,
+      "baseline_bytes_op": 14226440.0,
+      "after_bytes_op": 13842280.0,
+      "bytes_op_change_percent": -2.700324185108849,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/none/bytes=20480/c=1": {
+      "baseline_ns_op": 5967132.0,
+      "after_ns_op": 1197094.0,
+      "ns_op_change_percent": -79.93853663703099,
+      "baseline_bytes_op": 322890.0,
+      "after_bytes_op": 300037.0,
+      "bytes_op_change_percent": -7.0776425408033745,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/none/bytes=204800/c=1": {
+      "baseline_ns_op": 58250068.0,
+      "after_ns_op": 9852670.0,
+      "ns_op_change_percent": -83.08556480998442,
+      "baseline_bytes_op": 2586180.0,
+      "after_bytes_op": 2479448.0,
+      "bytes_op_change_percent": -4.1270135876079745,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/none/bytes=8388608/c=1": {
+      "baseline_ns_op": 2354229063.0,
+      "after_ns_op": 375488060.0,
+      "ns_op_change_percent": -84.0504874440079,
+      "baseline_bytes_op": 109922120.0,
+      "after_bytes_op": 109423720.0,
+      "bytes_op_change_percent": -0.45341192473361547,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/shadow/bytes=1048576/c=1": {
+      "baseline_ns_op": 553744044.0,
+      "after_ns_op": 59002224.0,
+      "ns_op_change_percent": -89.34485623108571,
+      "baseline_bytes_op": 19372184.0,
+      "after_bytes_op": 19093256.0,
+      "bytes_op_change_percent": -1.4398376558884651,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/shadow/bytes=204800/c=1": {
+      "baseline_ns_op": 108955039.0,
+      "after_ns_op": 11832348.0,
+      "ns_op_change_percent": -89.14015532590466,
+      "baseline_bytes_op": 3417976.0,
+      "after_bytes_op": 3219679.0,
+      "bytes_op_change_percent": -5.801591351138802,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/strict/bytes=1048576/c=1": {
+      "baseline_ns_op": 555099954.0,
+      "after_ns_op": 58577058.0,
+      "ns_op_change_percent": -89.44747561625631,
+      "baseline_bytes_op": 19649384.0,
+      "after_bytes_op": 19092960.0,
+      "bytes_op_change_percent": -2.831763072063731,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock-converse/strict/bytes=204800/c=1": {
+      "baseline_ns_op": 108165998.0,
+      "after_ns_op": 11923498.0,
+      "ns_op_change_percent": -88.97666714081444,
+      "baseline_bytes_op": 3333944.0,
+      "after_bytes_op": 3220126.0,
+      "bytes_op_change_percent": -3.413914570850618,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/block/bytes=1048576/c=1": {
+      "baseline_ns_op": 176212871.0,
+      "after_ns_op": 175278189.0,
+      "ns_op_change_percent": -0.5304277688092385,
+      "baseline_bytes_op": 11949720.0,
+      "after_bytes_op": 11923600.0,
+      "bytes_op_change_percent": -0.21858252745671214,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/block/bytes=204800/c=1": {
+      "baseline_ns_op": 34846619.0,
+      "after_ns_op": 34897724.0,
+      "ns_op_change_percent": 0.14665698270468486,
+      "baseline_bytes_op": 2133112.0,
+      "after_bytes_op": 2125613.0,
+      "bytes_op_change_percent": -0.35155209853022784,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/classifier/bytes=1048576/c=1": {
+      "baseline_ns_op": 286730386.0,
+      "after_ns_op": 286136468.0,
+      "ns_op_change_percent": -0.20713465645737505,
+      "baseline_bytes_op": 17212032.0,
+      "after_bytes_op": 17263680.0,
+      "bytes_op_change_percent": 0.3000691609218453,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/classifier/bytes=204800/c=1": {
+      "baseline_ns_op": 56804871.0,
+      "after_ns_op": 56675513.0,
+      "ns_op_change_percent": -0.22772342885877261,
+      "baseline_bytes_op": 2989092.0,
+      "after_bytes_op": 2932600.0,
+      "bytes_op_change_percent": -1.8899384829908161,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/enforce/bytes=1048576/c=1": {
+      "baseline_ns_op": 281000591.0,
+      "after_ns_op": 35265383.0,
+      "ns_op_change_percent": -87.45006803206333,
+      "baseline_bytes_op": 11845856.0,
+      "after_bytes_op": 11747978.0,
+      "bytes_op_change_percent": -0.8262636317713179,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/enforce/bytes=204800/c=1": {
+      "baseline_ns_op": 55387727.0,
+      "after_ns_op": 7160747.0,
+      "ns_op_change_percent": -87.07159981488317,
+      "baseline_bytes_op": 2114380.0,
+      "after_bytes_op": 2069076.0,
+      "bytes_op_change_percent": -2.1426612056489325,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/internal/bytes=1048576/c=1": {
+      "baseline_ns_op": 281590784.0,
+      "after_ns_op": 281487625.0,
+      "ns_op_change_percent": -0.03663436655654273,
+      "baseline_bytes_op": 12096776.0,
+      "after_bytes_op": 11850592.0,
+      "bytes_op_change_percent": -2.0351207627553047,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/internal/bytes=204800/c=1": {
+      "baseline_ns_op": 55672076.0,
+      "after_ns_op": 55490604.0,
+      "ns_op_change_percent": -0.3259659294904016,
+      "baseline_bytes_op": 2234840.0,
+      "after_bytes_op": 2182992.0,
+      "bytes_op_change_percent": -2.319987113171418,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/mask/bytes=1048576/c=1": {
+      "baseline_ns_op": 1107548929.0,
+      "after_ns_op": 1109164763.0,
+      "ns_op_change_percent": 0.14589278700842812,
+      "baseline_bytes_op": 46046160.0,
+      "after_bytes_op": 46138424.0,
+      "bytes_op_change_percent": 0.2003728432512064,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/mask/bytes=204800/c=1": {
+      "baseline_ns_op": 218354346.0,
+      "after_ns_op": 216945431.0,
+      "ns_op_change_percent": -0.645242481228192,
+      "baseline_bytes_op": 7740472.0,
+      "after_bytes_op": 7987992.0,
+      "bytes_op_change_percent": 3.1977378123711375,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/none/bytes=1048576/c=1": {
+      "baseline_ns_op": 26193686.0,
+      "after_ns_op": 26562011.0,
+      "ns_op_change_percent": 1.4061594843887137,
+      "baseline_bytes_op": 6497848.0,
+      "after_bytes_op": 6497124.0,
+      "bytes_op_change_percent": -0.011142150447351895,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/none/bytes=20480/c=1": {
+      "baseline_ns_op": 716401.0,
+      "after_ns_op": 749041.0,
+      "ns_op_change_percent": 4.55610754312179,
+      "baseline_bytes_op": 168097.0,
+      "after_bytes_op": 167841.0,
+      "bytes_op_change_percent": -0.1522930212912832,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/none/bytes=204800/c=1": {
+      "baseline_ns_op": 5336638.0,
+      "after_ns_op": 5487824.0,
+      "ns_op_change_percent": 2.832982113457949,
+      "baseline_bytes_op": 1324699.0,
+      "after_bytes_op": 1328046.0,
+      "bytes_op_change_percent": 0.2526611705753634,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/none/bytes=8388608/c=1": {
+      "baseline_ns_op": 204283172.0,
+      "after_ns_op": 206457838.0,
+      "ns_op_change_percent": 1.0645350660601682,
+      "baseline_bytes_op": 50699624.0,
+      "after_bytes_op": 50700320.0,
+      "bytes_op_change_percent": 0.0013727912459460256,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/shadow/bytes=1048576/c=1": {
+      "baseline_ns_op": 280651381.0,
+      "after_ns_op": 35714875.0,
+      "ns_op_change_percent": -87.2742920869504,
+      "baseline_bytes_op": 11957336.0,
+      "after_bytes_op": 11746101.0,
+      "bytes_op_change_percent": -1.7665724204789401,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/shadow/bytes=204800/c=1": {
+      "baseline_ns_op": 55028869.0,
+      "after_ns_op": 7199074.0,
+      "ns_op_change_percent": -86.91764135657594,
+      "baseline_bytes_op": 2186680.0,
+      "after_bytes_op": 2068226.0,
+      "bytes_op_change_percent": -5.417070627618125,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/strict/bytes=1048576/c=1": {
+      "baseline_ns_op": 281280388.0,
+      "after_ns_op": 35446238.0,
+      "ns_op_change_percent": -87.39825472652576,
+      "baseline_bytes_op": 12060864.0,
+      "after_bytes_op": 11747821.0,
+      "bytes_op_change_percent": -2.5955271529469193,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/bedrock/strict/bytes=204800/c=1": {
+      "baseline_ns_op": 56068574.0,
+      "after_ns_op": 7153819.0,
+      "ns_op_change_percent": -87.24094713020524,
+      "baseline_bytes_op": 2197572.0,
+      "after_bytes_op": 2064042.0,
+      "bytes_op_change_percent": -6.076251426574419,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/block/bytes=1048576/c=1": {
+      "baseline_ns_op": 160548359.0,
+      "after_ns_op": 160812126.0,
+      "ns_op_change_percent": 0.1642913086392861,
+      "baseline_bytes_op": 9888904.0,
+      "after_bytes_op": 9773504.0,
+      "bytes_op_change_percent": -1.1669645089081637,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/block/bytes=204800/c=1": {
+      "baseline_ns_op": 32372491.0,
+      "after_ns_op": 31896064.0,
+      "ns_op_change_percent": -1.4717032433494204,
+      "baseline_bytes_op": 1739398.0,
+      "after_bytes_op": 1710910.0,
+      "bytes_op_change_percent": -1.6378080232356207,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/classifier/bytes=1048576/c=1": {
+      "baseline_ns_op": 269661506.0,
+      "after_ns_op": 272316451.0,
+      "ns_op_change_percent": 0.9845472716450754,
+      "baseline_bytes_op": 15080672.0,
+      "after_bytes_op": 15251208.0,
+      "bytes_op_change_percent": 1.130824939366093,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/classifier/bytes=204800/c=1": {
+      "baseline_ns_op": 53318694.0,
+      "after_ns_op": 53539398.0,
+      "ns_op_change_percent": 0.4139336196044008,
+      "baseline_bytes_op": 2544376.0,
+      "after_bytes_op": 2508100.0,
+      "bytes_op_change_percent": -1.4257326747304622,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/enforce/bytes=1048576/c=1": {
+      "baseline_ns_op": 264554011.0,
+      "after_ns_op": 18572718.0,
+      "ns_op_change_percent": -92.97961201578607,
+      "baseline_bytes_op": 9750360.0,
+      "after_bytes_op": 9650084.0,
+      "bytes_op_change_percent": -1.0284338219306743,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/enforce/bytes=204800/c=1": {
+      "baseline_ns_op": 51833511.0,
+      "after_ns_op": 3764392.0,
+      "ns_op_change_percent": -92.7375322887157,
+      "baseline_bytes_op": 1731348.0,
+      "after_bytes_op": 1651513.0,
+      "bytes_op_change_percent": -4.611146921358388,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/internal/bytes=1048576/c=1": {
+      "baseline_ns_op": 266252469.0,
+      "after_ns_op": 263668650.0,
+      "ns_op_change_percent": -0.9704394515868353,
+      "baseline_bytes_op": 9757472.0,
+      "after_bytes_op": 9747936.0,
+      "bytes_op_change_percent": -0.09773023176494755,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/internal/bytes=204800/c=1": {
+      "baseline_ns_op": 52545680.0,
+      "after_ns_op": 51946794.0,
+      "ns_op_change_percent": -1.139743552657424,
+      "baseline_bytes_op": 1707604.0,
+      "after_bytes_op": 1747588.0,
+      "bytes_op_change_percent": 2.3415264897482135,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/mask/bytes=1048576/c=1": {
+      "baseline_ns_op": 1076484679.0,
+      "after_ns_op": 1070358593.0,
+      "ns_op_change_percent": -0.5690825071185235,
+      "baseline_bytes_op": 41958856.0,
+      "after_bytes_op": 41901320.0,
+      "bytes_op_change_percent": -0.1371248062625896,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/mask/bytes=204800/c=1": {
+      "baseline_ns_op": 212846845.0,
+      "after_ns_op": 210446831.0,
+      "ns_op_change_percent": -1.12757790701572,
+      "baseline_bytes_op": 6878584.0,
+      "after_bytes_op": 6988848.0,
+      "bytes_op_change_percent": 1.6030043392651683,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/none/bytes=1048576/c=1": {
+      "baseline_ns_op": 8958800.0,
+      "after_ns_op": 8872627.0,
+      "ns_op_change_percent": -0.9618810554985036,
+      "baseline_bytes_op": 4380376.0,
+      "after_bytes_op": 4392784.0,
+      "bytes_op_change_percent": 0.2832633545613472,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/none/bytes=20480/c=1": {
+      "baseline_ns_op": 377856.0,
+      "after_ns_op": 375083.0,
+      "ns_op_change_percent": -0.733877455962062,
+      "baseline_bytes_op": 126525.0,
+      "after_bytes_op": 126651.0,
+      "bytes_op_change_percent": 0.0995850622406591,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/none/bytes=204800/c=1": {
+      "baseline_ns_op": 1988110.0,
+      "after_ns_op": 1968185.0,
+      "ns_op_change_percent": -1.0022081273168948,
+      "baseline_bytes_op": 915190.0,
+      "after_bytes_op": 914483.0,
+      "bytes_op_change_percent": -0.07725171822244858,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/none/bytes=8388608/c=1": {
+      "baseline_ns_op": 65794541.0,
+      "after_ns_op": 65858110.0,
+      "ns_op_change_percent": 0.09661743821574031,
+      "baseline_bytes_op": 33919912.0,
+      "after_bytes_op": 33919624.0,
+      "bytes_op_change_percent": -0.0008490588065179772,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/shadow/bytes=1048576/c=1": {
+      "baseline_ns_op": 265666204.0,
+      "after_ns_op": 18296729.0,
+      "ns_op_change_percent": -93.11288800588275,
+      "baseline_bytes_op": 9910656.0,
+      "after_bytes_op": 9650164.0,
+      "bytes_op_change_percent": -2.628403205600116,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/shadow/bytes=204800/c=1": {
+      "baseline_ns_op": 52397348.0,
+      "after_ns_op": 3871112.0,
+      "ns_op_change_percent": -92.61200776802674,
+      "baseline_bytes_op": 1691960.0,
+      "after_bytes_op": 1657548.0,
+      "bytes_op_change_percent": -2.0338542282323457,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/strict/bytes=1048576/c=1": {
+      "baseline_ns_op": 265111888.0,
+      "after_ns_op": 18515472.0,
+      "ns_op_change_percent": -93.01597821973189,
+      "baseline_bytes_op": 9965040.0,
+      "after_bytes_op": 9649649.0,
+      "bytes_op_change_percent": -3.1649747517320526,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/openai/strict/bytes=204800/c=1": {
+      "baseline_ns_op": 51988318.0,
+      "after_ns_op": 3828049.0,
+      "ns_op_change_percent": -92.6367131169737,
+      "baseline_bytes_op": 1685132.0,
+      "after_bytes_op": 1656508.0,
+      "bytes_op_change_percent": -1.6986206421811478,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/block/bytes=1048576/c=1": {
+      "baseline_ns_op": 177708027.0,
+      "after_ns_op": 179209125.0,
+      "ns_op_change_percent": 0.8446990410849509,
+      "baseline_bytes_op": 21312856.0,
+      "after_bytes_op": 21384568.0,
+      "bytes_op_change_percent": 0.3364729719939952,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/block/bytes=204800/c=1": {
+      "baseline_ns_op": 36238127.0,
+      "after_ns_op": 36197481.0,
+      "ns_op_change_percent": -0.11216363362267501,
+      "baseline_bytes_op": 3427376.0,
+      "after_bytes_op": 3416845.0,
+      "bytes_op_change_percent": -0.30726129843938743,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/classifier/bytes=1048576/c=1": {
+      "baseline_ns_op": 290214952.0,
+      "after_ns_op": 290100146.0,
+      "ns_op_change_percent": -0.03955895421956512,
+      "baseline_bytes_op": 26605056.0,
+      "after_bytes_op": 26683064.0,
+      "bytes_op_change_percent": 0.29320742643803577,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/classifier/bytes=204800/c=1": {
+      "baseline_ns_op": 57991686.0,
+      "after_ns_op": 57572654.0,
+      "ns_op_change_percent": -0.7225725425537677,
+      "baseline_bytes_op": 4202460.0,
+      "after_bytes_op": 4226204.0,
+      "bytes_op_change_percent": 0.56500240335422,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/enforce/bytes=1048576/c=1": {
+      "baseline_ns_op": 287277254.0,
+      "after_ns_op": 38908351.0,
+      "ns_op_change_percent": -86.4561671840542,
+      "baseline_bytes_op": 21496128.0,
+      "after_bytes_op": 21182938.0,
+      "bytes_op_change_percent": -1.4569600627610702,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/enforce/bytes=204800/c=1": {
+      "baseline_ns_op": 56277824.0,
+      "after_ns_op": 7997473.0,
+      "ns_op_change_percent": -85.78929952942033,
+      "baseline_bytes_op": 3451768.0,
+      "after_bytes_op": 3328601.0,
+      "bytes_op_change_percent": -3.5682293827395073,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/internal/bytes=1048576/c=1": {
+      "baseline_ns_op": 284168802.0,
+      "after_ns_op": 283702663.0,
+      "ns_op_change_percent": -0.16403595212397537,
+      "baseline_bytes_op": 21449128.0,
+      "after_bytes_op": 21457440.0,
+      "bytes_op_change_percent": 0.03875215812969568,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/internal/bytes=204800/c=1": {
+      "baseline_ns_op": 56073400.0,
+      "after_ns_op": 56180718.0,
+      "ns_op_change_percent": 0.1913884301647517,
+      "baseline_bytes_op": 3451824.0,
+      "after_bytes_op": 3519052.0,
+      "bytes_op_change_percent": 1.9476079892833509,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/legacy/bytes=1048576/c=1": {
+      "baseline_ns_op": 1338653305.0,
+      "after_ns_op": 1200241274.0,
+      "ns_op_change_percent": -10.339647351783887,
+      "baseline_bytes_op": 88206648.0,
+      "after_bytes_op": 88039944.0,
+      "bytes_op_change_percent": -0.18899255756776867,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/legacy/bytes=204800/c=1": {
+      "baseline_ns_op": 262406802.0,
+      "after_ns_op": 238071832.0,
+      "ns_op_change_percent": -9.27375731670248,
+      "baseline_bytes_op": 15118088.0,
+      "after_bytes_op": 15035080.0,
+      "bytes_op_change_percent": -0.5490641409151786,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/mask/bytes=1048576/c=1": {
+      "baseline_ns_op": 1102660241.0,
+      "after_ns_op": 1101331900.0,
+      "ns_op_change_percent": -0.12046693538123598,
+      "baseline_bytes_op": 58626640.0,
+      "after_bytes_op": 58672104.0,
+      "bytes_op_change_percent": 0.07754836367903639,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/mask/bytes=204800/c=1": {
+      "baseline_ns_op": 216274759.0,
+      "after_ns_op": 217578002.0,
+      "ns_op_change_percent": 0.6025867308907751,
+      "baseline_bytes_op": 9446904.0,
+      "after_bytes_op": 9371880.0,
+      "bytes_op_change_percent": -0.7941649454678457,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=1048576/c=1": {
+      "baseline_ns_op": 285404356.0,
+      "after_ns_op": 35562232.0,
+      "ns_op_change_percent": -87.53970244238319,
+      "baseline_bytes_op": 21393544.0,
+      "after_bytes_op": 21175954.0,
+      "bytes_op_change_percent": -1.017082536675551,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=1048576/c=32": {
+      "baseline_ns_op": 282672501.0,
+      "after_ns_op": 10619978.0,
+      "ns_op_change_percent": -96.24300985683783,
+      "baseline_bytes_op": 21441840.0,
+      "after_bytes_op": 21164444.0,
+      "bytes_op_change_percent": -1.2937135992060367,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        10.0,
+        12.0,
+        12.0,
+        10.0,
+        10.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=1048576/c=8": {
+      "baseline_ns_op": 283751860.0,
+      "after_ns_op": 9968996.0,
+      "ns_op_change_percent": -96.48672047471337,
+      "baseline_bytes_op": 21443104.0,
+      "after_bytes_op": 21170018.0,
+      "bytes_op_change_percent": -1.2735376370883622,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=20480/c=1": {
+      "baseline_ns_op": 5804490.0,
+      "after_ns_op": 956200.0,
+      "ns_op_change_percent": -83.52654582917707,
+      "baseline_bytes_op": 427353.0,
+      "after_bytes_op": 407522.0,
+      "bytes_op_change_percent": -4.640426064635095,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=20480/c=32": {
+      "baseline_ns_op": 1631870.0,
+      "after_ns_op": 462252.0,
+      "ns_op_change_percent": -71.67347889231372,
+      "baseline_bytes_op": 424215.0,
+      "after_bytes_op": 403060.0,
+      "bytes_op_change_percent": -4.986858079040113,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=20480/c=8": {
+      "baseline_ns_op": 1637131.0,
+      "after_ns_op": 486225.0,
+      "ns_op_change_percent": -70.30017756673107,
+      "baseline_bytes_op": 431326.0,
+      "after_bytes_op": 407741.0,
+      "bytes_op_change_percent": -5.4680218674506005,
+      "baseline_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=204800/c=1": {
+      "baseline_ns_op": 55825862.0,
+      "after_ns_op": 7329174.0,
+      "ns_op_change_percent": -86.871364386635,
+      "baseline_bytes_op": 3469776.0,
+      "after_bytes_op": 3325006.0,
+      "bytes_op_change_percent": -4.172315446299701,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=204800/c=32": {
+      "baseline_ns_op": 16180453.0,
+      "after_ns_op": 1983913.0,
+      "ns_op_change_percent": -87.73882906739385,
+      "baseline_bytes_op": 3468716.0,
+      "after_bytes_op": 3310627.0,
+      "bytes_op_change_percent": -4.5575653930734035,
+      "baseline_workers": [
+        7.0,
+        7.0,
+        7.0,
+        7.0,
+        7.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=204800/c=8": {
+      "baseline_ns_op": 16034721.0,
+      "after_ns_op": 2061838.0,
+      "ns_op_change_percent": -87.14141643000836,
+      "baseline_bytes_op": 3447779.0,
+      "after_bytes_op": 3314456.0,
+      "bytes_op_change_percent": -3.8669241851058356,
+      "baseline_workers": [
+        7.0,
+        7.0,
+        7.0,
+        7.0,
+        7.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=8388608/c=1": {
+      "baseline_ns_op": 2254037728.0,
+      "after_ns_op": 273223389.0,
+      "ns_op_change_percent": -87.87849086969675,
+      "baseline_bytes_op": 168565144.0,
+      "after_bytes_op": 168137976.0,
+      "bytes_op_change_percent": -0.25341419338745785,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=8388608/c=32": {
+      "baseline_ns_op": 2234026610.0,
+      "after_ns_op": 273068178.0,
+      "ns_op_change_percent": -87.77686099271665,
+      "baseline_bytes_op": 168601040.0,
+      "after_bytes_op": 168138264.0,
+      "bytes_op_change_percent": -0.27447992017131106,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=8388608/c=8": {
+      "baseline_ns_op": 2244084678.0,
+      "after_ns_op": 275369532.0,
+      "ns_op_change_percent": -87.72909352754826,
+      "baseline_bytes_op": 168602928.0,
+      "after_bytes_op": 168138152.0,
+      "bytes_op_change_percent": -0.27566306559041465,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/shadow/bytes=1048576/c=1": {
+      "baseline_ns_op": 284684061.0,
+      "after_ns_op": 38388522.0,
+      "ns_op_change_percent": -86.5153946922234,
+      "baseline_bytes_op": 21413744.0,
+      "after_bytes_op": 21182202.0,
+      "bytes_op_change_percent": -1.0812775197088342,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/shadow/bytes=1048576/c=32": {
+      "baseline_ns_op": 283619326.0,
+      "after_ns_op": 10730487.0,
+      "ns_op_change_percent": -96.21658821655899,
+      "baseline_bytes_op": 21400384.0,
+      "after_bytes_op": 21169659.0,
+      "bytes_op_change_percent": -1.0781348596361595,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        10.0,
+        10.0,
+        10.0,
+        10.0,
+        10.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/shadow/bytes=1048576/c=8": {
+      "baseline_ns_op": 287072690.0,
+      "after_ns_op": 11124937.0,
+      "ns_op_change_percent": -96.12469684942863,
+      "baseline_bytes_op": 21369600.0,
+      "after_bytes_op": 21169047.0,
+      "bytes_op_change_percent": -0.9384967430368318,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/shadow/bytes=204800/c=1": {
+      "baseline_ns_op": 56233180.0,
+      "after_ns_op": 7786620.0,
+      "ns_op_change_percent": -86.15297943313894,
+      "baseline_bytes_op": 3517484.0,
+      "after_bytes_op": 3331056.0,
+      "bytes_op_change_percent": -5.300038322846667,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/shadow/bytes=204800/c=32": {
+      "baseline_ns_op": 16114211.0,
+      "after_ns_op": 2134806.0,
+      "ns_op_change_percent": -86.75202900098553,
+      "baseline_bytes_op": 3470717.0,
+      "after_bytes_op": 3314025.0,
+      "bytes_op_change_percent": -4.514686734758266,
+      "baseline_workers": [
+        7.0,
+        7.0,
+        7.0,
+        7.0,
+        6.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/shadow/bytes=204800/c=8": {
+      "baseline_ns_op": 16417171.0,
+      "after_ns_op": 2213920.0,
+      "ns_op_change_percent": -86.51460717562118,
+      "baseline_bytes_op": 3464539.0,
+      "after_bytes_op": 3321345.0,
+      "bytes_op_change_percent": -4.13313286414152,
+      "baseline_workers": [
+        7.0,
+        7.0,
+        7.0,
+        7.0,
+        6.0
+      ],
+      "after_workers": [
+        8.0,
+        8.0,
+        8.0,
+        8.0,
+        8.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/strict/bytes=1048576/c=1": {
+      "baseline_ns_op": 285466240.0,
+      "after_ns_op": 38599267.0,
+      "ns_op_change_percent": -86.47851773996112,
+      "baseline_bytes_op": 21410360.0,
+      "after_bytes_op": 21182461.0,
+      "bytes_op_change_percent": -1.0644332930413114,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/strict/bytes=204800/c=1": {
+      "baseline_ns_op": 55963332.0,
+      "after_ns_op": 7868456.0,
+      "ns_op_change_percent": -85.93997941366321,
+      "baseline_bytes_op": 3475732.0,
+      "after_bytes_op": 3331215.0,
+      "bytes_op_change_percent": -4.1578867415554495,
+      "baseline_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "after_workers": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    }
+  },
+  "gateway-concurrent": {
+    "BenchmarkGatewayInspection/responses/none/bytes=1048576/c=32": {
+      "baseline_ns_op": 70944321.0,
+      "after_ns_op": 9407272.0,
+      "ns_op_change_percent": -86.73992242451655,
+      "baseline_bytes_op": 21234204.0,
+      "after_bytes_op": 21159790.0,
+      "bytes_op_change_percent": -0.3504440288884858,
+      "baseline_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ],
+      "after_workers": [
+        16.0,
+        16.0,
+        16.0,
+        16.0,
+        16.0
+      ]
+    },
+    "BenchmarkGatewayInspection/responses/none/bytes=204800/c=32": {
+      "baseline_ns_op": 14722461.0,
+      "after_ns_op": 2028429.0,
+      "ns_op_change_percent": -86.22221515818585,
+      "baseline_bytes_op": 3349077.0,
+      "after_bytes_op": 3316460.0,
+      "bytes_op_change_percent": -0.9739101250881954,
+      "baseline_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ],
+      "after_workers": [
+        32.0,
+        32.0,
+        32.0,
+        32.0,
+        32.0
+      ]
+    }
+  }
+}

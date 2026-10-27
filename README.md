@@ -81,6 +81,14 @@ more than one team is on it.
 
 ## Policy-aware routing
 
+Basic JSON parsing is required. Additional inspection is conditional on the
+ingress and effective rules; Responses performs compatibility inspection even
+without policy; native Bedrock Converse also always checks structure. Structure-only
+paths skip finite PII detectors; applicable privacy and verified masking retain
+full detection, including beside context Shadow.
+Learned classification and legacy masking are separate opt-ins. See
+[inspection conditions](docs/policy-routing.md#when-inspection-runs).
+
 `GovernancePolicy.sensitiveData` selects approved internal destinations, complete
 masking, or refusal before egress. Independent `routing.context` rules classify
 weak/simple, optional normal, and strong/complex tasks. Context starts in **Shadow**;

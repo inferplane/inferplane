@@ -1,0 +1,23 @@
+File: after-router.test
+Build ID: 437a0fbc06aa7cfff403c96d93d0769515beb992
+Type: delay
+Time: 2026-10-27 09:43:09 UTC
+Showing nodes accounting for 465.51us, 100% of 465.51us total
+Dropped 34 nodes (cum <= 2.33us)
+Showing top 15 nodes out of 54
+      flat  flat%   sum%        cum   cum%
+  389.12us 83.59% 83.59%   389.12us 83.59%  runtime.unlock (inline)
+   76.39us 16.41%   100%    76.39us 16.41%  runtime._LostContendedRuntimeLock
+         0     0%   100%     5.26us  1.13%  main.main
+         0     0%   100%    12.27us  2.64%  runtime.(*mcache).prepareForSweep
+         0     0%   100%    12.27us  2.64%  runtime.(*mcache).releaseAll
+         0     0%   100%    12.27us  2.64%  runtime.(*mcentral).uncacheSpan
+         0     0%   100%    12.14us  2.61%  runtime.(*scavengerState).wake
+         0     0%   100%    13.09us  2.81%  runtime.(*sweepLocked).sweep
+         0     0%   100%     5.54us  1.19%  runtime.ReadMemStats
+         0     0%   100%     2.62us  0.56%  runtime.allocm
+         0     0%   100%    12.81us  2.75%  runtime.asyncPreempt2.func1
+         0     0%   100%    60.60us 13.02%  runtime.findRunnable
+         0     0%   100%   188.36us 40.46%  runtime.forEachP (inline)
+         0     0%   100%   188.36us 40.46%  runtime.forEachPInternal
+         0     0%   100%   242.53us 52.10%  runtime.gcBgMarkWorker

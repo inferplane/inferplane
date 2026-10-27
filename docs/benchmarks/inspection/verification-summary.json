@@ -1,0 +1,44 @@
+{
+  "counts": {
+    "package_skip": 5,
+    "test_pass": 2343,
+    "subtest_pass": 2758,
+    "package_pass": 62,
+    "test_skip": 3
+  },
+  "skips": [
+    {
+      "package": "github.com/inferplane/inferplane/api/v1alpha1",
+      "test": null
+    },
+    {
+      "package": "github.com/inferplane/inferplane/examples/pii-classifier-ko/training/regexbaseline",
+      "test": null
+    },
+    {
+      "package": "github.com/inferplane/inferplane/internal/cache",
+      "test": null
+    },
+    {
+      "package": "github.com/inferplane/inferplane/cmd/mayu",
+      "test": "TestE2ECodexCLIConverseToolRoundTrip"
+    },
+    {
+      "package": "github.com/inferplane/inferplane/cmd/mayu",
+      "test": "TestE2ECodexCLIToolRoundTrip"
+    },
+    {
+      "package": "github.com/inferplane/inferplane/cmd/mayu",
+      "test": "TestE2ECodexCLIChatBridgeToolRoundTrip"
+    },
+    {
+      "package": "github.com/inferplane/inferplane/internal/server/routingtest",
+      "test": null
+    },
+    {
+      "package": "github.com/inferplane/inferplane/internal/testutil/inspectionfixture",
+      "test": null
+    }
+  ],
+  "failures": []
+}

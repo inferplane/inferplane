@@ -1,0 +1,23 @@
+File: baseline-router.test
+Build ID: cf7782ce44117026e36f95515093fdf856ac78c6
+Type: delay
+Time: 2026-10-27 09:18:24 UTC
+Showing nodes accounting for 559.19us, 100% of 559.19us total
+Dropped 21 nodes (cum <= 2.79us)
+Showing top 15 nodes out of 55
+      flat  flat%   sum%        cum   cum%
+  550.43us 98.43% 98.43%   550.43us 98.43%  runtime.unlock (partial-inline)
+    8.76us  1.57%   100%     8.76us  1.57%  runtime._LostContendedRuntimeLock
+         0     0%   100%     8.79us  1.57%  internal/poll.(*FD).Pread
+         0     0%   100%     8.79us  1.57%  internal/poll.(*FD).Pread.func1 (inline)
+         0     0%   100%     8.79us  1.57%  internal/poll.ignoringEINTR2[go.shape.int] (inline)
+         0     0%   100%     8.79us  1.57%  os.(*File).ReadAt
+         0     0%   100%     8.79us  1.57%  os.(*File).pread (inline)
+         0     0%   100%     8.35us  1.49%  runtime.(*scavengerState).wake
+         0     0%   100%     8.55us  1.53%  runtime.(*spanSet).push
+         0     0%   100%     9.16us  1.64%  runtime.(*sweepLocked).sweep
+         0     0%   100%    35.82us  6.41%  runtime.allocm
+         0     0%   100%    25.83us  4.62%  runtime.asyncPreempt2.func1
+         0     0%   100%     8.76us  1.57%  runtime.bgsweep
+         0     0%   100%     8.79us  1.57%  runtime.exitsyscall
+         0     0%   100%     8.79us  1.57%  runtime.exitsyscall.func3

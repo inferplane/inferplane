@@ -1,0 +1,23 @@
+File: after-sensitivity.test
+Build ID: aeca8baf50b7f182758b86b646222b95cd5cc835
+Type: delay
+Time: 2026-10-27 09:43:08 UTC
+Showing nodes accounting for 231.49ms, 100% of 231.49ms total
+Dropped 11 nodes (cum <= 1.16ms)
+Showing top 15 nodes out of 19
+      flat  flat%   sum%        cum   cum%
+  161.77ms 69.88% 69.88%   161.77ms 69.88%  runtime.chanrecv1
+   69.73ms 30.12%   100%    69.73ms 30.12%  sync.(*WaitGroup).Wait
+         0     0%   100%    70.87ms 30.61%  github.com/inferplane/inferplane/internal/sensitivity.BenchmarkInspect
+         0     0%   100%    69.73ms 30.12%  github.com/inferplane/inferplane/internal/sensitivity.BenchmarkInspect.func1
+         0     0%   100%    69.73ms 30.12%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Run
+         0     0%   100%    90.90ms 39.27%  main.main
+         0     0%   100%    90.90ms 39.27%  runtime.main
+         0     0%   100%   161.32ms 69.69%  testing.(*B).Run
+         0     0%   100%    63.38ms 27.38%  testing.(*B).doBench
+         0     0%   100%    62.97ms 27.20%  testing.(*B).doBench.gowrap1
+         0     0%   100%    62.97ms 27.20%  testing.(*B).launch
+         0     0%   100%    63.38ms 27.38%  testing.(*B).run
+         0     0%   100%    97.95ms 42.31%  testing.(*B).run1
+         0     0%   100%    77.62ms 33.53%  testing.(*B).run1.func1
+         0     0%   100%   231.06ms 99.81%  testing.(*B).runN

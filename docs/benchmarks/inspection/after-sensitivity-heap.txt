@@ -1,0 +1,23 @@
+File: after-sensitivity.test
+Build ID: aeca8baf50b7f182758b86b646222b95cd5cc835
+Type: alloc_space
+Time: 2026-10-27 09:43:08 UTC
+Showing nodes accounting for 241.86MB, 97.96% of 246.90MB total
+Dropped 44 nodes (cum <= 1.23MB)
+Showing top 15 nodes out of 23
+      flat  flat%   sum%        cum   cum%
+   94.49MB 38.27% 38.27%    94.49MB 38.27%  internal/bytealg.MakeNoZero
+   92.22MB 37.35% 75.62%   186.71MB 75.62%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Request
+   44.74MB 18.12% 93.74%    44.74MB 18.12%  encoding/json.(*Decoder).refill
+   10.41MB  4.22% 97.96%    10.41MB  4.22%  encoding/json.(*decodeState).literalStore
+         0     0% 97.96%    55.15MB 22.34%  encoding/json.(*Decoder).Decode
+         0     0% 97.96%    55.15MB 22.34%  encoding/json.(*Decoder).Token
+         0     0% 97.96%    44.74MB 18.12%  encoding/json.(*Decoder).readValue
+         0     0% 97.96%    10.41MB  4.22%  encoding/json.(*decodeState).unmarshal
+         0     0% 97.96%    10.41MB  4.22%  encoding/json.(*decodeState).value
+         0     0% 97.96%    55.15MB 22.34%  github.com/inferplane/inferplane/internal/sensitivity.(*walker).decode
+         0     0% 97.96%    55.15MB 22.34%  github.com/inferplane/inferplane/internal/sensitivity.(*walker).value
+         0     0% 97.96%   187.21MB 75.82%  github.com/inferplane/inferplane/internal/sensitivity.BenchmarkInspect
+         0     0% 97.96%    55.15MB 22.34%  github.com/inferplane/inferplane/internal/sensitivity.BenchmarkInspect.func1.1
+         0     0% 97.96%   186.71MB 75.62%  github.com/inferplane/inferplane/internal/sensitivity.inspectionBenchmarkFixture (inline)
+         0     0% 97.96%    55.15MB 22.34%  github.com/inferplane/inferplane/internal/sensitivity.inspector.InspectWithMode

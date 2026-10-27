@@ -1,0 +1,22 @@
+File: baseline-router.test
+Build ID: cf7782ce44117026e36f95515093fdf856ac78c6
+Type: alloc_space
+Time: 2026-10-27 09:18:24 UTC
+Showing nodes accounting for 77.25MB, 100% of 77.25MB total
+Showing top 15 nodes out of 87
+      flat  flat%   sum%        cum   cum%
+   50.13MB 64.89% 64.89%    50.13MB 64.89%  encoding/json.(*Decoder).refill
+   13.88MB 17.97% 82.86%    13.88MB 17.97%  encoding/json.(*decodeState).literalStore
+    2.31MB  2.99% 85.85%     4.63MB  5.99%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Request
+    2.31MB  2.99% 88.85%     2.31MB  2.99%  internal/bytealg.MakeNoZero
+    1.53MB  1.99% 90.83%     1.53MB  1.99%  regexp.(*bitState).reset
+    1.16MB  1.50% 92.33%     1.16MB  1.50%  runtime/pprof.StartCPUProfile
+    1.02MB  1.32% 93.65%     1.02MB  1.32%  regexp/syntax.(*compiler).inst
+       1MB  1.30% 94.94%        1MB  1.30%  runtime.mallocgc
+    0.88MB  1.14% 96.09%     0.88MB  1.14%  compress/flate.NewWriter
+    0.52MB  0.67% 96.75%     0.52MB  0.67%  regexp.(*Regexp).get
+    0.50MB  0.65% 97.41%    57.90MB 74.96%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Run.func1
+    0.50MB  0.65% 98.06%     0.50MB  0.65%  runtime/pprof.(*profMap).lookup
+    0.50MB  0.65% 98.71%     0.50MB  0.65%  github.com/prometheus/client_golang/prometheus.(*goCollector).Describe
+    0.50MB  0.65% 99.35%     0.50MB  0.65%  testing.(*B).ResetTimer
+    0.50MB  0.65%   100%     0.50MB  0.65%  internal/reflectlite.Swapper

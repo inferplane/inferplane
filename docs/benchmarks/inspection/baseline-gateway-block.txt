@@ -1,0 +1,23 @@
+File: baseline-mayu.test
+Build ID: 364c6ddc1af850d80fd624f63fb52433eab88e57
+Type: delay
+Time: 2026-10-27 09:18:47 UTC
+Showing nodes accounting for 17.76s, 100% of 17.76s total
+Dropped 31 nodes (cum <= 0.09s)
+Showing top 15 nodes out of 25
+      flat  flat%   sum%        cum   cum%
+     7.34s 41.33% 41.33%      7.34s 41.33%  runtime.chanrecv1
+     3.67s 20.64% 61.97%      3.67s 20.64%  runtime.selectgo
+     3.66s 20.60% 82.57%      3.66s 20.60%  runtime.chanrecv2
+     3.10s 17.43%   100%      3.10s 17.43%  sync.(*WaitGroup).Wait
+         0     0%   100%      3.67s 20.64%  database/sql.(*DB).connectionOpener
+         0     0%   100%      3.67s 20.64%  database/sql.OpenDB.gowrap1
+         0     0%   100%      3.67s 20.66%  github.com/inferplane/inferplane/cmd/mayu.BenchmarkGatewayInspection
+         0     0%   100%      3.10s 17.43%  github.com/inferplane/inferplane/cmd/mayu.BenchmarkGatewayInspection.func1
+         0     0%   100%      3.66s 20.60%  github.com/inferplane/inferplane/internal/audit.(*Writer).loop
+         0     0%   100%      3.66s 20.60%  github.com/inferplane/inferplane/internal/audit.NewWriter.gowrap1
+         0     0%   100%      3.10s 17.43%  github.com/inferplane/inferplane/internal/testutil/inspectionfixture.Run
+         0     0%   100%      3.67s 20.67%  main.main
+         0     0%   100%      3.67s 20.67%  runtime.main
+         0     0%   100%      7.34s 41.32%  testing.(*B).Run
+         0     0%   100%      3.10s 17.47%  testing.(*B).doBench
