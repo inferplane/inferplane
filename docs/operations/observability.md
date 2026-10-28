@@ -238,12 +238,16 @@ Rules a data plane enforces:
 - A content exporter must declare `data_boundary: internal` and use TLS unless its
   endpoint is loopback. Records larger than `max_content_bytes` (default 2 MiB) are
   dropped, never truncated.
-- The gateway draws the sampling decision. An incoming `traceparent` still joins the
-  client's trace id, but its sampled flag neither suppresses nor forces export. The
-  legacy `otel` block keeps working as a local baseline exporter; the name `otel` is
-  reserved.
-- Each exporter holds at most `queue_bytes` (default 64 MiB) while its collector is
-  slow; further records are dropped. Batches are sent every second or at 512
+- The gateway draws the sampling decision: a random draw per request and target, not
+  deterministic on the trace id, so replicas and upstream services do not sample the
+  same traces. A span no exporter selected is not recorded. An incoming `traceparent`
+  still joins the client's trace id, but its sampled flag neither suppresses nor
+  forces export. The legacy `otel` block keeps working as a local baseline exporter
+  with these same semantics (its `sample_ratio` no longer follows a parent's sampled
+  flag); the name `otel` is reserved.
+- Each exporter holds at most `queue_bytes` (default 64 MiB) of queued records while
+  its collector is slow; further records are dropped. The queue's slots take about
+  1/16 of `queue_bytes` more, allocated at startup. Batches are sent every second or at 512
   records. HTTP 429/502/503/504 and gRPC `Unavailable`, `ResourceExhausted`,
   `DeadlineExceeded` and `Aborted` are retried twice. Watch
   `inferplane_otel_export_records_total{exporter,signal,outcome}`.

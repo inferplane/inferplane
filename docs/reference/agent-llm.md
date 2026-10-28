@@ -59,7 +59,8 @@ or an AWS invoice. Context pricing is described in [the pricing guide](pricing.m
   truncated stream is indistinguishable from a clean one. Span attributes never carry a
   secret, a `key_id`, or raw client input; model/provider values are the config-bounded
   post-routing ones.
-- Tracing (OTLP) is the ONLY signal mayu speaks over OTLP. Metrics are Prometheus
+- mayu speaks OTLP for traces and, when an `observability` policy selects them, for
+  governed logs (audit-record copies and egress content). Metrics are Prometheus
   exposition on `:9090/metrics` and control-plane usage windows are `POST /v1alpha1/usage`
   — see the Collector contract in [infrastructure.md](infrastructure.md).
 

@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: 277b5d2a94e750b9d13fcf16c2a63bdafeffbc6047d200d22bdea65460e63ea4
+translation_source_sha256: 7083f18757019cbc2a6c0a6d0eb0419ee4cbabd0aec5ce0e754503ab4945a00e
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -214,8 +214,8 @@ spec:
 - observability 규칙은 별도 문서에 두세요. 거부된 문서는 그 안의 예산 규칙까지 통째로 빠집니다. required identity 모드에서는 거부가 하나라도 있으면 이전에 배포된 정책 세트를 유지합니다.
 - 한 요청에 여러 정책이 맞으면 트레이스와 감사는 지정된 exporter의 합집합으로 갑니다(트레이스는 exporter별 가장 높은 `samplePercent`). 본문은 맞는 규칙이 모두 같은 exporter를 지정할 때만 내보냅니다.
 - 본문 exporter는 `data_boundary: internal`을 선언해야 하고, endpoint가 loopback이 아니면 TLS를 써야 합니다. `max_content_bytes`(기본 2 MiB)를 넘는 기록은 잘라 보내지 않고 버립니다.
-- 샘플링은 게이트웨이가 결정합니다. 들어온 `traceparent`로 클라이언트의 trace id에는 계속 합류하지만, sampled 플래그로 내보내기를 막거나 강제할 수는 없습니다. 기존 `otel` 블록은 로컬 기본 exporter로 계속 동작하며, `otel`이라는 이름은 예약돼 있습니다.
-- 수집기가 느리면 exporter마다 최대 `queue_bytes`(기본 64 MiB)까지만 보관하고 나머지는 버립니다. 배치는 1초마다 또는 512건이 모이면 보냅니다. HTTP 429/502/503/504와 gRPC `Unavailable`, `ResourceExhausted`, `DeadlineExceeded`, `Aborted`는 두 번 재시도합니다. `inferplane_otel_export_records_total{exporter,signal,outcome}`를 지켜보세요.
+- 샘플링은 게이트웨이가 요청·대상마다 무작위로 정합니다. trace id 기준의 결정적 샘플링이 아니므로 복제본이나 상위 서비스와 같은 trace를 고르지 않습니다. 어떤 exporter도 고르지 않은 span은 기록하지 않습니다. 들어온 `traceparent`로 클라이언트의 trace id에는 계속 합류하지만, sampled 플래그로 내보내기를 막거나 강제할 수는 없습니다. 기존 `otel` 블록도 같은 방식의 로컬 기본 exporter로 동작합니다(`sample_ratio`는 더 이상 부모의 sampled 플래그를 따르지 않습니다). `otel`이라는 이름은 예약돼 있습니다.
+- 수집기가 느리면 exporter마다 대기 기록을 최대 `queue_bytes`(기본 64 MiB)까지만 보관하고 나머지는 버립니다. 큐 슬롯은 시작할 때 `queue_bytes`의 약 1/16을 추가로 할당합니다. 배치는 1초마다 또는 512건이 모이면 보냅니다. HTTP 429/502/503/504와 gRPC `Unavailable`, `ResourceExhausted`, `DeadlineExceeded`, `Aborted`는 두 번 재시도합니다. `inferplane_otel_export_records_total{exporter,signal,outcome}`를 지켜보세요.
 - `observability` 변경은 재시작해야 반영됩니다. SIGHUP 리로드는 exporter를 다시 만들지 않습니다. 종료 시에는 감사 writer를 먼저 비우고, 그다음 exporter를 최대 5초 동안 flush합니다.
 
 한계: 메트릭은 계속 Prometheus 노출 방식이며 OTLP 메트릭 내보내기는 없습니다. mayu 호스트를 관리하는 사람은 로컬 상한을 고칠 수 있습니다. 사용자가 끌 수 없는 내보내기가 필요하면 사용자가 관리하지 않는 호스트에서 mayu를 운영해야 합니다.

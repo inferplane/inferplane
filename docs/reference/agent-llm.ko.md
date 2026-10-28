@@ -1,6 +1,6 @@
 ---
 translation_source: reference/agent-llm.md
-translation_source_sha256: d1fa1d963193fd81d9b1dca8f50c873a5d58d8b502d148c04ace2c13cf2d6bcf
+translation_source_sha256: 34af8cd25a6cf65a0c55f811ae0fe5c4e99e0321ed11b855e2ce2e6cded614a4
 ---
 
 # 에이전트·LLM 구현 {#agent-llm}
@@ -45,7 +45,7 @@ Bedrock Guardrails는 모든 InvokeModel·스트림·Converse 호출의 데이�
 
 **Span은 정산된 수치를 기록합니다.** 표준 input/output_tokens만으로 캐시·비용을 표현할 수 없어 inferplane.usage.cache_read_input_tokens, cache_write_5m/1h_input_tokens, 정수 inferplane.cost.amount_usd_micros와 pricing_missing을 사용합니다. 0이면서 missing이면 가격 누락이고, missing이 아니면 명시적 무료나 정상적인 round-half-even 결과일 수 있습니다. 부분 스트림에는 response.partial과 Error 상태를 기록해 이미 HTTP 200인 잘린 응답을 정상 종료와 구분합니다. 비밀·key_id·원시 클라이언트 입력을 넣지 않고 라우팅 후 설정 범위 모델·공급자만 사용합니다.
 
-OTLP는 트레이스에만 사용합니다. 메트릭은 관리 포트 Prometheus이고 사용량 윈도는 CP 자체 API입니다. [수집기 계약](infrastructure.md)을 참고하세요.
+OTLP는 트레이스와, `observability` 정책이 고른 경우의 정책 기반 로그(감사 기록 사본·송신 본문)에 사용합니다. 메트릭은 관리 포트 Prometheus이고 사용량 윈도는 CP 자체 API입니다. [수집기 계약](infrastructure.md)을 참고하세요.
 
 ### 4. 경로별 프롬프트 캐시 보존 {#4-prompt-cache-preservation-by-path}
 

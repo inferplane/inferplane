@@ -106,7 +106,9 @@ config:
   # the admin port (scrape http://<svc>:9090/metrics — the Service's named
   # `admin` port), and usage windows go to inferplaned over
   # `POST /v1alpha1/usage`, not OTLP. Absent (the default) → no tracer, request
-  # path byte-identical. Governed export (traces, audit copies, egress content
+  # path byte-identical. sample_ratio is a gateway-side random draw per request
+  # (a client's traceparent sampled flag is ignored; unsampled spans do not
+  # record). Governed export (traces, audit copies, egress content
   # selected per team/user by `observability` policy rules) uses a separate
   # `observability.exporters` block — see docs/operations/observability.md.
   # otel:
