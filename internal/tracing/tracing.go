@@ -1,9 +1,10 @@
 // Package tracing is the opt-in OpenTelemetry seam (ADR-011). It owns the OTel
 // SDK import (InitRouted builds the OTLP exporters + TracerProvider; Init is the
 // legacy single-exporter form) and exposes small request-span helpers so the
-// rest of the gateway depends only on this package, not the SDK. Spans are
-// always recorded once tracing is on; a routing processor exports each span
-// only to the exporters the injected Decider selects for its request. When Init is not called, every helper is a cheap no-op (the
+// rest of the gateway depends only on this package, not the SDK. Under a routed
+// provider, Start decides per span which exporters receive it (the injected
+// Decider plus a gateway-side draw); unselected spans are dropped as
+// non-recording. When Init is not called, every helper is a cheap no-op (the
 // default tracer is the library no-op and an `enabled` guard skips header/context
 // work), so a deployment without an `otel` config is byte-for-byte unchanged.
 //
@@ -42,6 +43,9 @@ var (
 	// tracer defaults to the library no-op, so Start works (cheaply) before Init.
 	tracer trace.Tracer                  = tracenoop.NewTracerProvider().Tracer(scopeName)
 	prop   propagation.TextMapPropagator = propagation.TraceContext{}
+	// router is the routed provider's processor; nil for an explicitly
+	// installed provider (SetTracerProvider), which then samples on its own.
+	router *routingProcessor
 )
 
 // Init is the legacy single-exporter setup (the `otel` config block): every
@@ -74,12 +78,14 @@ func SetTracerProvider(tp trace.TracerProvider) {
 	otel.SetTextMapPropagator(prop)
 	tracer = tp.Tracer(scopeName)
 	enabled = true
+	router = nil
 }
 
 // Disable reverts to the no-op tracer (test cleanup).
 func Disable() {
 	tracer = tracenoop.NewTracerProvider().Tracer(scopeName)
 	enabled = false
+	router = nil
 }
 
 // Enabled reports whether tracing is installed (false → no-op fast path).
@@ -95,7 +101,13 @@ func Extract(ctx context.Context, h http.Header) context.Context {
 }
 
 // Start begins a server span (no-op span when tracing is off).
+// Under a routed provider the export decision is made here, once per span, and
+// carried in the context to both the sampler (a span no target selected is
+// dropped: non-recording, no attribute allocation) and the routing processor.
 func Start(ctx context.Context, name string) (context.Context, trace.Span) {
+	if r := router; r != nil {
+		ctx = context.WithValue(ctx, routeKey{}, r.choose(ctx))
+	}
 	return tracer.Start(ctx, name, trace.WithSpanKind(trace.SpanKindServer))
 }
 

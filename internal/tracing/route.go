@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ExporterConfig is one OTLP trace destination. Headers are resolved values
@@ -61,12 +62,14 @@ type Target struct {
 // authenticated principal) and must be cheap.
 type Decider func(ctx context.Context) []Target
 
-// InitRouted installs a TracerProvider that records every span and exports
-// each one only to the targets decide returns for its request. The export draw
-// is made here, per target, so an incoming traceparent's sampled flag or a
-// client-chosen trace id cannot suppress or force export; the client's trace
-// id is still joined for correlation. It returns the provider's Shutdown,
-// which flushes every exporter.
+// InitRouted installs a TracerProvider whose spans are exported only to the
+// targets decide returns for their request. Start makes the per-target draw
+// once per span, so an incoming traceparent's sampled flag or a client-chosen
+// trace id cannot suppress or force export; the client's trace id is still
+// joined for correlation, and a span no target selected is dropped
+// (non-recording). Sampling is a random draw per request, not deterministic
+// on the trace id. It returns the provider's Shutdown, which flushes every
+// exporter.
 func InitRouted(serviceName string, exporters map[string]sdktrace.SpanExporter, decide Decider) func(context.Context) error {
 	if serviceName == "" {
 		serviceName = "inferplane"
@@ -76,13 +79,32 @@ func InitRouted(serviceName string, exporters map[string]sdktrace.SpanExporter, 
 		r.procs[name] = sdktrace.NewBatchSpanProcessor(exp)
 	}
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithSampler(routeSampler{}),
 		sdktrace.WithSpanProcessor(r),
 		sdktrace.WithResource(resource.NewSchemaless(attribute.String("service.name", serviceName))),
 	)
 	SetTracerProvider(tp)
+	router = r
 	return tp.Shutdown
 }
+
+// routeKey carries Start's chosen exporter names ([]string, possibly empty).
+type routeKey struct{}
+
+// routeSampler records and samples exactly the spans Start chose at least one
+// exporter for. It never reads the parent's sampled flag; the parent's
+// tracestate is preserved either way.
+type routeSampler struct{}
+
+func (routeSampler) ShouldSample(p sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	ts := trace.SpanContextFromContext(p.ParentContext).TraceState()
+	if chosen, _ := p.ParentContext.Value(routeKey{}).([]string); len(chosen) > 0 {
+		return sdktrace.SamplingResult{Decision: sdktrace.RecordAndSample, Tracestate: ts}
+	}
+	return sdktrace.SamplingResult{Decision: sdktrace.Drop, Tracestate: ts}
+}
+
+func (routeSampler) Description() string { return "InferplaneGovernedRoute" }
 
 // InitExporters builds one OTLP exporter per entry and installs InitRouted
 // over them, so callers outside this package never import the SDK.
@@ -110,11 +132,18 @@ type routingProcessor struct {
 }
 
 func (r *routingProcessor) OnStart(parent context.Context, s sdktrace.ReadWriteSpan) {
+	if chosen, _ := parent.Value(routeKey{}).([]string); len(chosen) > 0 {
+		r.routes.Store(s.SpanContext().SpanID(), chosen)
+	}
+}
+
+// choose runs the decider and the per-target draw for one span.
+func (r *routingProcessor) choose(ctx context.Context) []string {
 	if r.decide == nil {
-		return
+		return nil
 	}
 	var chosen []string
-	for _, t := range r.decide(parent) {
+	for _, t := range r.decide(ctx) {
 		if _, ok := r.procs[t.Exporter]; !ok || t.Ratio <= 0 {
 			continue
 		}
@@ -129,9 +158,7 @@ func (r *routingProcessor) OnStart(parent context.Context, s sdktrace.ReadWriteS
 			chosen = append(chosen, t.Exporter)
 		}
 	}
-	if len(chosen) > 0 {
-		r.routes.Store(s.SpanContext().SpanID(), chosen)
-	}
+	return chosen
 }
 
 func (r *routingProcessor) OnEnd(s sdktrace.ReadOnlySpan) {

@@ -118,3 +118,33 @@ func TestLegacyRatioTarget(t *testing.T) {
 		t.Fatalf("ratio 0.5 exported %d of 200 spans", n)
 	}
 }
+
+// A span no target selected must not record: unexported spans would otherwise
+// pay attribute and cost-event allocation on every request (legacy
+// sample_ratio users relied on non-recording unsampled spans).
+func TestUnselectedSpanIsNotRecorded(t *testing.T) {
+	_, _, shutdown := routed(t)
+	defer shutdown()
+	sampled := http.Header{}
+	sampled.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	for _, c := range []struct {
+		name      string
+		ctx       context.Context
+		recording bool
+	}{
+		{"no-target", context.Background(), false},
+		{"ratio-zero", withTargets(context.Background(), Target{Exporter: "a", Ratio: 0}), false},
+		{"unknown-exporter", withTargets(context.Background(), Target{Exporter: "zzz", Ratio: 1}), false},
+		{"client-sampled-no-target", Extract(context.Background(), sampled), false},
+		{"selected", withTargets(context.Background(), Target{Exporter: "a", Ratio: 1}), true},
+	} {
+		sctx, span := Start(c.ctx, c.name)
+		if span.IsRecording() != c.recording {
+			t.Errorf("%s: recording = %v, want %v", c.name, span.IsRecording(), c.recording)
+		}
+		if TraceID(sctx) == "" {
+			t.Errorf("%s: a dropped span must still carry a trace id for audit correlation", c.name)
+		}
+		span.End()
+	}
+}
