@@ -470,3 +470,22 @@ func TestGRPCExport(t *testing.T) {
 		t.Fatalf("gRPC metadata = %v", logs.auth)
 	}
 }
+
+// queue_bytes is the documented bound: small audit copies must not hit a
+// fixed item cap long before the byte budget is used.
+func TestQueueBoundIsBytesNotItems(t *testing.T) {
+	col := newCollector(t)
+	col.block = make(chan struct{})
+	m := metrics.New()
+	s := newTestSet(t, m, Exporter{Name: "corp", Endpoint: col.endpoint(), Insecure: true, Signals: []string{"audit"}, QueueBytes: 64 << 20})
+	sink := s.AuditSink(func(string, string) []string { return []string{"corp"} }).(audit.RecordSink)
+	rec, canon := auditRecord()
+	for i := 0; i < 12000; i++ { // ~12000 × (len(canon)+512) ≈ 9 MiB, well under 64 MiB
+		sink.WriteRecord(rec, canon)
+	}
+	if dropped := counter(m, "corp", "audit", "dropped_queue_full"); dropped != 0 {
+		t.Fatalf("dropped %v records with the byte budget mostly unused", dropped)
+	}
+	close(col.block)
+	shutdown(t, s)
+}

@@ -26,7 +26,10 @@ const (
 )
 
 const (
-	queueItems    = 8192
+	// The channel is sized from the byte budget so bytes, not a fixed item
+	// count, bound the queue: every item accounts at least recordOverhead.
+	minQueueItems = 1024
+	maxQueueItems = 1 << 18
 	maxBatchItems = 512
 	// maxBatchBytes keeps one request under a collector's default 4 MiB gRPC
 	// receive limit; a single larger record is still sent on its own.
@@ -70,10 +73,22 @@ type pipeline struct {
 func newPipeline(name string, client logClient, resource *resourcepb.Resource, limit int64, m *metrics.Metrics) *pipeline {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &pipeline{name: name, client: client, resource: resource, m: m, limit: limit,
-		ch: make(chan item, queueItems), ctx: ctx, cancel: cancel,
+		ch: make(chan item, queueCapacity(limit)), ctx: ctx, cancel: cancel,
 		stop: make(chan struct{}), done: make(chan struct{})}
 	go p.run()
 	return p
+}
+
+// queueCapacity is the most items the byte budget can admit, clamped.
+func queueCapacity(limit int64) int {
+	n := limit / recordOverhead
+	switch {
+	case n < minQueueItems:
+		return minQueueItems
+	case n > maxQueueItems:
+		return maxQueueItems
+	}
+	return int(n)
 }
 
 // enqueue accepts the record if it fits the byte budget; it never blocks.
