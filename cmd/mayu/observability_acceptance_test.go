@@ -269,3 +269,24 @@ func TestGatewayLegacyOTelStillExportsSpans(t *testing.T) {
 		t.Fatalf("legacy otel spans = %v", spans)
 	}
 }
+
+func TestGatewayObservabilityDeniedRequestExportsNoContent(t *testing.T) {
+	t.Setenv("OBS_ACCEPTANCE_TOKEN", "Bearer acceptance-collector")
+	corp, vault := newFakeOTLP(t), newFakeOTLP(t)
+	doc := observabilityDoc(&v1alpha1.ObservabilityRule{Audit: &v1alpha1.SignalExport{Exporter: "corp"}, Content: &v1alpha1.SignalExport{Exporter: "vault"}})
+	g, _ := bootObservability(t, routingAcceptanceConfig(t, &doc, withExporters(corp, vault)))
+	key, _, err := g.store.Create(context.Background(), "engineering", []string{"private"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := routingCall(t, g, key, "secret roadmap"); rec.Code != 403 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	flushObservability(t, g)
+	if n := len(vault.events("inferplane.content")); n != 0 {
+		t.Fatalf("a denied request exported %d content records", n)
+	}
+	if len(corp.events("inferplane.audit")) == 0 {
+		t.Fatal("the denial itself must still reach the governed audit copy")
+	}
+}

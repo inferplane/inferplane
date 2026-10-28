@@ -8,9 +8,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/inferplane/inferplane/api/v1alpha1"
 	"github.com/inferplane/inferplane/internal/adminauth"
 	"github.com/inferplane/inferplane/internal/config"
 	"github.com/inferplane/inferplane/internal/keystore"
+	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/router"
 	"github.com/inferplane/inferplane/internal/server/requestpolicy"
 	"github.com/inferplane/inferplane/internal/server/routingtest"
@@ -75,5 +77,37 @@ func TestConverseExportsContent(t *testing.T) {
 	}
 	if len(spy.recs) != 1 || spy.recs[0].Ingress != "bedrock-converse" || len(spy.recs[0].Request) == 0 {
 		t.Fatalf("converse content exports = %+v", spy.recs)
+	}
+}
+
+// The privacy guarantee of content export: a request refused before egress
+// (privacy Block, model access) exports nothing, on every ingress.
+func TestDeniedRequestsExportNoContent(t *testing.T) {
+	for _, i := range authorityIngresses() {
+		t.Run(i.name()+"/privacy-block", func(t *testing.T) {
+			f := routingtest.New(t, nil)
+			f.Policies = []*policy.Policy{routingtest.Privacy(v1alpha1.Block)}
+			spy := &contentSpy{}
+			rec := policyDo(policyMux(f, nil, nil, nil, nil, WithContentExport(spy.export)), i.path, routingtest.Body(i.protocol, "system", i.stream), true)
+			if rec.Code/100 != 4 || len(f.Public.Calls)+len(f.Private.Calls) != 0 {
+				t.Fatalf("expected a refusal before egress: status=%d calls=%d", rec.Code, len(f.Public.Calls)+len(f.Private.Calls))
+			}
+			if len(spy.recs) != 0 {
+				t.Fatalf("a blocked request exported content: %+v", spy.recs)
+			}
+		})
+		t.Run(i.name()+"/model-access", func(t *testing.T) {
+			f := routingtest.New(t, nil)
+			spy := &contentSpy{}
+			store := stubStore{key: "dev-key", p: keystore.Principal{KeyID: "opaque-key", Team: "team", AllowedModels: []string{"other-model"}, KeyOptions: keystore.KeyOptions{Owner: "user"}}}
+			mux := DataMux(f.Router, f.Holder, store, nil, nil, nil, nil, nil, nil, nil, adminauth.MappingConfig{}, nil, 0, WithContentExport(spy.export))
+			rec := policyDo(mux, i.path, authorityBody(i), true)
+			if rec.Code/100 != 4 || len(f.Public.Calls) != 0 {
+				t.Fatalf("expected a model-access refusal before egress: status=%d", rec.Code)
+			}
+			if len(spy.recs) != 0 {
+				t.Fatalf("a denied request exported content: %+v", spy.recs)
+			}
+		})
 	}
 }
