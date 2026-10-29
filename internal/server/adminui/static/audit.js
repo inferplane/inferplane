@@ -34,6 +34,12 @@ function auditKeyLabel(keyId) {
   const k = auditState.keys.get(keyId);
   return k && k.metadata && k.metadata.name ? k.metadata.name : (keyId || "—");
 }
+// "name · key_id" when the key store has a name, otherwise the key_id once.
+function auditKeyText(keyId) {
+  if (!keyId) return "—";
+  const label = auditKeyLabel(keyId);
+  return label === keyId ? keyId : label + " · " + keyId;
+}
 function auditTraceLink(template, traceId) {
   if (!template || !AUDIT_TRACE_ID.test(traceId || "")) return "";
   const url = template.split("{trace_id}").join(encodeURIComponent(traceId));
@@ -298,7 +304,7 @@ function renderAuditDetail(detail) {
   d.appendChild(renderAuditWaterfall(detail.waterfall || { rows: [] }, rec));
 
   const actor = auditEl("dl", "audit-kv");
-  const key = auditEl("span", "", auditKeyLabel(e.key_id) + " · " + e.key_id + " ");
+  const key = auditEl("span", "", auditKeyText(e.key_id) + " ");
   key.appendChild(auditPill(msg("audit.fromAudit"), "ev"));
   if (e.key_id) {
     const open = auditEl("button", "linklike", msg("audit.openKey"));

@@ -201,6 +201,9 @@ def run_scenario(page, base, width, scheme, screenshots):
     wait("() => document.querySelectorAll('#audit-detail .audit-wf-row').length === 4")
     if screenshots:
         page.screenshot(path=str(screenshots / f'audit-{width}-{scheme}.png'), full_page=True)
+    # A key without a name is shown once.
+    key_row = page.locator('#audit-detail dd').first.inner_text()
+    assert key_row.count(KEY_A) == 1, key_row
     assert page.locator('#audit-detail a[href*="traceId=' + TRACE + '"]').count() == 1
     detail = text('#audit-detail')
     assert HASH in detail and 'sha256-prev-fixture' in detail, detail

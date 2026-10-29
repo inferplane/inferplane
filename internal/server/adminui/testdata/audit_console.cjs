@@ -73,6 +73,10 @@ assert.equal(run('msg("audit.attemptTimingMissing")'), "Attempt timing was not r
 assert.ok(vm.runInContext('renderAuditWaterfall({ total_ms: 5, rows: [] }, { request: {}, usage: { input_tokens: 1 } })', ctx).all().some(n => n.textContent === run('msg("audit.attemptTimingMissing")')));
 assert.equal(run('auditShownNote(100, 100)'), run('msg("audit.showingFirst")').replace("{n}", "100"));
 assert.equal(run('auditShownNote(5, "")'), "");
+// A key without a name is shown once, never "ik_… · ik_…".
+assert.equal(run('auditKeyText("ik_1")'), "laptop · ik_1");
+assert.equal(run('auditKeyText("ik_9")'), "ik_9");
+assert.equal(run('auditKeyText("")'), "—");
 // An ambiguous key name yields no query parameters at all, so nothing is fetched for every key.
 const now = Date.UTC(2026, 9, 29, 12);
 assert.equal(run(`JSON.stringify(auditFilterParams("24h", "", "ci", ${now}))`), '{"params":null,"ambiguous":true}');
