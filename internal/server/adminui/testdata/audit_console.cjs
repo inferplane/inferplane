@@ -39,6 +39,15 @@ assert.equal(run('JSON.stringify(auditBar({ start_ms: 250, dur_ms: 500 }, 1000))
 assert.equal(run('auditScope("team_budget_exceeded")'), "team");
 assert.equal(run('auditScope("key_rate_limited")'), "key");
 assert.equal(run('auditScope("sensitive_blocked")'), "route");
+// Governance denials name their limit (ADR-057); a denial recorded before that evidence says so.
+assert.equal(run('auditDenySource("team-rate#2·rpm", "policy", "rpm")'), "team-rate#2·rpm");
+assert.equal(run('auditDenySource("", "key", "rpm")'), "key setting · requests/min");
+assert.equal(run('auditDenySource("", "lease", "budget")'), "control-plane lease · budget");
+assert.equal(run('auditDenySource("", "budget_store", "budget_month")'), "budget store full · monthly budget");
+assert.equal(run('auditDenySource("", "", "")'), run('msg("audit.policyNotRecorded")'));
+assert.equal(run('auditDenyScope("budget_authority_unavailable", "key")'), "key");
+assert.equal(run('auditDenyScope("key_rate_limited", "")'), "key");
+assert.equal(run('auditDenyScope("pricing_missing", "gateway")'), "gateway");
 assert.equal(run('auditSparkPoints([0, 0, 0], 120, 32).length'), 3);
 
 // A legacy record (no latency, no attempts) shows "no timing recorded", never a zero-width bar or NaN%.

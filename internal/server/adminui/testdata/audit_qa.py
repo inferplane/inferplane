@@ -45,7 +45,8 @@ EVENTS = [
     {'id': ID_DENIED, 'ts': '2026-10-29T10:36:22Z', 'event': 'request_started', 'kind': 'policy_denied', 'team': 'engineering',
      'key_id': KEY_A, 'ingress': 'anthropic', 'stream': False, 'status': 429, 'deny_code': 'key_rate_limited',
      'request_class': 'subagent', 'session_ref': SESSION, 'model_requested': 'private-coder', 'attempt_count': 0,
-     'input_tokens': 0, 'output_tokens': 0, 'cost_micros': 0, 'total_ms': 6},
+     'input_tokens': 0, 'output_tokens': 0, 'cost_micros': 0, 'total_ms': 6,
+     'gov_scope': 'key', 'gov_limit': 'rpm', 'gov_source': 'key'},
     {'id': ID_LEGACY, 'ts': '2026-10-29T10:31:40Z', 'event': 'request_completed', 'kind': 'privacy_masked', 'team': 'platform',
      'key_id': KEY_B, 'ingress': 'anthropic', 'stream': False, 'status': 200, 'masked': True, 'pii': True, 'categories': ['email'],
      'policy_ref': 'org-pii-mask#4·0', 'planned_boundary': 'external', 'actual_boundary': 'external', 'model_requested': 'economy-coder',
@@ -70,7 +71,12 @@ DENIED = {'event': EVENTS[1], 'hash': 'sha256-denied-fixture', 'record': {}, 'wa
 LEGACY = {'event': EVENTS[2], 'record': {}, 'waterfall': {'total_ms': 0, 'rows': []}}
 SUMMARY = {'since_ms': 0, 'until_ms': 0, 'by_kind': {'ok': 1, 'policy_denied': 1, 'privacy_masked': 1},
            'categories': [{'name': 'email', 'count': 1}], 'pii': {'masked': 1, 'internal': 0, 'blocked': 0, 'shadow': 0},
-           'denials': [{'code': 'key_rate_limited', 'team': 'engineering', 'key_id': KEY_A, 'count': 1, 'last_ts': '2026-10-29T10:36:22Z'}],
+           # A policy-rule denial, a key-setting reservation refusal, and a denial recorded before governance evidence.
+           'denials': [{'code': 'team_rate_limited', 'policy': 'team-rate#2·rpm', 'scope': 'team', 'limit': 'rpm', 'source': 'policy',
+                        'team': 'engineering', 'key_id': KEY_A, 'count': 3, 'last_ts': '2026-10-29T10:38:00Z'},
+                       {'code': 'budget_authority_unavailable', 'scope': 'key', 'limit': 'budget_day', 'source': 'key',
+                        'team': 'engineering', 'key_id': KEY_A, 'count': 2, 'last_ts': '2026-10-29T10:37:00Z'},
+                       {'code': 'key_rate_limited', 'team': 'engineering', 'key_id': KEY_A, 'count': 1, 'last_ts': '2026-10-29T10:36:22Z'}],
            'auto_mode': {'block': 1, 'allow': 5, 'unknown': 1, 'signatures': []},
            'buckets': [{'start_ms': i, 'requests': i % 3, 'denials': i % 2, 'pii': 0, 'auto_blocked': 0} for i in range(12)],
            'coverage_start_ms': 1793235600000}
@@ -222,6 +228,8 @@ def run_scenario(page, base, width, scheme, screenshots):
     detail = text('#audit-detail')
     assert en('audit.noTiming') not in detail
     assert page.locator('#audit-detail .audit-wf-row').count() == 1
+    # The denial section names the refusing limit (ADR-057).
+    assert en('audit.source.key') + ' · ' + en('audit.limit.rpm') in detail, detail
 
     # Legacy record (total_ms 0): "no timing was recorded", no NaN anywhere.
     page.locator('#audit-trace-table tbody tr').nth(2).click()
@@ -285,7 +293,11 @@ def run_scenario(page, base, width, scheme, screenshots):
     # Denials tab: denial row, auto-table lists block + unknown verdicts, unparsed warning visible.
     page.locator('#audit-tab-denials').click()
     wait("() => document.querySelectorAll('#audit-auto-table tbody tr').length === 2")
-    assert 'key_rate_limited' in text('#audit-deny-table')
+    deny_table = text('#audit-deny-table')
+    assert 'key_rate_limited' in deny_table
+    assert 'team-rate#2·rpm' in deny_table, deny_table
+    assert en('audit.source.key') + ' · ' + en('audit.limit.budget_day') in deny_table, deny_table
+    assert en('audit.policyNotRecorded') in deny_table, deny_table
     auto_rows = text('#audit-auto-table')
     assert 'block' in auto_rows and 'unknown' in auto_rows
     assert page.locator('#audit-auto-warning').is_visible()

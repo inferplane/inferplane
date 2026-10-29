@@ -61,6 +61,15 @@ function auditScope(code) {
   if (/^user_/.test(code)) return "user";
   return "route";
 }
+// A governance denial names its own scope (ADR-057); older rows fall back to the code.
+function auditDenyScope(code, scope) { return scope || auditScope(code); }
+// Where the refusing limit was set: the policy rule, else the governance source
+// and limit kind, else "not recorded" (a denial recorded before that evidence).
+function auditDenySource(policy, source, limit) {
+  if (policy) return policy;
+  if (source) return msg("audit.source." + source) + (limit ? " · " + msg("audit.limit." + limit) : "");
+  return msg("audit.policyNotRecorded");
+}
 function auditSparkPoints(series, w, h) {
   const top = Math.max(1, ...series), step = series.length > 1 ? w / (series.length - 1) : 0;
   return series.map((v, i) => [Math.round(i * step * 10) / 10, Math.round((h - 2 - v / top * (h - 6)) * 10) / 10]);
@@ -357,7 +366,7 @@ function renderAuditDetail(detail) {
   if (e.deny_code) {
     const p = auditEl("dl", "audit-kv");
     auditKV(p, "audit.code", e.deny_code + " · HTTP " + e.status);
-    auditKV(p, "audit.policy", e.policy_ref || msg("audit.policyNotRecorded"));
+    auditKV(p, "audit.policy", auditDenySource(e.policy_ref, e.gov_source, e.gov_limit));
     if (e.event === "request_started" && !e.attempt_count) auditKV(p, "audit.billing", msg("audit.noBilling"));
     d.appendChild(auditSection(msg("audit.denial"), p));
   }
@@ -588,9 +597,10 @@ async function auditLoadDenials() {
   for (const x of s.denials) {
     const tr = auditEl("tr", "static");
     auditCell(tr, x.code, "mono");
-    auditCell(tr, x.policy || msg("audit.policyNotRecorded"));
-    const scope = auditScope(x.code);
-    auditCell(tr, msg("audit.scope." + scope) + " " + (scope === "team" ? x.team : auditKeyLabel(x.key_id)));
+    auditCell(tr, auditDenySource(x.policy, x.source, x.limit));
+    const scope = auditDenyScope(x.code, x.scope);
+    const subject = scope === "team" ? x.team : scope === "gateway" ? "" : auditKeyLabel(x.key_id);
+    auditCell(tr, msg("audit.scope." + scope) + (subject ? " " + subject : ""));
     auditCell(tr, x.count, "num");
     auditCell(tr, auditTime(x.last_ts), "mono nowrap");
     tbody.appendChild(tr);
