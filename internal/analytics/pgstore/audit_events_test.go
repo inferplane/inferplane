@@ -3,11 +3,14 @@ package pgstore
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -317,5 +320,31 @@ func TestEnsureSchemaAddsAuditTablesToMigratedDatabase(t *testing.T) {
 	defer s2.Close()
 	if auditCount(t, s2, "audit_events") != 0 || auditCount(t, s2, "audit_event_categories") != 0 {
 		t.Fatal("tables should exist and be empty")
+	}
+}
+
+// Mode B stores the exact chain line the aggregator read, not a re-encoding:
+// a field this build does not know (a newer writer's) must survive, and the
+// detail hash must be the SHA-256 of those bytes.
+func TestPgstoreAuditDetailKeepsExactLine(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	b, err := auditRec("01JC0000000000000000000301", "request_completed", 200, nil).Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exact := strings.TrimSuffix(string(b), "}") + `,"x_future_field":1}`
+	dir := t.TempDir()
+	writeFile(t, dir, "seg.jsonl", exact+"\n")
+	if err := newTestAggregator(t, s, dir).tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	d, ok, err := s.AuditEvent("01JC0000000000000000000301")
+	if err != nil || !ok {
+		t.Fatalf("detail ok=%v err=%v", ok, err)
+	}
+	sum := sha256.Sum256([]byte(exact))
+	if string(d.Record) != exact || d.Hash != "sha256:"+hex.EncodeToString(sum[:]) {
+		t.Fatalf("stored record = %s\nwant exact line %s\nhash %s", d.Record, exact, d.Hash)
 	}
 }

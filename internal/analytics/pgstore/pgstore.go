@@ -446,7 +446,24 @@ func pgDayWhere(since, until string) (string, []any) {
 	return b.String(), args
 }
 
+// ingestItem is one decoded record and the exact audit line it was read from.
+// line is nil when only the decoded record is known; the console row then
+// stores the Canonical() re-encoding, which is what the writer emits.
+type ingestItem struct {
+	rec  audit.Record
+	line []byte
+}
+
+// ingestBatch ingests decoded records without their source lines.
 func (s *Store) ingestBatch(ctx context.Context, holder string, epoch int64, records []audit.Record, checkpointUpdates map[string]int64) error {
+	items := make([]ingestItem, len(records))
+	for i, r := range records {
+		items[i] = ingestItem{rec: r}
+	}
+	return s.ingestItems(ctx, holder, epoch, items, checkpointUpdates)
+}
+
+func (s *Store) ingestItems(ctx context.Context, holder string, epoch int64, items []ingestItem, checkpointUpdates map[string]int64) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin analytics ingest batch: %w", err)
@@ -458,10 +475,11 @@ func (s *Store) ingestBatch(ctx context.Context, holder string, epoch int64, rec
 	}
 
 	touched := map[rollupKey]struct{}{}
-	for _, r := range records {
-		// ingestBatch receives decoded records, not chain lines, so the detail
-		// hash uses the Canonical() fallback (the writer emits exactly those bytes).
-		if row, ok := analytics.ProjectAuditEvent(r, nil); ok {
+	for _, it := range items {
+		r := it.rec
+		// The aggregator passes the exact line, so record_json and the detail
+		// hash are the chain bytes, as in Mode A.
+		if row, ok := analytics.ProjectAuditEvent(r, it.line); ok {
 			if err := projectAuditEvent(ctx, tx, row); err != nil {
 				return err
 			}

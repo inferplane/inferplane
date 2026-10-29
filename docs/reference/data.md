@@ -204,7 +204,8 @@ never written.
 Both stores gain `audit_events` (one row per terminal record) and
 `audit_event_categories (id, category)`, created with the existing index. The
 `events` table and Usage numbers are unchanged. The exact audit line is kept in
-`record_json`. Projection is first-write-wins on `id`.
+`record_json` in both modes (Mode B keeps the bytes the aggregator read from the
+segment, not a re-encoding). Projection is first-write-wins on `id`.
 
 Free text taken from the record (`model_requested`, `model_actual`, `provider`,
 `policy_ref`, the boundaries, `request_class`, `session_ref`, `trace_id`,

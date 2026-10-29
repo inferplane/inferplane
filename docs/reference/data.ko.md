@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 02a85eb222eb1c15fa40b7a6983389d0e432ee01b1346943ff6d882779c16a2a
+translation_source_sha256: 301288bbc2f75fa9aea73199e73bc5877c22524e1c99df44feba9ab7f31b1614
 ---
 
 # 데이터 구현 {#data}
@@ -146,7 +146,8 @@ MatchingRoutingPolicies는 하나의 원자 스냅샷에서 호출자 소유 규
 
 두 저장소 모두 `audit_events`(종결 기록 하나당 한 행)와
 `audit_event_categories (id, category)`를 기존 인덱스와 함께 만듭니다. `events` 테이블과
-Usage 수치는 바뀌지 않습니다. 정확한 감사 행은 `record_json`에 보관합니다. 투영은 `id`에
+Usage 수치는 바뀌지 않습니다. 정확한 감사 행은 두 모드 모두 `record_json`에 보관합니다(Mode B는
+다시 인코딩한 값이 아니라 집계기가 세그먼트에서 읽은 바이트를 보관). 투영은 `id`에
 대해 먼저 쓴 값이 우선입니다.
 
 기록에서 가져온 자유 텍스트(`model_requested`, `model_actual`, `provider`, `policy_ref`,

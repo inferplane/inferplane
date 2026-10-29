@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -104,7 +105,7 @@ func (a *Aggregator) tick(ctx context.Context) error {
 	sort.Strings(names)
 
 	remaining := a.cfg.MaxLinesPerTick
-	records := []audit.Record{}
+	items := []ingestItem{}
 	checkpoints := map[string]int64{}
 	for _, name := range names {
 		if remaining <= 0 {
@@ -115,20 +116,20 @@ func (a *Aggregator) tick(ctx context.Context) error {
 			return err
 		}
 		path := filepath.Join(a.cfg.AggregatedAuditDir, name)
-		recs, newOffset, lines, err := readCompleteLines(path, offset, remaining)
+		read, newOffset, lines, err := readCompleteLines(path, offset, remaining)
 		if err != nil {
 			return err
 		}
 		if newOffset > offset {
 			checkpoints[name] = newOffset
-			records = append(records, recs...)
+			items = append(items, read...)
 			remaining -= lines
 		}
 	}
 	if len(checkpoints) == 0 {
 		return nil
 	}
-	if err := a.store.ingestBatch(ctx, a.instanceID, epoch, records, checkpoints); err != nil {
+	if err := a.store.ingestItems(ctx, a.instanceID, epoch, items, checkpoints); err != nil {
 		if errors.Is(err, errFenced) {
 			return nil
 		}
@@ -149,7 +150,9 @@ func (a *Aggregator) checkpoint(ctx context.Context, segment string) (int64, err
 	return offset, nil
 }
 
-func readCompleteLines(path string, start int64, maxLines int) ([]audit.Record, int64, int, error) {
+// readCompleteLines returns each decodable complete line with its exact bytes
+// (newline trimmed), so the console row keeps the chain line verbatim.
+func readCompleteLines(path string, start int64, maxLines int) ([]ingestItem, int64, int, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, start, 0, fmt.Errorf("open aggregate audit segment %q: %w", path, err)
@@ -162,7 +165,7 @@ func readCompleteLines(path string, start int64, maxLines int) ([]audit.Record, 
 	br := bufio.NewReader(f)
 	offset := start
 	lines := 0
-	records := []audit.Record{}
+	items := []ingestItem{}
 	for lines < maxLines {
 		line, readErr := br.ReadString('\n')
 		if len(line) > 0 && line[len(line)-1] == '\n' {
@@ -170,7 +173,7 @@ func readCompleteLines(path string, start int64, maxLines int) ([]audit.Record, 
 			lines++
 			var rec audit.Record
 			if json.Unmarshal([]byte(line), &rec) == nil {
-				records = append(records, rec)
+				items = append(items, ingestItem{rec: rec, line: []byte(strings.TrimRight(line, "\r\n"))})
 			}
 		}
 		if readErr != nil {
@@ -180,5 +183,5 @@ func readCompleteLines(path string, start int64, maxLines int) ([]audit.Record, 
 			return nil, offset, lines, fmt.Errorf("read aggregate audit segment %q: %w", path, readErr)
 		}
 	}
-	return records, offset, lines, nil
+	return items, offset, lines, nil
 }
