@@ -90,8 +90,8 @@ Reading the code for the plan changed these points of the reviewed design:
    on `events`; Usage numbers do not change.
 2. Messages, Chat and Invoke wrote no `latency`; every terminal record now
    carries it.
-3. `auto_mode.verdict` may be `unknown` so the console can count classifier
-   calls it could not read.
+3. `auto_mode.verdict` may be `unknown` so the console can count block calls and
+   server safeguards it could not read.
 4. Keys have no name; the console shows `metadata.name` or the `key_id`.
 5. A disabled index shows the standard enable card; the navigation stays.
 6. The trace link template reaches the console through `/admin/capabilities`.
@@ -109,7 +109,7 @@ Reading the code for the plan changed these points of the reviewed design:
 | Analytics index | SQLite `events` (Mode A) and Postgres (Mode B). Version-1 rows are first-write-wins (`WHERE events.projection_version=0`). Boot replay reads each configured file sink. | `internal/analytics/index.go:24-60,186-198,247`; `internal/analytics/pgstore/pgstore.go:21-65`; `cmd/mayu/gateway.go:247-262` |
 | Admin API | `/admin/logs`, `/admin/analytics/*`, `/admin/bodies/`, `/admin/audit/verify` (on-demand chain check, 16 MiB cap) | `internal/server/server.go:413-438,510`; `internal/server/auditapi/auditapi.go` |
 | Console | Dependency-free `app.js`, `evaluation.js`, `i18n.js` (en/ko/zh/ja); Node and Playwright checks in `testdata/` | `internal/server/adminui/static/`, `internal/server/adminui/testdata/` |
-| Claude Code headers | The 2.1.312 binary defines `X-Claude-Code-Session-Id` and `x-claude-code-request-class` with classes `main`, `subagent`, `workflow`, `compaction`, `auxiliary`, `side_reply`. The auto mode classifier query sources map to `auxiliary`. Whether Bedrock mode sends them to a custom base URL is not yet observed. | `strings` on `~/.local/share/claude/versions/2.1.312` |
+| Claude Code headers | The 2.1.312 binary defines `X-Claude-Code-Session-Id` and `x-claude-code-request-class` with classes `main`, `subagent`, `workflow`, `compaction`, `auxiliary`, `side_reply`. Early verification showed `x-claude-code-request-class` is not sent in any mode while `X-Claude-Code-Session-Id` is sent in all three (see "Early verification results"). | `strings` on `~/.local/share/claude/versions/2.1.312` |
 
 ## Architecture
 
@@ -159,7 +159,7 @@ type ClientRef struct {
     SessionRef   string `json:"session_ref,omitempty"`   // "s1:" + 32 hex
 }
 type AutoModeRef struct {
-    Verdict   string `json:"verdict"`   // block | allow | unknown (classifier-like, not parsed)
+    Verdict   string `json:"verdict"`   // block | allow | unknown (block call or server safeguard, not parsed)
     Stage     string `json:"stage"`     // s1 | s2 | server
     Signature string `json:"signature"` // e.g. "claude-code-2.1"
 }
@@ -201,9 +201,10 @@ type AutoModeRef struct {
   most the first 16 KiB of assistant text (non-streaming body, or text deltas
   for a stream), stores no text, and never changes the response bytes. What it
   records is fixed by "Resulting decisions" in "Early verification results".
-  Classifier-like calls that do not parse increment
+  Block calls and server safeguards that do not parse unambiguously increment
   `inferplane_audit_auto_mode_unparsed_total` (no labels) and are recorded with
-  `verdict: unknown`.
+  `verdict: unknown`. `</severity>` calls and reasoning replies ending in
+  `<severity>` are neither recorded nor counted.
 
 ### Configuration
 
@@ -311,7 +312,7 @@ is on; `/admin/capabilities` gains `audit_console: bool` and
   other sections), index lag banner (Mode A: a restart replays the file sink;
   Mode B: rebuild), coverage start, key no longer in the key
   store, body expired or capture off, auto mode not observed, signature
-  mismatch warning when unparsed classifier calls rise. The view keeps
+  mismatch warning when unparsed block calls or safeguards rise. The view keeps
   nothing in browser storage (ADR-001 data-free console).
 
 ## Security and privacy
@@ -529,7 +530,7 @@ A입니다. 하위 프로젝트 B(OTel 내보내기 대시보드, exporter·규�
    콘솔 전용 `audit_events` 표를 둡니다. 사용량 수치는 바뀌지 않습니다.
 2. Messages, Chat, Invoke는 `latency`를 기록하지 않았습니다. 이제 요청의 마지막
    기록에는 모두 붙습니다.
-3. 콘솔이 해석하지 못한 분류기 호출 수를 셀 수 있도록 `auto_mode.verdict`에
+3. 콘솔이 해석하지 못한 block 호출과 서버 safeguard 수를 셀 수 있도록 `auto_mode.verdict`에
    `unknown`을 둡니다.
 4. 키에는 이름이 없으므로 콘솔은 `metadata.name` 또는 `key_id`를 보여줍니다.
 5. 인덱스가 꺼져 있으면 표준 활성화 안내 카드를 보여주고, 메뉴는 그대로 둡니다.
@@ -549,7 +550,7 @@ A입니다. 하위 프로젝트 B(OTel 내보내기 대시보드, exporter·규�
 | analytics 인덱스 | SQLite `events`(Mode A)와 Postgres(Mode B). 버전 1 행은 first-write-wins(`WHERE events.projection_version=0`). 부팅 replay는 설정된 file sink를 읽습니다. | `internal/analytics/index.go:24-60,186-198,247`; `internal/analytics/pgstore/pgstore.go:21-65`; `cmd/mayu/gateway.go:247-262` |
 | admin API | `/admin/logs`, `/admin/analytics/*`, `/admin/bodies/`, `/admin/audit/verify`(즉시 체인 검사, 16 MiB 상한) | `internal/server/server.go:413-438,510`; `internal/server/auditapi/auditapi.go` |
 | 콘솔 | 의존성 없는 `app.js`, `evaluation.js`, `i18n.js`(en/ko/zh/ja). `testdata/`에 Node·Playwright 검사 | `internal/server/adminui/static/`, `internal/server/adminui/testdata/` |
-| Claude Code 헤더 | 2.1.312 바이너리에 `X-Claude-Code-Session-Id`와 `x-claude-code-request-class`가 있고, class는 `main`, `subagent`, `workflow`, `compaction`, `auxiliary`, `side_reply`입니다. auto mode 분류기 호출은 `auxiliary`로 분류됩니다. Bedrock 모드에서 사용자 지정 base URL로 보내는지는 아직 관측하지 않았습니다. | `~/.local/share/claude/versions/2.1.312` 문자열 검사 |
+| Claude Code 헤더 | 2.1.312 바이너리에 `X-Claude-Code-Session-Id`와 `x-claude-code-request-class`가 있고, class는 `main`, `subagent`, `workflow`, `compaction`, `auxiliary`, `side_reply`입니다. 먼저 확인한 결과, `x-claude-code-request-class`는 어떤 모드에서도 오지 않고 `X-Claude-Code-Session-Id`는 세 모드 모두에서 옵니다("먼저 확인한 결과" 참고). | `~/.local/share/claude/versions/2.1.312` 문자열 검사 |
 
 ## 구조
 
@@ -599,7 +600,7 @@ type ClientRef struct {
     SessionRef   string `json:"session_ref,omitempty"`   // "s1:" + hex 32자
 }
 type AutoModeRef struct {
-    Verdict   string `json:"verdict"`   // block | allow | unknown (분류기 형태지만 해석 불가)
+    Verdict   string `json:"verdict"`   // block | allow | unknown (block 호출 또는 서버 safeguard, 해석 불가)
     Stage     string `json:"stage"`     // s1 | s2 | server
     Signature string `json:"signature"` // 예: "claude-code-2.1"
 }
@@ -638,9 +639,10 @@ type AutoModeRef struct {
   판정기가 켜져 있을 때만 동작합니다. assistant 텍스트의 앞 16 KiB까지만 읽고
   (비 stream 본문 또는 stream의 text delta), 텍스트를 저장하지 않으며, 응답
   바이트를 바꾸지 않습니다. 무엇을 기록하는지는 "먼저 확인한 결과"의 "그에 따른
-  결정"이 정합니다. 분류기 호출처럼 보이지만 해석되지 않는 요청은
+  결정"이 정합니다. 모호하지 않게 해석되지 않는 block 호출과 서버 safeguard는
   `inferplane_audit_auto_mode_unparsed_total`(label 없음)을 올리고
-  `verdict: unknown`으로 기록합니다.
+  `verdict: unknown`으로 기록합니다. `</severity>` 호출과 `<severity>`로 끝나는
+  추론 응답은 기록도 집계도 하지 않습니다.
 
 ### 설정
 

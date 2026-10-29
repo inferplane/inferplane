@@ -104,7 +104,7 @@ which was the main request. Rejected.
      sequence), runs only when `request_class == auxiliary`.
    - `</severity>` calls and replies ending in `<severity>` are never recorded.
    The gateway reads at most 16 KiB of text, stores no text, and counts
-   non-matching classifier-like calls in one unlabelled metric. `signature`
+   non-matching block calls and server safeguards in one unlabelled metric (severity calls are excluded). `signature`
    (`claude-code-2.1`) names the client format version. The console always
    labels these verdicts as estimates.
 5. The analytics index gains an `audit_events` table and a category table that
@@ -240,8 +240,8 @@ Claude Code 세션 ID는 무작위 UUID이므로, 키에 묶인 도메인 분리
    - 단계 `s2`(stop sequence 없는 `<thinking>` 응답)를 포함한 전체 텍스트 규칙은
      `request_class == auxiliary`일 때만 동작합니다.
    - `</severity>` 호출과 `<severity>`로 끝나는 응답은 기록하지 않습니다.
-   gateway는 텍스트를 최대 16 KiB만 읽고 저장하지 않으며, 맞지 않는 분류기 형태
-   호출은 label 없는 metric 하나로 셉니다. `signature`(`claude-code-2.1`)는
+   gateway는 텍스트를 최대 16 KiB만 읽고 저장하지 않으며, 맞지 않는 block 호출과
+   서버 safeguard는 label 없는 metric 하나로 셉니다(severity 호출은 제외). `signature`(`claude-code-2.1`)는
    클라이언트 형식 버전입니다. 콘솔은 이 판정을 항상 추정으로 표시합니다.
 5. analytics 인덱스에 `audit_events` 표와 category 표를 추가합니다. 요청의 마지막
    기록(완료 기록과 거부된 `request_started` 기록)을 감사 줄 원본(`record_json`)과
