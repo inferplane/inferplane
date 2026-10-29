@@ -225,7 +225,7 @@ function renderAuditTraces() {
     const model = auditEl("span", "", e.model_requested);
     if (e.model_actual && e.model_actual !== e.model_requested) model.appendChild(auditEl("span", "sub", "→ " + e.model_actual));
     if (!e.model_actual && e.event === "request_started" && !e.attempt_count) model.appendChild(auditEl("span", "sub", msg("audit.deniedBefore")));
-    auditCell(tr, model);
+    auditCell(tr, model, "model");
     auditCell(tr, e.input_tokens + " / " + e.output_tokens, "num");
     auditCell(tr, e.cost_micros ? usd(e.cost_micros) : "—", "num");
     auditCell(tr, auditDuration(e.total_ms), "num");
@@ -251,6 +251,13 @@ async function auditLoadDetail(id) {
   } catch (err) {
     d.textContent = String(err.message || err);
   }
+  auditReveal(d);
+}
+
+// Below the split breakpoint the detail sits under the list; bring it into view after a pick.
+function auditReveal(el) {
+  const r = el.getBoundingClientRect();
+  if (r.top >= window.innerHeight || r.bottom <= 0) el.scrollIntoView({ block: "start" });
 }
 
 function auditKV(dl, label, value) {
@@ -481,6 +488,7 @@ async function auditLoadSession(s) {
   }
   d.appendChild(list);
   if (out.next) d.appendChild(auditEl("p", "hint", msg("audit.sessionTruncated")));
+  auditReveal(d);
 }
 
 function auditBars(box, rows) {
@@ -544,7 +552,7 @@ async function auditLoadDenials() {
     const scope = auditScope(x.code);
     auditCell(tr, msg("audit.scope." + scope) + " " + (scope === "team" ? x.team : auditKeyLabel(x.key_id)));
     auditCell(tr, x.count, "num");
-    auditCell(tr, auditTime(x.last_ts), "mono");
+    auditCell(tr, auditTime(x.last_ts), "mono nowrap");
     tbody.appendChild(tr);
   }
   const auto = s.auto_mode;
@@ -569,7 +577,7 @@ async function auditLoadDenials() {
     auditCell(tr, who);
     auditCell(tr, auditPill(e.auto_stage || "—", "cls"));
     auditCell(tr, auditPill(e.auto_verdict, "est"));
-    auditCell(tr, e.model_actual || e.model_requested);
+    auditCell(tr, e.model_actual || e.model_requested, "model");
     ab.appendChild(tr);
   }
 }

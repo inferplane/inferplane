@@ -26,34 +26,41 @@ def en(key):
 
 
 TRACE = '4bf92f3577b34da6a3ce929d0e0e4736'
+# Realistic widths: a Bedrock inference-profile model id and gateway key ids.
+LONG_MODEL = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
+KEY_A, KEY_B, KEY_C = 'ik_a49124618069', 'ik_b7310c2d5e88', 'ik_c0ffee000001'
+# KEY_A has no name (shown once); KEY_B and KEY_C share the name "ci" (ambiguous).
+KEYS = [dict(browser_qa.KEYS[0], key_id=KEY_A),
+        dict(browser_qa.KEYS[1], key_id=KEY_B, metadata={'name': 'ci'}),
+        dict(browser_qa.KEYS[1], key_id=KEY_C, metadata={'name': 'ci'})]
 SESSION = 's1:' + 'a' * 32
 SESSION2 = 's1:' + 'b' * 32
 ID_MAIN, ID_DENIED, ID_LEGACY = ('01JC0000000000000000000003', '01JC0000000000000000000002', '01JC0000000000000000000001')
 HASH = 'sha256-hash-fixture'
 EVENTS = [
     {'id': ID_MAIN, 'ts': '2026-10-29T10:44:12Z', 'event': 'request_completed', 'kind': 'ok', 'team': 'engineering',
-     'key_id': 'key-engineering-01', 'ingress': 'bedrock', 'stream': False, 'status': 200, 'request_class': 'main', 'session_ref': SESSION,
-     'trace_id': TRACE, 'model_requested': 'private-coder', 'model_actual': 'private-coder', 'provider': 'private', 'fallback': True,
+     'key_id': KEY_A, 'ingress': 'bedrock', 'stream': False, 'status': 200, 'request_class': 'main', 'session_ref': SESSION,
+     'trace_id': TRACE, 'model_requested': LONG_MODEL, 'model_actual': LONG_MODEL, 'provider': 'bedrock-global', 'fallback': True,
      'attempt_count': 2, 'input_tokens': 1200, 'output_tokens': 80, 'cost_micros': 31210, 'total_ms': 6810, 'ttft_ms': 1420},
     {'id': ID_DENIED, 'ts': '2026-10-29T10:36:22Z', 'event': 'request_started', 'kind': 'policy_denied', 'team': 'engineering',
-     'key_id': 'key-engineering-01', 'ingress': 'anthropic', 'stream': False, 'status': 429, 'deny_code': 'key_rate_limited',
+     'key_id': KEY_A, 'ingress': 'anthropic', 'stream': False, 'status': 429, 'deny_code': 'key_rate_limited',
      'request_class': 'subagent', 'session_ref': SESSION, 'model_requested': 'private-coder', 'attempt_count': 0,
      'input_tokens': 0, 'output_tokens': 0, 'cost_micros': 0, 'total_ms': 6},
     {'id': ID_LEGACY, 'ts': '2026-10-29T10:31:40Z', 'event': 'request_completed', 'kind': 'privacy_masked', 'team': 'platform',
-     'key_id': 'key-platform-02', 'ingress': 'anthropic', 'stream': False, 'status': 200, 'masked': True, 'pii': True, 'categories': ['email'],
+     'key_id': KEY_B, 'ingress': 'anthropic', 'stream': False, 'status': 200, 'masked': True, 'pii': True, 'categories': ['email'],
      'policy_ref': 'org-pii-mask#4·0', 'planned_boundary': 'external', 'actual_boundary': 'external', 'model_requested': 'economy-coder',
      'model_actual': 'economy-coder', 'attempt_count': 1, 'input_tokens': 600, 'output_tokens': 50, 'cost_micros': 2650, 'total_ms': 0},
 ]
 NOCLASS = [{k: v for k, v in e.items() if k != 'request_class'} for e in EVENTS]
 AUTO_EVENTS = [
     {'id': '01JC0000000000000000000010', 'ts': '2026-10-29T10:40:00Z', 'event': 'request_completed', 'kind': 'auto_mode_blocked', 'team': 'engineering',
-     'key_id': 'key-engineering-01', 'session_ref': SESSION, 'auto_stage': 'classifier', 'auto_verdict': 'block', 'auto_signature': 'sig-1',
+     'key_id': KEY_A, 'session_ref': SESSION, 'auto_stage': 'classifier', 'auto_verdict': 'block', 'auto_signature': 'sig-1',
      'model_requested': 'private-coder', 'model_actual': 'private-coder', 'input_tokens': 10, 'output_tokens': 2, 'cost_micros': 0},
     {'id': '01JC0000000000000000000011', 'ts': '2026-10-29T10:41:00Z', 'event': 'request_completed', 'kind': 'ok', 'team': 'engineering',
-     'key_id': 'key-engineering-01', 'session_ref': SESSION, 'auto_stage': 'classifier', 'auto_verdict': 'unknown', 'auto_signature': 'sig-2',
+     'key_id': KEY_A, 'session_ref': SESSION, 'auto_stage': 'classifier', 'auto_verdict': 'unknown', 'auto_signature': 'sig-2',
      'model_requested': 'private-coder', 'input_tokens': 10, 'output_tokens': 2, 'cost_micros': 0},
 ]
-DETAIL = {'event': EVENTS[0], 'hash': HASH, 'record': {'prev_hash': 'sha256-prev-fixture', 'principal': {'key_id': 'key-engineering-01', 'team': 'engineering'}},
+DETAIL = {'event': EVENTS[0], 'hash': HASH, 'record': {'prev_hash': 'sha256-prev-fixture', 'principal': {'key_id': KEY_A, 'team': 'engineering'}},
           'waterfall': {'total_ms': 6810, 'ttft_ms': 1420, 'rows': [
               {'kind': 'gateway', 'start_ms': 0, 'dur_ms': 15}, {'kind': 'attempt', 'provider': 'bedrock', 'status': 'upstream_error', 'http': 503, 'start_ms': 15, 'dur_ms': 1225},
               {'kind': 'attempt', 'provider': 'private', 'status': 'ok', 'start_ms': 1240, 'dur_ms': 5560}, {'kind': 'settle', 'start_ms': 6800, 'dur_ms': 10}]}}
@@ -63,14 +70,14 @@ DENIED = {'event': EVENTS[1], 'hash': 'sha256-denied-fixture', 'record': {}, 'wa
 LEGACY = {'event': EVENTS[2], 'record': {}, 'waterfall': {'total_ms': 0, 'rows': []}}
 SUMMARY = {'since_ms': 0, 'until_ms': 0, 'by_kind': {'ok': 1, 'policy_denied': 1, 'privacy_masked': 1},
            'categories': [{'name': 'email', 'count': 1}], 'pii': {'masked': 1, 'internal': 0, 'blocked': 0, 'shadow': 0},
-           'denials': [{'code': 'key_rate_limited', 'team': 'engineering', 'key_id': 'key-engineering-01', 'count': 1, 'last_ts': '2026-10-29T10:36:22Z'}],
+           'denials': [{'code': 'key_rate_limited', 'team': 'engineering', 'key_id': KEY_A, 'count': 1, 'last_ts': '2026-10-29T10:36:22Z'}],
            'auto_mode': {'block': 1, 'allow': 5, 'unknown': 1, 'signatures': []},
            'buckets': [{'start_ms': i, 'requests': i % 3, 'denials': i % 2, 'pii': 0, 'auto_blocked': 0} for i in range(12)],
            'coverage_start_ms': 1793235600000}
 SESSIONS = [
-    {'session_ref': SESSION, 'team': 'engineering', 'key_id': 'key-engineering-01', 'first_ts': '2026-10-29T10:02:11Z', 'last_ts': '2026-10-29T10:44:12Z',
+    {'session_ref': SESSION, 'team': 'engineering', 'key_id': KEY_A, 'first_ts': '2026-10-29T10:02:11Z', 'last_ts': '2026-10-29T10:44:12Z',
      'requests': 2, 'cost_micros': 31210, 'denials': 1, 'pii': 0, 'auto_blocked': 0, 'subagents': 1},
-    {'session_ref': SESSION2, 'team': 'platform', 'key_id': 'key-platform-02', 'first_ts': '2026-10-29T09:00:00Z', 'last_ts': '2026-10-29T09:05:00Z',
+    {'session_ref': SESSION2, 'team': 'platform', 'key_id': KEY_B, 'first_ts': '2026-10-29T09:00:00Z', 'last_ts': '2026-10-29T09:05:00Z',
      'requests': 1, 'cost_micros': 0, 'denials': 0, 'pii': 0, 'auto_blocked': 0, 'subagents': 0},
 ]
 # Console errors are failures except the 404 the shared harness serves for /admin/auth/config on purpose.
@@ -83,6 +90,8 @@ class Handler(browser_qa.Handler):
         path = unquote(urlparse(self.path).path)
         q = self.path
         if path.startswith('/admin/') and self.headers.get('Authorization') == 'Bearer fixture-admin':
+            if path == '/admin/keys':
+                return self.respond(200, {'data': KEYS})
             if path == '/admin/capabilities':
                 return self.respond(200, {'analytics_index': 'A', 'teams_records': True, 'audit_console': True, 'logs_bodies': False,
                                           'trace_link_template': 'https://grafana.example/explore?traceId={trace_id}'})
@@ -109,6 +118,20 @@ class Handler(browser_qa.Handler):
             if path == '/admin/analytics/health':
                 return self.respond(200, {'mode': 'A', 'last_ingest_ts': '2026-10-29T10:44:13Z'})
         return super().do_GET()
+
+
+TRACE_LAYOUT_JS = """() => {
+  const row = document.querySelector('#audit-trace-table tbody tr');
+  const lines = node => { const r = document.createRange(); r.selectNodeContents(node);
+    return new Set([...r.getClientRects()].filter(x => x.width > 0).map(x => Math.round(x.top))).size; };
+  // app.js wraps every table.data in a .table-scroll region: the horizontal-scroll container.
+  const wrap = document.querySelector('#audit-trace-table').closest('.table-scroll');
+  const lat = document.querySelector('#audit-trace-table thead th:last-child');
+  const w = wrap.getBoundingClientRect(), l = lat.getBoundingClientRect();
+  return { timeLines: lines(row.cells[0]), modelLines: lines(row.cells[4].firstChild.firstChild),
+           latencyLines: lines(row.cells[7]), latInside: l.left >= w.left - 1 && l.right <= w.right + 1,
+           latClipped: lat.scrollWidth > lat.clientWidth, header: lat.textContent };
+}"""
 
 
 def run_scenario(page, base, width, scheme, screenshots):
@@ -141,9 +164,25 @@ def run_scenario(page, base, width, scheme, screenshots):
     # Every fixture row carries a class here, so the "class not reported" hint stays hidden.
     assert page.locator('#audit-class-hint').is_hidden()
 
+    # Traces table: time on one line, the long model id wraps at word-ish
+    # boundaries only, latency is whole and inside the scroll container.
+    layout = page.evaluate(TRACE_LAYOUT_JS)
+    if not layout['latInside']:  # narrow screens scroll the table inside its wrapper
+        page.evaluate("() => { const w = document.querySelector('#audit-trace-table').closest('.table-scroll'); w.scrollLeft = w.scrollWidth; }")
+        layout = page.evaluate(TRACE_LAYOUT_JS)
+        assert width < 1280, f'latency must be visible without scrolling at {width}px: {layout}'
+    assert layout['timeLines'] == 1, layout
+    assert layout['latencyLines'] == 1 and layout['latInside'] and not layout['latClipped'], layout
+    assert 1 <= layout['modelLines'] <= 3, layout
+    assert layout['header'] == en('audit.latency'), layout
+    page.evaluate("() => { document.querySelector('#audit-trace-table').closest('.table-scroll').scrollLeft = 0; }")
+    assert text('#audit-trace-table thead th:first-child') == en('audit.time')
+
     # Main record: 4 waterfall rows, trace link, chain position shows hash next to prev_hash.
     page.locator('#audit-trace-table tbody tr').first.click()
     wait("() => document.querySelectorAll('#audit-detail .audit-wf-row').length === 4")
+    if screenshots:
+        page.screenshot(path=str(screenshots / f'audit-{width}-{scheme}.png'), full_page=True)
     assert page.locator('#audit-detail a[href*="traceId=' + TRACE + '"]').count() == 1
     detail = text('#audit-detail')
     assert HASH in detail and 'sha256-prev-fixture' in detail, detail
@@ -152,7 +191,7 @@ def run_scenario(page, base, width, scheme, screenshots):
     # "Open in Virtual keys" switches view and pre-fills the key filter.
     page.locator('#audit-detail button.linklike', has_text=en('audit.openKey')).click()
     page.locator('#view-keys').wait_for(state='visible')
-    assert page.locator('#key-search').input_value() == 'key-engineering-01'
+    assert page.locator('#key-search').input_value() == KEY_A
     page.locator('button.nav[data-view="audit"]').click()
     wait("() => document.querySelectorAll('#audit-trace-table tbody tr').length === 3")
 
@@ -208,7 +247,7 @@ def run_scenario(page, base, width, scheme, screenshots):
     overflow = page.evaluate('document.documentElement.scrollWidth - window.innerWidth')
     assert overflow <= 0, f'horizontal overflow {overflow}px at {width}px'
     if screenshots:
-        page.screenshot(path=str(screenshots / f'audit-{width}-{scheme}.png'), full_page=True)
+        page.screenshot(path=str(screenshots / f'audit-{width}-{scheme}-denials.png'), full_page=True)
 
     # Empty auto result shows the current empty-state copy.
     page.locator('#audit-team').fill('empty-team')
