@@ -1,6 +1,6 @@
 ---
 translation_source: codex-launcher.md
-translation_source_sha256: bcfc61b40c06485b7a140b5f4d4cce7cb85d24a3d896f91b7e32c2f07f7c752c
+translation_source_sha256: ce6f9e1a44dd9419cb444febc6243f8c626dccac238598c4781f579e56d2a3a8
 ---
 
 # 모델별 Codex 실행 도구 {#model-aware-codex-launcher}
@@ -207,6 +207,11 @@ HUD가 없을 때도 직접 실행합니다.
 기록합니다. 오류 본문은 64 KiB까지만 해석하고 원문 메시지·param·알 수 없는
 코드는 노출하지 않습니다. 정책이나 이력을 바꾸거나 재시도·사용량을 만들지 않습니다.
 이미 전송이 시작된 SSE의 실패 처리는 변경하지 않습니다.
+
+무상태 브리지에서 모든 호환 대상의 선언된 컨텍스트 창보다 큰 요청은 HTTP 400과
+`error.code="context_length_exceeded"`를 반환하므로 Codex가 압축합니다. 이전에는
+403 `no policy-permitted compatible Responses target`을 받아 같은 요청을 다섯 번
+다시 보냈습니다(2026-10-27 경로 점검).
 
 동일 모델·리전·이력·클라이언트 설정으로 비교해야 합니다. 누적 토큰은 현재
 컨텍스트 사용량이 아닙니다. 조기 압축은 임시 회피책일 수 있지만 실제 모델 한도를

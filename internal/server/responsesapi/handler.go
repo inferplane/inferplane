@@ -120,6 +120,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	})
 	if routeErr != nil {
 		req = requestpolicy.Observe(w, req, result, h.metrics)
+		if result.Decision.Reason == "context_window_exceeded" {
+			// Every compatible target refused the request for its size alone:
+			// answer with the recoverable context error Codex compacts on, like
+			// the preflight below, never a 403 it retries unchanged.
+			h.denied(req, p, model, 400, "context_window_exceeded", start)
+			writeCodedError(w, 400, "request exceeds the configured context window", "context_length_exceeded")
+			return
+		}
 		status, reason := 403, result.Decision.Reason
 		if !requestpolicy.Active(result.Decision) && len(chain) > 0 && !slices.ContainsFunc(chain, compatible) {
 			status, reason = 400, "unsupported_conversion"

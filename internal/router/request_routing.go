@@ -217,6 +217,9 @@ func (r *Router) RouteRequest(ctx context.Context, in RequestRoutingInput) (Requ
 		if responsesInspection != nil {
 			transport := requestBoundary{router: r, in: in, apis: requestAPIs(st), inspection: responsesInspection}
 			out.Chain = transport.filter(in.Chain, false)
+			if len(out.Chain) == 0 && transport.contextOnly(in.Chain) {
+				return denyRouting(out, "context_window_exceeded", nil)
+			}
 		} else {
 			out.Chain = r.legacyChain(in)
 		}
@@ -369,6 +372,9 @@ func (r *Router) RouteRequest(ctx context.Context, in RequestRoutingInput) (Requ
 				break
 			}
 		}
+	}
+	if len(safe) == 0 && !strictBudget && boundary.models == nil && boundary.contextOnly(in.Chain) {
+		return denyRouting(out, "context_window_exceeded", nil)
 	}
 	out, err = finishRouting(out, safe)
 	if err != nil || in.CountOnly {
@@ -587,6 +593,9 @@ type requestBoundary struct {
 	apis         map[requestTargetKey]string
 	converseSafe bool
 	budgetModel  string
+	// ignoreContext drops only the context-size bound, so contextOnly can tell
+	// a request that is too large from every other reason for no route.
+	ignoreContext bool
 }
 
 type requestTargetKey struct{ provider, upstream string }
@@ -704,6 +713,9 @@ func (b requestBoundary) filter(chain []ChainTarget, automatic bool) []ChainTarg
 				b.models == nil && b.budgetModel == "" && capacity.InputTokens >= 0 {
 				capacity.InputTokens = max(int64(1), int64(len(b.in.RawBody)/4))
 			}
+			if b.ignoreContext && capacity.InputTokens >= 0 && capacity.OutputTokens >= 0 {
+				capacity.InputTokens, capacity.OutputTokens = 0, 0
+			}
 			if !fitsRequest(mc, capacity) || st.Pricing() == nil || !st.Pricing().HasRate(ct.ProviderName, ct.Upstream) {
 				continue
 			}
@@ -711,6 +723,18 @@ func (b requestBoundary) filter(chain []ChainTarget, automatic bool) []ChainTarg
 		out = append(out, ct)
 	}
 	return out
+}
+
+// contextOnly reports whether chain would route if the request fit: at least
+// one candidate that is otherwise permitted, compatible, capable and priced was
+// refused by its declared context window alone. Unknown windows and invalid
+// (negative) estimates are not context-size refusals.
+func (b requestBoundary) contextOnly(chain []ChainTarget) bool {
+	if b.inspection == nil {
+		return false
+	}
+	b.ignoreContext = true
+	return len(b.filter(chain, false)) > 0
 }
 
 func (b requestBoundary) compatible(ct ChainTarget, target config.Target) bool {

@@ -53,6 +53,9 @@ Inspector.Inspect and safe legacy fallback remain; selective missing evidence de
 before classification. Structural mode retains the walker and all limits.
 Routing returns a complete retry chain tied to the supplied
 `live.State`. Lookup rejection must be checked even if there are no returned rules.
+A chain emptied only by declared context windows denies with reason
+`context_window_exceeded` (Responses answers 400 `context_length_exceeded`; other
+ingresses keep their 403 shape).
 Sensitive rules intersect; Block wins; no safe route denies before masking,
 admission, capture, or provider calls. Context is FailOpen/Shadow by default and
 never relaxes privacy. Enforce switches only completely inspectable single user

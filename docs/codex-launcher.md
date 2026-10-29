@@ -389,6 +389,12 @@ in the existing audit outcome error field. This preserves client recovery
 signals without bypassing policy, changing history, silently retrying or
 inventing usage. Already-committed SSE failure handling is unchanged.
 
+On the stateless bridge, a request too large for every compatible target's
+declared context window returns HTTP 400 with
+`error.code="context_length_exceeded"`, so Codex compacts. It used to get 403
+`no policy-permitted compatible Responses target` and resend the same request
+five times (2026-10-27 path check).
+
 For diagnosis compare the same model, region, history and client settings.
 Cumulative session token usage is not current context occupancy. A lower
 `model_auto_compact_token_limit` can mitigate failures but does not establish the
