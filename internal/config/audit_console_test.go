@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -42,6 +43,20 @@ func TestTraceLinkTemplate(t *testing.T) {
 	} {
 		if _, err := loadJSON(t, bad); err == nil {
 			t.Fatalf("accepted %s", bad)
+		}
+	}
+}
+
+// /admin/capabilities serves the template to every authenticated admin, so it
+// must not carry credentials; the error must not echo them either.
+func TestTraceLinkTemplateRejectsUserInfo(t *testing.T) {
+	for _, tpl := range []string{"https://user:s3cret@grafana.example/explore?traceId={trace_id}", "https://user@grafana.example/{trace_id}"} {
+		_, err := loadJSON(t, `{"otel":{"endpoint":"c:4318","trace_link_template":"`+tpl+`"}}`)
+		if err == nil {
+			t.Fatalf("accepted %s", tpl)
+		}
+		if !strings.Contains(err.Error(), "user info") || strings.Contains(err.Error(), "s3cret") || strings.Contains(err.Error(), "user@") {
+			t.Fatalf("error for %s = %v", tpl, err)
 		}
 	}
 }

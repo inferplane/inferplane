@@ -1311,6 +1311,12 @@ func validateTraceLinkTemplate(tpl string) error {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("config: otel.trace_link_template must be an http or https URL with a host")
 	}
+	// /admin/capabilities serves the template to every authenticated admin,
+	// team-mapped ones included, so it must not carry credentials. The error
+	// never echoes the template.
+	if u.User != nil {
+		return fmt.Errorf("config: otel.trace_link_template must not contain user info (user:password@); put credentials in the trace UI, not the link")
+	}
 	return nil
 }
 

@@ -251,4 +251,4 @@ ingest path repopulates them. A record no longer in any source is not in the con
 |---|---|---|
 | `audit.client_evidence.session_ref` | `key_scoped` (default), `off` | `off` stops writing `client.session_ref`; existing records keep their links. `request_class` is unaffected. |
 | `audit.client_evidence.auto_mode` | `on` (default), `off` | `off` stops auto mode estimation. |
-| `otel.trace_link_template` | `http` or `https` URL containing `{trace_id}` | Console link only; `{trace_id}` is replaced by the record's 32-hex trace ID. Sent to the console through `/admin/capabilities`. |
+| `otel.trace_link_template` | `http` or `https` URL containing `{trace_id}`, without user info (`user:password@` is rejected) | Console link only; `{trace_id}` is replaced by the record's 32-hex trace ID. Sent to the console through `/admin/capabilities`. |

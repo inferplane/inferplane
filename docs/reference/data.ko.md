@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 9904840a6e1a39cce24a4fade8d3c3c84702e04c41addca431c7b116aa84450e
+translation_source_sha256: 5e19314867344fe7dcae39ed12591f71e76f19ce135016e84eebf41fe1ac78d1
 ---
 
 # 데이터 구현 {#data}
@@ -189,4 +189,4 @@ Usage 수치는 바뀌지 않습니다. 정확한 감사 행은 두 모드 모�
 |---|---|---|
 | `audit.client_evidence.session_ref` | `key_scoped`(기본), `off` | `off`는 `client.session_ref` 기록을 멈춥니다. 기존 기록의 연결은 그대로입니다. `request_class`에는 영향이 없습니다. |
 | `audit.client_evidence.auto_mode` | `on`(기본), `off` | `off`는 자동 모드 추정을 끕니다. |
-| `otel.trace_link_template` | `{trace_id}`를 포함한 `http`·`https` URL | 콘솔 링크 전용. `{trace_id}`는 기록의 32자리 16진수 trace ID로 치환합니다. `/admin/capabilities`로 콘솔에 전달합니다. |
+| `otel.trace_link_template` | `{trace_id}`를 포함한 `http`·`https` URL. 사용자 정보(`user:password@`)는 거부합니다 | 콘솔 링크 전용. `{trace_id}`는 기록의 32자리 16진수 trace ID로 치환합니다. `/admin/capabilities`로 콘솔에 전달합니다. |
