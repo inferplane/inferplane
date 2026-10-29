@@ -234,7 +234,10 @@ For a status of 400 or more, a completed record whose last attempt failed is
 gateway decisions and legacy completed records without attempts are matched by
 their deny code. Below 400, a partial stream is `upstream_error`, and so is a
 completed stream whose last attempt is `stream_failed` (an upstream error event
-or a missing end of stream after the 200 was sent).
+or a missing end of stream after the 200 was sent). `deny_code` (status 400 or
+more) is `outcome.error`; only a gateway decision without one falls back to
+`routing.reason`, so a completed upstream error never shows a routing outcome
+such as `unchanged` as a denial.
 
 Coverage: Mode A is built from the configured file sinks, which a restart
 replays, and has no rebuild endpoint. Mode B `POST /admin/analytics/rebuild`

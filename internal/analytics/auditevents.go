@@ -44,6 +44,9 @@ func AuditObservable(r audit.Record) bool {
 	return false
 }
 
+// denyCodeOf returns the record's error code. routing.reason stands in only
+// for a gateway decision (a started record with an outcome); on a completed
+// record it is the routing outcome (e.g. "unchanged"), never a denial.
 func denyCodeOf(r audit.Record) string {
 	if r.Outcome == nil {
 		return ""
@@ -51,7 +54,7 @@ func denyCodeOf(r audit.Record) string {
 	if r.Outcome.Error != nil {
 		return *r.Outcome.Error
 	}
-	if r.Outcome.Status >= 400 && r.Request.Routing != nil {
+	if r.Event == "request_started" && r.Outcome.Status >= 400 && r.Request.Routing != nil {
 		return r.Request.Routing.Reason
 	}
 	return ""

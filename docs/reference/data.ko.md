@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 80b8725e5b4e588bd4e21f86201def824a342e9738e7197b6af104a8e07c8817
+translation_source_sha256: 9904840a6e1a39cce24a4fade8d3c3c84702e04c41addca431c7b116aa84450e
 ---
 
 # 데이터 구현 {#data}
@@ -174,6 +174,9 @@ Usage 수치는 바뀌지 않습니다. 정확한 감사 행은 두 모드 모�
 게이트웨이 결정과 시도가 없는 과거 완료 기록은 거부 코드로 분류합니다. 400 미만에서는
 부분 스트림이 `upstream_error`이며, 마지막 시도가 `stream_failed`인 완료 스트림(200을 보낸
 뒤 업스트림 오류 이벤트가 오거나 스트림 끝이 오지 않은 경우)도 `upstream_error`입니다.
+`deny_code`(상태 400 이상)는 `outcome.error`입니다. 이 값이 없는 게이트웨이 결정만
+`routing.reason`을 쓰므로, 완료된 업스트림 오류가 `unchanged` 같은 라우팅 결과를 거부로
+보이는 일은 없습니다.
 
 커버리지: Mode A는 설정된 파일 싱크에서 만들며 재시작하면 다시 재생하고 재구축
 엔드포인트가 없습니다. Mode B `POST /admin/analytics/rebuild`는 감사 테이블을 다른 파생

@@ -285,3 +285,24 @@ func TestAuditModelFilter(t *testing.T) {
 		t.Fatalf("summary model = %+v err=%v", sum, err)
 	}
 }
+
+// routing.reason is a deny code only for gateway decisions; on a completed
+// upstream error it is the routing outcome ("unchanged") and must not surface
+// as a denial.
+func TestDenyCodeOnlyFromGatewayDecisions(t *testing.T) {
+	upstream := rec("01JC0000000000000000000071", "request_completed", 529, func(r *audit.Record) {
+		r.Request.Routing = &audit.RoutingRef{Reason: "unchanged"}
+		r.Attempts = []audit.AttemptRef{{Provider: "anthropic", Status: audit.AttemptUpstreamError, HTTP: 529}}
+	})
+	row, _ := ProjectAuditEvent(upstream, nil)
+	if row.DenyCode != "" || row.Kind != KindUpstreamError || row.RoutingReason != "unchanged" {
+		t.Fatalf("completed 529: deny_code=%q kind=%s routing_reason=%q", row.DenyCode, row.Kind, row.RoutingReason)
+	}
+	denied := rec("01JC0000000000000000000072", "request_started", 403, func(r *audit.Record) {
+		r.Request.Routing = &audit.RoutingRef{Reason: "no_safe_route"}
+	})
+	row, _ = ProjectAuditEvent(denied, nil)
+	if row.DenyCode != "no_safe_route" || row.Kind != KindPolicyDenied {
+		t.Fatalf("gateway decision: deny_code=%q kind=%s", row.DenyCode, row.Kind)
+	}
+}
