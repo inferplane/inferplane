@@ -367,6 +367,35 @@ is on; `/admin/capabilities` gains `audit_console: bool` and
    stable, parseable form? If yes, the plan may add stage `server`; if not,
    the limit is documented.
 
+## Early verification results (2026-10-29)
+
+Captured with Claude Code 2.1.312 (`--permission-mode auto -p`, one shell
+command) through a relay in front of a throwaway gateway. Modes: (a) Bedrock
+with a Claude main model, (b) Bedrock with a non-Claude main model (`kimi-k3`),
+(c) Anthropic mode (`global.anthropic.claude-sonnet-5`).
+
+- `X-Claude-Code-Session-Id`: present in all three modes on every model call
+  (36 characters), absent only on the `inference-profiles` GET. Sessions data is
+  available in every mode.
+- `x-claude-code-request-class` and every other `x-claude-code-*` header:
+  absent in all three modes. There is no request-class data; the console must
+  not depend on it and states that.
+- Mode (a): no classifier calls at all (only streaming main calls,
+  `max_tokens` 128000, no stop sequences), so a server-side verdict is invisible
+  to the gateway. Whether the verdict is parseable in the main response was not
+  inspected; stage `server` stays out.
+- Modes (b) and (c): classifier calls are non-streaming (`stream` absent in
+  Bedrock `invoke`, absent in the Anthropic request), `max_tokens` 64, and
+  carry one stop sequence. Two kinds occur in this order per tool call:
+  `</severity>` (reply `<severity>5</severity>` in (b)) and then `</block>`
+  (reply `<block>no`, `stop_reason` `stop_sequence` in (c); in (b) the reply
+  `<block>no</block>` ends with `max_tokens`).
+- Stage marker: the stop sequence is the only stage marker (`</severity>`
+  versus `</block>`); `<block>` appears at the start of the reply text. The
+  `</block>` call is the verdict. No stage field exists in headers or body.
+- Main calls stream (`stream: true` in Anthropic mode, `invoke-with-response-stream`
+  in Bedrock mode), so the stream tap is still required.
+
 ## Out of scope
 
 - Sub-project B: OTel export dashboard, exporter and rule editing.
@@ -721,6 +750,30 @@ type AutoModeRef struct {
    어떤 메인 모델이 서버 판정을 쓰는지(그 세션에서는 분류기 호출이 생기지 않음).
 3. 서버 판정이 메인 InvokeModel 응답에 안정적이고 해석 가능한 형태로 나오는지.
    그렇다면 계획에 단계 `server`를 추가할 수 있고, 아니면 한계로 문서화합니다.
+
+## 먼저 확인한 결과 (2026-10-29)
+
+Claude Code 2.1.312(`--permission-mode auto -p`, 셸 명령 하나)를 임시 gateway 앞의
+중계기로 캡처했습니다. 모드: (a) Claude 메인 모델의 Bedrock, (b) 비Claude 메인
+모델(`kimi-k3`)의 Bedrock, (c) Anthropic 모드(`global.anthropic.claude-sonnet-5`).
+
+- `X-Claude-Code-Session-Id`: 세 모드 모두 모든 모델 호출에 있습니다(36자).
+  `inference-profiles` GET에만 없습니다. 모든 모드에서 세션 데이터를 쓸 수 있습니다.
+- `x-claude-code-request-class`와 다른 모든 `x-claude-code-*` 헤더: 세 모드 모두
+  없습니다. 요청 class 데이터가 없으므로 콘솔은 이에 의존하지 않고 그렇게 표시합니다.
+- 모드 (a): 분류기 호출이 전혀 없습니다(stream 메인 호출만, `max_tokens` 128000,
+  stop sequence 없음). 서버 판정은 gateway에서 보이지 않습니다. 메인 응답에서 판정을
+  해석할 수 있는지는 확인하지 않았고, 단계 `server`는 넣지 않습니다.
+- 모드 (b), (c): 분류기 호출은 stream이 아니고(`stream` 없음), `max_tokens` 64,
+  stop sequence 하나를 가집니다. 도구 호출마다 순서대로 두 종류가 나옵니다.
+  `</severity>`((b)의 응답 `<severity>5</severity>`) 다음에 `</block>`((c)의 응답
+  `<block>no`, `stop_reason` `stop_sequence`. (b)는 `<block>no</block>`이고
+  `max_tokens`로 끝남).
+- 단계 표지: stop sequence가 유일한 표지입니다(`</severity>` 대 `</block>`).
+  `<block>`은 응답 텍스트의 앞에 나옵니다. `</block>` 호출이 판정입니다.
+  헤더와 본문에 단계 필드는 없습니다.
+- 메인 호출은 stream입니다(Anthropic 모드 `stream: true`, Bedrock 모드
+  `invoke-with-response-stream`). stream tap은 계속 필요합니다.
 
 ## 범위 밖
 
