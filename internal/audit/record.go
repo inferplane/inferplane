@@ -144,6 +144,10 @@ type Record struct {
 	Attempts []AttemptRef `json:"attempts,omitempty"`
 	Client   *ClientRef   `json:"client,omitempty"`
 	AutoMode *AutoModeRef `json:"auto_mode,omitempty"`
+	// Governance names the limit behind a governance denial (ADR-057). Only a
+	// gateway denial (request_started with an outcome) carries it; appended
+	// with omitempty like the fields above.
+	Governance *GovernanceRef `json:"governance,omitempty"`
 }
 
 // Canonical returns the deterministic JSON used both for the on-disk record and
