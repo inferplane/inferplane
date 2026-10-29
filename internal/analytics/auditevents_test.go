@@ -62,6 +62,19 @@ func TestKindOf(t *testing.T) {
 	})); got != KindPolicyDenied {
 		t.Fatalf("denied after earlier attempt = %s", got)
 	}
+	okAttempt := []audit.AttemptRef{{Provider: "a", Status: audit.AttemptOK, HTTP: 200}}
+	if got := KindOf(rec("14", "request_completed", 403, func(r *audit.Record) {
+		r.Outcome.Error = str("model_forbidden")
+		r.Attempts = okAttempt
+	})); got != KindPolicyDenied {
+		t.Fatalf("completed deny, last attempt ok = %s", got)
+	}
+	if got := KindOf(rec("15", "request_completed", 403, func(r *audit.Record) {
+		r.Request.Routing = &audit.RoutingRef{Privacy: "block", Reason: "sensitive_blocked"}
+		r.Attempts = okAttempt
+	})); got != KindPrivacyBlocked {
+		t.Fatalf("completed privacy block, last attempt ok = %s", got)
+	}
 	if got := KindOf(rec("13", "request_completed", 429, func(r *audit.Record) { r.Outcome.Error = str("key_rate_limited") })); got != KindPolicyDenied {
 		t.Fatalf("legacy completed deny without attempts = %s", got)
 	}

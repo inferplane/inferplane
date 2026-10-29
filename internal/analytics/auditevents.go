@@ -79,7 +79,7 @@ func KindOf(r audit.Record) string {
 		privacy, masked = rt.Privacy, masked || rt.Masked
 	}
 	if status >= 400 {
-		if r.Event == "request_completed" && len(r.Attempts) > 0 {
+		if r.Event == "request_completed" && len(r.Attempts) > 0 && r.Attempts[len(r.Attempts)-1].Status != audit.AttemptOK {
 			return KindUpstreamError
 		}
 		code := denyCodeOf(r)

@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -409,7 +410,7 @@ func RunAuditSummary(d Dialect, run QueryFunc, f AuditFilter) (AuditSummary, err
 	b = where()
 	b.conds = append(b.conds, "e.kind IN "+deniedKinds)
 	if err := run("SELECT e.deny_code, e.policy_ref, e.team, e.key_id, COUNT(*), MAX(e.ts) FROM audit_events e"+b.clause()+
-		" GROUP BY e.deny_code, e.policy_ref, e.team, e.key_id ORDER BY COUNT(*) DESC LIMIT 50", b.args, func(s RowScanner) error {
+		" GROUP BY e.deny_code, e.policy_ref, e.team, e.key_id ORDER BY COUNT(*) DESC, MAX(e.ts) DESC, e.deny_code, e.policy_ref, e.team, e.key_id LIMIT 50", b.args, func(s RowScanner) error {
 		var x AuditDenial
 		err := s.Scan(&x.Code, &x.Policy, &x.Team, &x.KeyID, &x.Count, &x.LastTS)
 		sum.Denials = append(sum.Denials, x)
@@ -441,6 +442,7 @@ func RunAuditSummary(d Dialect, run QueryFunc, f AuditFilter) (AuditSummary, err
 		}); err != nil {
 		return sum, err
 	}
+	slices.Sort(sum.AutoMode.Signatures)
 	if f.SinceMs > 0 && f.UntilMs > f.SinceMs {
 		width := max((f.UntilMs-f.SinceMs)/12, 1)
 		sum.Buckets = make([]AuditBucket, 12)
