@@ -135,6 +135,15 @@ type Record struct {
 	// old records stay byte-identical.
 	GuardrailID      *string `json:"guardrail_id,omitempty"`
 	GuardrailVersion *string `json:"guardrail_version,omitempty"`
+
+	// ADR-057 audit console evidence, appended at the END with omitempty so
+	// earlier records keep their exact bytes. Attempts are provider names and
+	// closed statuses only; Client holds a closed request class and a
+	// key-scoped session digest, never the raw session ID; AutoMode is an
+	// estimate read from a Claude Code classifier response.
+	Attempts []AttemptRef `json:"attempts,omitempty"`
+	Client   *ClientRef   `json:"client,omitempty"`
+	AutoMode *AutoModeRef `json:"auto_mode,omitempty"`
 }
 
 // Canonical returns the deterministic JSON used both for the on-disk record and
