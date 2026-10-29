@@ -82,7 +82,15 @@ function auditCell(tr, content, cls) {
 }
 // "Showing the first N" note for single-page tables; empty when nothing was cut off.
 function auditShownNote(count, next) { return next ? msg("audit.showingFirst").replace("{n}", String(count)) : ""; }
+// The API returns UTC; tables say so in their headers, free-standing times carry " UTC".
 function auditTime(ts) { return ts ? ts.replace("T", " ").slice(0, 19) : ""; }
+function auditTimeUTC(ts) { return ts ? auditTime(ts) + " UTC" : ""; }
+// Session period: one date when both ends share a UTC day, both dates otherwise.
+function auditPeriod(first, last) {
+  const a = auditTime(first), b = auditTime(last);
+  if (!a || !b) return (a || b).slice(0, 16);
+  return a.slice(0, 10) === b.slice(0, 10) ? a.slice(0, 16) + "–" + b.slice(11, 16) : a.slice(0, 16) + " – " + b.slice(0, 16);
+}
 
 // Query parameters for the filter inputs. An ambiguous key name gives no
 // parameters at all: it must never fall back to every key's data.
@@ -137,9 +145,9 @@ async function refreshAuditView() {
 
 function renderAuditHeader(summary, health) {
   const fresh = health && health !== DISABLED && health.last_ingest_ts ? health.last_ingest_ts : "";
-  $("audit-freshness").textContent = fresh ? msg("audit.freshness") + " " + auditTime(fresh) : msg("audit.lagHint");
+  $("audit-freshness").textContent = fresh ? msg("audit.freshness") + " " + auditTimeUTC(fresh) : msg("audit.lagHint");
   $("audit-coverage").textContent = summary.coverage_start_ms
-    ? msg("audit.coverage") + " " + auditTime(new Date(summary.coverage_start_ms).toISOString())
+    ? msg("audit.coverage") + " " + auditTimeUTC(new Date(summary.coverage_start_ms).toISOString())
     : msg("audit.coverageEmpty");
 }
 
@@ -480,7 +488,7 @@ async function auditLoadSessions() {
     const who = auditEl("span", "", s.team);
     who.appendChild(auditEl("span", "sub", auditKeyLabel(s.key_id)));
     auditCell(tr, who);
-    auditCell(tr, auditTime(s.first_ts).slice(11, 16) + "–" + auditTime(s.last_ts).slice(11, 16), "nowrap");
+    auditCell(tr, auditPeriod(s.first_ts, s.last_ts), "mono nowrap");
     auditCell(tr, s.requests, "num");
     auditCell(tr, s.cost_micros ? usd(s.cost_micros) : "—", "num");
     const flags = auditEl("span");
@@ -501,7 +509,7 @@ async function auditLoadSession(s) {
   d.textContent = msg("common.loading");
   const out = await api("GET", "/admin/audit/sessions/" + encodeURIComponent(s.session_ref) + auditQuery({ limit: 500 }));
   d.textContent = "";
-  d.append(auditEl("p", "microlabel", msg("audit.sessionTimeline")), auditEl("h2", "mono", s.session_ref.slice(0, 11) + "…"));
+  d.append(auditEl("p", "microlabel", msg("audit.sessionTimeline") + " · UTC"), auditEl("h2", "mono", s.session_ref.slice(0, 11) + "…"));
   if (out.events.length && !out.events.some(e => e.request_class)) d.appendChild(auditEl("p", "hint", msg("audit.classNotReported")));
   const list = auditEl("div", "audit-tl");
   for (const e of out.events) {

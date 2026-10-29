@@ -77,6 +77,10 @@ assert.equal(run('auditShownNote(5, "")'), "");
 assert.equal(run('auditKeyText("ik_1")'), "laptop · ik_1");
 assert.equal(run('auditKeyText("ik_9")'), "ik_9");
 assert.equal(run('auditKeyText("")'), "—");
+// Session periods are UTC; a multi-day period carries both dates.
+assert.equal(run('auditPeriod("2026-10-29T10:02:11Z", "2026-10-29T10:44:12Z")'), "2026-10-29 10:02–10:44");
+assert.equal(run('auditPeriod("2026-10-28T23:50:00Z", "2026-10-29T00:10:00Z")'), "2026-10-28 23:50 – 2026-10-29 00:10");
+assert.equal(run('msg("audit.time")'), "time (UTC)");
 // An ambiguous key name yields no query parameters at all, so nothing is fetched for every key.
 const now = Date.UTC(2026, 9, 29, 12);
 assert.equal(run(`JSON.stringify(auditFilterParams("24h", "", "ci", ${now}))`), '{"params":null,"ambiguous":true}');

@@ -77,7 +77,7 @@ SUMMARY = {'since_ms': 0, 'until_ms': 0, 'by_kind': {'ok': 1, 'policy_denied': 1
 SESSIONS = [
     {'session_ref': SESSION, 'team': 'engineering', 'key_id': KEY_A, 'first_ts': '2026-10-29T10:02:11Z', 'last_ts': '2026-10-29T10:44:12Z',
      'requests': 2, 'cost_micros': 31210, 'denials': 1, 'pii': 0, 'auto_blocked': 0, 'subagents': 1},
-    {'session_ref': SESSION2, 'team': 'platform', 'key_id': KEY_B, 'first_ts': '2026-10-29T09:00:00Z', 'last_ts': '2026-10-29T09:05:00Z',
+    {'session_ref': SESSION2, 'team': 'platform', 'key_id': KEY_B, 'first_ts': '2026-10-28T23:50:00Z', 'last_ts': '2026-10-29T00:10:00Z',
      'requests': 1, 'cost_micros': 0, 'denials': 0, 'pii': 0, 'auto_blocked': 0, 'subagents': 0},
 ]
 # Console errors are failures except the 404 the shared harness serves for /admin/auth/config on purpose.
@@ -265,6 +265,9 @@ def run_scenario(page, base, width, scheme, screenshots):
     page.locator('#audit-tab-sessions').click()
     wait("() => document.querySelectorAll('#audit-session-table tbody tr').length === 2")
     assert en('audit.showingFirst').replace('{n}', '2') == text('#audit-sessions-note').strip()
+    # Periods are UTC with dates; a multi-day period shows both dates.
+    assert text('#audit-session-table tbody tr:nth-child(1) td:nth-child(3)') == '2026-10-29 10:02–10:44'
+    assert text('#audit-session-table tbody tr:nth-child(2) td:nth-child(3)') == '2026-10-28 23:50 – 2026-10-29 00:10'
     page.locator('#audit-session-table tbody tr').first.click()
     wait("() => document.querySelectorAll('#audit-session-detail .audit-tl-item').length === 2")
     assert page.locator('#audit-session-detail .audit-tl-item.indent').count() == 1
