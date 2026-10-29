@@ -943,7 +943,20 @@ func newGateway(cfgPath string) (*gateway, error) {
 		} else if analyticsIdx != nil {
 			ai = "A" // Mode A (local single-replica).
 		}
+		var aq any
+		if pgstoreQ != nil {
+			aq = pgstoreQ
+		} else if analyticsIdx != nil {
+			aq = analyticsIdx
+		}
+		_, auditConsole := aq.(analytics.AuditEventQuerier)
+		traceLink := ""
+		if cfg.OTel != nil {
+			traceLink = cfg.OTel.TraceLinkTemplate
+		}
 		return configapi.Capabilities{
+			AuditConsole:        auditConsole,
+			TraceLinkTemplate:   traceLink,
 			AnalyticsIndex:      ai,
 			ProviderStore:       writer != nil,
 			Guardrails:          masking != nil,

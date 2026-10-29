@@ -8,6 +8,7 @@ import (
 
 	"github.com/inferplane/inferplane/internal/adminauth"
 	"github.com/inferplane/inferplane/internal/alert"
+	"github.com/inferplane/inferplane/internal/analytics"
 	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/internal/bodystore"
 	"github.com/inferplane/inferplane/internal/clientctx"
@@ -24,6 +25,7 @@ import (
 	"github.com/inferplane/inferplane/internal/server/analyticsapi"
 	"github.com/inferplane/inferplane/internal/server/anthropicapi"
 	"github.com/inferplane/inferplane/internal/server/auditapi"
+	"github.com/inferplane/inferplane/internal/server/auditconsoleapi"
 	"github.com/inferplane/inferplane/internal/server/authapi"
 	"github.com/inferplane/inferplane/internal/server/bedrockapi"
 	"github.com/inferplane/inferplane/internal/server/configapi"
@@ -441,6 +443,19 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 		// analyticsQ is on: logs metadata does not require body capture).
 		mux.Handle("GET /admin/logs", AdminAuth(adminTokens, verifier, mapping, denied,
 			requireAdmin(analyticsapi.LogsHandler(analyticsQ), emit)))
+		// Audit console (ADR-057): read-only, full-admin only, mounted only when
+		// the analytics store also implements the console projection.
+		if aq, ok := analyticsQ.(analytics.AuditEventQuerier); ok {
+			for pattern, h := range map[string]http.Handler{
+				"GET /admin/audit/events":         auditconsoleapi.EventsHandler(aq),
+				"GET /admin/audit/events/{id}":    auditconsoleapi.EventHandler(aq),
+				"GET /admin/audit/sessions":       auditconsoleapi.SessionsHandler(aq),
+				"GET /admin/audit/sessions/{ref}": auditconsoleapi.SessionHandler(aq),
+				"GET /admin/audit/summary":        auditconsoleapi.SummaryHandler(aq),
+			} {
+				mux.Handle(pattern, AdminAuth(adminTokens, verifier, mapping, denied, requireAdmin(h, emit)))
+			}
+		}
 	}
 	// Body fetch/erase (D4, ADR-018): full-admin only — resolves a decrypted
 	// captured body server-side. nil bodiesRec omits the mount (log_bodies off).
