@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: cfa68eb3f4a167a116966541642808217715db528871c85fc5f1c3891b811ea5
+translation_source_sha256: 28b1ba78863b929e93d0444e8b43a514a9d45b6836199e87522a072e920e9cb7
 ---
 
 # API 구현 {#api}
@@ -66,7 +66,7 @@ count 엔드포인트, TPM·쿼터 추정, 금전 예약, 개인정보 검사, �
 
 **모델 폴백:** 한 단계 model_fallbacks와 기본 동일 계열 휴리스틱을 허용 검사 전에 적용합니다. 미설정 이름만 허용된 키는 다른 모델을 대신 받지 않고 거부됩니다. 이미 설정된 모델도 업스트림 404이면 기존 폴백 루프에서 교차 모델을 시도하되, 나중 추가한 타깃을 FilterModelAllowed로 다시 검사합니다. 응답 x-inferplane-model-fallback은 공급자 폴백 헤더와 독립적입니다.
 
-Messages는 출력 전 전송 오류·5xx/429·교차 모델 404만 재시도합니다. 타입이 있는 검증 오류와 다른 4xx는 종료하며 일반적인 Bedrock ValidationException은 모델 부재 근거가 아닙니다. 각 재시도 타깃은 전송 전에 자체 컨텍스트 선언을 다시 검사하며 최초 사전 검사 계약은 유지합니다. 엄격한 숫자 형식의 프롬프트 초과 SDK 검증 오류만 안전한 context_length_exceeded 코드와 인식 가능한 초과 문구를 보존하고 나머지 Bedrock 원문은 숨깁니다.
+Messages는 출력 전 전송 오류·5xx/429·교차 모델 404만 재시도합니다. 타입이 있는 검증 오류와 다른 4xx는 종료하며 일반적인 Bedrock ValidationException은 모델 부재 근거가 아닙니다. 각 재시도 타깃은 전송 전에 자체 컨텍스트 선언을 다시 검사하며 최초 사전 검사 계약은 유지합니다. 엄격한 숫자 형식의 프롬프트 초과 SDK 검증 오류만 안전한 context_length_exceeded 코드와 인식 가능한 초과 문구를 보존하고 나머지 Bedrock 원문은 숨깁니다. Bedrock Converse(Claude 외 모델, SDK 경로와 네이티브 `/converse` 수신)는 서빙 엔진이 전달한 `Input length (N) exceeds model's maximum context length (M).` 문구(2026-10-27 `openai.gpt-oss-120b-1:0`에서 관측, Mantle 스트리밍 접두어 유무와 무관)와 코드가 정확히 `context_length_exceeded`인 OpenAI 오류(숫자 없음)도 인식합니다. 그러면 Messages·Chat Completions·Bedrock Invoke/Converse·Responses가 `bedrock upstream error (ValidationException)` 대신 각자의 오류 형식으로 같은 복구 가능한 `prompt is too long` 오류를 반환합니다.
 
 Messages에서 OpenAI 호환 업스트림의 HTTP 400 오류는 Anthropic `invalid_request_error` 형식으로 변환합니다. 중첩된 `error.code=context_length_exceeded`는 고정 문구 `prompt is too long`으로 바꾸며, v0.8.5 소스로 확인한 기존 vLLM Chat Completions 초과 문구가 정확히 일치하면 검증된 양수 토큰 합계와 한도도 보존합니다. 이 합계에는 요청한 출력 토큰이 포함될 수 있습니다. 알 수 없거나 잘못되었거나 너무 큰 오류 형식은 공급자 원문을 노출하거나 컨텍스트 오류로 추측하지 않고 `upstream request rejected`로 반환합니다. 파싱 한도는 64 KiB입니다. 비스트리밍 응답과 스트리밍 시작 오류에 적용하며 OpenAI 수신 오류 바이트는 그대로 유지합니다.
 

@@ -66,8 +66,12 @@ func (n *nativeConverseClient) call(ctx context.Context, req *providers.ProxyReq
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		// Do not echo AWS error messages (may contain account IDs, ARNs or
-		// request content). Ingress renders the status in AWS error shape.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		// request content). Ingress renders the status in AWS error shape;
+		// only recognized context-overflow evidence survives (errors.go).
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		if overflow := nativeOverflow(resp, raw); overflow != nil {
+			return nil, overflow
+		}
 		status := resp.StatusCode
 		if status < 400 {
 			status = http.StatusBadGateway
@@ -79,6 +83,31 @@ func (n *nativeConverseClient) call(ctx context.Context, req *providers.ProxyReq
 		return nil, synthError(502, "bedrock Converse returned an invalid stream content type")
 	}
 	return resp, nil
+}
+
+// nativeOverflow applies the SDK path's overflow recognition to a native
+// Converse error: an AWS JSON {"message": ...} body typed ValidationException
+// by the X-Amzn-ErrorType header or the body's __type.
+func nativeOverflow(resp *http.Response, raw []byte) *providers.UpstreamError {
+	if resp.StatusCode != http.StatusBadRequest {
+		return nil
+	}
+	var body struct {
+		Type    string `json:"__type"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return nil
+	}
+	kind, _, _ := strings.Cut(resp.Header.Get("X-Amzn-ErrorType"), ":")
+	if kind != "ValidationException" && !strings.HasSuffix(body.Type, "ValidationException") {
+		return nil
+	}
+	tokens, maximum, ok := promptOverflowMessage(body.Message)
+	if !ok {
+		return nil
+	}
+	return &providers.UpstreamError{StatusCode: http.StatusBadRequest, Body: providers.PromptTooLongBody(tokens, maximum)}
 }
 
 func (n *nativeConverseClient) Complete(ctx context.Context, req *providers.ProxyRequest) (*providers.ProxyResponse, error) {

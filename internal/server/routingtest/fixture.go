@@ -32,6 +32,9 @@ type Spy struct {
 	Calls         []Call
 	Fail, Partial bool
 	Usage         *schema.Usage
+	// Err, when set, is returned by Complete and Stream before any output,
+	// e.g. a provider's *providers.UpstreamError.
+	Err error
 }
 
 func (*Spy) Name() string                { return "mock" }
@@ -42,6 +45,9 @@ func (s *Spy) record(ctx context.Context, r *providers.ProxyRequest) {
 }
 func (s *Spy) Complete(ctx context.Context, r *providers.ProxyRequest) (*providers.ProxyResponse, error) {
 	s.record(ctx, r)
+	if s.Err != nil {
+		return nil, s.Err
+	}
 	if s.Fail {
 		return nil, errors.New("transport failed")
 	}
@@ -49,6 +55,9 @@ func (s *Spy) Complete(ctx context.Context, r *providers.ProxyRequest) (*provide
 }
 func (s *Spy) Stream(ctx context.Context, r *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
 	s.record(ctx, r)
+	if s.Err != nil {
+		return nil, s.Err
+	}
 	if s.Fail {
 		return nil, errors.New("transport failed")
 	}
