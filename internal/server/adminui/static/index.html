@@ -40,6 +40,7 @@
         <button class="nav active" data-view="overview">⌂&ensp;<span data-i18n="nav.overview">Overview</span></button>
         <button class="nav" data-view="usage">▤&ensp;<span data-i18n="nav.usage">Usage</span></button>
         <button class="nav" data-view="logs">≡&ensp;<span data-i18n="nav.logs">Logs</span></button>
+        <button class="nav" data-view="audit">◉&ensp;<span data-i18n="nav.audit">Audit</span></button>
         <button class="nav" data-view="evaluation">⇆&ensp;<span data-i18n="nav.evaluation">Compare models</span></button>
         <button class="nav" data-view="keys">⚿&ensp;<span data-i18n="nav.keys">Virtual keys</span></button>
         <button class="nav" data-view="teams">⚇&ensp;<span data-i18n="nav.teamsUsers">Teams &amp; Users</span></button>
@@ -187,6 +188,84 @@
               sensitive content. Viewing a body is itself logged (</span><code>body_accessed</code><span data-i18n="logs.retentionPost">).</span></p>
             <div id="body-drawer-content"></div>
             <button id="body-drawer-close" type="button" class="ghost" data-i18n="logs.close">CLOSE</button>
+          </div>
+        </div>
+      </section>
+      <section id="view-audit" class="view" hidden>
+        <div class="card affordance" data-cap="audit_console">
+          <div class="microlabel" data-i18n="audit.enableTitle">audit console</div>
+          <p class="hint" data-i18n="audit.enableHint">Turn on the analytics index (a file audit sink enables it) to review requests, sessions, PII handling and denials from the audit chain.</p>
+        </div>
+        <p id="audit-admin-only" class="hint" hidden data-i18n="audit.adminOnly">Only full administrators can open the audit console.</p>
+        <div id="audit-content" hidden>
+          <div class="audit-head">
+            <div class="audit-filters">
+              <label for="audit-range"><span data-i18n="audit.range">Period</span>
+                <select id="audit-range"><option value="24h" data-i18n="audit.range24h">Last 24 hours</option><option value="7d" data-i18n="audit.range7d">Last 7 days</option><option value="30d" data-i18n="audit.range30d">Last 30 days</option></select></label>
+              <label for="audit-team"><span data-i18n="audit.team">Team</span><input id="audit-team" type="search" autocomplete="off"></label>
+              <label for="audit-key"><span data-i18n="audit.key">Key</span><input id="audit-key" type="search" autocomplete="off" data-i18n-placeholder="audit.keyPlaceholder" placeholder="key_id or metadata name"></label>
+            </div>
+            <div class="audit-tools">
+              <span id="audit-freshness" class="hint"></span>
+              <button id="audit-verify" type="button" class="ghost" data-i18n="audit.verifyChain">Verify chain</button>
+              <span id="audit-verify-result" class="hint"></span>
+            </div>
+          </div>
+          <p id="audit-coverage" class="hint"></p>
+          <p id="audit-filter-note" class="hint" hidden></p>
+          <div class="audit-cards" id="audit-cards"></div>
+          <div class="audit-tabs" role="tablist" aria-label="Audit">
+            <button type="button" role="tab" class="audit-tab" id="audit-tab-traces" data-audit-tab="traces" aria-selected="true" aria-controls="audit-panel-traces" data-i18n="audit.tabTraces">Traces</button>
+            <button type="button" role="tab" class="audit-tab" id="audit-tab-sessions" data-audit-tab="sessions" aria-selected="false" aria-controls="audit-panel-sessions" data-i18n="audit.tabSessions">Sessions</button>
+            <button type="button" role="tab" class="audit-tab" id="audit-tab-pii" data-audit-tab="pii" aria-selected="false" aria-controls="audit-panel-pii" data-i18n="audit.tabPII">PII detections</button>
+            <button type="button" role="tab" class="audit-tab" id="audit-tab-denials" data-audit-tab="denials" aria-selected="false" aria-controls="audit-panel-denials" data-i18n="audit.tabDenials">Denials</button>
+          </div>
+          <div id="audit-panel-traces" role="tabpanel" aria-labelledby="audit-tab-traces">
+            <div id="audit-kinds" class="audit-kinds"></div>
+            <p id="audit-class-hint" class="hint" hidden data-i18n="audit.classNotReported">This client does not report a request class, so class shows “—”.</p>
+            <div class="audit-split">
+              <div class="card audit-list"><div class="table-wrap"><table class="data" id="audit-trace-table"><thead><tr>
+                <th data-i18n="audit.time">time</th><th data-i18n="audit.kindCol">kind</th><th data-i18n="audit.teamKey">team · key</th><th data-i18n="audit.class">class</th>
+                <th data-i18n="audit.model">model (requested → actual)</th><th class="num" data-i18n="audit.tokens">tokens in/out</th><th class="num" data-i18n="audit.cost">cost</th><th class="num" data-i18n="audit.latency">latency</th>
+              </tr></thead><tbody></tbody></table></div>
+                <button id="audit-more" type="button" class="ghost" hidden data-i18n="audit.loadMore">Load more</button></div>
+              <div class="card audit-detail" id="audit-detail" aria-live="polite"></div>
+            </div>
+          </div>
+          <div id="audit-panel-sessions" role="tabpanel" aria-labelledby="audit-tab-sessions" hidden>
+            <div class="audit-split">
+              <div class="card audit-list"><div class="table-wrap"><table class="data" id="audit-session-table"><thead><tr>
+                <th data-i18n="audit.sessionCol">session</th><th data-i18n="audit.teamKey">team · key</th><th data-i18n="audit.period">period</th>
+                <th class="num" data-i18n="audit.requests">requests</th><th class="num" data-i18n="audit.cost">cost</th><th data-i18n="audit.flags">flags</th>
+              </tr></thead><tbody></tbody></table></div></div>
+              <div class="card" id="audit-session-detail"></div>
+            </div>
+            <p class="hint" data-i18n="audit.sessionHint">Sessions group requests by a key-scoped digest of X-Claude-Code-Session-Id. The raw ID is never stored.</p>
+          </div>
+          <div id="audit-panel-pii" role="tabpanel" aria-labelledby="audit-tab-pii" hidden>
+            <div class="audit-two">
+              <div class="card"><p class="microlabel" data-i18n="audit.piiCats">Detected categories</p><div id="audit-pii-cats" class="audit-bars"></div><p class="hint" data-i18n="audit.piiCatsHint">One request can match several categories, so the total can exceed the request count.</p></div>
+              <div class="card"><p class="microlabel" data-i18n="audit.piiActions">Handling</p><div id="audit-pii-actions" class="audit-bars"></div><p class="hint" data-i18n="audit.piiShadowHint">Shadow policies do not block; they record “would restrict”.</p></div>
+            </div>
+            <div class="card audit-list"><div class="table-wrap"><table class="data" id="audit-pii-table"><thead><tr>
+              <th data-i18n="audit.time">time</th><th data-i18n="audit.teamKey">team · key</th><th data-i18n="audit.category">category</th><th data-i18n="audit.handling">handling</th>
+              <th data-i18n="audit.policy">policy · rule</th><th data-i18n="audit.boundary">boundary (planned → actual)</th>
+            </tr></thead><tbody></tbody></table></div></div>
+          </div>
+          <div id="audit-panel-denials" role="tabpanel" aria-labelledby="audit-tab-denials" hidden>
+            <div class="audit-two">
+              <div class="card audit-list"><h2 data-i18n="audit.policyDenials">Policy denials</h2><p class="hint" data-i18n="audit.policyDenialsHint">From audit deny codes · certain</p>
+                <div class="table-wrap"><table class="data" id="audit-deny-table"><thead><tr>
+                  <th data-i18n="audit.code">code</th><th data-i18n="audit.policy">policy · rule</th><th data-i18n="audit.scopeCol">scope</th><th class="num" data-i18n="audit.count">count</th><th data-i18n="audit.last">last</th>
+                </tr></thead><tbody></tbody></table></div></div>
+              <div class="card audit-list"><h2><span data-i18n="audit.autoTitle">Auto mode blocks</span> <span class="audit-pill est" data-i18n="audit.estimate">Estimate</span></h2>
+                <p class="hint" data-i18n="audit.autoHint">Verdicts come from two sources: Claude Code classifier &lt;block&gt; replies, and Bedrock safeguard results in the main response stream. Allow verdicts are counted, not listed.</p>
+                <p id="audit-auto-warning" class="hint audit-warn" hidden></p>
+                <div class="table-wrap"><table class="data" id="audit-auto-table"><thead><tr>
+                  <th data-i18n="audit.time">time</th><th data-i18n="audit.sessionKey">session · key</th><th data-i18n="audit.stage">stage</th><th data-i18n="audit.verdict">verdict</th><th data-i18n="audit.model">model</th>
+                </tr></thead><tbody></tbody></table></div>
+                <p class="hint audit-callout" data-i18n="audit.autoCallout">The gateway sees only the verdict. Which tool call was blocked is visible only when body capture is on.</p></div>
+            </div>
           </div>
         </div>
       </section>
@@ -547,6 +626,7 @@ api key:  the same virtual key</code></pre>
   </dialog>
   <script src="i18n.js"></script>
   <script src="app.js"></script>
+  <script src="audit.js"></script>
   <script src="evaluation.js"></script>
 </body>
 </html>

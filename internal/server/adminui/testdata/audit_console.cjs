@@ -1,0 +1,56 @@
+// Pure helper checks for audit.js (no DOM). Run: node testdata/audit_console.cjs
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+// Minimal element double so the waterfall renderer can be inspected without a browser.
+class El {
+  constructor(tag) { this.tag = tag; this.className = ""; this.textContent = ""; this.children = []; this.style = {}; this.attrs = {}; }
+  appendChild(c) { this.children.push(c); return c; }
+  append(...cs) { cs.forEach(c => this.children.push(c)); }
+  setAttribute(k, v) { this.attrs[k] = v; }
+  all() { return [this, ...this.children.flatMap(c => c.all())]; }
+}
+const ctx = vm.createContext({ navigator: { language: "en" }, document: { getElementById: () => null, createElement: t => new El(t), documentElement: {} }, Node: El, URLSearchParams, console });
+for (const f of ["i18n.js", "audit.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "static", f), "utf8"), ctx, { filename: f });
+const run = (src) => vm.runInContext(src, ctx);
+assert.equal(run('auditKindClass("policy_denied")'), "err");
+assert.equal(run('auditKindClass("auto_mode_blocked")'), "est");
+assert.equal(run('auditKindClass("upstream_error")'), "warn");
+assert.equal(run('msg("audit.kind.upstream_error")'), "Error");
+const w = JSON.parse(run('JSON.stringify(auditWindow("7d", Date.UTC(2026, 9, 29, 12)))'));
+assert.equal(w.since, "2026-10-22T12:00:00.000Z");
+assert.equal(run('auditQuery({ a: "", b: "x", c: null, d: 2 })'), "?b=x&d=2");
+run('auditState.keys = new Map([["ik_1", { key_id: "ik_1", metadata: { name: "laptop" } }], ["ik_2", { key_id: "ik_2", metadata: { name: "ci" } }], ["ik_3", { key_id: "ik_3", metadata: { name: "ci" } }]])');
+assert.equal(run('JSON.stringify(auditResolveKey("laptop"))'), '{"keyId":"ik_1","ambiguous":false}');
+assert.equal(run('JSON.stringify(auditResolveKey("ci"))'), '{"keyId":"","ambiguous":true}');   // ambiguous names never pick one
+assert.equal(run('JSON.stringify(auditResolveKey("ik_9"))'), '{"keyId":"ik_9","ambiguous":false}');
+assert.equal(run('auditKeyLabel("ik_1")'), "laptop");
+assert.equal(run('auditKeyLabel("ik_9")'), "ik_9");
+const trace = "4bf92f3577b34da6a3ce929d0e0e4736";
+assert.equal(run(`auditTraceLink("https://g.example/x?t={trace_id}", "${trace}")`), `https://g.example/x?t=${trace}`);
+assert.equal(run(`auditTraceLink("https://g.example/x?t={trace_id}", "not-hex")`), "");
+assert.equal(run(`auditTraceLink("javascript:alert({trace_id})", "${trace}")`), "");
+assert.equal(run('auditDuration(0)'), "—");
+assert.equal(run('auditDuration(412)'), "412ms");
+assert.equal(run('auditDuration(6810)'), "6.81s");
+assert.equal(run('JSON.stringify(auditBar({ start_ms: 0, dur_ms: 0 }, 0))'), '{"left":0,"width":100}'); // zero total: full-width neutral bar, no NaN
+assert.equal(run('JSON.stringify(auditBar({ start_ms: 250, dur_ms: 500 }, 1000))'), '{"left":25,"width":50}');
+assert.equal(run('auditScope("team_budget_exceeded")'), "team");
+assert.equal(run('auditScope("key_rate_limited")'), "key");
+assert.equal(run('auditScope("sensitive_blocked")'), "route");
+assert.equal(run('auditSparkPoints([0, 0, 0], 120, 32).length'), 3);
+
+// A legacy record (no latency, no attempts) shows "no timing recorded", never a zero-width bar or NaN%.
+const legacy = vm.runInContext('renderAuditWaterfall({ total_ms: 0, rows: [] })', ctx);
+const legacyNodes = legacy.all();
+assert.equal(legacyNodes.filter(n => /audit-wf-bar/.test(n.className)).length, 0);
+assert.ok(legacyNodes.some(n => n.textContent === run('msg("audit.noTiming")')));
+assert.ok(!legacyNodes.some(n => /NaN/.test(n.textContent) || /NaN/.test(n.style.width || "")));
+// A gateway denial after an earlier attempt keeps both rows; the failed attempt shows its status.
+const after = vm.runInContext('renderAuditWaterfall({ total_ms: 900, rows: [{ kind: "attempt", provider: "bedrock", status: "timeout", start_ms: 10, dur_ms: 700 }, { kind: "denied", start_ms: 710, dur_ms: 5 }] })', ctx);
+const labels = after.all().filter(n => n.className === "lab").map(n => n.textContent);
+assert.deepEqual(labels, ["Attempt · bedrock · timeout", "Gateway denial"]);
+assert.ok(after.all().filter(n => /audit-wf-bar/.test(n.className)).every(n => /fail/.test(n.className) && !/NaN/.test(n.style.width)));
+assert.equal(run('msg("audit.wf.denied")'), "Gateway denial");
+console.log("audit_console.cjs: ok");
