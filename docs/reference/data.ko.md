@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 2b6bc5f19e00ab4946fe73afc025dc38a713c7762246adfe3566972acf5ae2b0
+translation_source_sha256: 02a85eb222eb1c15fa40b7a6983389d0e432ee01b1346943ff6d882779c16a2a
 ---
 
 # 데이터 구현 {#data}
@@ -148,6 +148,13 @@ MatchingRoutingPolicies는 하나의 원자 스냅샷에서 호출자 소유 규
 `audit_event_categories (id, category)`를 기존 인덱스와 함께 만듭니다. `events` 테이블과
 Usage 수치는 바뀌지 않습니다. 정확한 감사 행은 `record_json`에 보관합니다. 투영은 `id`에
 대해 먼저 쓴 값이 우선입니다.
+
+기록에서 가져온 자유 텍스트(`model_requested`, `model_actual`, `provider`, `policy_ref`,
+경계 값, `request_class`, `session_ref`, `trace_id`, `auto_signature`)는 NUL 바이트를
+버리고 잘못된 UTF-8을 대체 문자로 바꾸며 필터 상한인 256바이트로 자릅니다. 클라이언트가
+보낸 모델 문자열은 검증 없이 거부 기록에 들어가기 때문입니다. 투영은 기록 단위
+최선 노력입니다. 행마다 savepoint를 두므로 저장소가 거부한 행은 기록 ID와 저장소 코드만
+로그에 남기고 건너뛰며, 같은 배치의 Usage 행이나 Mode B 체크포인트를 막지 않습니다.
 
 | 열 그룹 | 열 |
 |---|---|

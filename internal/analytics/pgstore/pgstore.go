@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inferplane/inferplane/internal/analytics"
@@ -461,11 +462,8 @@ func (s *Store) ingestBatch(ctx context.Context, holder string, epoch int64, rec
 		// ingestBatch receives decoded records, not chain lines, so the detail
 		// hash uses the Canonical() fallback (the writer emits exactly those bytes).
 		if row, ok := analytics.ProjectAuditEvent(r, nil); ok {
-			if err := analytics.InsertAuditEvent(analytics.PostgresDialect, func(q string, args ...any) error {
-				_, err := tx.Exec(ctx, q, args...)
+			if err := projectAuditEvent(ctx, tx, row); err != nil {
 				return err
-			}, row); err != nil {
-				return fmt.Errorf("project audit event %q: %w", r.ID, err)
 			}
 		}
 		if !analytics.Observable(r) {
@@ -505,6 +503,42 @@ func (s *Store) ingestBatch(ctx context.Context, holder string, epoch int64, rec
 		return fmt.Errorf("commit analytics ingest batch: %w", err)
 	}
 	return nil
+}
+
+// projectAuditEvent stores one console row inside a savepoint of the ingest
+// transaction. The console projection is best-effort per record: a failed
+// insert rolls back to the savepoint, is logged by record ID and SQLSTATE only
+// (Postgres messages can quote the offending bytes), and never blocks the
+// usage rows or the checkpoint of the same batch. Only a failing savepoint
+// statement (an unusable transaction) is returned.
+func projectAuditEvent(ctx context.Context, tx pgx.Tx, row analytics.AuditEventRow) error {
+	sp, err := tx.Begin(ctx) // pgx: SAVEPOINT inside an open transaction
+	if err != nil {
+		return fmt.Errorf("begin audit projection savepoint: %w", err)
+	}
+	err = analytics.InsertAuditEvent(analytics.PostgresDialect, func(q string, args ...any) error {
+		_, err := sp.Exec(ctx, q, args...)
+		return err
+	}, row)
+	if err == nil {
+		if err := sp.Commit(ctx); err != nil { // RELEASE SAVEPOINT
+			return fmt.Errorf("release audit projection savepoint: %w", err)
+		}
+		return nil
+	}
+	if rbErr := sp.Rollback(ctx); rbErr != nil { // ROLLBACK TO SAVEPOINT
+		return fmt.Errorf("roll back audit projection savepoint: %w", rbErr)
+	}
+	analytics.LogAuditSkip(row.ID, sqlState(err))
+	return nil
+}
+
+func sqlState(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return "SQLSTATE " + pgErr.Code
+	}
+	return "error"
 }
 
 // fenceIngest requires an EXISTING lease row matching holder+epoch —

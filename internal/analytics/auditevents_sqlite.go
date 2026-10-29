@@ -2,6 +2,8 @@ package analytics
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/inferplane/inferplane/internal/audit"
@@ -35,6 +37,36 @@ func ingestAudit(e sqlExec, r audit.Record, line []byte) error {
 		return nil
 	}
 	return InsertAuditEvent(SQLiteDialect, sqliteExec(e), row)
+}
+
+// ingestAuditSavepoint projects one console row inside a savepoint of the
+// replay transaction. The console projection is best-effort per record: a
+// failed insert rolls back to the savepoint, is logged by record ID and
+// driver code only, and never aborts the usage replay. Only a failing
+// savepoint statement (an unusable transaction) is returned.
+func ingestAuditSavepoint(tx *sql.Tx, r audit.Record, line []byte) error {
+	if _, err := tx.Exec(`SAVEPOINT audit_projection`); err != nil {
+		return fmt.Errorf("begin audit projection savepoint: %w", err)
+	}
+	if err := ingestAudit(tx, r, line); err != nil {
+		if _, rbErr := tx.Exec(`ROLLBACK TO SAVEPOINT audit_projection`); rbErr != nil {
+			return fmt.Errorf("roll back audit projection savepoint: %w", rbErr)
+		}
+		LogAuditSkip(r.ID, sqliteCode(err))
+	}
+	if _, err := tx.Exec(`RELEASE SAVEPOINT audit_projection`); err != nil {
+		return fmt.Errorf("release audit projection savepoint: %w", err)
+	}
+	return nil
+}
+
+// sqliteCode names a driver error by its numeric code, never its message.
+func sqliteCode(err error) string {
+	var c interface{ Code() int }
+	if errors.As(err, &c) {
+		return fmt.Sprintf("sqlite code %d", c.Code())
+	}
+	return "error"
 }
 
 // IngestAudit projects one terminal record into the console table.

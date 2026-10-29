@@ -268,10 +268,12 @@ func (ix *Index) Replay(r io.Reader) (int, error) {
 					}
 					n++
 				}
-				// Console projection is independent of the usage projection;
-				// the insert is ON CONFLICT DO NOTHING, so replay is idempotent.
+				// Console projection is independent of the usage projection:
+				// each row has its own savepoint, so a failed row never rolls
+				// back usage. The insert is ON CONFLICT DO NOTHING, so replay
+				// is idempotent.
 				if AuditObservable(rec) {
-					if e := ingestAudit(tx, rec, []byte(strings.TrimRight(line, "\r\n"))); e != nil {
+					if e := ingestAuditSavepoint(tx, rec, []byte(strings.TrimRight(line, "\r\n"))); e != nil {
 						return n, e
 					}
 				}

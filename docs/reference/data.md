@@ -206,6 +206,15 @@ Both stores gain `audit_events` (one row per terminal record) and
 `events` table and Usage numbers are unchanged. The exact audit line is kept in
 `record_json`. Projection is first-write-wins on `id`.
 
+Free text taken from the record (`model_requested`, `model_actual`, `provider`,
+`policy_ref`, the boundaries, `request_class`, `session_ref`, `trace_id`,
+`auto_signature`) drops NUL bytes, replaces invalid UTF-8 and is cut to 256
+bytes, the filter cap; a client's model string reaches denial records
+unvalidated. The projection is best-effort per record: each row has its own
+savepoint, so a row the store refuses is skipped and logged by record ID and
+store code only, and never blocks the Usage rows or the Mode B checkpoint of
+the same batch.
+
 | Column group | Columns |
 |---|---|
 | Identity and time | `id` (primary key), `ts`, `ts_ms`, `event`, `kind`, `team`, `key_id`, `ingress`, `stream`, `status` |

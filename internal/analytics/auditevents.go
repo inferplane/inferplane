@@ -3,9 +3,12 @@ package analytics
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/inferplane/inferplane/internal/audit"
 )
@@ -52,6 +55,36 @@ func denyCodeOf(r audit.Record) string {
 		return r.Request.Routing.Reason
 	}
 	return ""
+}
+
+// maxAuditTextBytes matches the console API's free-text filter cap.
+const maxAuditTextBytes = 256
+
+// auditText makes a record-derived free-text value storable in both stores
+// (Postgres TEXT rejects NUL and invalid UTF-8) and filterable: NUL bytes are
+// dropped, invalid UTF-8 becomes U+FFFD, and the value is cut to
+// maxAuditTextBytes on a rune boundary. Client-supplied model names reach
+// denial records unvalidated, so every such column passes through here.
+func auditText(s string) string {
+	if len(s) <= maxAuditTextBytes && utf8.ValidString(s) && !strings.Contains(s, "\x00") {
+		return s
+	}
+	s = strings.ReplaceAll(strings.ToValidUTF8(s, "\uFFFD"), "\x00", "")
+	if len(s) <= maxAuditTextBytes {
+		return s
+	}
+	cut := maxAuditTextBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
+// LogAuditSkip reports a console row that a store refused (both modes). It
+// names the record and a store code only: store messages can quote the
+// offending request bytes.
+func LogAuditSkip(id, code string) {
+	fmt.Fprintf(os.Stderr, "inferplane: analytics audit console skipped record %q (%s)\n", id, code)
 }
 
 func boundedCode(s string) string {
@@ -103,7 +136,8 @@ func KindOf(r audit.Record) string {
 	return KindOK
 }
 
-// AuditEvent is one console row; every string comes from a closed set or the record itself.
+// AuditEvent is one console row; every string comes from a closed set or the
+// record itself, and record free text is bounded by auditText.
 type AuditEvent struct {
 	ID              string   `json:"id"`
 	TS              string   `json:"ts"`
@@ -182,10 +216,10 @@ func ProjectAuditEvent(r audit.Record, line []byte) (AuditEventRow, bool) {
 	if rt != nil {
 		row.RoutingReason, row.Privacy = boundedCode(rt.Reason), boundedCode(rt.Privacy)
 		row.Masked = row.Masked || rt.Masked
-		row.PlannedBoundary, row.ActualBoundary = rt.PlannedBoundary, rt.ActualBoundary
+		row.PlannedBoundary, row.ActualBoundary = auditText(rt.PlannedBoundary), auditText(rt.ActualBoundary)
 		if len(rt.Policies) > 0 {
 			p := rt.Policies[0]
-			row.PolicyRef = fmt.Sprintf("%s#%d·%s", p.Name, p.Generation, p.Rule)
+			row.PolicyRef = auditText(fmt.Sprintf("%s#%d·%s", p.Name, p.Generation, p.Rule))
 		}
 		for _, c := range rt.Classifiers {
 			row.WouldRestrict = row.WouldRestrict || c.WouldRestrict
@@ -200,26 +234,27 @@ func ProjectAuditEvent(r audit.Record, line []byte) (AuditEventRow, bool) {
 	row.Categories = cats
 	row.PII = len(cats) > 0 || row.Masked || row.Privacy != "" || row.WouldRestrict
 	if c := r.Client; c != nil {
-		row.RequestClass, row.SessionRef = c.RequestClass, c.SessionRef
+		row.RequestClass, row.SessionRef = auditText(c.RequestClass), auditText(c.SessionRef)
 	}
 	if r.TraceID != nil {
-		row.TraceID = *r.TraceID
+		row.TraceID = auditText(*r.TraceID)
 	}
 	var reqModel, actModel, actProvider string
 	if rt != nil {
 		reqModel, actModel, actProvider = rt.RequestedModel, rt.ActualModel, rt.ActualProvider
 	}
-	row.ModelRequested = firstNonEmpty(reqModel, r.Request.ModelSubstitutedFrom, r.Request.ModelRequested)
+	row.ModelRequested = auditText(firstNonEmpty(reqModel, r.Request.ModelSubstitutedFrom, r.Request.ModelRequested))
 	if r.Event == "request_completed" {
-		row.ModelActual = firstNonEmpty(actModel, r.Request.ModelRequested)
+		row.ModelActual = auditText(firstNonEmpty(actModel, r.Request.ModelRequested))
 	}
-	row.Provider = firstNonEmpty(r.Request.Provider, actProvider)
-	if row.Provider == "" && len(r.Attempts) > 0 {
-		row.Provider = r.Attempts[len(r.Attempts)-1].Provider
+	provider := firstNonEmpty(r.Request.Provider, actProvider)
+	if provider == "" && len(r.Attempts) > 0 {
+		provider = r.Attempts[len(r.Attempts)-1].Provider
 	}
+	row.Provider = auditText(provider)
 	row.Fallback = row.Fallback || len(r.Attempts) > 1
 	if a := r.AutoMode; a != nil {
-		row.AutoVerdict, row.AutoStage, row.AutoSignature = boundedCode(a.Verdict), boundedCode(a.Stage), a.Signature
+		row.AutoVerdict, row.AutoStage, row.AutoSignature = boundedCode(a.Verdict), boundedCode(a.Stage), auditText(a.Signature)
 	}
 	if u := r.Usage; u != nil {
 		row.InputTokens, row.OutputTokens = u.InputTokens, u.OutputTokens
