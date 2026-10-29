@@ -420,31 +420,6 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// endAttemptOnError closes the open attempt for a terminal provider error.
-// The status is the upstream's own (noted from a *providers.UpstreamError),
-// never the gateway's synthesized response; a deadline is a timeout.
-func endAttemptOnError(ctx context.Context, err error) {
-	requestpolicy.NoteAttemptFailure(ctx, err)
-	status := audit.AttemptUpstreamError
-	var ue *providers.UpstreamError
-	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ue) && ue.HTTPStatus() == http.StatusGatewayTimeout) {
-		status = audit.AttemptTimeout
-	}
-	audit.EndOpenAttempt(ctx, status, 0)
-}
-
-// httpAttemptStatus maps a committed upstream response status to an attempt status.
-func httpAttemptStatus(code int) string {
-	switch {
-	case code < 400:
-		return audit.AttemptOK
-	case code == http.StatusGatewayTimeout:
-		return audit.AttemptTimeout
-	default:
-		return audit.AttemptUpstreamError
-	}
-}
-
 // isModelNotFound reports whether an upstream response looks like a
 // "model not found" rejection rather than an unrelated client error.
 // Generic Bedrock ValidationException also covers context/tool/schema errors.
@@ -485,7 +460,7 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 			requestpolicy.NoteAttemptFailure(req.Context(), err)
 			return true // transport error → fall back
 		}
-		endAttemptOnError(req.Context(), err)
+		requestpolicy.EndAttemptOnError(req.Context(), err)
 		// Tee a non-2xx upstream error verbatim (status/body) so the client
 		// sees the real rate-limit/error response, not a fabricated one —
 		// mirrors serveStream's tee below (parity fix: bedrock's non-streaming
@@ -528,7 +503,7 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	w.Write(resp.RawBody) // tee verbatim (incl. non-2xx error bodies)
 	// The provider exchange is over: close the attempt before settlement and
 	// body capture so those never count toward its duration.
-	audit.EndOpenAttempt(req.Context(), httpAttemptStatus(resp.StatusCode), resp.StatusCode)
+	audit.EndOpenAttempt(req.Context(), requestpolicy.AttemptStatusForHTTP(resp.StatusCode), resp.StatusCode)
 	// A 2xx is a breaker success; a committed non-2xx on the last target is not
 	// counted (it was teed as the client's real upstream error).
 	if resp.StatusCode < 400 {
@@ -574,7 +549,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 			requestpolicy.NoteAttemptFailure(req.Context(), err)
 			return true // pre-TTFT failure → fall back
 		}
-		endAttemptOnError(req.Context(), err)
+		requestpolicy.EndAttemptOnError(req.Context(), err)
 		// Tee a non-2xx upstream error verbatim (status/body) so the client
 		// sees Anthropic's real rate-limit/error response, not a fabricated one.
 		var ue *providers.UpstreamError

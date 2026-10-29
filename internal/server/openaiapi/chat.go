@@ -351,11 +351,17 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		defer finishBudget() // also retain authority if a provider panics
 		attemptReq := reservedReq.WithContext(audit.WithRoutingAttempt(reservedReq.Context(), ct.Model, ct.ProviderName, ct.DataBoundary))
 		attemptReq = requestpolicy.WithAffinityAttempt(attemptReq, h.r, result.AffinityToken, ct)
+		audit.BeginAttempt(attemptReq.Context(), ct.ProviderName, ct.Model)
 		var retriable bool
 		if stream {
 			retriable = h.serveStream(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		} else {
 			retriable = h.serveComplete(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
+		}
+		if retriable {
+			// Close the attempt before releasing the reservation so budget
+			// settlement never counts toward its duration.
+			audit.EndOpenAttempt(attemptReq.Context(), requestpolicy.RetryStatus(attemptReq.Context(), crossModelNext), 0)
 		}
 		finishBudget()
 		if !retriable {
@@ -377,8 +383,10 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last {
+			requestpolicy.NoteAttemptFailure(req.Context(), err)
 			return true // fall back to the next target
 		}
+		requestpolicy.EndAttemptOnError(req.Context(), err)
 		// Tee a non-2xx upstream error verbatim when available.
 		var ue *providers.UpstreamError
 		if errors.As(err, &ue) {
@@ -400,6 +408,7 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 		return false
 	}
 	if !last && (resp.StatusCode >= 500 || resp.StatusCode == 429 || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
+		audit.NoteAttemptHTTP(req.Context(), resp.StatusCode)
 		return true // upstream 5xx/429, or a cross-model "model not found" → fall back
 	}
 	if resp.StatusCode < 400 {
@@ -424,6 +433,9 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 	}
 	w.WriteHeader(resp.StatusCode)
 	w.Write(clientBody)
+	// The provider exchange is over: close the attempt before settlement and
+	// body capture so those never count toward its duration.
+	audit.EndOpenAttempt(req.Context(), requestpolicy.AttemptStatusForHTTP(resp.StatusCode), resp.StatusCode)
 	var usage *audit.UsageRef
 	var cost *audit.CostRef
 	if resp.Parsed != nil {
@@ -453,8 +465,10 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last {
+			requestpolicy.NoteAttemptFailure(req.Context(), err)
 			return true // pre-TTFT failure → fall back
 		}
+		requestpolicy.EndAttemptOnError(req.Context(), err)
 		var ue *providers.UpstreamError
 		if errors.As(err, &ue) {
 			if w.Header().Get("Content-Type") == "" {
@@ -476,6 +490,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		audit.EndOpenAttempt(req.Context(), audit.AttemptUpstreamError, 0)
 		writeErr(w, 500, "api_error", "streaming unsupported")
 		h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, 500, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 		recordSpanResponse(req, prov.Name(), upstream, nil, false)
@@ -505,6 +520,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 			// writeStreamErrorEvent / bedrockapi's exception-frame path). The
 			// error detail is logged server-side only, never echoed to the
 			// client (an AWS SDK error string can carry an account id/ARN).
+			audit.EndOpenAttempt(req.Context(), audit.AttemptStreamFailed, 200)
 			log.Printf("openaiapi: stream interrupted (model=%s upstream=%s provider=%s): %v", model, upstream, providerName, err)
 			writeStreamErrorEvent(w)
 			flusher.Flush()
@@ -525,6 +541,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 		}
 		if ttft == 0 {
 			ttft = time.Since(start).Seconds() // first streamed event = time to first token
+			audit.MarkFirstToken(req.Context())
 		}
 		if openaiWire {
 			// openai-wire provider: tee the upstream OpenAI SSE bytes verbatim
@@ -560,6 +577,11 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 		// We rendered the OpenAI stream ourselves, so append the terminal marker.
 		w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
+	}
+	if streamCompleted && !streamFailed {
+		audit.EndOpenAttempt(req.Context(), audit.AttemptOK, 200)
+	} else {
+		audit.EndOpenAttempt(req.Context(), audit.AttemptStreamFailed, 200)
 	}
 	cost := h.settle(p, providerName, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 	requestpolicy.SettleBudget(req, cost, lastUsage, streamCompleted && !streamFailed)
@@ -736,6 +758,7 @@ func (h *ChatHandler) audit(ctx context.Context, p keystore.Principal, model, up
 	if traceID != "" {
 		rec.TraceID = &traceID
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 
@@ -770,6 +793,7 @@ func (h *ChatHandler) auditCompleted(ctx context.Context, id string, p keystore.
 	if guardrailVersion != "" {
 		rec.GuardrailVersion = &guardrailVersion
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 
@@ -791,6 +815,7 @@ func (h *ChatHandler) auditCompletedPartial(ctx context.Context, p keystore.Prin
 	if traceID != "" {
 		rec.TraceID = &traceID
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 

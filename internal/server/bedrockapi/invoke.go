@@ -382,11 +382,17 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		defer finishBudget() // also retain authority if a provider panics
 		attemptReq := reservedReq.WithContext(audit.WithRoutingAttempt(reservedReq.Context(), ct.Model, ct.ProviderName, ct.DataBoundary))
 		attemptReq = requestpolicy.WithAffinityAttempt(attemptReq, h.r, result.AffinityToken, ct)
+		audit.BeginAttempt(attemptReq.Context(), ct.ProviderName, ct.Model)
 		var retriable bool
 		if h.streaming {
 			retriable = h.serveStream(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		} else {
 			retriable = h.serveComplete(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
+		}
+		if retriable {
+			// Close the attempt before releasing the reservation so budget
+			// settlement never counts toward its duration.
+			audit.EndOpenAttempt(attemptReq.Context(), requestpolicy.RetryStatus(attemptReq.Context(), crossModelNext), 0)
 		}
 		finishBudget()
 		if !retriable {
@@ -429,8 +435,10 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last && h.retryError(err, crossModelNext) {
+			requestpolicy.NoteAttemptFailure(req.Context(), err)
 			return true
 		}
+		requestpolicy.EndAttemptOnError(req.Context(), err)
 		var ue *providers.UpstreamError
 		if errors.As(err, &ue) {
 			st := ue.HTTPStatus()
@@ -448,8 +456,10 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 	}
 	if resp == nil {
 		if !last {
+			// No response and no error: nothing to note (no upstream status).
 			return true
 		}
+		audit.EndOpenAttempt(req.Context(), audit.AttemptUpstreamError, 0)
 		writeErr(w, http.StatusBadGateway, "bedrock upstream error")
 		h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, http.StatusBadGateway, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 		recordSpanResponse(req, prov.Name(), upstream, nil, false)
@@ -457,8 +467,12 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 		return false
 	}
 	if !last && (resp.StatusCode >= http.StatusInternalServerError || resp.StatusCode == http.StatusTooManyRequests || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
+		audit.NoteAttemptHTTP(req.Context(), resp.StatusCode)
 		return true
 	}
+	// The provider exchange is over: close the attempt before settlement and
+	// body capture so those never count toward its duration.
+	audit.EndOpenAttempt(req.Context(), requestpolicy.AttemptStatusForHTTP(resp.StatusCode), resp.StatusCode)
 	if resp.Headers != nil {
 		copyUpstreamHeaders(w.Header(), resp.Headers)
 	}
@@ -511,8 +525,10 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last && h.retryError(err, crossModelNext) {
+			requestpolicy.NoteAttemptFailure(req.Context(), err)
 			return true
 		}
+		requestpolicy.EndAttemptOnError(req.Context(), err)
 		var ue *providers.UpstreamError
 		if errors.As(err, &ue) {
 			st := ue.HTTPStatus()
@@ -531,6 +547,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		audit.EndOpenAttempt(req.Context(), audit.AttemptUpstreamError, 0)
 		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
 		h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, http.StatusInternalServerError, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 		recordSpanResponse(req, prov.Name(), upstream, nil, false)
@@ -554,6 +571,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	// and a Partial audit record — mirroring anthropicapi's
 	// auditCompletedPartial path, never a clean 200 completion record.
 	partialFinish := func() bool {
+		audit.EndOpenAttempt(req.Context(), audit.AttemptStreamFailed, http.StatusOK)
 		if writeExceptionFrame(w, enc, "internalServerException", "stream interrupted") == nil {
 			flusher.Flush()
 		}
@@ -592,6 +610,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 			}
 			if ttft == 0 && ev.Chunk.Type == "content_block_delta" {
 				ttft = time.Since(start).Seconds()
+				audit.MarkFirstToken(req.Context())
 			}
 			streamCompleted = streamCompleted || ev.Chunk.Type == "message_stop"
 			streamFailed = streamFailed || ev.Chunk.Type == "error"
@@ -610,6 +629,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		}
 		if ttft == 0 {
 			ttft = time.Since(start).Seconds()
+			audit.MarkFirstToken(req.Context())
 		}
 		if err := writeChunkFrame(w, enc, chunkJSON); err != nil {
 			return partialFinish()
@@ -635,6 +655,11 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		return partialFinish()
 	}
 
+	if streamCompleted && !streamFailed {
+		audit.EndOpenAttempt(req.Context(), audit.AttemptOK, http.StatusOK)
+	} else {
+		audit.EndOpenAttempt(req.Context(), audit.AttemptStreamFailed, http.StatusOK)
+	}
 	cost := h.settle(p, providerName, model, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 	requestpolicy.SettleBudget(req, cost, lastUsage, streamCompleted && !streamFailed)
 	if streamCompleted && !streamFailed && lastUsage != nil {
@@ -750,6 +775,7 @@ func (h *InvokeHandler) audit(ctx context.Context, p keystore.Principal, model, 
 	if traceID != "" {
 		rec.TraceID = &traceID
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 
@@ -783,6 +809,7 @@ func (h *InvokeHandler) auditCompleted(ctx context.Context, id string, p keystor
 	if guardrailVersion != "" {
 		rec.GuardrailVersion = &guardrailVersion
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 
@@ -807,6 +834,7 @@ func (h *InvokeHandler) auditCompletedPartial(ctx context.Context, p keystore.Pr
 	if traceID != "" {
 		rec.TraceID = &traceID
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 

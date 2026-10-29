@@ -3,6 +3,7 @@ package requestpolicy
 import (
 	"context"
 	"errors"
+	"net/http"
 
 	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/providers"
@@ -28,4 +29,29 @@ func RetryStatus(ctx context.Context, crossModelNext bool) string {
 		return audit.AttemptModelNotFound
 	}
 	return audit.AttemptUpstreamError
+}
+
+// EndAttemptOnError closes the open attempt for a terminal provider error.
+// The status is the upstream's own (noted from a *providers.UpstreamError),
+// never the gateway's synthesized response; a deadline is a timeout.
+func EndAttemptOnError(ctx context.Context, err error) {
+	NoteAttemptFailure(ctx, err)
+	status := audit.AttemptUpstreamError
+	var ue *providers.UpstreamError
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ue) && ue.HTTPStatus() == http.StatusGatewayTimeout) {
+		status = audit.AttemptTimeout
+	}
+	audit.EndOpenAttempt(ctx, status, 0)
+}
+
+// AttemptStatusForHTTP maps a committed upstream response status to an attempt status.
+func AttemptStatusForHTTP(code int) string {
+	switch {
+	case code < 400:
+		return audit.AttemptOK
+	case code == http.StatusGatewayTimeout:
+		return audit.AttemptTimeout
+	default:
+		return audit.AttemptUpstreamError
+	}
 }
