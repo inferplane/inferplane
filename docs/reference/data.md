@@ -242,10 +242,13 @@ Free text taken from the record (`model_requested`, `model_actual`, `provider`,
 `policy_ref`, the boundaries, `request_class`, `session_ref`, `trace_id`,
 `auto_signature`) drops NUL bytes, replaces invalid UTF-8 and is cut to 256
 bytes, the filter cap; a client's model string reaches denial records
-unvalidated. The projection is best-effort per record: each row has its own
-savepoint, so a row the store refuses is skipped and logged by record ID and
-store code only, and never blocks the Usage rows or the Mode B checkpoint of
-the same batch.
+unvalidated. The projection is best-effort per record. Mode A boot replay gives
+each row its own savepoint in the replay transaction, and the live sink writes
+each row with its categories in one transaction; a row the store refuses is
+skipped and logged by record ID and store code only, never blocks the Usage
+rows, and is offered again by the next boot replay. Mode B gives each row its
+own savepoint, so a refused row never blocks the Usage rows or the checkpoint
+of the same batch.
 
 | Column group | Columns |
 |---|---|

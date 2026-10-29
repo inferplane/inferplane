@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 4c0376f7cf88beac58320448e5442b8049e44373838c356a88f8af3279d567fc
+translation_source_sha256: ff5f121cee9903ef2badfe7a2491f8b108e7044e8753c84a30a7c4b15a96665a
 ---
 
 # 데이터 구현 {#data}
@@ -181,8 +181,10 @@ Usage 수치는 바뀌지 않습니다. 정확한 감사 행은 두 모드 모�
 경계 값, `request_class`, `session_ref`, `trace_id`, `auto_signature`)는 NUL 바이트를
 버리고 잘못된 UTF-8을 대체 문자로 바꾸며 필터 상한인 256바이트로 자릅니다. 클라이언트가
 보낸 모델 문자열은 검증 없이 거부 기록에 들어가기 때문입니다. 투영은 기록 단위
-최선 노력입니다. 행마다 savepoint를 두므로 저장소가 거부한 행은 기록 ID와 저장소 코드만
-로그에 남기고 건너뛰며, 같은 배치의 Usage 행이나 Mode B 체크포인트를 막지 않습니다.
+최선 노력입니다. Mode A 부팅 재생은 재생 트랜잭션 안에서 행마다 savepoint를 두고, 실시간
+싱크는 행과 카테고리를 한 트랜잭션으로 씁니다. 저장소가 거부한 행은 기록 ID와 저장소 코드만
+로그에 남기고 건너뛰며, Usage 행을 막지 않고, 다음 부팅 재생에서 다시 시도됩니다. Mode B는
+행마다 savepoint를 두므로 거부된 행이 같은 배치의 Usage 행이나 체크포인트를 막지 않습니다.
 
 | 열 그룹 | 열 |
 |---|---|

@@ -69,13 +69,31 @@ func sqliteCode(err error) string {
 	return "error"
 }
 
-// IngestAudit projects one terminal record into the console table.
+// IngestAudit projects one terminal record into the console table; the live
+// sink calls it for every terminal record. The row and its categories commit
+// in one transaction, so a refused category never leaves a row without it. A
+// failure is logged by record ID and driver code only (store messages can
+// quote request bytes) and returned; the sink drops it and the next boot's
+// Replay offers the record again.
 func (ix *Index) IngestAudit(r audit.Record, line []byte) error {
-	if err := ingestAudit(ix.db, r, line); err != nil {
+	if err := ix.ingestAuditTx(r, line); err != nil {
+		LogAuditSkip(r.ID, sqliteCode(err))
 		return err
 	}
 	ix.markIngest(time.Now().UTC())
 	return nil
+}
+
+func (ix *Index) ingestAuditTx(r audit.Record, line []byte) error {
+	tx, err := ix.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() // no-op after a successful Commit
+	if err := ingestAudit(tx, r, line); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (ix *Index) AuditEvents(f AuditFilter) ([]AuditEvent, string, error) {
