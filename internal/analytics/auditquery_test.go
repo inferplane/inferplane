@@ -1,7 +1,10 @@
 package analytics
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -343,5 +346,49 @@ func TestAuditAutoOnlyExcludesAllow(t *testing.T) {
 	}
 	if seen["allow"] != 0 || seen["block"] != 10 || seen["unknown"] != 10 || len(got) != 20 {
 		t.Fatalf("auto-only verdicts = %v (rows %d)", seen, len(got))
+	}
+}
+
+// The detail hash is the chain hash of the stored line, so it equals the next
+// record's prev_hash. It is chain position, not a verification result.
+func TestAuditEventDetailHashLinksChain(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+	fs, err := audit.NewFileSink(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := audit.NewWriter("inst", filepath.Join(dir, "wal"), []audit.Sink{fs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Append(rec("01JC0000000000000000000201", "request_completed", 200, nil))
+	w.Append(rec("01JC0000000000000000000202", "request_completed", 200, nil))
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	ix := openIndex(t)
+	if _, err := ix.Replay(f); err != nil {
+		t.Fatal(err)
+	}
+	first, ok, err := ix.AuditEvent("01JC0000000000000000000201")
+	if err != nil || !ok {
+		t.Fatalf("first: %v %v", ok, err)
+	}
+	second, ok, err := ix.AuditEvent("01JC0000000000000000000202")
+	if err != nil || !ok {
+		t.Fatalf("second: %v %v", ok, err)
+	}
+	var next audit.Record
+	if err := json.Unmarshal(second.Record, &next); err != nil {
+		t.Fatal(err)
+	}
+	if first.Hash == "" || first.Hash != next.PrevHash {
+		t.Fatalf("hash = %q, next prev_hash = %q", first.Hash, next.PrevHash)
 	}
 }

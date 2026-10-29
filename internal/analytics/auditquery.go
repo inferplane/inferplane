@@ -1,6 +1,8 @@
 package analytics
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"slices"
 	"strconv"
@@ -63,6 +65,8 @@ type QueryFunc func(query string, args []any, each func(RowScanner) error) error
 // ExecFunc runs one statement.
 type ExecFunc func(query string, args ...any) error
 
+// AuditFilter selects console rows. AutoOnly lists block and unknown auto mode
+// verdicts only; allow verdicts are counted in the summary but never listed.
 type AuditFilter struct {
 	Kinds                                                                 []string
 	Team, KeyID, Model, Provider, Code, Category, Class, Session, TraceID string
@@ -73,9 +77,12 @@ type AuditFilter struct {
 }
 
 type AuditEventDetail struct {
-	Event     AuditEvent      `json:"event"`
-	Record    json.RawMessage `json:"record"`
-	Waterfall Waterfall       `json:"waterfall"`
+	Event  AuditEvent      `json:"event"`
+	Record json.RawMessage `json:"record"`
+	// Hash is the chain hash of the stored line ("sha256:" + hex), i.e. the
+	// next record's prev_hash. It shows chain position; it is not a verification.
+	Hash      string    `json:"hash,omitempty"`
+	Waterfall Waterfall `json:"waterfall"`
 }
 
 type AuditSession struct {
@@ -325,6 +332,8 @@ func RunAuditEvent(d Dialect, run QueryFunc, id string) (AuditEventDetail, bool,
 		}
 		e.Stream, e.Masked, e.WouldRestrict, e.PII, e.Fallback, e.HasBody = stream == 1, masked == 1, would == 1, pii == 1, fallback == 1, hasBody == 1
 		detail.Event, detail.Record, found = e, json.RawMessage(raw), true
+		sum := sha256.Sum256([]byte(raw))
+		detail.Hash = "sha256:" + hex.EncodeToString(sum[:])
 		var rec audit.Record
 		if json.Unmarshal([]byte(raw), &rec) == nil {
 			detail.Waterfall = WaterfallOf(rec)

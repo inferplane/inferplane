@@ -53,4 +53,14 @@ const labels = after.all().filter(n => n.className === "lab").map(n => n.textCon
 assert.deepEqual(labels, ["Attempt · bedrock · timeout", "Gateway denial"]);
 assert.ok(after.all().filter(n => /audit-wf-bar/.test(n.className)).every(n => /fail/.test(n.className) && !/NaN/.test(n.style.width)));
 assert.equal(run('msg("audit.wf.denied")'), "Gateway denial");
+// A current record with latency but no attempts (e.g. count_tokens) is not "legacy": one neutral full-width bar plus a short hint.
+const noAttempts = vm.runInContext('renderAuditWaterfall({ total_ms: 35, rows: [] })', ctx).all();
+assert.ok(!noAttempts.some(n => n.textContent === run('msg("audit.noTiming")')));
+assert.ok(noAttempts.some(n => n.textContent === run('msg("audit.noAttempt")')));
+const bars = noAttempts.filter(n => /audit-wf-bar/.test(n.className));
+assert.equal(bars.length, 1);
+assert.deepEqual([bars[0].style.left, bars[0].style.width], ["0%", "100%"]);
+assert.ok(!/fail|ok/.test(bars[0].className.replace("audit-wf-bar", "")));
+assert.equal(run('auditShownNote(100, 100)'), run('msg("audit.showingFirst")').replace("{n}", "100"));
+assert.equal(run('auditShownNote(5, "")'), "");
 console.log("audit_console.cjs: ok");

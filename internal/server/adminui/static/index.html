@@ -237,7 +237,7 @@
               <div class="card audit-list"><div class="table-wrap"><table class="data" id="audit-session-table"><thead><tr>
                 <th data-i18n="audit.sessionCol">session</th><th data-i18n="audit.teamKey">team · key</th><th data-i18n="audit.period">period</th>
                 <th class="num" data-i18n="audit.requests">requests</th><th class="num" data-i18n="audit.cost">cost</th><th data-i18n="audit.flags">flags</th>
-              </tr></thead><tbody></tbody></table></div></div>
+              </tr></thead><tbody></tbody></table></div><p id="audit-sessions-note" class="hint"></p></div>
               <div class="card" id="audit-session-detail"></div>
             </div>
             <p class="hint" data-i18n="audit.sessionHint">Sessions group requests by a key-scoped digest of X-Claude-Code-Session-Id. The raw ID is never stored.</p>
@@ -247,7 +247,7 @@
               <div class="card"><p class="microlabel" data-i18n="audit.piiCats">Detected categories</p><div id="audit-pii-cats" class="audit-bars"></div><p class="hint" data-i18n="audit.piiCatsHint">One request can match several categories, so the total can exceed the request count.</p></div>
               <div class="card"><p class="microlabel" data-i18n="audit.piiActions">Handling</p><div id="audit-pii-actions" class="audit-bars"></div><p class="hint" data-i18n="audit.piiShadowHint">Shadow policies do not block; they record “would restrict”.</p></div>
             </div>
-            <div class="card audit-list"><div class="table-wrap"><table class="data" id="audit-pii-table"><thead><tr>
+            <div class="card audit-list"><div class="table-wrap"><p id="audit-pii-note" class="hint"></p><table class="data" id="audit-pii-table"><thead><tr>
               <th data-i18n="audit.time">time</th><th data-i18n="audit.teamKey">team · key</th><th data-i18n="audit.category">category</th><th data-i18n="audit.handling">handling</th>
               <th data-i18n="audit.policy">policy · rule</th><th data-i18n="audit.boundary">boundary (planned → actual)</th>
             </tr></thead><tbody></tbody></table></div></div>
@@ -261,6 +261,7 @@
               <div class="card audit-list"><h2><span data-i18n="audit.autoTitle">Auto mode blocks</span> <span class="audit-pill est" data-i18n="audit.estimate">Estimate</span></h2>
                 <p class="hint" data-i18n="audit.autoHint">Verdicts come from two sources: Claude Code classifier &lt;block&gt; replies, and Bedrock safeguard results in the main response stream. Allow verdicts are counted, not listed.</p>
                 <p id="audit-auto-warning" class="hint audit-warn" hidden></p>
+                <p id="audit-auto-note" class="hint"></p>
                 <div class="table-wrap"><table class="data" id="audit-auto-table"><thead><tr>
                   <th data-i18n="audit.time">time</th><th data-i18n="audit.sessionKey">session · key</th><th data-i18n="audit.stage">stage</th><th data-i18n="audit.verdict">verdict</th><th data-i18n="audit.model">model</th>
                 </tr></thead><tbody></tbody></table></div>

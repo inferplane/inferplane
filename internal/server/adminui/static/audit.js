@@ -74,6 +74,8 @@ function auditCell(tr, content, cls) {
   tr.appendChild(td);
   return td;
 }
+// "Showing the first N" note for single-page tables; empty when nothing was cut off.
+function auditShownNote(count, next) { return next ? msg("audit.showingFirst").replace("{n}", String(count)) : ""; }
 function auditTime(ts) { return ts ? ts.replace("T", " ").slice(0, 19) : ""; }
 
 function auditFilters() {
@@ -269,6 +271,16 @@ function renderAuditDetail(detail) {
   const actor = auditEl("dl", "audit-kv");
   const key = auditEl("span", "", auditKeyLabel(e.key_id) + " · " + e.key_id + " ");
   key.appendChild(auditPill(msg("audit.fromAudit"), "ev"));
+  if (e.key_id) {
+    const open = auditEl("button", "linklike", msg("audit.openKey"));
+    open.type = "button";
+    open.addEventListener("click", () => {
+      showView("keys");
+      $("key-search").value = e.key_id;
+      applyRecordFilters();
+    });
+    key.appendChild(open);
+  }
   auditKV(actor, "audit.keyRow", key);
   const team = auditEl("span", "", e.team + " ");
   team.appendChild(auditPill(msg("audit.fromAudit"), "ev"));
@@ -346,6 +358,7 @@ function renderAuditDetail(detail) {
     auditKV(chain, "audit.traceId", e.trace_id || "—");
   }
   auditKV(chain, "audit.prevHash", rec.prev_hash || "—");
+  auditKV(chain, "audit.recordHash", detail.hash || "—");
   d.appendChild(auditSection(msg("audit.chainPos"), chain));
 }
 
@@ -359,8 +372,20 @@ function auditSection(title, child) {
 function renderAuditWaterfall(w) {
   const box = auditEl("div", "audit-wf");
   box.appendChild(auditEl("p", "microlabel", msg("audit.timeline") + " · " + auditDuration(w.total_ms)));
-  if (!w.rows || !w.rows.length || !w.total_ms) {
+  if (!w.total_ms) {
     box.appendChild(auditEl("p", "hint", msg("audit.noTiming")));
+    return box;
+  }
+  if (!w.rows || !w.rows.length) {
+    // Current record without provider attempts (e.g. count_tokens): not a legacy gap.
+    const row = auditEl("div", "audit-wf-row");
+    const track = auditEl("div", "audit-wf-track");
+    const bar = auditEl("span", "audit-wf-bar gate");
+    bar.style.left = "0%";
+    bar.style.width = "100%";
+    track.appendChild(bar);
+    row.append(auditEl("span", "lab", msg("audit.wf.gateway")), track, auditEl("span", "ms", auditDuration(w.total_ms)));
+    box.append(row, auditEl("p", "hint", msg("audit.noAttempt")));
     return box;
   }
   for (const r of w.rows) {
@@ -392,6 +417,7 @@ async function auditLoadSessions() {
   const tbody = $("audit-session-table").querySelector("tbody");
   tbody.textContent = "";
   $("audit-session-detail").textContent = "";
+  $("audit-sessions-note").textContent = auditShownNote(out.sessions.length, out.next);
   if (!out.sessions.length) {
     const tr = auditEl("tr", "static");
     auditCell(tr, msg("audit.sessionsEmpty"), "hint").colSpan = 6;
@@ -467,6 +493,7 @@ async function auditLoadPII() {
   const out = await api("GET", "/admin/audit/events" + auditQuery({ ...auditFilters(), pii: "true", limit: 100 }));
   const tbody = $("audit-pii-table").querySelector("tbody");
   tbody.textContent = "";
+  $("audit-pii-note").textContent = auditShownNote(out.events.length, out.next);
   if (!out.events.length) {
     const tr = auditEl("tr", "static");
     auditCell(tr, msg("audit.piiEmpty"), "hint").colSpan = 6;
@@ -515,6 +542,7 @@ async function auditLoadDenials() {
   const out = await api("GET", "/admin/audit/events" + auditQuery({ ...auditFilters(), auto: "true", limit: 100 }));
   const ab = $("audit-auto-table").querySelector("tbody");
   ab.textContent = "";
+  $("audit-auto-note").textContent = auditShownNote(out.events.length, out.next);
   if (!out.events.length) {
     const tr = auditEl("tr", "static");
     auditCell(tr, msg("audit.autoNotObserved"), "hint").colSpan = 5;

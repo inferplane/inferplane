@@ -53,8 +53,14 @@ func TestAuditI18nKeysHaveFourLanguages(t *testing.T) {
 		keys["audit.wf."+wf] = true
 	}
 	// Copy changes that must exist in all four languages even if a call site moves.
-	for _, k := range []string{"audit.wf.denied", "audit.autoHint", "audit.autoNotObserved", "audit.classNotReported", "audit.verdictAllow", "audit.verdictBlock", "audit.verdictUnknown", "audit.noTiming", "audit.keyAmbiguous"} {
+	for _, k := range []string{"audit.wf.denied", "audit.autoHint", "audit.autoNotObserved", "audit.classNotReported", "audit.verdictAllow", "audit.verdictBlock", "audit.verdictUnknown", "audit.noTiming", "audit.keyAmbiguous", "audit.noAttempt", "audit.recordHash", "audit.openKey", "audit.showingFirst", "audit.signatureWarn"} {
 		keys[k] = true
+	}
+	if strings.Contains(string(dict), `"audit.verdicts"`) {
+		t.Error("dead i18n key audit.verdicts must stay removed")
+	}
+	if !strings.Contains(string(dict), `ko: "게이트웨이 거부"`) {
+		t.Error("ko audit.wf.denied must use 게이트웨이")
 	}
 	for k := range keys {
 		line := regexp.MustCompile(`(?m)^\s*"` + regexp.QuoteMeta(k) + `": \{.*\},?$`).FindString(string(dict))
