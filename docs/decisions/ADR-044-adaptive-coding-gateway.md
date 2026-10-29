@@ -8,6 +8,9 @@ Implementation update (2026-09-11): [ADR-045](ADR-045-durable-budget-authority.m
 implements the Postgres monetary authority described below. Shared key/rate/quota
 state remains separate.
 
+Proposed (2026-10-29): [ADR-057](ADR-057-audit-console-evidence.md) adds a
+key-scoped session digest to audit records only; pins below are unchanged.
+
 ## Decision
 
 Keep the classifier, inspection and affinity decisions inside each mayu.
