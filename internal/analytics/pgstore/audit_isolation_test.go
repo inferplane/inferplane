@@ -44,7 +44,8 @@ func TestPgstoreNULModelDenialKeepsUsage(t *testing.T) {
 	}
 }
 
-// Any console insert failure rolls back to its savepoint; usage rows and the
+// A console row Postgres rejects as data (SQLSTATE class 22) fails the batch
+// savepoint; the row-by-row retry skips only that row, and usage rows and the
 // checkpoint still commit.
 func TestPgstoreAuditProjectionFailureKeepsUsage(t *testing.T) {
 	s := newTestStore(t)
@@ -54,7 +55,7 @@ func TestPgstoreAuditProjectionFailureKeepsUsage(t *testing.T) {
 	}
 	cleanup()
 	t.Cleanup(cleanup)
-	if _, err := s.db.Exec(ctx, `CREATE FUNCTION audit_probe_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'probe'; END $$;
+	if _, err := s.db.Exec(ctx, `CREATE FUNCTION audit_probe_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'probe' USING ERRCODE = '22023'; END $$;
 CREATE TRIGGER audit_probe_fail BEFORE INSERT ON audit_event_categories FOR EACH ROW EXECUTE FUNCTION audit_probe_fail()`); err != nil {
 		t.Fatal(err)
 	}

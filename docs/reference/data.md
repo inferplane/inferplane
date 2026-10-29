@@ -246,9 +246,13 @@ unvalidated. The projection is best-effort per record. Mode A boot replay gives
 each row its own savepoint in the replay transaction, and the live sink writes
 each row with its categories in one transaction; a row the store refuses is
 skipped and logged by record ID and store code only, never blocks the Usage
-rows, and is offered again by the next boot replay. Mode B gives each row its
-own savepoint, so a refused row never blocks the Usage rows or the checkpoint
-of the same batch.
+rows, and is offered again by the next boot replay. Mode B writes a tick's rows
+in one savepoint and, only when that fails with a data error (SQLSTATE class 22
+or 23), retries them row by row, each in its own savepoint; a row refused that
+way is skipped and logged the same way and never blocks the Usage rows or the
+checkpoint. Any other Mode B failure (a timeout, a deadlock, a lost connection)
+aborts the tick without advancing the checkpoint, so the next tick retries it;
+the logged error names only the SQLSTATE.
 
 | Column group | Columns |
 |---|---|

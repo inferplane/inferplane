@@ -499,14 +499,13 @@ func (s *Store) ingestItems(ctx context.Context, holder string, epoch int64, ite
 	}
 
 	touched := map[rollupKey]struct{}{}
+	var rows []analytics.AuditEventRow
 	for _, it := range items {
 		r := it.rec
 		// The aggregator passes the exact line, so record_json and the detail
 		// hash are the chain bytes, as in Mode A.
 		if row, ok := analytics.ProjectAuditEvent(r, it.line); ok {
-			if err := projectAuditEvent(ctx, tx, row); err != nil {
-				return err
-			}
+			rows = append(rows, row)
 		}
 		if !analytics.Observable(r) {
 			continue
@@ -528,6 +527,9 @@ func (s *Store) ingestItems(ctx context.Context, holder string, epoch int64, ite
 		}
 		touched[key] = struct{}{}
 	}
+	if err := projectAuditEvents(ctx, tx, rows); err != nil {
+		return err
+	}
 	for key := range touched {
 		if err := recomputeRollup(ctx, tx, key); err != nil {
 			return fmt.Errorf("recompute analytics rollup: %w", err)
@@ -547,32 +549,88 @@ func (s *Store) ingestItems(ctx context.Context, holder string, epoch int64, ite
 	return nil
 }
 
-// projectAuditEvent stores one console row inside a savepoint of the ingest
-// transaction. The console projection is best-effort per record: a failed
-// insert rolls back to the savepoint, is logged by record ID and SQLSTATE only
-// (Postgres messages can quote the offending bytes), and never blocks the
-// usage rows or the checkpoint of the same batch. Only a failing savepoint
-// statement (an unusable transaction) is returned.
-func projectAuditEvent(ctx context.Context, tx pgx.Tx, row analytics.AuditEventRow) error {
+// projectAuditEvents stores a batch's console rows inside ONE savepoint of the
+// ingest transaction, so a tick holds one subtransaction instead of one per
+// row (Postgres caches 64 per backend; overflowing that cache slows snapshots
+// for every session on the server, ADR-046 admission included). Only when the
+// batch fails with a data error does it retry row by row, each row in its own
+// savepoint. A row Postgres rejects as data (SQLSTATE class 22 or 23) is
+// skipped and logged by record ID and SQLSTATE only; any other failure (a
+// timeout, a deadlock, a lost connection) is returned, so the tick rolls back
+// without advancing its checkpoint and the next tick retries the records.
+func projectAuditEvents(ctx context.Context, tx pgx.Tx, rows []analytics.AuditEventRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	err := inSavepoint(ctx, tx, func(sp pgx.Tx) error {
+		for _, row := range rows {
+			if err := insertAuditEvent(ctx, sp, row); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err == nil {
+		return nil
+	}
+	if !dataError(err) {
+		return consoleError(err)
+	}
+	for _, row := range rows {
+		err := inSavepoint(ctx, tx, func(sp pgx.Tx) error { return insertAuditEvent(ctx, sp, row) })
+		switch {
+		case err == nil:
+		case dataError(err):
+			analytics.LogAuditSkip(row.ID, sqlState(err))
+		default:
+			return consoleError(err)
+		}
+	}
+	return nil
+}
+
+func insertAuditEvent(ctx context.Context, tx pgx.Tx, row analytics.AuditEventRow) error {
+	return analytics.InsertAuditEvent(analytics.PostgresDialect, func(q string, args ...any) error {
+		_, err := tx.Exec(ctx, q, args...)
+		return err
+	}, row)
+}
+
+// inSavepoint runs fn inside a savepoint of tx; when fn fails, tx is rolled
+// back to the savepoint and fn's error is returned.
+func inSavepoint(ctx context.Context, tx pgx.Tx, fn func(pgx.Tx) error) error {
 	sp, err := tx.Begin(ctx) // pgx: SAVEPOINT inside an open transaction
 	if err != nil {
 		return fmt.Errorf("begin audit projection savepoint: %w", err)
 	}
-	err = analytics.InsertAuditEvent(analytics.PostgresDialect, func(q string, args ...any) error {
-		_, err := sp.Exec(ctx, q, args...)
-		return err
-	}, row)
-	if err == nil {
-		if err := sp.Commit(ctx); err != nil { // RELEASE SAVEPOINT
-			return fmt.Errorf("release audit projection savepoint: %w", err)
+	if err := fn(sp); err != nil {
+		if rbErr := sp.Rollback(ctx); rbErr != nil { // ROLLBACK TO SAVEPOINT
+			return fmt.Errorf("roll back audit projection savepoint: %w", rbErr)
 		}
-		return nil
+		return err
 	}
-	if rbErr := sp.Rollback(ctx); rbErr != nil { // ROLLBACK TO SAVEPOINT
-		return fmt.Errorf("roll back audit projection savepoint: %w", rbErr)
+	if err := sp.Commit(ctx); err != nil { // RELEASE SAVEPOINT
+		return fmt.Errorf("release audit projection savepoint: %w", err)
 	}
-	analytics.LogAuditSkip(row.ID, sqlState(err))
 	return nil
+}
+
+// dataError reports Postgres rejecting the row's own data: SQLSTATE class 22
+// (data exception) or 23 (integrity constraint violation). Retrying such a
+// row cannot succeed; every other failure may.
+func dataError(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (strings.HasPrefix(pgErr.Code, "22") || strings.HasPrefix(pgErr.Code, "23"))
+}
+
+// consoleError names a failed console write by SQLSTATE only: the tick error
+// is logged, and a Postgres message can quote the offending request bytes.
+func consoleError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return fmt.Errorf("project audit console rows: SQLSTATE %s", pgErr.Code)
+	}
+	return fmt.Errorf("project audit console rows: %w", err)
 }
 
 func sqlState(err error) string {

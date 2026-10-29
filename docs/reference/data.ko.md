@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: ff5f121cee9903ef2badfe7a2491f8b108e7044e8753c84a30a7c4b15a96665a
+translation_source_sha256: 79e07fc12c8103afdda1fda6973e9a6f01575dd3eeef5d87fde4fe40f5c8b070
 ---
 
 # 데이터 구현 {#data}
@@ -184,7 +184,11 @@ Usage 수치는 바뀌지 않습니다. 정확한 감사 행은 두 모드 모�
 최선 노력입니다. Mode A 부팅 재생은 재생 트랜잭션 안에서 행마다 savepoint를 두고, 실시간
 싱크는 행과 카테고리를 한 트랜잭션으로 씁니다. 저장소가 거부한 행은 기록 ID와 저장소 코드만
 로그에 남기고 건너뛰며, Usage 행을 막지 않고, 다음 부팅 재생에서 다시 시도됩니다. Mode B는
-행마다 savepoint를 두므로 거부된 행이 같은 배치의 Usage 행이나 체크포인트를 막지 않습니다.
+한 틱의 행을 savepoint 하나로 쓰고, 데이터 오류(SQLSTATE 클래스 22 또는 23)로 실패할 때만
+행마다 savepoint를 두어 다시 씁니다. 그렇게 거부된 행은 같은 방식으로 로그에 남기고 건너뛰며
+Usage 행이나 체크포인트를 막지 않습니다. 그 밖의 Mode B 실패(시간 초과, 교착, 연결 끊김)는
+체크포인트를 진행하지 않고 틱을 중단하므로 다음 틱이 다시 시도하며, 로그의 오류에는 SQLSTATE만
+남습니다.
 
 | 열 그룹 | 열 |
 |---|---|
