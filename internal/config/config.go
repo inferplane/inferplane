@@ -270,6 +270,14 @@ type AuditConfig struct {
 	Sinks       []AuditSink    `json:"sinks"`
 	Anchor      *AnchorConfig  `json:"anchor,omitempty"`
 	LogBodies   *BodyLogConfig `json:"log_bodies,omitempty"`
+
+	ClientEvidence *ClientEvidenceConfig `json:"client_evidence,omitempty"`
+}
+
+// ClientEvidenceConfig selects ADR-057 client evidence. Absent = both on.
+type ClientEvidenceConfig struct {
+	SessionRef string `json:"session_ref,omitempty"` // "key_scoped" (default) | "off"
+	AutoMode   string `json:"auto_mode,omitempty"`   // "on" (default) | "off"
 }
 
 // BodyLogConfig enables opt-in request/response body capture (D4, ADR-018).
@@ -508,6 +516,8 @@ type OTelConfig struct {
 	Insecure    bool     `json:"insecure,omitempty"`
 	SampleRatio *float64 `json:"sample_ratio,omitempty"`
 	ServiceName string   `json:"service_name,omitempty"`
+
+	TraceLinkTemplate string `json:"trace_link_template,omitempty"` // console link only; {trace_id} is replaced by a 32-hex trace ID (ADR-057)
 }
 
 type Config struct {
@@ -813,6 +823,9 @@ func LoadRaw(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := validateOTel(cfg.OTel); err != nil {
+		return nil, err
+	}
+	if err := validateClientEvidence(cfg.Audit.ClientEvidence); err != nil {
 		return nil, err
 	}
 	if err := validateAnchor(cfg.Audit.Anchor); err != nil {
@@ -1266,6 +1279,37 @@ func validateOTel(o *OTelConfig) error {
 	}
 	if o.SampleRatio != nil && (*o.SampleRatio < 0 || *o.SampleRatio > 1) {
 		return fmt.Errorf("config: otel.sample_ratio must be in [0,1], got %v", *o.SampleRatio)
+	}
+	return validateTraceLinkTemplate(o.TraceLinkTemplate)
+}
+
+func validateClientEvidence(c *ClientEvidenceConfig) error {
+	if c == nil {
+		return nil
+	}
+	switch c.SessionRef {
+	case "", "key_scoped", "off":
+	default:
+		return fmt.Errorf("config: audit.client_evidence.session_ref must be \"key_scoped\" or \"off\", got %q", c.SessionRef)
+	}
+	switch c.AutoMode {
+	case "", "on", "off":
+	default:
+		return fmt.Errorf("config: audit.client_evidence.auto_mode must be \"on\" or \"off\", got %q", c.AutoMode)
+	}
+	return nil
+}
+
+func validateTraceLinkTemplate(tpl string) error {
+	if tpl == "" {
+		return nil
+	}
+	if !strings.Contains(tpl, "{trace_id}") {
+		return fmt.Errorf("config: otel.trace_link_template must contain {trace_id}")
+	}
+	u, err := url.Parse(strings.ReplaceAll(tpl, "{trace_id}", strings.Repeat("0", 32)))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("config: otel.trace_link_template must be an http or https URL with a host")
 	}
 	return nil
 }

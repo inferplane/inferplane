@@ -10,6 +10,7 @@ import (
 	"github.com/inferplane/inferplane/internal/alert"
 	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/internal/bodystore"
+	"github.com/inferplane/inferplane/internal/clientctx"
 	"github.com/inferplane/inferplane/internal/filter"
 	"github.com/inferplane/inferplane/internal/governance"
 	"github.com/inferplane/inferplane/internal/keystore"
@@ -51,6 +52,16 @@ type dataMuxOptions struct {
 	usage           *telemetry.Collector
 	maxRequestBytes int64
 	governanceGate  func() (bool, string)
+	clientEvidence  clientctx.Mode
+}
+
+func newDataMuxOptions() dataMuxOptions {
+	return dataMuxOptions{clientEvidence: clientctx.DefaultMode()}
+}
+
+// WithClientEvidence selects ADR-057 client evidence (default: both on).
+func WithClientEvidence(m clientctx.Mode) DataMuxOption {
+	return func(o *dataMuxOptions) { o.clientEvidence = m }
 }
 
 // WithGovernanceGate installs the control_plane.require_sync gate (review/
@@ -108,7 +119,7 @@ func WithMaxRequestBytes(n int64) DataMuxOption {
 // (usage telemetry today) without growing the positional signature — every
 // existing call site compiles unchanged.
 func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *audit.Writer, gov *governance.Governor, m *metrics.Metrics, mask *filter.Masking, teamPolicy func(team string) (keystore.TeamRecord, bool), bodies *bodystore.Recorder, cliVerifier OIDCVerifier, cliMapping adminauth.MappingConfig, cliConfig func() authapi.ConfigView, cliKeyTTL time.Duration, opts ...DataMuxOption) http.Handler {
-	var o dataMuxOptions
+	o := newDataMuxOptions()
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -229,7 +240,7 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	if aud != nil {
 		governed = auditGateMiddleware(aud.Ready, governed)
 	}
-	dataMux.Handle("/", maxBytesMiddleware(limit, KeyAuth(store, governed)))
+	dataMux.Handle("/", maxBytesMiddleware(limit, KeyAuth(store, clientctx.Middleware(o.clientEvidence, governed))))
 	return dataMux
 }
 
