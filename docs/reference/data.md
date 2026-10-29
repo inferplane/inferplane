@@ -157,5 +157,83 @@ Audit `request.routing` is appended with `omitempty` and mixed-version exact-byt
 verification. It records requested/selected/proposed model, bounded decision fields,
 policy names/generations, and planned/actual provider and boundary. Actual attempt
 fields distinguish same-model retries across providers. No detected text, prompt,
-key ID, or client session value is added. Existing body logging stays independent.
+key ID, or client session value is added to `request.routing`; the ADR-057
+`client.session_ref` digest is a separate field. Existing body logging stays independent.
 No-rule traffic omits the field. See [decision semantics](../policy-routing.md#read-decisions-and-evaluate-rollout).
+
+## Audit console evidence (ADR-057)
+
+The console reads three append-only, `omitempty` additions to terminal audit
+records (a `request_completed` record, or a `request_started` record that carries
+an outcome, which is how every gateway denial is written), plus a console-only
+projection in the analytics index. Older records and the exact-byte chain
+verification are unchanged.
+
+`attempts[]` has at most eight entries: the first seven and the last.
+
+| Field | Type | Values and bounds |
+|---|---|---|
+| `provider` | string | Configured provider name, never a URL. |
+| `model` | string | Model sent to that provider. |
+| `status` | string | `ok`, `upstream_error`, `model_not_found`, `stream_failed`, `timeout`, `canceled`. |
+| `http` | integer | The upstream's own status; omitted when the upstream never answered. |
+| `start_ms`, `dur_ms` | integer | Offset from request start; duration. |
+
+An attempt ends when the provider exchange ends, before settlement and body
+capture, so the timeline's `settle` row is gateway work after the provider.
+`model_not_found` is the ingress's own verdict at a cross-model boundary. A
+completed stream or an upstream verdict is not overwritten by a later cancel. A
+request denied after an earlier attempt keeps that attempt.
+
+| Field | Type | Values and bounds |
+|---|---|---|
+| `client.request_class` | string | `main`, `subagent`, `workflow`, `compaction`, `auxiliary`, `side_reply`, from the `x-claude-code-request-class` header only; any other value is dropped. Claude Code 2.1.312 does not send it, so the field is absent on real traffic. |
+| `client.session_ref` | string | `s1:` plus 32 hex digits (see [security](security.md#audit-console-adr-057)). |
+| `auto_mode.verdict` | string | `block`, `allow`, `unknown`. An estimate. Only `request_completed` records carry it. |
+| `auto_mode.stage` | string | `s1`, `s2`, `server`. |
+| `auto_mode.signature` | string | `claude-code-2.1`, the client response format the rules follow. |
+
+`latency{total_ms, ttft_ms}` is now written on every terminal record on every
+ingress; `ttft_ms` is omitted when zero. When a request makes more than one
+attempt, `outcome.fallback_used` and `outcome.fallback_chain` (the attempts'
+provider names) are written from `attempts`; they were declared before but
+never written.
+
+### Console tables
+
+Both stores gain `audit_events` (one row per terminal record) and
+`audit_event_categories (id, category)`, created with the existing index. The
+`events` table and Usage numbers are unchanged. The exact audit line is kept in
+`record_json`. Projection is first-write-wins on `id`.
+
+| Column group | Columns |
+|---|---|
+| Identity and time | `id` (primary key), `ts`, `ts_ms`, `event`, `kind`, `team`, `key_id`, `ingress`, `stream`, `status` |
+| Decision | `deny_code`, `routing_reason`, `privacy`, `masked`, `would_restrict`, `pii`, `policy_ref`, `planned_boundary`, `actual_boundary` |
+| Client and trace | `request_class`, `session_ref`, `trace_id` |
+| Routing | `model_requested`, `model_actual`, `provider`, `fallback`, `attempt_count` |
+| Auto mode | `auto_verdict`, `auto_stage`, `auto_signature` |
+| Usage | `input_tokens`, `output_tokens`, `cost_micros`, `total_ms`, `ttft_ms`, `has_body` |
+| Source | `record_json` |
+
+`kind` is derived in the index and never written to the audit chain. First
+match wins: `auto_mode_blocked` (verdict `block`), `privacy_blocked`,
+`policy_denied`, `upstream_error`, `privacy_masked`, `privacy_internal`, `ok`.
+For a status of 400 or more, a completed record whose last attempt failed is
+`upstream_error` before any code matching, because the code is the upstream's;
+gateway decisions and legacy completed records without attempts are matched by
+their deny code. A partial stream is `upstream_error`.
+
+Coverage: Mode A is built from the configured file sinks, which a restart
+replays, and has no rebuild endpoint. Mode B `POST /admin/analytics/rebuild`
+truncates the audit tables with the other derived tables and repopulates them
+from the sources. A record no longer in any source is not in the console;
+`coverage_start_ms` in the summary is the earliest time the index holds.
+
+### Configuration
+
+| Key | Values | Effect |
+|---|---|---|
+| `audit.client_evidence.session_ref` | `key_scoped` (default), `off` | `off` stops writing `client.session_ref`; existing records keep their links. `request_class` is unaffected. |
+| `audit.client_evidence.auto_mode` | `on` (default), `off` | `off` stops auto mode estimation. |
+| `otel.trace_link_template` | `http` or `https` URL containing `{trace_id}` | Console link only; `{trace_id}` is replaced by the record's 32-hex trace ID. Sent to the console through `/admin/capabilities`. |

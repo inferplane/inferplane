@@ -1,6 +1,6 @@
 ---
 translation_source: api-reference.md
-translation_source_sha256: 9c3feca93b68fa421083252513c6605cd2609367ae838887eca550d45f109363
+translation_source_sha256: 2590629c85d8a3910533cb043c8c273f3efce0061295cf194157282d8c51a579
 ---
 
 # API 레퍼런스 {#api-reference}
@@ -219,6 +219,31 @@ unavailable/unpriced에서 숫자 0을 알려진 달러 금액으로 표시하�
 비스트리밍 요청만 지원하며 stream·background는 거부합니다. 브리지 본문 상한은 64 MiB이고 데이터 영역의 설정된 본문 제한도 적용됩니다. 브라우저 응답 보관은 4 MiB로 제한됩니다. 바깥 HTTP 상태는 브리지 인증·검증 결과이며, 결과의 `http_status`가 실제 추론 상태입니다. 응답에는 `outcome`, `response_success`, `stop_reason`, `duration_ms`, 출력, 사용량 근거, 가격 버전·비용, `accounting_known`, `attempts`, `unsettled_attempts`가 포함됩니다.
 
 `ttft_ms`는 null입니다. 출력 토큰/E2E 초는 디코딩 처리량이 아닙니다. HTTP 200에서도 거절·출력 중단은 응답 실패로 집계합니다. 비용 확인에는 단일 시도·완전한 정산·사용량 근거·가격이 필요하며 AWS 청구서 대조를 뜻하지 않습니다. 재시도 후 마지막 정산 비용만 있으면 전체 비용 확인으로 표시하지 않습니다. 응답은 `no-store`이며 제어 영역 바이너리는 추론을 처리하지 않습니다.
+
+### 감사 콘솔 (ADR-057) {#audit-console-adr-057}
+
+이 읽기 전용 경로는 **full-admin** 권한이 필요하며(토큰이 없으면 401, 비관리자는 403) 분석
+인덱스가 켜져 있을 때만 마운트됩니다. `GET /admin/capabilities`가 `audit_console`을
+보고합니다. `GET`만 허용합니다.
+
+```text
+GET /admin/audit/events?kind=policy_denied&limit=100&before=<event-id>
+GET /admin/audit/events/{id}
+GET /admin/audit/sessions?since=2026-10-29T00:00:00Z
+GET /admin/audit/sessions/{ref}?after=<event-id>
+GET /admin/audit/summary
+```
+
+목록 경로는 `since`/`until`(RFC 3339, 기본 최근 24시간, 최대 366일. `+` 오프셋은
+`%2B`로 인코딩), `limit`(1-200, 기본 100), 커서 `before`/`after`, 필터 `kind`, `team`,
+`key_id`, `model`, `provider`, `code`, `class`, `category`, `session`, `trace_id`,
+`pii=true`, `auto=true`(자동 모드 `block`·`unknown` 판정만)를 받습니다. 오류는
+`{"error":"<code>"}`이며 400 `invalid_range`, `invalid_limit`, `invalid_cursor`,
+`invalid_kind`, `invalid_filter`, `invalid_id`, 404 `not_found`, 405
+`method_not_allowed`, 500 `query_failed`입니다. 이벤트 상세 응답의 `hash`는 저장된 감사
+행의 SHA-256으로 기록의 체인 위치를 보여 줄 뿐 검증이 아닙니다.
+[필드 계약](reference/api.ko.md#audit-console-adr-057)과
+[기록 필드](reference/data.ko.md#audit-console-evidence-adr-057)를 참고하세요.
 
 ## 오류 코드 {#error-codes}
 

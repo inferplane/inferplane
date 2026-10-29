@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: 26d5decf9bf63faee3b7d8b5be65531a0b45f6aad8f9fa1c608499f635a3d3c4
+translation_source_sha256: cfa68eb3f4a167a116966541642808217715db528871c85fc5f1c3891b811ea5
 ---
 
 # API 구현 {#api}
@@ -165,3 +165,49 @@ API의 정수 산정액은 청구서·작업 품질 지표·승인 크레딧이 
 Mode-B 마이그레이션·backfill은 트랜잭션으로 수행하지만 기존 checkpoint 이후
 건너뛴 원본을 재생하지는 않습니다. 과거 투영 건수 0도 완전한 이력을 증명하지
 않습니다. 어느 프로파일에서도 분석 변경은 금전 권한을 변경하지 않습니다.
+
+## 감사 콘솔 (ADR-057) {#audit-console-adr-057}
+
+분석 인덱스의 콘솔 투영을 읽는 읽기 전용 경로 다섯 개입니다. 모두 **full-admin**
+권한이 필요합니다. 토큰이 없으면 401, 인증된 비관리자는 403을 받습니다. 분석 인덱스가
+켜져 있고 그 저장소가 콘솔 조회를 구현할 때만 마운트되며(SQLite Mode A와 PostgreSQL
+Mode B 모두 구현), 그렇지 않으면 경로가 없고 `GET /admin/capabilities`는
+`audit_console: false`를 보고합니다. `otel.trace_link_template`을 설정하면 같은
+엔드포인트가 `trace_link_template`도 반환합니다. `GET`만 허용하며(405
+`method_not_allowed`) 응답은 `no-store`입니다.
+
+```text
+GET /admin/audit/events?kind=policy_denied,upstream_error&limit=100
+GET /admin/audit/events/{id}
+GET /admin/audit/sessions?since=2026-10-29T00:00:00Z
+GET /admin/audit/sessions/{ref}?after=<event-id>
+GET /admin/audit/summary
+```
+
+| 경로 | 반환 |
+|---|---|
+| `/admin/audit/events` | `{"events":[...],"next":"<id>"}`, 최신순. 다음 페이지는 `next`를 `before`로 전달합니다. |
+| `/admin/audit/events/{id}` | `{"event":{...},"record":{...},"hash":"sha256:...","waterfall":{...}}`. `record`는 저장된 감사 행입니다. `hash`는 그 행의 SHA-256으로 기록의 체인 위치를 보여 줄 뿐 체인 검증이 아닙니다(검증은 `/admin/audit/verify`). `waterfall`은 `latency`와 `attempts`에서 만든 타임라인입니다(행 종류 `gateway`, `attempt`, `settle`, `denied`. 기록에 지연 시간이 없으면 행이 없습니다). |
+| `/admin/audit/sessions` | `{"sessions":[...],"next":"<id>"}`. `session_ref`별 한 행(없는 기록은 세션이 아님)과 요청·거부·PII·자동 모드 차단·서브에이전트 수, 비용, 처음·마지막 시각. |
+| `/admin/audit/sessions/{ref}` | `{"events":[...],"next":"<id>"}`, 오래된 순. `s1:` 세션 다이제스트 하나의 이벤트이며 `after`와 `limit`만 적용합니다. |
+| `/admin/audit/summary` | 종류별 건수, 상위 10개 카테고리, PII 건수(`masked`, `internal`, `blocked`, `shadow`), 상위 50개 거부, 자동 모드 건수(`block`, `allow`, `unknown`, `signatures`), 12개 균등 시간 구간, 인덱스가 가진 가장 이른 시각 `coverage_start_ms`. |
+
+목록 경로와 요약이 공유하는 쿼리 파라미터입니다. 모든 값을 검증하며 잘못된 값은 마지막
+열의 닫힌 400 코드를 반환합니다.
+
+| 파라미터 | 규칙 | 코드 |
+|---|---|---|
+| `since`, `until` | RFC 3339 시각. 기본 구간은 최근 24시간이며 `until`만 주면 `since`는 24시간 앞입니다. `since`는 `until`보다 앞서야 하고 구간은 366일을 넘을 수 없습니다. 원시 URL에서 `+` UTC 오프셋은 `%2B`로 보내야 하며 아니면 공백으로 해석됩니다. | `invalid_range` |
+| `limit` | 1~200 정수(`/sessions/{ref}`는 500). 기본 100. | `invalid_limit` |
+| `before`, `after` | 26자 이벤트 ID(ULID). | `invalid_cursor` |
+| `kind` | `ok`, `policy_denied`, `privacy_blocked`, `privacy_masked`, `privacy_internal`, `upstream_error`, `auto_mode_blocked`의 쉼표 구분 부분집합. | `invalid_kind` |
+| `session` | `s1:` 다음 소문자 16진수 32자리. | `invalid_filter` |
+| `trace_id` | 소문자 16진수 32자리. | `invalid_filter` |
+| `code`, `class`, `category` | `[a-z0-9_]` 1~64자. | `invalid_filter` |
+| `team`, `key_id`, `model`, `provider` | 최대 256바이트. `model`은 요청 모델 또는 실제 모델과 일치합니다. | `invalid_filter` |
+| `pii=true` | PII 근거가 있는 행만. | 없음 |
+| `auto=true` | 자동 모드 판정이 `block` 또는 `unknown`인 행만. `allow`는 요약에서 세지만 목록에는 나오지 않습니다. | 없음 |
+
+잘못된 `{id}`·`{ref}`는 400 `invalid_id`, 없는 이벤트는 404 `not_found`입니다. 저장소
+실패는 상세 없이 500 `query_failed`입니다. 오류 본문은 `{"error":"<code>"}`이며 입력을
+되돌려 주지 않습니다.
