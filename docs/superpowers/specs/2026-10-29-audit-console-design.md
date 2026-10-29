@@ -170,7 +170,8 @@ type AutoModeRef struct {
 ```
 
 - `attempts` holds at most 8 entries (longer chains keep the first 7 and the
-  last). Only the `request_completed` record carries it.
+  last). The terminal record carries the attempts; a request denied after an
+  earlier attempt keeps them.
 - When `attempts` has more than one entry, `outcome.fallback_used` becomes
   `true` and `outcome.fallback_chain` lists the attempted providers in order.
   Both fields are already part of the documented wire shape; until now they
@@ -610,8 +611,8 @@ type AutoModeRef struct {
 //   AutoMode *AutoModeRef `json:"auto_mode,omitempty"`
 ```
 
-- `attempts`는 최대 8개입니다(더 길면 앞의 7개와 마지막 1개). `request_completed`
-  기록에만 붙습니다.
+- `attempts`는 최대 8개입니다(더 길면 앞의 7개와 마지막 1개). 시도 목록은
+  최종(terminal) 기록에 붙고, 앞선 시도 뒤에 거부된 요청도 그 시도들을 유지합니다.
 - `attempts`가 2개 이상이면 `outcome.fallback_used`를 `true`로,
   `outcome.fallback_chain`을 시도한 provider 순서로 채웁니다. 두 필드는 이미
   문서화된 wire 형식이지만 지금까지 한 번도 채워지지 않았습니다. 옛 기록은 바뀌지
