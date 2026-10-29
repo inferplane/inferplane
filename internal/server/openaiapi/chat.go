@@ -247,6 +247,8 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		var maskErr error
 		canonical, maskErr = openai.RequestToCanonical(result.SanitizedBody)
 		if len(result.SanitizedBody) == 0 || maskErr != nil {
+			failed := "masking_failed"
+			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: 400, Error: &failed}, traceID)
 			writeErr(w, 400, "invalid_request_error", "request could not be PII-masked")
 			return
 		}
@@ -260,7 +262,11 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if h.mask.Enabled(p.Team) && !result.Decision.Masked {
 		// Audit the security-critical rejection (a masking-bypass attempt) — a
 		// silent reject would be a blind spot in the tamper-evident chain (P4 gate).
-		h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: 400}, traceID)
+		// Observe already ran after RouteRequest; nil metrics adds the
+		// refusal's evidence without a second routing-decision count.
+		result.Decision.Reason = "mask_failed"
+		req = requestpolicy.Observe(w, req, result, nil)
+		h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: 400, Error: &result.Decision.Reason}, traceID)
 		h.metrics.ObserveRequest(ingressName, rejectedModelLabel, "", p.Team, 400, time.Since(start).Seconds(), 0)
 		tracing.SetStatus(span, false, "pii mask bypass blocked")
 		writeErr(w, 400, "invalid_request_error", "PII masking is enabled for your team but not supported on the OpenAI-compatible endpoint yet; use /v1/messages")

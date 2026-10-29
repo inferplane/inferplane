@@ -263,6 +263,8 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	tracing.SetGenAIRequest(span, model)
 	if result.MaskRequired {
 		if len(result.SanitizedBody) == 0 || json.Unmarshal(result.SanitizedBody, &parsed) != nil {
+			failed := "masking_failed"
+			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest, Error: &failed}, false, traceID)
 			writeErr(w, http.StatusBadRequest, "request could not be PII-masked")
 			return
 		}
@@ -282,22 +284,23 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				n = 1
 			}
 		}
+		// A masking error and an unreadable result are the same refusal.
+		var reparsed schema.ChatRequest
+		if err == nil && n > 0 {
+			err = json.Unmarshal(masked, &reparsed)
+		}
 		if err != nil {
-			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
+			// Observe already ran after RouteRequest; nil metrics adds the
+			// refusal's evidence without a second routing-decision count.
+			result.Decision.Reason = "mask_failed"
+			req = requestpolicy.Observe(w, req, result, nil)
+			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest, Error: &result.Decision.Reason}, false, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "pii mask failed")
 			writeErr(w, http.StatusBadRequest, "request could not be PII-masked")
 			return
 		}
 		if n > 0 {
-			var reparsed schema.ChatRequest
-			if err := json.Unmarshal(masked, &reparsed); err != nil {
-				h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
-				h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
-				tracing.SetStatus(span, false, "pii mask failed")
-				writeErr(w, http.StatusBadRequest, "request could not be PII-masked")
-				return
-			}
 			raw = masked
 			parsed = reparsed
 			piiMasked = true

@@ -244,6 +244,8 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	tracing.SetGenAIRequest(span, model)
 	if result.MaskRequired {
 		if len(result.SanitizedBody) == 0 || json.Unmarshal(result.SanitizedBody, &parsed) != nil {
+			failed := "masking_failed"
+			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: 400, Error: &failed}, false, traceID)
 			writeErr(w, 400, "invalid_request_error", "request could not be PII-masked")
 			return
 		}
@@ -257,25 +259,21 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// rejects the request; the unmasked body is never forwarded.
 	piiMasked := result.Decision.Masked
 	if h.mask.Enabled(p.Team) {
-		masked, n, err := maskBody(raw, h.mask.Filter)
+		masked, reparsed, n, err := legacyMask(raw, h.mask.Filter)
 		if err != nil {
-			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: 400}, false, traceID)
+			// Observe already ran after RouteRequest; nil metrics adds the
+			// refusal's evidence without a second routing-decision count.
+			result.Decision.Reason = "mask_failed"
+			req = requestpolicy.Observe(w, req, result, nil)
+			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: 400, Error: &result.Decision.Reason}, false, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, 400, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "pii mask failed")
 			writeErr(w, 400, "invalid_request_error", "request could not be PII-masked")
 			return
 		}
 		if n > 0 {
-			var reparsed schema.ChatRequest
-			if err := json.Unmarshal(masked, &reparsed); err != nil {
-				h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: 400}, false, traceID)
-				h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, 400, time.Since(start).Seconds(), 0)
-				tracing.SetStatus(span, false, "pii mask failed")
-				writeErr(w, 400, "invalid_request_error", "request could not be PII-masked")
-				return
-			}
 			raw = masked
-			parsed = reparsed
+			parsed = *reparsed
 			piiMasked = true
 			h.metrics.ObservePIIMask(p.Team, n)
 		}
