@@ -19,6 +19,7 @@ import (
 	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
+	"github.com/inferplane/inferplane/internal/server/requestpolicy"
 	"github.com/inferplane/inferplane/pkg/schema"
 	"github.com/inferplane/inferplane/providers"
 	"github.com/inferplane/inferplane/providers/testing/mockprovider"
@@ -214,12 +215,46 @@ func TestMessagesStreamMidErrorIsStreamFailedPartial(t *testing.T) {
 	}
 }
 
-func TestMessagesStreamCleanIsOKAndEndsBeforeTotal(t *testing.T) {
-	done := serveEvidence(t, evStream{events: []*providers.StreamEvent{chunkEv("message_start"), chunkEv("message_stop")}}, true)
-	a := done.Attempts[0]
-	if a.Status != audit.AttemptOK || a.HTTP != 200 || a.StartMs+a.DurMs > done.Latency.TotalMs {
-		t.Fatalf("attempt = %+v latency = %+v", a, done.Latency)
+// slowSettle delays settlement by 20ms through the request-scoped settlement
+// observer, a seam that runs after the provider exchange and before the audit
+// record is written. The final attempt must have ended before that delay.
+func slowSettleRequest(body string, p keystore.Principal) *http.Request {
+	req := evidenceRequest(body, p)
+	return req.WithContext(requestpolicy.WithSettlementObserver(req.Context(), func(*audit.CostRef, *schema.Usage, bool) {
+		time.Sleep(20 * time.Millisecond)
+	}))
+}
+
+func requireAttemptEndedBeforeSettle(t *testing.T, done audit.Record) {
+	t.Helper()
+	if len(done.Attempts) == 0 || done.Latency == nil {
+		t.Fatalf("record = %+v", done)
 	}
+	a := done.Attempts[len(done.Attempts)-1]
+	if a.Status != audit.AttemptOK || a.HTTP != 200 {
+		t.Fatalf("attempt = %+v", a)
+	}
+	if gap := done.Latency.TotalMs - (a.StartMs + a.DurMs); gap < 15 {
+		t.Fatalf("attempt %+v includes settlement: total %d, gap %d ms (want >= 15)", a, done.Latency.TotalMs, gap)
+	}
+}
+
+func TestMessagesStreamAttemptEndsBeforeSettlement(t *testing.T) {
+	w, buf := evidenceWriter(t)
+	h := NewMessagesHandlerFull(testRouter(), w, nil)
+	h.ServeHTTP(httptest.NewRecorder(), slowSettleRequest(`{"model":"claude-sonnet-4-6","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"hi"}]}`,
+		keystore.Principal{KeyID: "ik_t1", Team: "t", AllowedModels: []string{"*"}}))
+	w.Close()
+	requireAttemptEndedBeforeSettle(t, terminal(t, records(t, buf)))
+}
+
+func TestMessagesCompleteAttemptEndsBeforeSettlement(t *testing.T) {
+	w, buf := evidenceWriter(t)
+	h := NewMessagesHandlerFull(testRouter(), w, nil)
+	h.ServeHTTP(httptest.NewRecorder(), slowSettleRequest(`{"model":"claude-sonnet-4-6","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`,
+		keystore.Principal{KeyID: "ik_t2", Team: "t", AllowedModels: []string{"*"}}))
+	w.Close()
+	requireAttemptEndedBeforeSettle(t, terminal(t, records(t, buf)))
 }
 
 func TestMessagesStreamPreTTFT404CrossModelIsModelNotFound(t *testing.T) {
@@ -255,13 +290,5 @@ func TestMessagesLastTargetDeadlineIsTimeout(t *testing.T) {
 	done := serveEvidence(t, evStream{complete: context.DeadlineExceeded}, false)
 	if len(done.Attempts) != 1 || done.Attempts[0].Status != audit.AttemptTimeout {
 		t.Fatalf("attempts = %+v", done.Attempts)
-	}
-}
-
-func TestMessagesFinalAttemptEndsBeforeTotal(t *testing.T) {
-	done := serveEvidence(t, evStream{events: []*providers.StreamEvent{chunkEv("message_start"), chunkEv("message_stop")}}, true)
-	a := done.Attempts[len(done.Attempts)-1]
-	if a.StartMs+a.DurMs > done.Latency.TotalMs {
-		t.Fatalf("attempt %+v ends after total %d", a, done.Latency.TotalMs)
 	}
 }
