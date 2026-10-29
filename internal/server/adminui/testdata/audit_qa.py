@@ -235,6 +235,29 @@ def run_scenario(page, base, width, scheme, screenshots):
     page.locator('#audit-class-hint').wait_for(state='hidden')
     wait("() => document.querySelectorAll('#audit-trace-table tbody tr').length === 3")
 
+    # An ambiguous key name queries nothing and clears the view; only the note remains.
+    audit_calls = []
+    on_request = lambda r: audit_calls.append(r.url) if '/admin/audit/' in r.url else None  # noqa: E731
+    page.on('request', on_request)
+    page.locator('#audit-key').fill('ci')
+    page.locator('#audit-key').dispatch_event('change')
+    page.locator('#audit-filter-note').wait_for(state='visible')
+    wait("() => document.getElementById('audit-cards').children.length === 0")
+    page.locator('#audit-tab-sessions').click()
+    page.wait_for_timeout(300)
+    assert not audit_calls, audit_calls
+    assert text('#audit-filter-note').strip() == en('audit.keyAmbiguous')
+    assert page.locator('#audit-trace-table tbody tr').count() == 0
+    assert page.locator('#audit-session-table tbody tr').count() == 0
+    assert text('#audit-detail').strip() == ''
+    page.remove_listener('request', on_request)
+    page.locator('#audit-tab-traces').click()
+    page.locator('#audit-key').fill('')
+    page.locator('#audit-key').dispatch_event('change')
+    page.locator('#audit-filter-note').wait_for(state='hidden')
+    wait("() => document.querySelectorAll('#audit-trace-table tbody tr').length === 3")
+    assert page.locator('#audit-cards .audit-stat').count() == 4
+
     # Sessions: path with encoded ':' resolves, subagent indented, truncation note shown.
     page.locator('#audit-tab-sessions').click()
     wait("() => document.querySelectorAll('#audit-session-table tbody tr').length === 2")

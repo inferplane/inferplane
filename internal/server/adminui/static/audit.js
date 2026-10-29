@@ -78,13 +78,33 @@ function auditCell(tr, content, cls) {
 function auditShownNote(count, next) { return next ? msg("audit.showingFirst").replace("{n}", String(count)) : ""; }
 function auditTime(ts) { return ts ? ts.replace("T", " ").slice(0, 19) : ""; }
 
+// Query parameters for the filter inputs. An ambiguous key name gives no
+// parameters at all: it must never fall back to every key's data.
+function auditFilterParams(range, team, keyText, nowMs) {
+  const key = auditResolveKey(keyText);
+  if (key.ambiguous) return { params: null, ambiguous: true };
+  const w = auditWindow(range, nowMs);
+  return { params: { since: w.since, until: w.until, team: team, key_id: key.keyId }, ambiguous: false };
+}
+
+// Current filters, or null (after clearing the view) when the key name is ambiguous.
 function auditFilters() {
-  const w = auditWindow($("audit-range").value, Date.now());
-  const key = auditResolveKey($("audit-key").value.trim());
+  const f = auditFilterParams($("audit-range").value, $("audit-team").value.trim(), $("audit-key").value.trim(), Date.now());
   const note = $("audit-filter-note");
-  note.hidden = !key.ambiguous;
-  note.textContent = key.ambiguous ? msg("audit.keyAmbiguous") : "";
-  return { since: w.since, until: w.until, team: $("audit-team").value.trim(), key_id: key.keyId };
+  note.hidden = !f.ambiguous;
+  note.textContent = f.ambiguous ? msg("audit.keyAmbiguous") : "";
+  if (f.ambiguous) auditClearView();
+  return f.params;
+}
+
+// Empties cards, tables and details so nothing from an earlier query stays on screen.
+function auditClearView() {
+  auditState.events = []; auditState.next = ""; auditState.selected = ""; auditState.summary = null;
+  $("audit-cards").textContent = "";
+  $("audit-coverage").textContent = "";
+  for (const id of ["audit-trace-table", "audit-session-table", "audit-pii-table", "audit-deny-table", "audit-auto-table"]) $(id).querySelector("tbody").textContent = "";
+  for (const id of ["audit-detail", "audit-session-detail", "audit-pii-cats", "audit-pii-actions", "audit-sessions-note", "audit-pii-note", "audit-auto-note"]) $(id).textContent = "";
+  for (const id of ["audit-more", "audit-class-hint", "audit-auto-warning"]) $(id).hidden = true;
 }
 
 async function refreshAuditView() {
@@ -96,6 +116,7 @@ async function refreshAuditView() {
   const keys = await api("GET", "/admin/keys");
   auditState.keys = new Map(((keys && keys.data) || []).map(k => [k.key_id, k]));
   const f = auditFilters();
+  if (!f) return;
   const [summary, health] = await Promise.all([
     api("GET", "/admin/audit/summary" + auditQuery(f)),
     api("GET", "/admin/analytics/health", null, true),
@@ -189,6 +210,7 @@ async function auditShowTab(tab) {
 async function auditLoadEvents(append) {
   const gen = auditState.generation;
   const f = auditFilters();
+  if (!f) return;
   const out = await api("GET", "/admin/audit/events" + auditQuery({ ...f, kind: [...auditState.kinds].join(","), limit: 100, before: append ? auditState.next : "" }));
   if (gen !== auditState.generation) return;
   auditState.events = append ? auditState.events.concat(out.events) : out.events;
@@ -432,7 +454,9 @@ function renderAuditWaterfall(w, rec) {
 }
 
 async function auditLoadSessions() {
-  const out = await api("GET", "/admin/audit/sessions" + auditQuery({ ...auditFilters(), limit: 100 }));
+  const f = auditFilters();
+  if (!f) return;
+  const out = await api("GET", "/admin/audit/sessions" + auditQuery({ ...f, limit: 100 }));
   const tbody = $("audit-session-table").querySelector("tbody");
   tbody.textContent = "";
   $("audit-session-detail").textContent = "";
@@ -506,11 +530,12 @@ function auditBars(box, rows) {
 }
 
 async function auditLoadPII() {
-  const s = auditState.summary;
+  const s = auditState.summary, f = auditFilters();
+  if (!f || !s) return;
   auditBars($("audit-pii-cats"), (s.categories || []).map(c => [c.name, c.count, "warn"]));
   auditBars($("audit-pii-actions"), [[msg("audit.piiMasked"), s.pii.masked, "warn"], [msg("audit.piiInternal"), s.pii.internal, "warn"],
     [msg("audit.piiBlocked"), s.pii.blocked, "err"], [msg("audit.piiShadow"), s.pii.shadow, "dim"]]);
-  const out = await api("GET", "/admin/audit/events" + auditQuery({ ...auditFilters(), pii: "true", limit: 100 }));
+  const out = await api("GET", "/admin/audit/events" + auditQuery({ ...f, pii: "true", limit: 100 }));
   const tbody = $("audit-pii-table").querySelector("tbody");
   tbody.textContent = "";
   $("audit-pii-note").textContent = auditShownNote(out.events.length, out.next);
@@ -537,7 +562,8 @@ async function auditLoadPII() {
 }
 
 async function auditLoadDenials() {
-  const s = auditState.summary;
+  const s = auditState.summary, f = auditFilters();
+  if (!f || !s) return;
   const tbody = $("audit-deny-table").querySelector("tbody");
   tbody.textContent = "";
   if (!s.denials.length) {
@@ -559,7 +585,7 @@ async function auditLoadDenials() {
   const warn = $("audit-auto-warning");
   warn.hidden = !auto.unknown;
   warn.textContent = auto.unknown ? msg("audit.signatureWarn") + " (" + auto.unknown + ")" : "";
-  const out = await api("GET", "/admin/audit/events" + auditQuery({ ...auditFilters(), auto: "true", limit: 100 }));
+  const out = await api("GET", "/admin/audit/events" + auditQuery({ ...f, auto: "true", limit: 100 }));
   const ab = $("audit-auto-table").querySelector("tbody");
   ab.textContent = "";
   $("audit-auto-note").textContent = auditShownNote(out.events.length, out.next);
