@@ -69,7 +69,9 @@ or numeric changes, remaining detections and incomplete transformations refuse.
 Responses remote-tool egress cannot be authorized merely by an internal model
 label. Strict budget constraints also gate rejected policy updates and filter
 every subsequent context choice, affinity hit and fallback. Session hints are
-scoped HMAC inputs only; they never become principals or audit dimensions.
+scoped HMAC inputs only; they never become principals or audit dimensions. The one
+exception is the ADR-057 key-scoped session digest in audit records and the
+analytics index, never metrics ([below](#audit-console-adr-057)).
 
 ### Opt-in PII classifiers (systemone)
 
@@ -138,3 +140,50 @@ digests or endpoints.
   request, with up to `max_windows` windows. Saturation fails closed in
   Enforce (`onUninspectable`) and adds up to `timeout_ms` of latency in
   Shadow. A cross-request cap on classifier calls is a follow-up.
+
+## Audit console (ADR-057)
+
+**Session digest.** Claude Code's `X-Claude-Code-Session-Id` is sent on model
+calls. The gateway accepts 1 to 128 bytes of `[A-Za-z0-9._:-]` and records
+`session_ref = "s1:" + hex(sha256("inferplane-session-v1\x00" + key_id + "\x00" + id)[:16])`
+in the audit record and the analytics index. The raw ID is never stored, logged,
+used as a metric label or returned by an API. The digest is scoped to the key:
+the same session under two keys gives two refs, and it groups requests for audit
+only; it is never used for authorization or routing. This is a scoped exception
+to ADR-044's rule that session hints stay out of audit: the ADR-044 affinity
+pins are unchanged and still use scoped HMAC inputs in a bounded local store.
+
+Within one key, requests of one session become linkable in long-term audit
+data. `audit.client_evidence.session_ref: "off"` stops writing new refs but does
+not remove links already in the chain. A client that sends low-entropy IDs would
+make the digest guessable; Claude Code sends random UUIDs.
+
+**Auto mode is an estimate.** Verdicts come from Anthropic-format responses and
+depend on Claude Code's current format. The gateway reads at most 16 KiB of text
+per response, stores no response text, and never changes the response. An
+unparsed block call or server safeguard is recorded as `unknown` and increments
+`inferplane_audit_auto_mode_unparsed_total`, which has no labels. `</severity>`
+calls and severity replies are neither recorded nor counted. The console labels
+every verdict an estimate. `audit.client_evidence.auto_mode: "off"` disables it.
+
+The rules, by stage:
+
+- `s1`, a block call: the request's stop sequences contain `</block>`. After
+  removing `<thinking>` text, the reply must contain one consistent
+  `<block>yes` or `<block>no`; `yes` is `block` and `no` is `allow`. It is
+  accepted only when the reply stopped on `</block>` or its text closes the tag
+  with `</block>`. Gateway-translated Bedrock Converse replies report
+  `stop_reason` `stop_sequence` without naming the sequence; that counts as a
+  stop on `</block>` only when `</block>` is the sole requested stop sequence.
+  Anything else, including conflicting values or text over 16 KiB, is `unknown`.
+- `s2`, the auxiliary-class text rule: only for requests whose
+  `x-claude-code-request-class` is `auxiliary`, with no stop sequence required.
+  Claude Code 2.1.312 does not send that header, so it is dormant with that client.
+- `server`, a Bedrock server safeguard: a `dangerous_tool_use` entry in
+  `safeguard_results`. All tool uses `not_flagged` is `allow`; any other status
+  or outcome is `unknown`; no tool uses records nothing.
+
+**Access.** The five `/admin/audit/*` routes are read-only and full-admin only.
+Responses carry digests, closed codes and the stored audit line, never the raw
+session ID, prompts or response text. Error bodies are closed codes and never
+echo input. The `hash` on an event shows chain position, not verification.

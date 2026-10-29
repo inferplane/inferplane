@@ -35,12 +35,14 @@ func (h *Handler) denied(req *http.Request, p keystore.Principal, model string, 
 	h.metrics.ObserveRequest("responses", "_rejected", "", p.Team, status, time.Since(started).Seconds(), 0)
 	tracing.SetStatus(trace.SpanFromContext(req.Context()), false, reason)
 	if h.aud != nil {
-		h.aud.Append(audit.Record{
+		rec := audit.Record{
 			SchemaVersion: 1, Event: "request_started", ID: ulid.New(), TS: time.Now().UTC().Format(time.RFC3339Nano),
 			Principal: requestpolicy.AuditPrincipal(p),
 			Request:   audit.RequestRef{Ingress: "responses", ModelRequested: model, Routing: audit.RoutingFrom(req.Context())},
 			Outcome:   &audit.OutcomeRef{Status: status, Error: &reason},
-		})
+		}
+		audit.Finish(req.Context(), &rec)
+		h.aud.Append(rec)
 	}
 }
 
@@ -127,5 +129,6 @@ func (a attempt) finish(status int, u *schema.Usage, body []byte, partial bool, 
 	if id := tracing.TraceID(a.req.Context()); id != "" {
 		rec.TraceID = &id
 	}
+	audit.Finish(a.req.Context(), &rec)
 	a.h.aud.Append(rec)
 }

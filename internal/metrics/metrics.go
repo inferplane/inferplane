@@ -40,6 +40,7 @@ type Metrics struct {
 	budgetRejectedSeen int64                  // last value passed to SetBudgetStoreRejections; atomic
 	substitution       *prometheus.CounterVec // inferplane_model_substitution_total (ADR-041)
 	routingDecisions   *prometheus.CounterVec // inferplane_routing_decisions_total
+	autoModeUnparsed   prometheus.Counter     // inferplane_audit_auto_mode_unparsed_total (ADR-057)
 	classifiers        *classifierMetrics     // PII classifier collectors (classifier.go)
 }
 
@@ -101,6 +102,10 @@ func New() *Metrics {
 		anchorFail: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "inferplane_audit_anchor_failures_total", Help: "Audit chain-head anchor (WORM) write failures (ADR-012).",
 		}),
+		autoModeUnparsed: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "inferplane_audit_auto_mode_unparsed_total",
+			Help: "Claude Code auto mode block calls or server safeguards that did not parse (ADR-057; no labels).",
+		}),
 		budgetRejected: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "inferplane_budget_store_rejected_total",
 			Help: "Cumulative requests denied by the budget store's at-capacity fail-safe, not by a real budget (no team/key/user label — same cardinality bar as key_id)." +
@@ -117,7 +122,8 @@ func New() *Metrics {
 	}
 	reg.MustRegister(m.tokenUsage, m.requestDuration, m.ttft, m.requestsTotal,
 		m.fallbackTotal, m.circuitState, m.quotaUtil, m.budgetUtil, m.budgetSpend, m.pricingMiss,
-		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected, m.substitution, m.routingDecisions)
+		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected, m.substitution, m.routingDecisions,
+		m.autoModeUnparsed)
 	m.classifiers = newClassifierMetrics(reg)
 	// Prometheus only emits a labeled metric family once it has at least one
 	// observed child series. Pre-initialize the token-usage family to zero so
@@ -196,6 +202,15 @@ func (m *Metrics) IncUsageWindowDropped() {
 		return
 	}
 	m.usageDropped.Inc()
+}
+
+// ObserveAutoModeUnparsed counts one Claude Code auto mode block call or
+// server safeguard that did not parse and was recorded as unknown (ADR-057).
+func (m *Metrics) ObserveAutoModeUnparsed() {
+	if m == nil {
+		return
+	}
+	m.autoModeUnparsed.Inc()
 }
 
 // IncAnchorFailure counts a failed audit-anchor write (ADR-012).

@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 911544b47f6da51aec1a960de34e0ef1639c3af9b827d89dce2e4790d46972fd
+translation_source_sha256: a8def42b461a99bfbf8265deb540dd01129456a2794db28cdda975a75963d673
 ---
 
 # 데이터 구현 {#data}
@@ -100,9 +100,93 @@ providerstore의 providers.data_boundary는 TEXT이며 누락·unknown을 신뢰
 
 MatchingRoutingPolicies는 하나의 원자 스냅샷에서 호출자 소유 규칙을 반환합니다. 거부된 분산 민감 문서는 유효한 교체 전까지 주체를 차단하고, 로컬 재로드 실패는 마지막 유효 스냅샷을 유지합니다. 적용 시 현재 RoutedAndPriced를 사용하고 토폴로지 변경 후 요청 시에도 후보를 검사합니다. 정책·토폴로지는 별도 게시이며 새 규칙 전에 전체 참여자를 업그레이드하세요.
 
-감사 request.routing은 omitempty로 추가하고 혼합 버전 정확 바이트를 시험합니다. 요청·선택·제안 모델, 제한된 판단 필드, 정책·세대, 계획·실제 공급자와 경계를 기록해 같은 모델의 다른 공급자 재시도를 구분합니다. 탐지 원문·프롬프트·키 ID·클라이언트 세션 값을 추가하지 않습니다. 본문 기록은 별도이며 규칙이 없으면 필드를 생략합니다. [판단 의미](../policy-routing.md#read-decisions-and-evaluate-rollout)를 참고하세요.
+감사 request.routing은 omitempty로 추가하고 혼합 버전 정확 바이트를 시험합니다. 요청·선택·제안 모델, 제한된 판단 필드, 정책·세대, 계획·실제 공급자와 경계를 기록해 같은 모델의 다른 공급자 재시도를 구분합니다. 탐지 원문·프롬프트·키 ID·클라이언트 세션 값을 `request.routing`에 추가하지 않으며, ADR-057 `client.session_ref` 다이제스트는 별도 필드입니다. 본문 기록은 별도이며 규칙이 없으면 필드를 생략합니다. [판단 의미](../policy-routing.md#read-decisions-and-evaluate-rollout)를 참고하세요.
 
 
 ### 가격 동기화의 보호 범위
 
 가격 동기화는 bedrock_responses 경로를 미해결로 표시하며 조용히 생략하지 않습니다. 컨텍스트 구간·명시 캐시 단가·캐시 쓰기 미지원·무료 선언은 입력·출력만 생성하는 도구로 덮어쓰지 않습니다. 제한된 가격 범위도 고정 단가로 해석하지 않습니다. 자세한 범위는 [가격 가이드](pricing.ko.md)의 동기화 항목을 따릅니다.
+
+## 감사 콘솔 근거 (ADR-057) {#audit-console-evidence-adr-057}
+
+콘솔은 종결 감사 기록(`request_completed` 기록, 또는 결과를 가진 `request_started`
+기록으로, 게이트웨이 거부가 이렇게 기록됩니다)에 추가된 append-only `omitempty` 필드
+세 가지와 분석 인덱스의 콘솔 전용 투영을 읽습니다. 기존 기록과 정확 바이트 체인 검증은
+바뀌지 않습니다.
+
+`attempts[]`는 최대 8개이며 처음 7개와 마지막 하나입니다.
+
+| 필드 | 타입 | 값과 한계 |
+|---|---|---|
+| `provider` | 문자열 | 설정된 공급자 이름이며 URL이 아닙니다. |
+| `model` | 문자열 | 이 시도가 처리한 게이트웨이 모델 이름(별칭·대체 해석 뒤의 설정 모델). 공급자에 보낸 업스트림 모델 ID가 아닙니다. |
+| `status` | 문자열 | `ok`, `upstream_error`, `model_not_found`, `stream_failed`, `timeout`, `canceled`. |
+| `http` | 정수 | 업스트림 자체의 상태 코드. 업스트림이 응답하지 않았으면 생략. |
+| `start_ms`, `dur_ms` | 정수 | 요청 시작 기준 오프셋, 소요 시간. |
+
+시도는 공급자 교환이 끝날 때(정산과 본문 캡처 전) 끝나므로 타임라인의 `settle` 행은
+공급자 이후 게이트웨이 작업입니다. `model_not_found`는 교차 모델 경계에서 수신 계층이
+내린 판정입니다. 완료된 스트림이나 업스트림 판정은 나중의 취소로 덮어쓰지 않습니다.
+앞선 시도 뒤에 거부된 요청은 그 시도를 유지합니다.
+
+| 필드 | 타입 | 값과 한계 |
+|---|---|---|
+| `client.request_class` | 문자열 | `main`, `subagent`, `workflow`, `compaction`, `auxiliary`, `side_reply`. `x-claude-code-request-class` 헤더에서만 오며 다른 값은 버립니다. Claude Code 2.1.312는 이 헤더를 보내지 않아 실제 트래픽에서는 필드가 없습니다. |
+| `client.session_ref` | 문자열 | `s1:` + 16진수 32자리([보안](security.ko.md#audit-console-adr-057) 참고). |
+| `auto_mode.verdict` | 문자열 | `block`, `allow`, `unknown`. 추정값이며 `request_completed` 기록에만 있습니다. |
+| `auto_mode.stage` | 문자열 | `s1`(차단 호출), `s2`(auxiliary 클래스 텍스트 규칙), `server`(Bedrock 안전장치). 규칙은 [보안](security.ko.md#audit-console-adr-057) 참고. |
+| `auto_mode.signature` | 문자열 | `claude-code-2.1`. 규칙이 따르는 클라이언트 응답 형식입니다. |
+
+`latency{total_ms, ttft_ms}`는 이제 모든 수신 계층의 종결 기록에 기록됩니다. `ttft_ms`가
+0이면 생략합니다. 요청이 시도를 둘 이상 하면 `outcome.fallback_used`와
+`outcome.fallback_chain`(시도한 공급자 이름)을 `attempts`에서 기록합니다. 이전에는 선언만
+있고 기록되지 않았습니다.
+
+### 콘솔 테이블
+
+두 저장소 모두 `audit_events`(종결 기록 하나당 한 행)와
+`audit_event_categories (id, category)`를 기존 인덱스와 함께 만듭니다. `events` 테이블과
+Usage 수치는 바뀌지 않습니다. 정확한 감사 행은 두 모드 모두 `record_json`에 보관합니다(Mode B는
+다시 인코딩한 값이 아니라 집계기가 세그먼트에서 읽은 바이트를 보관). 투영은 `id`에
+대해 먼저 쓴 값이 우선입니다.
+
+기록에서 가져온 자유 텍스트(`model_requested`, `model_actual`, `provider`, `policy_ref`,
+경계 값, `request_class`, `session_ref`, `trace_id`, `auto_signature`)는 NUL 바이트를
+버리고 잘못된 UTF-8을 대체 문자로 바꾸며 필터 상한인 256바이트로 자릅니다. 클라이언트가
+보낸 모델 문자열은 검증 없이 거부 기록에 들어가기 때문입니다. 투영은 기록 단위
+최선 노력입니다. 행마다 savepoint를 두므로 저장소가 거부한 행은 기록 ID와 저장소 코드만
+로그에 남기고 건너뛰며, 같은 배치의 Usage 행이나 Mode B 체크포인트를 막지 않습니다.
+
+| 열 그룹 | 열 |
+|---|---|
+| 식별·시각 | `id`(기본 키), `ts`, `ts_ms`, `event`, `kind`, `team`, `key_id`, `ingress`, `stream`, `status` |
+| 판단 | `deny_code`, `routing_reason`, `privacy`, `masked`, `would_restrict`, `pii`, `policy_ref`, `planned_boundary`, `actual_boundary` |
+| 클라이언트·추적 | `request_class`, `session_ref`, `trace_id` |
+| 라우팅 | `model_requested`, `model_actual`, `provider`, `fallback`, `attempt_count` |
+| 자동 모드 | `auto_verdict`, `auto_stage`, `auto_signature` |
+| 사용량 | `input_tokens`, `output_tokens`, `cost_micros`, `total_ms`, `ttft_ms`, `has_body` |
+| 원본 | `record_json` |
+
+`kind`는 인덱스에서 파생하며 감사 체인에는 기록하지 않습니다. 먼저 맞는 규칙이 적용됩니다.
+`auto_mode_blocked`(판정 `block`), `privacy_blocked`, `policy_denied`, `upstream_error`,
+`privacy_masked`, `privacy_internal`, `ok` 순입니다. 상태가 400 이상일 때 마지막 시도가
+실패한 완료 기록은 코드가 업스트림의 것이므로 코드 매칭보다 먼저 `upstream_error`입니다.
+게이트웨이 결정과 시도가 없는 과거 완료 기록은 거부 코드로 분류합니다. 400 미만에서는
+부분 스트림이 `upstream_error`이며, 마지막 시도가 `stream_failed`인 완료 스트림(200을 보낸
+뒤 업스트림 오류 이벤트가 오거나 스트림 끝이 오지 않은 경우)도 `upstream_error`입니다.
+`deny_code`(상태 400 이상)는 `outcome.error`입니다. 이 값이 없는 게이트웨이 결정만
+`routing.reason`을 쓰므로, 완료된 업스트림 오류가 `unchanged` 같은 라우팅 결과를 거부로
+보이는 일은 없습니다.
+
+커버리지: Mode A는 설정된 파일 싱크에서 만들며 재시작하면 다시 재생하고 재구축
+엔드포인트가 없습니다. Mode B `POST /admin/analytics/rebuild`는 감사 테이블을 다른 파생
+테이블과 함께 비우고, 기존 수집 경로가 다시 채웁니다. 어떤 원본에도 남아 있지 않은 기록은 콘솔에
+없으며, 요약의 `coverage_start_ms`가 인덱스가 가진 가장 이른 시각입니다.
+
+### 설정
+
+| 키 | 값 | 효과 |
+|---|---|---|
+| `audit.client_evidence.session_ref` | `key_scoped`(기본), `off` | `off`는 `client.session_ref` 기록을 멈춥니다. 기존 기록의 연결은 그대로입니다. `request_class`에는 영향이 없습니다. |
+| `audit.client_evidence.auto_mode` | `on`(기본), `off` | `off`는 자동 모드 추정을 끕니다. |
+| `otel.trace_link_template` | `{trace_id}`를 포함한 `http`·`https` URL. 사용자 정보(`user:password@`)는 거부합니다 | 콘솔 링크 전용. `{trace_id}`는 기록의 32자리 16진수 trace ID로 치환합니다. `/admin/capabilities`로 콘솔에 전달합니다. |

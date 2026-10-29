@@ -20,6 +20,7 @@ var contentTypes = map[string]string{
 	"index.html":    "text/html; charset=utf-8",
 	"app.js":        "text/javascript; charset=utf-8",
 	"evaluation.js": "text/javascript; charset=utf-8",
+	"audit.js":      "text/javascript; charset=utf-8",
 	"i18n.js":       "text/javascript; charset=utf-8",
 	"style.css":     "text/css; charset=utf-8",
 	"favicon.svg":   "image/svg+xml",

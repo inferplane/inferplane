@@ -194,3 +194,50 @@ and [source recovery](../operations/recovery.md#recover-analytics-evidence).
 Mode-B migration/backfill is transactional; it does not replay source records
 skipped beyond old checkpoints. A zero legacy-projection count does not attest
 complete history. Neither profile's analytics changes financial authority.
+
+## Audit console (ADR-057)
+
+Five read-only routes over the console projection of the analytics index. All
+require **full-admin** authorization: no token gives 401 and an authenticated
+non-admin receives 403. They are mounted only when the analytics index is
+enabled and its store implements the console querier (SQLite Mode A and
+PostgreSQL Mode B both do); otherwise they are absent, and
+`GET /admin/capabilities` reports `audit_console: false`. The same endpoint
+returns `trace_link_template` when `otel.trace_link_template` is set. Only `GET`
+is accepted (405 `method_not_allowed`), and responses are `no-store`.
+
+```text
+GET /admin/audit/events?kind=policy_denied,upstream_error&limit=100
+GET /admin/audit/events/{id}
+GET /admin/audit/sessions?since=2026-10-29T00:00:00Z
+GET /admin/audit/sessions/{ref}?after=<event-id>
+GET /admin/audit/summary
+```
+
+| Route | Returns |
+|---|---|
+| `/admin/audit/events` | `{"events":[...],"next":"<id>"}`, newest first; pass `next` as `before` for the following page. |
+| `/admin/audit/events/{id}` | `{"event":{...},"record":{...},"hash":"sha256:...","waterfall":{...}}`. `record` is the stored audit line. `hash` is the SHA-256 of that line, shown as the record's chain position; it is not a chain verification (use `/admin/audit/verify`). `waterfall` is the timing timeline derived from `latency` and `attempts` (rows of kind `gateway`, `attempt`, `settle` or `denied`; no rows when the record has no latency). |
+| `/admin/audit/sessions` | `{"sessions":[...],"next":"<id>"}`, one row per `session_ref` (records without one are not sessions) with request, denial, PII, auto-mode-block and subagent counts, cost and first/last time. |
+| `/admin/audit/sessions/{ref}` | `{"events":[...],"next":"<id>"}`, oldest first, for one `s1:` session digest; only `after` and `limit` are applied. |
+| `/admin/audit/summary` | Counts by kind, top 10 categories, PII counts (`masked`, `internal`, `blocked`, `shadow`), top 50 denials, auto mode counts (`block`, `allow`, `unknown`, `signatures`), 12 equal time buckets and `coverage_start_ms`, the earliest time in the index. |
+
+Query parameters, shared by the list routes and the summary. Every value is
+validated; a bad value gives the closed 400 code in the last column.
+
+| Parameter | Rule | Code |
+|---|---|---|
+| `since`, `until` | RFC 3339 times. Default window is the last 24 hours; with only `until`, `since` is 24 hours earlier. `since` must precede `until`, and the window may not exceed 366 days. A `+` UTC offset must be sent as `%2B` in a raw URL, otherwise it decodes to a space. | `invalid_range` |
+| `limit` | Integer from 1 to 200 (500 on `/sessions/{ref}`); default 100. | `invalid_limit` |
+| `before`, `after` | A 26-character event ID (ULID). | `invalid_cursor` |
+| `kind` | Comma-separated subset of `ok`, `policy_denied`, `privacy_blocked`, `privacy_masked`, `privacy_internal`, `upstream_error`, `auto_mode_blocked`. | `invalid_kind` |
+| `session` | `s1:` followed by 32 lowercase hex digits. | `invalid_filter` |
+| `trace_id` | 32 lowercase hex digits. | `invalid_filter` |
+| `code`, `class`, `category` | `[a-z0-9_]`, 1 to 64 characters. | `invalid_filter` |
+| `team`, `key_id`, `model`, `provider` | At most 256 bytes. `model` matches the requested or the actual model. | `invalid_filter` |
+| `pii=true` | Only rows with PII evidence. | none |
+| `auto=true` | Only rows whose auto mode verdict is `block` or `unknown`. `allow` verdicts are counted in the summary but never listed. | none |
+
+A malformed `{id}` or `{ref}` gives 400 `invalid_id`; an unknown event gives 404
+`not_found`. A storage failure gives 500 `query_failed` with no detail. Error
+bodies are `{"error":"<code>"}` and never echo query input.

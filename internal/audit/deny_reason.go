@@ -37,3 +37,14 @@ func (d DenyReason) Ptr() *string {
 	s := string(d)
 	return &s
 }
+
+// KnownDenyReason reports whether code is one of the closed deny codes above.
+func KnownDenyReason(code string) bool {
+	switch DenyReason(code) {
+	case DenyModelNotAllowed, DenyTeamRateLimited, DenyTeamTokenRateLimited, DenyTeamQuotaExceeded,
+		DenyKeyRateLimited, DenyKeyTokenRateLimited, DenyTeamBudgetExceeded, DenyKeyBudgetExceeded,
+		DenyUserBudgetExceeded, DenyRegionBlocked, DenyPricingMissing, DenyInvalidTokenEstimate:
+		return true
+	}
+	return false
+}

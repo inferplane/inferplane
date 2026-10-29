@@ -15,6 +15,7 @@ import (
 
 	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/internal/bodystore"
+	"github.com/inferplane/inferplane/internal/clientctx"
 	"github.com/inferplane/inferplane/internal/filter"
 	"github.com/inferplane/inferplane/internal/governance"
 	"github.com/inferplane/inferplane/internal/keystore"
@@ -395,11 +396,16 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		defer finishBudget() // also retain authority if a provider panics
 		attemptReq := reservedReq.WithContext(audit.WithRoutingAttempt(reservedReq.Context(), ct.Model, ct.ProviderName, ct.DataBoundary))
 		attemptReq = requestpolicy.WithAffinityAttempt(attemptReq, h.r, result.AffinityToken, ct)
+		audit.BeginAttempt(attemptReq.Context(), ct.ProviderName, ct.Model)
 		var retriable bool
 		if stream {
 			retriable = h.serveStream(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		} else {
 			retriable = h.serveComplete(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
+		}
+		if retriable {
+			// Safety net: the serve path already ended the attempt (a no-op then).
+			audit.EndOpenAttempt(attemptReq.Context(), audit.AttemptUpstreamError, 0)
 		}
 		finishBudget()
 		if !retriable {
@@ -420,6 +426,12 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // Generic Bedrock ValidationException also covers context/tool/schema errors.
 func isModelNotFound(statusCode int, _ []byte) bool {
 	return statusCode == 404
+}
+
+// errModelNotFound is Messages' own model-not-found rule for a failure error.
+func errModelNotFound(err error) bool {
+	var ue *providers.UpstreamError
+	return errors.As(err, &ue) && isModelNotFound(ue.HTTPStatus(), ue.Body)
 }
 
 func retryMessagesError(err error, crossModelNext bool) bool {
@@ -452,8 +464,10 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last && retryMessagesError(err, crossModelNext) {
+			requestpolicy.EndRetriedAttempt(req.Context(), err, 0, crossModelNext && errModelNotFound(err))
 			return true // transport error → fall back
 		}
+		requestpolicy.EndAttemptOnError(req.Context(), err)
 		// Tee a non-2xx upstream error verbatim (status/body) so the client
 		// sees the real rate-limit/error response, not a fabricated one —
 		// mirrors serveStream's tee below (parity fix: bedrock's non-streaming
@@ -483,8 +497,12 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	// found" response — narrow on purpose: a plain 400 unrelated to the
 	// requested model must stay a client error, never replayed elsewhere.
 	if !last && (resp.StatusCode >= 500 || resp.StatusCode == 429 || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
+		requestpolicy.EndRetriedAttempt(req.Context(), nil, resp.StatusCode, crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))
 		return true
 	}
+	// The provider exchange is over: close the attempt before writing to the
+	// client, settlement and body capture so none count toward its duration.
+	audit.EndOpenAttempt(req.Context(), requestpolicy.AttemptStatusForHTTP(resp.StatusCode), resp.StatusCode)
 	if resp.Headers != nil {
 		copyUpstreamHeaders(w.Header(), resp.Headers)
 	}
@@ -519,6 +537,11 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	if h.bodies != nil && resp.StatusCode < 400 {
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, resp.RawBody)
 	}
+	if resp.StatusCode/100 == 2 {
+		tap := clientctx.AutoModeTapFor(req.Context(), pr.Parsed) // nil when auto mode evidence is off
+		tap.ObserveResponse(resp.Parsed)
+		h.recordAutoMode(req.Context(), tap)
+	}
 	h.auditCompleted(req.Context(), recID, p, model, upstream, resp.StatusCode, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
 	recordSpanSettled(req, prov.Name(), providerName, upstream, usage, cost, resp.StatusCode < 400, false)
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, resp.StatusCode, time.Since(start).Seconds(), 0)
@@ -535,8 +558,10 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last && retryMessagesError(err, crossModelNext) {
+			requestpolicy.EndRetriedAttempt(req.Context(), err, 0, crossModelNext && errModelNotFound(err))
 			return true // pre-TTFT failure → fall back
 		}
+		requestpolicy.EndAttemptOnError(req.Context(), err)
 		// Tee a non-2xx upstream error verbatim (status/body) so the client
 		// sees Anthropic's real rate-limit/error response, not a fabricated one.
 		var ue *providers.UpstreamError
@@ -561,6 +586,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		audit.EndOpenAttempt(req.Context(), audit.AttemptUpstreamError, 0)
 		writeErr(w, 500, "api_error", "streaming unsupported")
 		h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, 500, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 		recordSpanResponse(req, prov.Name(), upstream, nil, false) // terminal
@@ -576,6 +602,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 	var lastUsage *schema.Usage
 	var ttft float64
 	var streamCompleted, streamFailed bool
+	tap := clientctx.AutoModeTapFor(req.Context(), pr.Parsed) // nil when auto mode evidence is off
 	for ev, err := range seq {
 		if err != nil {
 			// upstream broke mid-stream: the 200 is already committed, so the
@@ -584,6 +611,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 			// server-side only — an AWS SDK error string can carry an account
 			// id/ARN (same principle providers/bedrock/errors.go applies) — and
 			// never echoed to the client.
+			requestpolicy.EndStreamAttempt(req.Context(), false, err)
 			log.Printf("anthropicapi: stream interrupted (model=%s upstream=%s provider=%s): %v", model, upstream, providerName, err)
 			writeStreamErrorEvent(w)
 			flusher.Flush()
@@ -605,6 +633,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 		}
 		if ttft == 0 {
 			ttft = time.Since(start).Seconds() // first streamed event = time to first token
+			audit.MarkFirstToken(req.Context())
 		}
 		w.Write(ev.Raw) // tee original bytes verbatim
 		flusher.Flush()
@@ -624,8 +653,10 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 				lastUsage = schema.MergeUsage(lastUsage, ev.Chunk.Usage)
 			}
 			usage = usageRef(lastUsage)
+			tap.ObserveChunk(ev.Chunk) // after the verbatim tee; reads, never mutates
 		}
 	}
+	requestpolicy.EndStreamAttempt(req.Context(), streamCompleted && !streamFailed, nil)
 	cost := h.settle(p, providerName, model, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 	requestpolicy.SettleBudget(req, cost, lastUsage, streamCompleted && !streamFailed)
 	if streamCompleted && !streamFailed && lastUsage != nil {
@@ -641,10 +672,28 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 	if h.bodies != nil {
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, nil)
 	}
+	if streamCompleted && !streamFailed {
+		h.recordAutoMode(req.Context(), tap)
+	}
 	h.auditCompleted(req.Context(), recID, p, model, upstream, 200, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
 	recordSpanSettled(req, prov.Name(), providerName, upstream, usage, cost, true, false) // committed stream success
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 200, time.Since(start).Seconds(), ttft)
 	return false
+}
+
+// recordAutoMode stores the tap's estimated Claude Code auto mode verdict
+// before the terminal record is written, where audit.Finish stamps it
+// (ADR-057), and counts an unparsed block call or server safeguard. Only
+// successful responses reach it; the response bytes are never changed.
+func (h *MessagesHandler) recordAutoMode(ctx context.Context, tap *clientctx.AutoModeTap) {
+	ref, unparsed := tap.Result()
+	if ref == nil {
+		return
+	}
+	audit.SetAutoMode(ctx, ref)
+	if unparsed {
+		h.metrics.ObserveAutoModeUnparsed()
+	}
 }
 
 // settle maps the observed schema.Usage to pricing.Usage and runs the
@@ -749,6 +798,7 @@ func (h *MessagesHandler) audit(ctx context.Context, p keystore.Principal, model
 	if traceID != "" {
 		rec.TraceID = &traceID
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 
@@ -785,6 +835,7 @@ func (h *MessagesHandler) auditCompleted(ctx context.Context, id string, p keyst
 	if guardrailVersion != "" {
 		rec.GuardrailVersion = &guardrailVersion
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 
@@ -808,6 +859,7 @@ func (h *MessagesHandler) auditCompletedPartial(ctx context.Context, p keystore.
 	if traceID != "" {
 		rec.TraceID = &traceID
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 

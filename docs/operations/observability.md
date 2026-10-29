@@ -26,6 +26,7 @@ Start with the [Grafana dashboard](../../deploy/grafana/inferplane.json). Config
 | `inferplane_audit_write_failures_total` | Sink permissions, capacity, downstream availability |
 | `inferplane_audit_buffer_utilization_ratio` | Retained WAL records / 1024; at 1 or above, new inference is blocked. Check `/readyz` for a latched WAL failure even below 1 |
 | `inferplane_audit_anchor_failures_total` | Object storage/IAM/retention configuration |
+| `inferplane_audit_auto_mode_unparsed_total` | Claude Code auto mode block calls or server safeguards the console could not read (ADR-057); a rise suggests a client format change |
 | `gen_ai_server_time_to_first_token_seconds` | Upstream or request-path latency |
 | `inferplane_fallback_total` / circuit state | Provider failure or incompatibility |
 | `inferplane_usage_windows_dropped_total` | Analytics delivery loss; distinguish from authority accounting |

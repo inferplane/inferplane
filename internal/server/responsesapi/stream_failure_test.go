@@ -38,13 +38,18 @@ type streamProbe struct {
 	steps             []streamStep
 	openErr           error
 	onOpen            func()
+	complete          func() (*providers.ProxyResponse, error)
 	attempts, yielded int
 }
 
 func (p *streamProbe) Name() string              { return p.name }
 func (*streamProbe) SupportsIngress(string) bool { return true }
 func (*streamProbe) Models() []schema.ModelInfo  { return nil }
-func (*streamProbe) Complete(context.Context, *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+func (p *streamProbe) Complete(context.Context, *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+	if p.complete != nil {
+		p.attempts++
+		return p.complete()
+	}
 	return nil, errors.New("unexpected nonstream request")
 }
 func (p *streamProbe) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
@@ -149,7 +154,11 @@ func (f *streamFixture) close(t *testing.T) {
 }
 func (f *streamFixture) serve(t *testing.T, w http.ResponseWriter, ctx context.Context) []audit.Record {
 	t.Helper()
-	req := httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"premium","input":"hello","stream":true}`))
+	return f.serveBody(t, w, ctx, `{"model":"premium","input":"hello","stream":true}`)
+}
+func (f *streamFixture) serveBody(t *testing.T, w http.ResponseWriter, ctx context.Context, body string) []audit.Record {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/v1/responses", strings.NewReader(body))
 	req = req.WithContext(principal.With(ctx, keystore.Principal{Team: "team", KeyID: "opaque-key", AllowedModels: []string{"*"}, KeyOptions: keystore.KeyOptions{Owner: "user"}}))
 	f.h.ServeHTTP(w, req)
 	f.close(t)

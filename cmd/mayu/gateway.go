@@ -27,6 +27,7 @@ import (
 	sharedpg "github.com/inferplane/inferplane/internal/authority/pgstore"
 	"github.com/inferplane/inferplane/internal/bodystore"
 	"github.com/inferplane/inferplane/internal/budget"
+	"github.com/inferplane/inferplane/internal/clientctx"
 	"github.com/inferplane/inferplane/internal/config"
 	"github.com/inferplane/inferplane/internal/filter"
 	"github.com/inferplane/inferplane/internal/governance"
@@ -923,7 +924,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		maxAge := raw.ControlPlane.MaxPolicyAgeDuration
 		governanceGate = func() (bool, string) { return syncer.GovernanceReady(maxAge) }
 	}
-	g.dataSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol), server.WithMaxRequestBytes(cfg.Server.MaxRequestBytes), server.WithGovernanceGate(governanceGate))}
+	g.dataSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol), server.WithMaxRequestBytes(cfg.Server.MaxRequestBytes), server.WithGovernanceGate(governanceGate), server.WithClientEvidence(clientEvidenceMode(cfg)))}
 	if authority != nil || shared != nil {
 		next := g.dataSrv.Handler
 		g.dataSrv.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -942,7 +943,20 @@ func newGateway(cfgPath string) (*gateway, error) {
 		} else if analyticsIdx != nil {
 			ai = "A" // Mode A (local single-replica).
 		}
+		var aq any
+		if pgstoreQ != nil {
+			aq = pgstoreQ
+		} else if analyticsIdx != nil {
+			aq = analyticsIdx
+		}
+		_, auditConsole := aq.(analytics.AuditEventQuerier)
+		traceLink := ""
+		if cfg.OTel != nil {
+			traceLink = cfg.OTel.TraceLinkTemplate
+		}
 		return configapi.Capabilities{
+			AuditConsole:        auditConsole,
+			TraceLinkTemplate:   traceLink,
 			AnalyticsIndex:      ai,
 			ProviderStore:       writer != nil,
 			Guardrails:          masking != nil,
@@ -1937,4 +1951,14 @@ func wireRoutingPolicyGates(r *router.Router, store *policy.Store) {
 		return store.ModelAllowed(p.Team, p.AccountSubject(), model, canonical)
 	})
 	r.SetRoutingPolicySnapshot(store.RoutingSnapshot)
+}
+
+// clientEvidenceMode maps audit.client_evidence to the data-plane option.
+func clientEvidenceMode(cfg *config.Config) clientctx.Mode {
+	m := clientctx.DefaultMode()
+	if ce := cfg.Audit.ClientEvidence; ce != nil {
+		m.SessionRef = ce.SessionRef != "off"
+		m.AutoMode = ce.AutoMode != "off"
+	}
+	return m
 }
