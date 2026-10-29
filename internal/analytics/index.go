@@ -65,25 +65,43 @@ var eventsMigrationColumns = []string{
 // present without losing existing rows. A fresh database already has them
 // from the CREATE TABLE above, so this is a no-op there.
 func migrateEventsColumns(db *sql.DB) error {
-	return migrateColumns(db, "events", eventsMigrationColumns)
+	_, err := migrateColumns(db, "events", eventsMigrationColumns)
+	return err
 }
 
 // migrateAuditEventColumns adds the console columns of
 // AuditEventsMigrationColumns to an audit_events table created before them.
+// When it adds any, rows projected by the earlier release may name a routing
+// rule on a governance- or RBAC-coded denial that did not refuse the request;
+// the same one-time step clears that policy_ref (ADR-057). Before the columns
+// no row can hold a governance rule, so only misattributed rules are cleared.
 func migrateAuditEventColumns(db *sql.DB) error {
 	stmts := make([]string, len(AuditEventsMigrationColumns))
 	for i, col := range AuditEventsMigrationColumns {
 		stmts[i] = "ALTER TABLE audit_events ADD COLUMN " + col
 	}
-	return migrateColumns(db, "audit_events", stmts)
+	added, err := migrateColumns(db, "audit_events", stmts)
+	if err != nil || !added {
+		return err
+	}
+	codes := audit.KnownDenyReasons()
+	marks := strings.TrimSuffix(strings.Repeat("?,", len(codes)), ",")
+	args := make([]any, len(codes))
+	for i, c := range codes {
+		args[i] = c
+	}
+	if _, err := db.Exec(`UPDATE audit_events SET policy_ref = '' WHERE status >= 400 AND policy_ref <> '' AND deny_code IN (`+marks+`)`, args...); err != nil {
+		return fmt.Errorf("clear stale routing policy_ref: %w", err)
+	}
+	return nil
 }
 
 // migrateColumns runs each "ALTER TABLE <table> ADD COLUMN <name> ..."
 // statement whose column the table does not have yet.
-func migrateColumns(db *sql.DB, table string, stmts []string) error {
+func migrateColumns(db *sql.DB, table string, stmts []string) (bool, error) {
 	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
-		return err
+		return false, err
 	}
 	existing := map[string]bool{}
 	for rows.Next() {
@@ -93,14 +111,15 @@ func migrateColumns(db *sql.DB, table string, stmts []string) error {
 		var dflt any
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
 			rows.Close()
-			return err
+			return false, err
 		}
 		existing[name] = true
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return false, err
 	}
 	rows.Close()
+	added := false
 	for _, stmt := range stmts {
 		// Each ALTER statement's target column name is token index 5:
 		// "ALTER(0) TABLE(1) <table>(2) ADD(3) COLUMN(4) <name>(5) ...".
@@ -110,10 +129,11 @@ func migrateColumns(db *sql.DB, table string, stmts []string) error {
 			continue
 		}
 		if _, err := db.Exec(stmt); err != nil {
-			return fmt.Errorf("migrate %s.%s: %w", table, col, err)
+			return added, fmt.Errorf("migrate %s.%s: %w", table, col, err)
 		}
+		added = true
 	}
-	return nil
+	return added, nil
 }
 
 type Index struct {

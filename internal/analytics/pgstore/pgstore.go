@@ -256,6 +256,13 @@ func (s *Store) ensureSchema(ctx context.Context) (retErr error) {
 				return fmt.Errorf("migrate audit console columns: %w", err)
 			}
 		}
+		// The earlier release also wrote the first routing rule on governance-
+		// and RBAC-coded denials, which that rule did not refuse. Before these
+		// columns no row can hold a governance rule, so this only clears
+		// misattributed routing rules.
+		if _, err := tx.Exec(ctx, `UPDATE audit_events SET policy_ref = '' WHERE status >= 400 AND policy_ref <> '' AND deny_code = ANY($1)`, audit.KnownDenyReasons()); err != nil {
+			return fmt.Errorf("clear stale routing policy_ref: %w", err)
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO analytics_schema_migrations(version) VALUES (2)`); err != nil {
 			return fmt.Errorf("record audit console migration: %w", err)
 		}

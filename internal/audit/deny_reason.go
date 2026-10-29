@@ -43,13 +43,22 @@ func (d DenyReason) Ptr() *string {
 	return &s
 }
 
+var knownDenyReasons = []string{
+	string(DenyModelNotAllowed), string(DenyTeamRateLimited), string(DenyTeamTokenRateLimited), string(DenyTeamQuotaExceeded),
+	string(DenyKeyRateLimited), string(DenyKeyTokenRateLimited), string(DenyTeamBudgetExceeded), string(DenyKeyBudgetExceeded),
+	string(DenyUserBudgetExceeded), string(DenyRegionBlocked), string(DenyPricingMissing), string(DenyInvalidTokenEstimate),
+	string(DenyBudgetAuthorityUnavailable),
+}
+
+// KnownDenyReasons returns a copy of the closed deny codes above.
+func KnownDenyReasons() []string { return append([]string(nil), knownDenyReasons...) }
+
 // KnownDenyReason reports whether code is one of the closed deny codes above.
 func KnownDenyReason(code string) bool {
-	switch DenyReason(code) {
-	case DenyModelNotAllowed, DenyTeamRateLimited, DenyTeamTokenRateLimited, DenyTeamQuotaExceeded,
-		DenyKeyRateLimited, DenyKeyTokenRateLimited, DenyTeamBudgetExceeded, DenyKeyBudgetExceeded,
-		DenyUserBudgetExceeded, DenyRegionBlocked, DenyPricingMissing, DenyInvalidTokenEstimate, DenyBudgetAuthorityUnavailable:
-		return true
+	for _, c := range knownDenyReasons {
+		if c == code {
+			return true
+		}
 	}
 	return false
 }

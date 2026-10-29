@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: c712aabed1e6cb9ab2cc2ceb649f848af63883c73c53c2595aa8fdef528b6cd0
+translation_source_sha256: 4c0376f7cf88beac58320448e5442b8049e44373838c356a88f8af3279d567fc
 ---
 
 # 데이터 구현 {#data}
@@ -173,6 +173,9 @@ Usage 수치는 바뀌지 않습니다. 정확한 감사 행은 두 모드 모�
 `gov_scope`, `gov_limit`, `gov_source`를 얻습니다(SQLite는 없는 열마다 추가하고, Postgres는
 마이그레이션 표식 2로 한 번 추가). 기존 행은 빈 값을 유지하며 콘솔은 이를 기록 없음으로
 보여 주고, 부팅 재생은 이 행을 다시 쓰지 않습니다.
+같은 일회성 단계가 이전 릴리스가 거버넌스·RBAC 코드 거부 행에 쓴 오래된 라우팅
+`policy_ref`를 지웁니다. 그 규칙은 요청을 거부하지 않았기 때문이며, 라우팅 거부는
+자기 규칙을 유지합니다.
 
 기록에서 가져온 자유 텍스트(`model_requested`, `model_actual`, `provider`, `policy_ref`,
 경계 값, `request_class`, `session_ref`, `trace_id`, `auto_signature`)는 NUL 바이트를

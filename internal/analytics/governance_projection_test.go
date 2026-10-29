@@ -92,6 +92,15 @@ func TestAuditEventsMigrationKeepsRowsAndReplays(t *testing.T) {
 		old.ID, string(oldLine)); err != nil {
 		t.Fatal(err)
 	}
+	// Rows the earlier release projected with the first routing rule as
+	// policy_ref: one on a governance-coded denial (the rule did not refuse
+	// it) and one on a routing denial (it did).
+	for id, code := range map[string]string{"01JC0000000000000000000043": "key_rate_limited", "01JC0000000000000000000044": "sensitive_blocked"} {
+		if _, err := db.Exec(`INSERT INTO audit_events(id, ts, ts_ms, event, kind, team, key_id, status, deny_code, policy_ref, record_json)
+			VALUES (?, '2026-10-29T01:00:01Z', 1793235601000, 'request_started', 'policy_denied', 'platform', 'ik_a', 403, ?, 'privacy#7·protect', '{}')`, id, code); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -112,8 +121,16 @@ func TestAuditEventsMigrationKeepsRowsAndReplays(t *testing.T) {
 		if err != nil || !ok || kept.Event.DenyCode != "key_rate_limited" || kept.Event.GovSource != "" || kept.Event.PolicyRef != "" {
 			t.Fatalf("open %d: legacy row = %+v ok=%v err=%v", open, kept.Event, ok, err)
 		}
+		stale, _, err := ix.AuditEvent("01JC0000000000000000000043")
+		if err != nil || stale.Event.PolicyRef != "" {
+			t.Fatalf("open %d: stale routing rule on governance denial = %q err=%v", open, stale.Event.PolicyRef, err)
+		}
+		routed, _, err := ix.AuditEvent("01JC0000000000000000000044")
+		if err != nil || routed.Event.PolicyRef != "privacy#7·protect" {
+			t.Fatalf("open %d: routing denial rule = %q err=%v", open, routed.Event.PolicyRef, err)
+		}
 		sum, err := ix.AuditSummary(AuditFilter{})
-		if err != nil || len(sum.Denials) != 2 {
+		if err != nil || len(sum.Denials) != 3 {
 			t.Fatalf("open %d: denials = %+v err=%v", open, sum.Denials, err)
 		}
 		for _, d := range sum.Denials {
@@ -121,6 +138,10 @@ func TestAuditEventsMigrationKeepsRowsAndReplays(t *testing.T) {
 			case "team_rate_limited":
 				if d.Policy != "team-rate#2·rpm" || d.Scope != "team" || d.Limit != "rpm" || d.Source != "policy" {
 					t.Fatalf("open %d: governance denial = %+v", open, d)
+				}
+			case "sensitive_blocked":
+				if d.Policy != "privacy#7·protect" {
+					t.Fatalf("open %d: routing denial = %+v", open, d)
 				}
 			case "key_rate_limited":
 				if d.Policy != "" || d.Scope != "" || d.Limit != "" || d.Source != "" {
