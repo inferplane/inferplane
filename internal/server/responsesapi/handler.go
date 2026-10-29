@@ -263,6 +263,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if !retry {
 			return
 		}
+		// Safety net: a retry never leaves its attempt open (no-op when closed).
+		audit.EndOpenAttempt(attemptReq.Context(), audit.AttemptUpstreamError, 0)
 		h.r.RecordResult(ct.ProviderName, ct.Identity, false)
 		h.metrics.ObserveFallback(ct.Model, ct.ProviderName, chain[i+1].ProviderName, "upstream_error")
 	}
