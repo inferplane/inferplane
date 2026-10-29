@@ -237,6 +237,11 @@ func (s *Store) ensureSchema(ctx context.Context) (retErr error) {
 			return fmt.Errorf("record analytics projection migration: %w", err)
 		}
 	}
+	// Console tables are created outside the migration marker so databases that
+	// already installed the projection also get them (IF NOT EXISTS).
+	if _, err := tx.Exec(ctx, analytics.AuditEventsDDL); err != nil {
+		return fmt.Errorf("create audit console tables: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit analytics schema migration: %w", err)
 	}
@@ -417,7 +422,7 @@ func (s *Store) Rebuild(ctx context.Context) error {
 			return fmt.Errorf("bump analytics rebuild epoch: %w", err)
 		}
 	}
-	if _, err := tx.Exec(ctx, `TRUNCATE events, rollup_day, checkpoints`); err != nil {
+	if _, err := tx.Exec(ctx, `TRUNCATE events, rollup_day, checkpoints, audit_events, audit_event_categories`); err != nil {
 		return fmt.Errorf("truncate analytics rebuild tables: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -453,6 +458,16 @@ func (s *Store) ingestBatch(ctx context.Context, holder string, epoch int64, rec
 
 	touched := map[rollupKey]struct{}{}
 	for _, r := range records {
+		// ingestBatch receives decoded records, not chain lines, so the detail
+		// hash uses the Canonical() fallback (the writer emits exactly those bytes).
+		if row, ok := analytics.ProjectAuditEvent(r, nil); ok {
+			if err := analytics.InsertAuditEvent(analytics.PostgresDialect, func(q string, args ...any) error {
+				_, err := tx.Exec(ctx, q, args...)
+				return err
+			}, row); err != nil {
+				return fmt.Errorf("project audit event %q: %w", r.ID, err)
+			}
+		}
 		if !analytics.Observable(r) {
 			continue
 		}
@@ -572,3 +587,41 @@ func recomputeRollup(ctx context.Context, tx pgx.Tx, key rollupKey) error {
 		key.day, key.team, key.model)
 	return err
 }
+
+func (s *Store) run(q string, args []any, each func(analytics.RowScanner) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	rows, err := s.db.Query(ctx, q, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if err := each(rows); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func (s *Store) AuditEvents(f analytics.AuditFilter) ([]analytics.AuditEvent, string, error) {
+	return analytics.RunAuditEvents(analytics.PostgresDialect, s.run, f)
+}
+
+func (s *Store) AuditEvent(id string) (analytics.AuditEventDetail, bool, error) {
+	return analytics.RunAuditEvent(analytics.PostgresDialect, s.run, id)
+}
+
+func (s *Store) AuditSessions(f analytics.AuditFilter) ([]analytics.AuditSession, string, error) {
+	return analytics.RunAuditSessions(analytics.PostgresDialect, s.run, f)
+}
+
+func (s *Store) AuditSessionEvents(ref string, f analytics.AuditFilter) ([]analytics.AuditEvent, string, error) {
+	return analytics.RunAuditSessionEvents(analytics.PostgresDialect, s.run, ref, f)
+}
+
+func (s *Store) AuditSummary(f analytics.AuditFilter) (analytics.AuditSummary, error) {
+	return analytics.RunAuditSummary(analytics.PostgresDialect, s.run, f)
+}
+
+var _ analytics.AuditEventQuerier = (*Store)(nil)
