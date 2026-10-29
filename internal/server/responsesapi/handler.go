@@ -82,7 +82,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeError(w, 400, "invalid_request_error", "stored response, conversation and item references are not supported; resend the full input")
 		return
 	}
-	model, _ := h.r.ResolveModel(parsed.Model)
+	model, fallbackSource := h.r.ResolveModelSource(parsed.Model)
+	if fallbackSource != "" {
+		w.Header().Set("x-inferplane-model-fallback", model)
+		req = req.WithContext(audit.WithModelFallback(req.Context(), parsed.Model, model, fallbackSource))
+		h.r.ObserveModelFallback(parsed.Model, model, fallbackSource)
+	}
 	if !h.r.Allows(p, model) {
 		h.denied(req, p, "_rejected", 403, "model_forbidden", start)
 		writeError(w, 403, "permission_error", "model is not allowed")

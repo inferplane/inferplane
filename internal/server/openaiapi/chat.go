@@ -143,12 +143,14 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeErr(w, 400, "invalid_request_error", "malformed JSON")
 		return
 	}
-	model, modelSubstituted := h.r.ResolveModel(canonical.Model)
-	if modelSubstituted {
+	model, fallbackSource := h.r.ResolveModelSource(canonical.Model)
+	if fallbackSource != "" {
 		// Unconfigured/unrouted model substituted for a configured one
 		// (model_fallbacks or the same-family default, D5) BEFORE the
-		// allow-list check — advertise it to the client.
+		// allow-list check — advertise it to the client and audit it.
 		w.Header().Set("x-inferplane-model-fallback", model)
+		req = req.WithContext(audit.WithModelFallback(req.Context(), canonical.Model, model, fallbackSource))
+		h.r.ObserveModelFallback(canonical.Model, model, fallbackSource)
 	}
 	// Tracing (ADR-011): join the client trace, start ONE server span across the
 	// request, end once via defer; no-op when off.

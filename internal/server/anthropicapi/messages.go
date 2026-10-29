@@ -130,13 +130,16 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeErr(w, 400, "invalid_request_error", "malformed JSON")
 		return
 	}
-	model, modelSubstituted := h.r.ResolveModel(parsed.Model)
-	if modelSubstituted {
+	model, fallbackSource := h.r.ResolveModelSource(parsed.Model)
+	if fallbackSource != "" {
 		// Unconfigured/unrouted model substituted for a configured one
 		// (model_fallbacks or the same-family default, live.State.FallbackFor)
 		// BEFORE the allow-list check, so RBAC/audit/metrics/pricing below all
-		// key off the model actually served — advertise it to the client.
+		// key off the model actually served — advertise it to the client and
+		// keep the requested name in the audit routing evidence.
 		w.Header().Set("x-inferplane-model-fallback", model)
+		req = req.WithContext(audit.WithModelFallback(req.Context(), parsed.Model, model, fallbackSource))
+		h.r.ObserveModelFallback(parsed.Model, model, fallbackSource)
 	}
 	// Tracing (ADR-011): join the client's trace (W3C traceparent), start ONE
 	// server span owned across the whole request (incl. the fallback loop) and

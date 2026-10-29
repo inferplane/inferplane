@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: a1bf6c5282e95206122697b527af2d45f0047f300b056b18289b73f41314d11f
+translation_source_sha256: 9c42547d936ee5e182d6510fefe804ca7b7fe592b881bf22fe833e3a2ee46a85
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -36,6 +36,7 @@ translation_source_sha256: a1bf6c5282e95206122697b527af2d45f0047f300b056b18289b7
 | `inferplane_fallback_total`·회로 차단기 상태 | 공급자 실패·비호환 |
 | `inferplane_usage_windows_dropped_total` | 분석 전달 손실. 권한 회계와 구분 |
 | `process_resident_memory_bytes`, `go_memstats_heap_inuse_bytes`, `go_goroutines` | 메모리 증가. 처리 중인 요청 본문마다 여러 사본을 보유하므로(실측 약 5.5배) 동시에 들어온 큰 본문이 대부분을 차지 |
+| `inferplane_model_fallback_total` | 라우팅되지 않은 모델 ID 요청(오타·새 별칭). 로그 `router: model fallback`에 요청 ID가 남음 |
 
 실측 트래픽과 프로파일에 따라 임계값을 정하세요. Prometheus 비용은 관측값입니다. 사용 가능한 잔액은 정수 회계 기록과 확정된 권한 예약이 결정합니다.
 

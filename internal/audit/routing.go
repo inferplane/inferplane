@@ -26,6 +26,11 @@ type RoutingRef struct {
 	ActualBoundary  string                  `json:"actual_boundary,omitempty"`
 	Masked          bool                    `json:"masked,omitempty"`
 	Classifiers     []ClassifierRef         `json:"classifiers,omitempty"`
+	// Append-only ADR-029 evidence: an unrouted requested model (the client's
+	// string, bounded) was served by a configured model, the record's
+	// request.model_requested. Source is "model_fallbacks" or "family".
+	ModelFallbackFrom   string `json:"model_fallback_from,omitempty"`
+	ModelFallbackSource string `json:"model_fallback_source,omitempty"`
 }
 
 type RoutingPolicyRef struct {
@@ -52,6 +57,24 @@ type ClassifierRef struct {
 }
 
 type routingKey struct{}
+type modelFallbackKey struct{}
+
+// maxFallbackRequested bounds the client-supplied model name kept as evidence.
+const maxFallbackRequested = 256
+
+// WithModelFallback records an applied model fallback for every record of the
+// request. RoutingFrom attaches it to the routing decision; a request without
+// one (no applicable policy) gets a routing ref whose reason is
+// "model_fallback". served is the model the request is now resolved to.
+func WithModelFallback(ctx context.Context, requested, served, source string) context.Context {
+	if len(requested) > maxFallbackRequested {
+		requested = requested[:maxFallbackRequested]
+	}
+	return context.WithValue(ctx, modelFallbackKey{}, &RoutingRef{
+		RequestedModel: requested, SelectedModel: served, Reason: "model_fallback", Inspection: "not_inspected",
+		ModelFallbackFrom: requested, ModelFallbackSource: source,
+	})
+}
 
 func cloneRouting(r *RoutingRef) *RoutingRef {
 	if r == nil {
@@ -77,7 +100,15 @@ func WithRouting(ctx context.Context, r *RoutingRef) context.Context {
 // RoutingFrom returns an owned projection for asynchronous record submission.
 func RoutingFrom(ctx context.Context) *RoutingRef {
 	r, _ := ctx.Value(routingKey{}).(*RoutingRef)
-	return cloneRouting(r)
+	fallback, _ := ctx.Value(modelFallbackKey{}).(*RoutingRef)
+	if r == nil {
+		return cloneRouting(fallback)
+	}
+	out := cloneRouting(r)
+	if out.ModelFallbackSource == "" && fallback != nil {
+		out.ModelFallbackFrom, out.ModelFallbackSource = fallback.ModelFallbackFrom, fallback.ModelFallbackSource
+	}
+	return out
 }
 
 // WithRoutingAttempt derives a NEW context for one actual provider call. Never

@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: a8def42b461a99bfbf8265deb540dd01129456a2794db28cdda975a75963d673
+translation_source_sha256: 2dc0c6b63793c40881c9e02f0e73f85f4906f9542f36a83bf51211be2573d1d2
 ---
 
 # 데이터 구현 {#data}
@@ -100,7 +100,7 @@ providerstore의 providers.data_boundary는 TEXT이며 누락·unknown을 신뢰
 
 MatchingRoutingPolicies는 하나의 원자 스냅샷에서 호출자 소유 규칙을 반환합니다. 거부된 분산 민감 문서는 유효한 교체 전까지 주체를 차단하고, 로컬 재로드 실패는 마지막 유효 스냅샷을 유지합니다. 적용 시 현재 RoutedAndPriced를 사용하고 토폴로지 변경 후 요청 시에도 후보를 검사합니다. 정책·토폴로지는 별도 게시이며 새 규칙 전에 전체 참여자를 업그레이드하세요.
 
-감사 request.routing은 omitempty로 추가하고 혼합 버전 정확 바이트를 시험합니다. 요청·선택·제안 모델, 제한된 판단 필드, 정책·세대, 계획·실제 공급자와 경계를 기록해 같은 모델의 다른 공급자 재시도를 구분합니다. 탐지 원문·프롬프트·키 ID·클라이언트 세션 값을 `request.routing`에 추가하지 않으며, ADR-057 `client.session_ref` 다이제스트는 별도 필드입니다. 본문 기록은 별도이며 규칙이 없으면 필드를 생략합니다. [판단 의미](../policy-routing.md#read-decisions-and-evaluate-rollout)를 참고하세요.
+감사 request.routing은 omitempty로 추가하고 혼합 버전 정확 바이트를 시험합니다. 요청·선택·제안 모델, 제한된 판단 필드, 정책·세대, 계획·실제 공급자와 경계를 기록해 같은 모델의 다른 공급자 재시도를 구분합니다. 탐지 원문·프롬프트·키 ID·클라이언트 세션 값을 `request.routing`에 추가하지 않으며, ADR-057 `client.session_ref` 다이제스트는 별도 필드입니다. 본문 기록은 별도이며 규칙이 없으면 필드를 생략합니다. 단 ADR-029 모델 대체가 적용되면 `routing`에 `reason: model_fallback`, 클라이언트가 요청한 모델(`requested_model`과 `model_fallback_from`, 최대 256바이트), `model_fallback_source`(`model_fallbacks` 또는 `family`)를 기록합니다. 정책 판단이 있으면 그 사유를 유지하고 같은 두 필드를 추가합니다. [판단 의미](../policy-routing.md#read-decisions-and-evaluate-rollout)를 참고하세요.
 
 
 ### 가격 동기화의 보호 범위

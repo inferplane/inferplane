@@ -31,6 +31,7 @@ Start with the [Grafana dashboard](../../deploy/grafana/inferplane.json). Config
 | `inferplane_fallback_total` / circuit state | Provider failure or incompatibility |
 | `inferplane_usage_windows_dropped_total` | Analytics delivery loss; distinguish from authority accounting |
 | `process_resident_memory_bytes`, `go_memstats_heap_inuse_bytes`, `go_goroutines` | Memory growth: the gateway holds several copies of every request body being processed (about 5.5× measured), so concurrent large bodies dominate |
+| `inferplane_model_fallback_total` | Clients requesting unrouted model IDs (a typo or a newer alias); the log line `router: model fallback` names the requested ID |
 
 Choose thresholds from measured traffic and the selected profile. Prometheus spend is observational; integer accounting records and authority commitments determine available balance.
 

@@ -41,6 +41,7 @@ type Metrics struct {
 	budgetRejectedSeen int64                  // last value passed to SetBudgetStoreRejections; atomic
 	substitution       *prometheus.CounterVec // inferplane_model_substitution_total (ADR-041)
 	routingDecisions   *prometheus.CounterVec // inferplane_routing_decisions_total
+	modelFallback      *prometheus.CounterVec // inferplane_model_fallback_total (ADR-029)
 	autoModeUnparsed   prometheus.Counter     // inferplane_audit_auto_mode_unparsed_total (ADR-057)
 	classifiers        *classifierMetrics     // PII classifier collectors (classifier.go)
 }
@@ -120,11 +121,17 @@ func New() *Metrics {
 			// config-declared values (team, from/to model names) — never
 			// raw, unvalidated client input.
 		}, []string{"team", "from_model", "to_model"}),
+		modelFallback: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "inferplane_model_fallback_total",
+			Help: "Requests for an unrouted model served by a configured one (ADR-029), by source and served model.",
+			// The requested name is client input and never a label: source is
+			// a closed set and model is the configured served model.
+		}, []string{"source", "model"}),
 	}
 	reg.MustRegister(m.tokenUsage, m.requestDuration, m.ttft, m.requestsTotal,
 		m.fallbackTotal, m.circuitState, m.quotaUtil, m.budgetUtil, m.budgetSpend, m.pricingMiss,
 		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected, m.substitution, m.routingDecisions,
-		m.autoModeUnparsed)
+		m.autoModeUnparsed, m.modelFallback)
 	// Go runtime (heap, GC, goroutines) and process (RSS, CPU, file
 	// descriptors) collectors: their families carry no request data and only
 	// fixed labels. Without them a large-body memory burst was visible only
@@ -239,6 +246,19 @@ func (m *Metrics) ObserveModelSubstitution(team, from, to string) {
 	}
 	m.substitution.WithLabelValues(team, from, to).Inc()
 }
+
+// ObserveModelFallback counts one applied model fallback. source is
+// "model_fallbacks" or "family"; model is the configured served model.
+func (m *Metrics) ObserveModelFallback(source, model string) {
+	if m == nil {
+		return
+	}
+	if source != "model_fallbacks" && source != "family" {
+		source = "unknown"
+	}
+	m.modelFallback.WithLabelValues(source, model).Inc()
+}
+
 func (m *Metrics) SetCircuitState(provider string, state int) {
 	if m == nil {
 		return

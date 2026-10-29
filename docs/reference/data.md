@@ -159,7 +159,11 @@ policy names/generations, and planned/actual provider and boundary. Actual attem
 fields distinguish same-model retries across providers. No detected text, prompt,
 key ID, or client session value is added to `request.routing`; the ADR-057
 `client.session_ref` digest is a separate field. Existing body logging stays independent.
-No-rule traffic omits the field. See [decision semantics](../policy-routing.md#read-decisions-and-evaluate-rollout).
+No-rule traffic omits the field unless an ADR-029 model fallback applied: then
+`routing` carries `reason: model_fallback`, the client's requested model in
+`requested_model` and `model_fallback_from` (at most 256 bytes), and
+`model_fallback_source` (`model_fallbacks` or `family`). A policy decision keeps
+its own reason and gains the same two fields. See [decision semantics](../policy-routing.md#read-decisions-and-evaluate-rollout).
 
 ## Audit console evidence (ADR-057)
 

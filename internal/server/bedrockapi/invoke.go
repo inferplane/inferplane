@@ -140,9 +140,11 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	_ = json.Unmarshal(raw, &parsed)
 
 	urlID := req.PathValue("modelId")
-	model, substituted, resolved := resolveModel(h.r, h.holder, urlID)
-	if substituted {
+	model, fallbackSource, resolved := resolveModel(h.r, h.holder, urlID)
+	if fallbackSource != "" {
 		w.Header().Set("x-inferplane-model-fallback", model)
+		req = req.WithContext(audit.WithModelFallback(req.Context(), urlID, model, fallbackSource))
+		h.r.ObserveModelFallback(urlID, model, fallbackSource)
 	}
 
 	tctx := tracing.Extract(req.Context(), req.Header)

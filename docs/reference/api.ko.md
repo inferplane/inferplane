@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: 1900449ea267a0bbdb8ac8f48f2ceb24282f41ad00f7bf003355f37587f93a25
+translation_source_sha256: 65d6d6eaf34e35527c33aa16ef2d9a499fe65c3bec659ddaa1553dce01c6390a
 ---
 
 # API 구현 {#api}
@@ -64,7 +64,7 @@ count 엔드포인트, TPM·쿼터 추정, 금전 예약, 개인정보 검사, �
 
 키 인증이 성공하면 count_tokens는 별칭을 정규화하고 라우팅·준비 상태 거부에도 200을 반환합니다. 없거나 잘못된 키는 핸들러 실행 전 401을 받습니다. 같은 프로토콜이면 원문 전달, 다르면 정규 변환을 적용합니다. 별칭은 RBAC·라우팅·감사·메트릭 전에 정규 이름으로 바꿉니다. Anthropic 원문 경로는 최상위 model만 바꾸고 중첩 cache_control과 HTML 이스케이프 상태를 보존합니다. 오류는 수신 형식이며 허용된 가용 모델 목록을 표시합니다.
 
-**모델 폴백:** 한 단계 model_fallbacks와 기본 동일 계열 휴리스틱을 허용 검사 전에 적용합니다. 미설정 이름만 허용된 키는 다른 모델을 대신 받지 않고 거부됩니다. 이미 설정된 모델도 업스트림 404이면 기존 폴백 루프에서 교차 모델을 시도하되, 나중 추가한 타깃을 FilterModelAllowed로 다시 검사합니다. 응답 x-inferplane-model-fallback은 공급자 폴백 헤더와 독립적입니다.
+**모델 폴백:** 한 단계 model_fallbacks와 기본 동일 계열 휴리스틱을 허용 검사 전에 적용합니다. 미설정 이름만 허용된 키는 다른 모델을 대신 받지 않고 거부됩니다. 이미 설정된 모델도 업스트림 404이면 기존 폴백 루프에서 교차 모델을 시도하되, 나중 추가한 타깃을 FilterModelAllowed로 다시 검사합니다. 응답 x-inferplane-model-fallback은 공급자 폴백 헤더와 독립적입니다. Responses를 포함한 모든 생성 수신 경로는 이 대체를 프로세스당 서로 다른 쌍마다 한 번 `router: model fallback source=… requested=… served=…`로 기록하고, `inferplane_model_fallback_total{source,model}`을 세며, 감사에 `routing.reason: model_fallback`과 `model_fallback_from`·`model_fallback_source`를 남깁니다. 응답하는 모델은 바뀌지 않습니다.
 
 Messages는 출력 전 전송 오류·5xx/429·교차 모델 404만 재시도합니다. 타입이 있는 검증 오류와 다른 4xx는 종료하며 일반적인 Bedrock ValidationException은 모델 부재 근거가 아닙니다. 각 재시도 타깃은 전송 전에 자체 컨텍스트 선언을 다시 검사하며 최초 사전 검사 계약은 유지합니다. 엄격한 숫자 형식의 프롬프트 초과 SDK 검증 오류만 안전한 context_length_exceeded 코드와 인식 가능한 초과 문구를 보존하고 나머지 Bedrock 원문은 숨깁니다. Bedrock Converse(Claude 외 모델, SDK 경로와 네이티브 `/converse` 수신)는 서빙 엔진이 전달한 `Input length (N) exceeds model's maximum context length (M).` 문구(2026-10-27 `openai.gpt-oss-120b-1:0`에서 관측, Mantle 스트리밍 접두어 유무와 무관)와 코드가 정확히 `context_length_exceeded`인 OpenAI 오류(숫자 없음)도 인식합니다. 그러면 Messages·Chat Completions·Bedrock Invoke/Converse는 `bedrock upstream error (ValidationException)` 대신 각자의 오류 형식으로 복구 가능한 `prompt is too long: N tokens > M maximum` 오류(숫자는 업스트림이 알려 준 경우에만)를 반환하고, Responses는 고정 문구와 함께 `error.code: context_length_exceeded`(type `invalid_request_error`)를 반환합니다.
 
