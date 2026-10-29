@@ -2,6 +2,7 @@ package bedrock
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
@@ -14,6 +15,12 @@ func TestToolResultTextNamesLoadedTools(t *testing.T) {
 	for _, tc := range []struct{ name, content, want string }{
 		{"references only", `[{"type":"tool_reference","tool_name":"CronList"},{"type":"tool_reference","tool_name":"mcp__probe__tool-17"}]`, "Loaded tool: CronList\nLoaded tool: mcp__probe__tool-17"},
 		{"text then reference", `[{"type":"text","text":"Found 1 tool."},{"type":"tool_reference","tool_name":"CronList"}]`, "Found 1 tool.\nLoaded tool: CronList"},
+		{"reference then text", `[{"type":"tool_reference","tool_name":"CronList"},{"type":"text","text":"Found"}]`, "Loaded tool: CronList\nFound"},
+		{"reference text reference", `[{"type":"tool_reference","tool_name":"A"},{"type":"text","text":"x"},{"type":"tool_reference","tool_name":"B"}]`, "Loaded tool: A\nx\nLoaded tool: B"},
+		{"control characters are stripped", `[{"type":"tool_reference","tool_name":"a\nb\rc\u0000d\u0085e"}]`, "Loaded tool: abcde"},
+		{"invalid utf-8 is dropped", "[{\"type\":\"tool_reference\",\"tool_name\":\"a\xffb\"}]", "Loaded tool: ab"},
+		{"name empty after cleaning is skipped", `[{"type":"tool_reference","tool_name":"\n\u0000"}]`, ""},
+		{"over-long name is capped on a rune boundary", `[{"type":"tool_reference","tool_name":"` + strings.Repeat("é", 200) + `"}]`, "Loaded tool: " + strings.Repeat("é", 128)},
 		{"nameless or invalid references are skipped", `[{"type":"tool_reference"},{"type":"tool_reference","tool_name":7},{"type":"tool_reference","tool_name":""}]`, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

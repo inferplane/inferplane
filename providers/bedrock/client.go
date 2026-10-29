@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"iter"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -460,10 +462,15 @@ func toolResultText(raw json.RawMessage) string {
 		var blocks []schema.ContentBlock
 		if json.Unmarshal(raw, &blocks) == nil {
 			var out strings.Builder
+			afterRef := false
 			for _, blk := range blocks {
 				switch {
 				case blk.Text != nil:
+					if afterRef && *blk.Text != "" {
+						out.WriteByte('\n')
+					}
 					out.WriteString(*blk.Text)
+					afterRef = afterRef && *blk.Text == ""
 				case blk.Type == "tool_reference":
 					// Claude Code's ToolSearch answers with tool_reference
 					// blocks naming the deferred tools it loaded; their
@@ -471,11 +478,14 @@ func toolResultText(raw json.RawMessage) string {
 					// has no such block, and an empty result reads as "nothing
 					// found", so name each loaded tool in text.
 					var name string
-					if json.Unmarshal(blk.Extra["tool_name"], &name) == nil && name != "" {
-						if out.Len() > 0 {
-							out.WriteByte('\n')
+					if json.Unmarshal(blk.Extra["tool_name"], &name) == nil {
+						if name = cleanToolName(name); name != "" {
+							if out.Len() > 0 {
+								out.WriteByte('\n')
+							}
+							out.WriteString("Loaded tool: " + name)
+							afterRef = true
 						}
-						out.WriteString("Loaded tool: " + name)
 					}
 				}
 			}
@@ -721,4 +731,28 @@ func uncertainSDKUsage(u *brtypes.TokenUsage) bool {
 		return true
 	}
 	return false
+}
+
+// maxToolNameBytes bounds a tool_reference name echoed into the prompt.
+const maxToolNameBytes = 256
+
+// cleanToolName makes a client-supplied tool_reference name safe to render as
+// one "Loaded tool:" line: control characters (including newlines) and invalid
+// UTF-8 are dropped, and the result is capped at maxToolNameBytes on a rune
+// boundary.
+func cleanToolName(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if r == utf8.RuneError || unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, name)
+	if len(name) > maxToolNameBytes {
+		cut := maxToolNameBytes
+		for cut > 0 && !utf8.RuneStart(name[cut]) {
+			cut--
+		}
+		name = name[:cut]
+	}
+	return name
 }
