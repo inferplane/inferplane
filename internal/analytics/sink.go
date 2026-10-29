@@ -14,9 +14,16 @@ import (
 // is eventually consistent with the authoritative audit log.
 const sinkQueueCap = 4096
 
+// sinkItem carries the exact audit line so the console row stores the
+// verbatim chain bytes.
+type sinkItem struct {
+	rec  audit.Record
+	line []byte
+}
+
 type sink struct {
 	ix   *Index
-	ch   chan audit.Record
+	ch   chan sinkItem
 	done chan struct{}
 	once sync.Once
 }
@@ -27,14 +34,19 @@ type sink struct {
 // It is best-effort (Required()==false). Close() drains the queue and stops the
 // worker; the assembly closes the Index afterwards.
 func NewSink(ix *Index) audit.Sink {
-	s := &sink{ix: ix, ch: make(chan audit.Record, sinkQueueCap), done: make(chan struct{})}
+	s := &sink{ix: ix, ch: make(chan sinkItem, sinkQueueCap), done: make(chan struct{})}
 	go s.worker()
 	return s
 }
 
 func (s *sink) worker() {
-	for rec := range s.ch {
-		_ = s.ix.Ingest(rec) // best-effort; a derived-index error never propagates
+	for it := range s.ch {
+		if Observable(it.rec) {
+			_ = s.ix.Ingest(it.rec) // best-effort; a derived-index error never propagates
+		}
+		if AuditObservable(it.rec) {
+			_ = s.ix.IngestAudit(it.rec, it.line)
+		}
 	}
 	close(s.done)
 }
@@ -44,12 +56,12 @@ func (s *sink) Write(line []byte) error {
 	if json.Unmarshal(line, &rec) != nil {
 		return nil // malformed → skip, never error the chain
 	}
-	if !Observable(rec) {
-		return nil // don't spend queue slots on started/admin events
+	if !Observable(rec) && !AuditObservable(rec) {
+		return nil // don't spend queue slots on admitted/admin events
 	}
 	// Non-blocking enqueue: drop rather than block the audit fan-out goroutine.
 	select {
-	case s.ch <- rec:
+	case s.ch <- sinkItem{rec: rec, line: append([]byte(nil), line...)}:
 	default: // queue full → drop (recovered on next boot via Replay)
 	}
 	return nil

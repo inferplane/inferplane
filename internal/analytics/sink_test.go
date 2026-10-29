@@ -69,9 +69,9 @@ func TestSinkIncludesCostlessCompletion(t *testing.T) {
 
 func TestSinkFullQueueDoesNotBlock(t *testing.T) {
 	// A real full queue with no worker makes blocking enqueue observable.
-	s := &sink{ch: make(chan audit.Record, sinkQueueCap)}
+	s := &sink{ch: make(chan sinkItem, sinkQueueCap)}
 	for i := 0; i < cap(s.ch); i++ {
-		s.ch <- audit.Record{Event: "request_completed"}
+		s.ch <- sinkItem{rec: audit.Record{Event: "request_completed"}}
 	}
 	done := make(chan error, 1)
 	go func() {

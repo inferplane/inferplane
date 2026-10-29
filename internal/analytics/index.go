@@ -125,6 +125,10 @@ func OpenSQLite(path string) (*Index, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := db.Exec(AuditEventsDDL); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Index{db: db}, nil
 }
 
@@ -257,11 +261,20 @@ func (ix *Index) Replay(r io.Reader) (int, error) {
 		line, readErr := br.ReadString('\n')
 		if len(line) > 0 && line[len(line)-1] == '\n' { // complete line only
 			var rec audit.Record
-			if json.Unmarshal([]byte(line), &rec) == nil && Observable(rec) {
-				if e := ingest(tx, rec); e != nil {
-					return n, e
+			if json.Unmarshal([]byte(line), &rec) == nil {
+				if Observable(rec) {
+					if e := ingest(tx, rec); e != nil {
+						return n, e
+					}
+					n++
 				}
-				n++
+				// Console projection is independent of the usage projection;
+				// the insert is ON CONFLICT DO NOTHING, so replay is idempotent.
+				if AuditObservable(rec) {
+					if e := ingestAudit(tx, rec, []byte(strings.TrimRight(line, "\r\n"))); e != nil {
+						return n, e
+					}
+				}
 			}
 		}
 		if readErr != nil { // io.EOF (drops any unterminated trailing remainder)
