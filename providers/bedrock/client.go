@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -458,13 +459,27 @@ func toolResultText(raw json.RawMessage) string {
 	if raw[0] == '[' {
 		var blocks []schema.ContentBlock
 		if json.Unmarshal(raw, &blocks) == nil {
-			var out string
+			var out strings.Builder
 			for _, blk := range blocks {
-				if blk.Text != nil {
-					out += *blk.Text
+				switch {
+				case blk.Text != nil:
+					out.WriteString(*blk.Text)
+				case blk.Type == "tool_reference":
+					// Claude Code's ToolSearch answers with tool_reference
+					// blocks naming the deferred tools it loaded; their
+					// definitions arrive in the next request's tools. Converse
+					// has no such block, and an empty result reads as "nothing
+					// found", so name each loaded tool in text.
+					var name string
+					if json.Unmarshal(blk.Extra["tool_name"], &name) == nil && name != "" {
+						if out.Len() > 0 {
+							out.WriteByte('\n')
+						}
+						out.WriteString("Loaded tool: " + name)
+					}
 				}
 			}
-			return out
+			return out.String()
 		}
 	}
 	// Any other JSON shape (e.g. an object like {"output":"x"}) falls through
