@@ -39,10 +39,10 @@ func EndRetriedAttempt(ctx context.Context, err error, httpStatus int, modelNotF
 	}
 	status := audit.AttemptUpstreamError
 	switch {
+	case modelNotFound:
+		status = audit.AttemptModelNotFound // the upstream's actual answer
 	case canceled(ctx, err):
 		status = audit.AttemptCanceled
-	case modelNotFound:
-		status = audit.AttemptModelNotFound
 	case errors.Is(err, context.DeadlineExceeded) || code == http.StatusGatewayTimeout:
 		status = audit.AttemptTimeout
 	}
@@ -53,10 +53,10 @@ func EndRetriedAttempt(ctx context.Context, err error, httpStatus int, modelNotF
 // completed cleanly, canceled when the request was canceled, else stream_failed.
 func EndStreamAttempt(ctx context.Context, completed bool, err error) {
 	switch {
-	case canceled(ctx, err):
-		audit.EndOpenAttempt(ctx, audit.AttemptCanceled, http.StatusOK)
 	case completed && err == nil:
 		audit.EndOpenAttempt(ctx, audit.AttemptOK, http.StatusOK)
+	case canceled(ctx, err):
+		audit.EndOpenAttempt(ctx, audit.AttemptCanceled, http.StatusOK)
 	default:
 		audit.EndOpenAttempt(ctx, audit.AttemptStreamFailed, http.StatusOK)
 	}

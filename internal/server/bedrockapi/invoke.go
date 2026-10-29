@@ -423,16 +423,17 @@ func (h *InvokeHandler) inspectConverseStructure(ctx context.Context, raw []byte
 // shape for a model not enabled/available in that region). Deliberately
 // narrow: only these are ever retried across a D5 model-level fallback
 // boundary; any other 4xx stays a client error.
-func errModelNotFound(err error) bool {
-	var ue *providers.UpstreamError
-	return errors.As(err, &ue) && isModelNotFound(ue.HTTPStatus(), ue.Body)
-}
-
 func isModelNotFound(statusCode int, body []byte) bool {
 	if statusCode == http.StatusNotFound {
 		return true
 	}
 	return statusCode == http.StatusBadRequest && bytes.Contains(body, []byte("ValidationException"))
+}
+
+// errModelNotFound applies isModelNotFound to an upstream error's status and body.
+func errModelNotFound(err error) bool {
+	var ue *providers.UpstreamError
+	return errors.As(err, &ue) && isModelNotFound(ue.HTTPStatus(), ue.Body)
 }
 
 func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
@@ -461,7 +462,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 	if resp == nil {
 		if !last {
 			// No response and no error: no upstream status to note.
-			audit.EndOpenAttempt(req.Context(), audit.AttemptUpstreamError, 0)
+			requestpolicy.EndRetriedAttempt(req.Context(), nil, 0, false)
 			return true
 		}
 		audit.EndOpenAttempt(req.Context(), audit.AttemptUpstreamError, 0)

@@ -52,7 +52,7 @@ func TestEndRetriedAttempt(t *testing.T) {
 		{"status 500", nil, 500, false, audit.AttemptUpstreamError, 500},
 		{"status 504 timeout", nil, 504, false, audit.AttemptTimeout, 504},
 		{"deadline", context.DeadlineExceeded, 0, false, audit.AttemptTimeout, 0},
-		{"canceled err", context.Canceled, 0, true, audit.AttemptCanceled, 0},
+		{"canceled err", context.Canceled, 0, false, audit.AttemptCanceled, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := audit.WithEvidence(context.Background(), time.Now(), nil)
@@ -63,14 +63,20 @@ func TestEndRetriedAttempt(t *testing.T) {
 			}
 		})
 	}
-	t.Run("canceled context", func(t *testing.T) {
-		ctx := canceledCtx()
-		audit.BeginAttempt(ctx, "p", "m")
-		EndRetriedAttempt(ctx, errors.New("x"), 0, false)
-		if a := closedAttempt(t, ctx); a.Status != audit.AttemptCanceled {
-			t.Fatalf("attempt = %+v", a)
+	for _, mnf := range []bool{false, true} {
+		want := audit.AttemptCanceled
+		if mnf {
+			want = audit.AttemptModelNotFound // the upstream's actual answer wins
 		}
-	})
+		t.Run(fmt.Sprintf("canceled context mnf=%v", mnf), func(t *testing.T) {
+			ctx := canceledCtx()
+			audit.BeginAttempt(ctx, "p", "m")
+			EndRetriedAttempt(ctx, &providers.UpstreamError{StatusCode: 404}, 0, mnf)
+			if a := closedAttempt(t, ctx); a.Status != want {
+				t.Fatalf("attempt = %+v, want %s", a, want)
+			}
+		})
+	}
 }
 
 func TestEndAttemptOnErrorCanceled(t *testing.T) {
@@ -100,6 +106,8 @@ func TestEndStreamAttempt(t *testing.T) {
 		{"clean", true, nil, func() context.Context { return audit.WithEvidence(context.Background(), time.Now(), nil) }, audit.AttemptOK},
 		{"incomplete", false, nil, func() context.Context { return audit.WithEvidence(context.Background(), time.Now(), nil) }, audit.AttemptStreamFailed},
 		{"error", true, errors.New("reset"), func() context.Context { return audit.WithEvidence(context.Background(), time.Now(), nil) }, audit.AttemptStreamFailed},
+		{"incomplete with error", false, errors.New("reset"), func() context.Context { return audit.WithEvidence(context.Background(), time.Now(), nil) }, audit.AttemptStreamFailed},
+		{"completed with canceled ctx", true, nil, canceledCtx, audit.AttemptOK},
 		{"canceled err", false, context.Canceled, func() context.Context { return audit.WithEvidence(context.Background(), time.Now(), nil) }, audit.AttemptCanceled},
 		{"canceled ctx", false, errors.New("x"), canceledCtx, audit.AttemptCanceled},
 	} {

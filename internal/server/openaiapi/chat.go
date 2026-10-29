@@ -603,16 +603,17 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 // 400, not 404, for a model not enabled/available in that region).
 // Deliberately narrow: only these are ever retried across a D5 model-level
 // fallback boundary; any other 4xx stays a client error, teed verbatim.
-func errModelNotFound(err error) bool {
-	var ue *providers.UpstreamError
-	return errors.As(err, &ue) && isModelNotFound(ue.HTTPStatus(), ue.Body)
-}
-
 func isModelNotFound(statusCode int, body []byte) bool {
 	if statusCode == 404 {
 		return true
 	}
 	return statusCode == 400 && bytes.Contains(body, []byte("ValidationException"))
+}
+
+// errModelNotFound applies isModelNotFound to an upstream error's status and body.
+func errModelNotFound(err error) bool {
+	var ue *providers.UpstreamError
+	return errors.As(err, &ue) && isModelNotFound(ue.HTTPStatus(), ue.Body)
 }
 
 // govErrType maps a governance deny status to the OpenAI error `type`.
