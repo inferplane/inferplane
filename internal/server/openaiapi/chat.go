@@ -359,9 +359,8 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			retriable = h.serveComplete(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		}
 		if retriable {
-			// Close the attempt before releasing the reservation so budget
-			// settlement never counts toward its duration.
-			audit.EndOpenAttempt(attemptReq.Context(), requestpolicy.RetryStatus(attemptReq.Context(), crossModelNext), 0)
+			// Safety net: the serve path already ended the attempt (a no-op then).
+			audit.EndOpenAttempt(attemptReq.Context(), audit.AttemptUpstreamError, 0)
 		}
 		finishBudget()
 		if !retriable {
@@ -383,7 +382,7 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last {
-			requestpolicy.NoteAttemptFailure(req.Context(), err)
+			requestpolicy.EndRetriedAttempt(req.Context(), err, 0, crossModelNext && errModelNotFound(err))
 			return true // fall back to the next target
 		}
 		requestpolicy.EndAttemptOnError(req.Context(), err)
@@ -408,9 +407,12 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 		return false
 	}
 	if !last && (resp.StatusCode >= 500 || resp.StatusCode == 429 || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
-		audit.NoteAttemptHTTP(req.Context(), resp.StatusCode)
+		requestpolicy.EndRetriedAttempt(req.Context(), nil, resp.StatusCode, crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))
 		return true // upstream 5xx/429, or a cross-model "model not found" → fall back
 	}
+	// The provider exchange is over: close the attempt before writing to the
+	// client, settlement and body capture so none count toward its duration.
+	audit.EndOpenAttempt(req.Context(), requestpolicy.AttemptStatusForHTTP(resp.StatusCode), resp.StatusCode)
 	if resp.StatusCode < 400 {
 		h.r.RecordResult(providerName, identity, true)
 		if resp.StatusCode/100 == 2 && resp.Parsed != nil && resp.Parsed.Usage != nil {
@@ -433,9 +435,6 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 	}
 	w.WriteHeader(resp.StatusCode)
 	w.Write(clientBody)
-	// The provider exchange is over: close the attempt before settlement and
-	// body capture so those never count toward its duration.
-	audit.EndOpenAttempt(req.Context(), requestpolicy.AttemptStatusForHTTP(resp.StatusCode), resp.StatusCode)
 	var usage *audit.UsageRef
 	var cost *audit.CostRef
 	if resp.Parsed != nil {
@@ -465,7 +464,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last {
-			requestpolicy.NoteAttemptFailure(req.Context(), err)
+			requestpolicy.EndRetriedAttempt(req.Context(), err, 0, crossModelNext && errModelNotFound(err))
 			return true // pre-TTFT failure → fall back
 		}
 		requestpolicy.EndAttemptOnError(req.Context(), err)
@@ -520,7 +519,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 			// writeStreamErrorEvent / bedrockapi's exception-frame path). The
 			// error detail is logged server-side only, never echoed to the
 			// client (an AWS SDK error string can carry an account id/ARN).
-			audit.EndOpenAttempt(req.Context(), audit.AttemptStreamFailed, 200)
+			requestpolicy.EndStreamAttempt(req.Context(), false, err)
 			log.Printf("openaiapi: stream interrupted (model=%s upstream=%s provider=%s): %v", model, upstream, providerName, err)
 			writeStreamErrorEvent(w)
 			flusher.Flush()
@@ -578,11 +577,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 		w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
 	}
-	if streamCompleted && !streamFailed {
-		audit.EndOpenAttempt(req.Context(), audit.AttemptOK, 200)
-	} else {
-		audit.EndOpenAttempt(req.Context(), audit.AttemptStreamFailed, 200)
-	}
+	requestpolicy.EndStreamAttempt(req.Context(), streamCompleted && !streamFailed, nil)
 	cost := h.settle(p, providerName, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 	requestpolicy.SettleBudget(req, cost, lastUsage, streamCompleted && !streamFailed)
 	if streamCompleted && !streamFailed && lastUsage != nil {
@@ -608,6 +603,11 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 // 400, not 404, for a model not enabled/available in that region).
 // Deliberately narrow: only these are ever retried across a D5 model-level
 // fallback boundary; any other 4xx stays a client error, teed verbatim.
+func errModelNotFound(err error) bool {
+	var ue *providers.UpstreamError
+	return errors.As(err, &ue) && isModelNotFound(ue.HTTPStatus(), ue.Body)
+}
+
 func isModelNotFound(statusCode int, body []byte) bool {
 	if statusCode == 404 {
 		return true

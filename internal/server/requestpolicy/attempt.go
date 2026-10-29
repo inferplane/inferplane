@@ -18,17 +18,48 @@ func NoteAttemptFailure(ctx context.Context, err error) {
 	}
 }
 
-// RetryStatus is the closed attempt status for a retriable failure: a
-// noted 4xx other than 429 at a cross-model boundary is the only
-// retriable "model not found" case; 5xx, 429 and transport errors are
-// upstream errors. Call it while the attempt is still open: it reads the
-// status noted on the open attempt.
-func RetryStatus(ctx context.Context, crossModelNext bool) string {
-	h := audit.OpenAttemptHTTP(ctx)
-	if crossModelNext && h >= 400 && h < 500 && h != 429 {
-		return audit.AttemptModelNotFound
+func canceled(ctx context.Context, err error) bool {
+	return errors.Is(err, context.Canceled) || ctx.Err() == context.Canceled
+}
+
+// EndRetriedAttempt notes the upstream status of a retriable failure and
+// ends the open attempt. modelNotFound is the ingress's own verdict
+// (cross-model boundary and its model-not-found predicate); status is
+// otherwise canceled, timeout or upstream_error.
+func EndRetriedAttempt(ctx context.Context, err error, httpStatus int, modelNotFound bool) {
+	code := 0
+	var ue *providers.UpstreamError
+	if errors.As(err, &ue) {
+		code = ue.HTTPStatus()
+	} else if httpStatus > 0 {
+		code = httpStatus
 	}
-	return audit.AttemptUpstreamError
+	if code > 0 {
+		audit.NoteAttemptHTTP(ctx, code)
+	}
+	status := audit.AttemptUpstreamError
+	switch {
+	case canceled(ctx, err):
+		status = audit.AttemptCanceled
+	case modelNotFound:
+		status = audit.AttemptModelNotFound
+	case errors.Is(err, context.DeadlineExceeded) || code == http.StatusGatewayTimeout:
+		status = audit.AttemptTimeout
+	}
+	audit.EndOpenAttempt(ctx, status, 0)
+}
+
+// EndStreamAttempt ends the open attempt of a committed stream: ok when it
+// completed cleanly, canceled when the request was canceled, else stream_failed.
+func EndStreamAttempt(ctx context.Context, completed bool, err error) {
+	switch {
+	case canceled(ctx, err):
+		audit.EndOpenAttempt(ctx, audit.AttemptCanceled, http.StatusOK)
+	case completed && err == nil:
+		audit.EndOpenAttempt(ctx, audit.AttemptOK, http.StatusOK)
+	default:
+		audit.EndOpenAttempt(ctx, audit.AttemptStreamFailed, http.StatusOK)
+	}
 }
 
 // EndAttemptOnError closes the open attempt for a terminal provider error.
@@ -38,7 +69,9 @@ func EndAttemptOnError(ctx context.Context, err error) {
 	NoteAttemptFailure(ctx, err)
 	status := audit.AttemptUpstreamError
 	var ue *providers.UpstreamError
-	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ue) && ue.HTTPStatus() == http.StatusGatewayTimeout) {
+	if canceled(ctx, err) {
+		status = audit.AttemptCanceled
+	} else if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ue) && ue.HTTPStatus() == http.StatusGatewayTimeout) {
 		status = audit.AttemptTimeout
 	}
 	audit.EndOpenAttempt(ctx, status, 0)

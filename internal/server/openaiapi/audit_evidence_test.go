@@ -84,6 +84,7 @@ func TestChatDenialCarriesClient(t *testing.T) {
 type evChatStream struct {
 	events []*providers.StreamEvent
 	err    error
+	delay  time.Duration
 }
 
 func (evChatStream) Name() string               { return "mock" }
@@ -93,6 +94,7 @@ func (evChatStream) Complete(context.Context, *providers.ProxyRequest) (*provide
 }
 func (p evChatStream) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
 	return func(yield func(*providers.StreamEvent, error) bool) {
+		time.Sleep(p.delay)
 		for _, ev := range p.events {
 			if !yield(ev, nil) {
 				return
@@ -135,9 +137,12 @@ func chatSlowSettleRequest(body string, p keystore.Principal) *http.Request {
 }
 
 func TestChatStreamRecordsAttemptAndFirstToken(t *testing.T) {
-	done := chatStreamRecord(t, mockprovider.New("claude-sonnet-4-6"), chatPlainRequest)
+	done := chatStreamRecord(t, evChatStream{delay: 5 * time.Millisecond, events: []*providers.StreamEvent{chatEv("message_start"), chatEv("content_block_delta"), chatEv("message_stop")}}, chatPlainRequest)
 	if len(done.Attempts) != 1 || done.Attempts[0].Status != audit.AttemptOK || done.Attempts[0].HTTP != 200 || done.Latency == nil {
 		t.Fatalf("stream record = %+v", done)
+	}
+	if done.Latency.TTFTMs < 1 {
+		t.Fatalf("TTFTMs = %d, want >= 1", done.Latency.TTFTMs)
 	}
 }
 
@@ -195,4 +200,66 @@ func TestChatCompleteAttemptEndsBeforeSettlement(t *testing.T) {
 		chatSlowSettleRequest(`{"model":"claude-sonnet-4-6","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`, keystore.Principal{KeyID: "ik", Team: "t", AllowedModels: []string{"*"}}))
 	w.Close()
 	requireChatAttemptEndedBeforeSettle(t, chatTerminal(t, buf))
+}
+
+// errChatProvider fails both Complete and Stream with err.
+type errChatProvider struct{ err error }
+
+func (errChatProvider) Name() string               { return "mock" }
+func (errChatProvider) Models() []schema.ModelInfo { return nil }
+func (p errChatProvider) Complete(context.Context, *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+	return nil, p.err
+}
+func (p errChatProvider) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
+	return nil, p.err
+}
+
+func crossModelChatRecord(t *testing.T, bad providers.Provider, stream bool) audit.Record {
+	t.Helper()
+	provs := map[string]providers.Provider{"bad": bad, "good": mockprovider.New("claude-sonnet-4-6")}
+	models := map[string]config.ModelConfig{
+		"claude-opus-5":     {Targets: []config.Target{{Provider: "bad", Model: "claude-opus-5"}}},
+		"claude-sonnet-4-6": {Targets: []config.Target{{Provider: "good", Model: "claude-sonnet-4-6"}}},
+	}
+	body := `{"model":"claude-opus-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	if stream {
+		body = `{"model":"claude-opus-5","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	}
+	w, buf := chatWriter(t)
+	NewChatHandlerFull(router.New(holderForWithFallbacks(provs, models, map[string]string{"claude-opus-5": "claude-sonnet-4-6"})), w, nil).ServeHTTP(httptest.NewRecorder(),
+		chatPlainRequest(body, keystore.Principal{KeyID: "ik", Team: "t", AllowedModels: []string{"*"}}))
+	w.Close()
+	return chatTerminal(t, buf)
+}
+
+func TestChatCrossModelAttemptStatuses(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		// A cross-model 401 is retried but is NOT a model-not-found.
+		done := crossModelChatRecord(t, errChatProvider{err: &providers.UpstreamError{StatusCode: 401, Body: []byte(`{}`)}}, stream)
+		if len(done.Attempts) != 2 || done.Attempts[0].Status != audit.AttemptUpstreamError || done.Attempts[0].HTTP != 401 {
+			t.Fatalf("stream=%v 401 attempts = %+v", stream, done.Attempts)
+		}
+		done = crossModelChatRecord(t, errChatProvider{err: &providers.UpstreamError{StatusCode: 404, Body: []byte(`{}`)}}, stream)
+		if len(done.Attempts) != 2 || done.Attempts[0].Status != audit.AttemptModelNotFound || done.Attempts[0].HTTP != 404 {
+			t.Fatalf("stream=%v 404 attempts = %+v", stream, done.Attempts)
+		}
+	}
+	// Status-based (no error) cross-model model-not-found on the complete path.
+	done := crossModelChatRecord(t, statusProvider{code: 404, body: []byte(`{}`)}, false)
+	if len(done.Attempts) != 2 || done.Attempts[0].Status != audit.AttemptModelNotFound || done.Attempts[0].HTTP != 404 {
+		t.Fatalf("status 404 attempts = %+v", done.Attempts)
+	}
+}
+
+func TestChatCanceledRecordsCanceled(t *testing.T) {
+	provs := map[string]providers.Provider{"p": errChatProvider{err: context.Canceled}}
+	models := map[string]config.ModelConfig{"claude-sonnet-4-6": {Targets: []config.Target{{Provider: "p", Model: "claude-sonnet-4-6"}}}}
+	w, buf := chatWriter(t)
+	NewChatHandlerFull(router.New(holderFor(provs, models)), w, nil).ServeHTTP(httptest.NewRecorder(),
+		chatPlainRequest(`{"model":"claude-sonnet-4-6","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`, keystore.Principal{KeyID: "ik", Team: "t", AllowedModels: []string{"*"}}))
+	w.Close()
+	done := chatTerminal(t, buf)
+	if len(done.Attempts) != 1 || done.Attempts[0].Status != audit.AttemptCanceled {
+		t.Fatalf("attempts = %+v", done.Attempts)
+	}
 }

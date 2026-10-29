@@ -87,7 +87,7 @@ func TestInvokeDenialCarriesClient(t *testing.T) {
 }
 
 func TestInvokeStreamRecordsAttempt(t *testing.T) {
-	provs := map[string]providers.Provider{"p": streamProvider{}}
+	provs := map[string]providers.Provider{"p": delayedStream{}}
 	models := map[string]config.ModelConfig{"claude-x": {Targets: []config.Target{{Provider: "p", Model: "claude-x"}}}}
 	w, buf := invokeWriter(t)
 	h := holderFor(provs, models)
@@ -96,6 +96,9 @@ func TestInvokeStreamRecordsAttempt(t *testing.T) {
 	done := invokeTerminal(t, buf)
 	if len(done.Attempts) != 1 || done.Attempts[0].Status != audit.AttemptOK || done.Latency == nil {
 		t.Fatalf("stream record = %+v", done)
+	}
+	if done.Latency.TTFTMs < 1 {
+		t.Fatalf("TTFTMs = %d, want >= 1", done.Latency.TTFTMs)
 	}
 }
 
@@ -174,7 +177,7 @@ func TestConverseStreamRecordsAttemptOutcome(t *testing.T) {
 		}, audit.AttemptStreamFailed},
 	} {
 		t.Run(name, func(t *testing.T) {
-			c := &nativeCapture{events: tc.events()}
+			c := &delayedNative{nativeCapture: nativeCapture{events: tc.events()}}
 			h := holderFor(map[string]providers.Provider{"p": c}, map[string]config.ModelConfig{"native": {Targets: []config.Target{{Provider: "p", Model: "native-id"}}}})
 			w, buf := invokeWriter(t)
 			invokeServe(NewConverseHandlerMetrics(router.New(h), h, w, nil, nil, true), "/model/native/converse-stream", anyModel)
@@ -182,6 +185,9 @@ func TestConverseStreamRecordsAttemptOutcome(t *testing.T) {
 			done := invokeTerminal(t, buf)
 			if len(done.Attempts) != 1 || done.Attempts[0].Status != tc.want || done.Attempts[0].HTTP != 200 || done.Latency == nil {
 				t.Fatalf("converse record = %+v", done)
+			}
+			if done.Latency.TTFTMs < 1 {
+				t.Fatalf("TTFTMs = %d, want >= 1", done.Latency.TTFTMs)
 			}
 		})
 	}
@@ -247,4 +253,75 @@ func TestInvokeStreamAttemptEndsBeforeSettlement(t *testing.T) {
 	slowInvokeServe(NewInvokeHandlerMetrics(router.New(h), h, w, nil, nil, true), "/model/claude-x/invoke-with-response-stream")
 	w.Close()
 	requireInvokeAttemptEndedBeforeSettle(t, invokeTerminal(t, buf))
+}
+
+// delayedStream waits before the first event so TTFT is measurable.
+type delayedStream struct{ streamProvider }
+
+func (d delayedStream) Stream(ctx context.Context, r *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
+	seq, err := d.streamProvider.Stream(ctx, r)
+	return func(yield func(*providers.StreamEvent, error) bool) {
+		time.Sleep(5 * time.Millisecond)
+		seq(yield)
+	}, err
+}
+
+type delayedNative struct{ nativeCapture }
+
+func (d *delayedNative) Stream(ctx context.Context, r *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
+	seq, err := d.nativeCapture.Stream(ctx, r)
+	return func(yield func(*providers.StreamEvent, error) bool) {
+		time.Sleep(5 * time.Millisecond)
+		seq(yield)
+	}, err
+}
+
+// errInvokeProvider fails both Complete and Stream with err.
+type errInvokeProvider struct{ err error }
+
+func (errInvokeProvider) Name() string               { return "mock" }
+func (errInvokeProvider) Models() []schema.ModelInfo { return nil }
+func (p errInvokeProvider) Complete(context.Context, *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+	return nil, p.err
+}
+func (p errInvokeProvider) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
+	return nil, p.err
+}
+
+func crossModelInvokeRecord(t *testing.T, bad providers.Provider, stream bool) audit.Record {
+	t.Helper()
+	provs := map[string]providers.Provider{"bad": bad, "good": &captureProvider{}}
+	if stream {
+		provs["good"] = streamProvider{}
+	}
+	models := map[string]config.ModelConfig{
+		"claude-opus-5": {Targets: []config.Target{{Provider: "bad", Model: "claude-opus-5"}}},
+		"claude-x":      {Targets: []config.Target{{Provider: "good", Model: "claude-x"}}},
+	}
+	w, buf := invokeWriter(t)
+	h := holderForWithFallbacks(provs, models, map[string]string{"claude-opus-5": "claude-x"})
+	path := "/model/claude-opus-5/invoke"
+	if stream {
+		path += "-with-response-stream"
+	}
+	invokeServe(NewInvokeHandlerMetrics(router.New(h), h, w, nil, nil, stream), path, anyModel)
+	w.Close()
+	return invokeTerminal(t, buf)
+}
+
+func TestInvokeCrossModelAttemptStatuses(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		done := crossModelInvokeRecord(t, errInvokeProvider{err: &providers.UpstreamError{StatusCode: 401, Body: []byte(`{}`)}}, stream)
+		if len(done.Attempts) != 2 || done.Attempts[0].Status != audit.AttemptUpstreamError || done.Attempts[0].HTTP != 401 {
+			t.Fatalf("stream=%v 401 attempts = %+v", stream, done.Attempts)
+		}
+		done = crossModelInvokeRecord(t, errInvokeProvider{err: &providers.UpstreamError{StatusCode: 404, Body: []byte(`{}`)}}, stream)
+		if len(done.Attempts) != 2 || done.Attempts[0].Status != audit.AttemptModelNotFound || done.Attempts[0].HTTP != 404 {
+			t.Fatalf("stream=%v 404 attempts = %+v", stream, done.Attempts)
+		}
+	}
+	done := crossModelInvokeRecord(t, statusProvider{code: 404, body: []byte(`{}`)}, false)
+	if len(done.Attempts) != 2 || done.Attempts[0].Status != audit.AttemptModelNotFound || done.Attempts[0].HTTP != 404 {
+		t.Fatalf("status 404 attempts = %+v", done.Attempts)
+	}
 }

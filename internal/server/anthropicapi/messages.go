@@ -403,8 +403,8 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			retriable = h.serveComplete(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		}
 		if retriable {
-			// End the attempt before budget release so its duration is the provider exchange only.
-			audit.EndOpenAttempt(attemptReq.Context(), requestpolicy.RetryStatus(attemptReq.Context(), crossModelNext), 0)
+			// Safety net: the serve path already ended the attempt (a no-op then).
+			audit.EndOpenAttempt(attemptReq.Context(), audit.AttemptUpstreamError, 0)
 		}
 		finishBudget()
 		if !retriable {
@@ -425,6 +425,12 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // Generic Bedrock ValidationException also covers context/tool/schema errors.
 func isModelNotFound(statusCode int, _ []byte) bool {
 	return statusCode == 404
+}
+
+// errModelNotFound is Messages' own model-not-found rule for a failure error.
+func errModelNotFound(err error) bool {
+	var ue *providers.UpstreamError
+	return errors.As(err, &ue) && isModelNotFound(ue.HTTPStatus(), ue.Body)
 }
 
 func retryMessagesError(err error, crossModelNext bool) bool {
@@ -457,7 +463,7 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last && retryMessagesError(err, crossModelNext) {
-			requestpolicy.NoteAttemptFailure(req.Context(), err)
+			requestpolicy.EndRetriedAttempt(req.Context(), err, 0, crossModelNext && errModelNotFound(err))
 			return true // transport error → fall back
 		}
 		requestpolicy.EndAttemptOnError(req.Context(), err)
@@ -490,9 +496,12 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	// found" response — narrow on purpose: a plain 400 unrelated to the
 	// requested model must stay a client error, never replayed elsewhere.
 	if !last && (resp.StatusCode >= 500 || resp.StatusCode == 429 || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
-		audit.NoteAttemptHTTP(req.Context(), resp.StatusCode)
+		requestpolicy.EndRetriedAttempt(req.Context(), nil, resp.StatusCode, crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))
 		return true
 	}
+	// The provider exchange is over: close the attempt before writing to the
+	// client, settlement and body capture so none count toward its duration.
+	audit.EndOpenAttempt(req.Context(), requestpolicy.AttemptStatusForHTTP(resp.StatusCode), resp.StatusCode)
 	if resp.Headers != nil {
 		copyUpstreamHeaders(w.Header(), resp.Headers)
 	}
@@ -501,9 +510,6 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	}
 	w.WriteHeader(resp.StatusCode)
 	w.Write(resp.RawBody) // tee verbatim (incl. non-2xx error bodies)
-	// The provider exchange is over: close the attempt before settlement and
-	// body capture so those never count toward its duration.
-	audit.EndOpenAttempt(req.Context(), requestpolicy.AttemptStatusForHTTP(resp.StatusCode), resp.StatusCode)
 	// A 2xx is a breaker success; a committed non-2xx on the last target is not
 	// counted (it was teed as the client's real upstream error).
 	if resp.StatusCode < 400 {
@@ -546,7 +552,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last && retryMessagesError(err, crossModelNext) {
-			requestpolicy.NoteAttemptFailure(req.Context(), err)
+			requestpolicy.EndRetriedAttempt(req.Context(), err, 0, crossModelNext && errModelNotFound(err))
 			return true // pre-TTFT failure → fall back
 		}
 		requestpolicy.EndAttemptOnError(req.Context(), err)
@@ -598,7 +604,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 			// server-side only — an AWS SDK error string can carry an account
 			// id/ARN (same principle providers/bedrock/errors.go applies) — and
 			// never echoed to the client.
-			audit.EndOpenAttempt(req.Context(), audit.AttemptStreamFailed, 200)
+			requestpolicy.EndStreamAttempt(req.Context(), false, err)
 			log.Printf("anthropicapi: stream interrupted (model=%s upstream=%s provider=%s): %v", model, upstream, providerName, err)
 			writeStreamErrorEvent(w)
 			flusher.Flush()
@@ -642,11 +648,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 			usage = usageRef(lastUsage)
 		}
 	}
-	if streamCompleted && !streamFailed {
-		audit.EndOpenAttempt(req.Context(), audit.AttemptOK, 200)
-	} else {
-		audit.EndOpenAttempt(req.Context(), audit.AttemptStreamFailed, 200)
-	}
+	requestpolicy.EndStreamAttempt(req.Context(), streamCompleted && !streamFailed, nil)
 	cost := h.settle(p, providerName, model, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 	requestpolicy.SettleBudget(req, cost, lastUsage, streamCompleted && !streamFailed)
 	if streamCompleted && !streamFailed && lastUsage != nil {

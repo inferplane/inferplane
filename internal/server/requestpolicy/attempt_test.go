@@ -18,27 +18,97 @@ import (
 	"github.com/inferplane/inferplane/providers"
 )
 
-func TestRetryStatus(t *testing.T) {
+func closedAttempt(t *testing.T, ctx context.Context) audit.AttemptRef {
+	t.Helper()
+	rec := audit.Record{Event: "request_completed"}
+	audit.Finish(ctx, &rec)
+	if len(rec.Attempts) != 1 {
+		t.Fatalf("attempts = %+v", rec.Attempts)
+	}
+	return rec.Attempts[0]
+}
+
+func canceledCtx() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return audit.WithEvidence(ctx, time.Now(), nil)
+}
+
+func TestEndRetriedAttempt(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		cross bool
-		http  int
-		want  string
+		name       string
+		err        error
+		httpStatus int
+		mnf        bool
+		status     string
+		wantHTTP   int
 	}{
-		{"same-model 503", false, 503, audit.AttemptUpstreamError},
-		{"cross 503", true, 503, audit.AttemptUpstreamError},
-		{"cross 429", true, 429, audit.AttemptUpstreamError},
-		{"cross 404", true, 404, audit.AttemptModelNotFound},
-		{"cross 400", true, 400, audit.AttemptModelNotFound},
-		{"cross transport error", true, 0, audit.AttemptUpstreamError},
-		{"same-model 404", false, 404, audit.AttemptUpstreamError},
+		{"transport", errors.New("dial"), 0, false, audit.AttemptUpstreamError, 0},
+		{"upstream 503 err", &providers.UpstreamError{StatusCode: 503}, 0, false, audit.AttemptUpstreamError, 503},
+		{"upstream 401 err not model-not-found", &providers.UpstreamError{StatusCode: 401}, 0, false, audit.AttemptUpstreamError, 401},
+		{"upstream 404 err model-not-found", &providers.UpstreamError{StatusCode: 404}, 0, true, audit.AttemptModelNotFound, 404},
+		{"status 429", nil, 429, false, audit.AttemptUpstreamError, 429},
+		{"status 404 model-not-found", nil, 404, true, audit.AttemptModelNotFound, 404},
+		{"status 500", nil, 500, false, audit.AttemptUpstreamError, 500},
+		{"status 504 timeout", nil, 504, false, audit.AttemptTimeout, 504},
+		{"deadline", context.DeadlineExceeded, 0, false, audit.AttemptTimeout, 0},
+		{"canceled err", context.Canceled, 0, true, audit.AttemptCanceled, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := audit.WithEvidence(context.Background(), time.Now(), nil)
 			audit.BeginAttempt(ctx, "p", "m")
-			audit.NoteAttemptHTTP(ctx, tc.http)
-			if got := RetryStatus(ctx, tc.cross); got != tc.want {
-				t.Fatalf("RetryStatus = %q, want %q", got, tc.want)
+			EndRetriedAttempt(ctx, tc.err, tc.httpStatus, tc.mnf)
+			if a := closedAttempt(t, ctx); a.Status != tc.status || a.HTTP != tc.wantHTTP {
+				t.Fatalf("attempt = %+v, want %s/%d", a, tc.status, tc.wantHTTP)
+			}
+		})
+	}
+	t.Run("canceled context", func(t *testing.T) {
+		ctx := canceledCtx()
+		audit.BeginAttempt(ctx, "p", "m")
+		EndRetriedAttempt(ctx, errors.New("x"), 0, false)
+		if a := closedAttempt(t, ctx); a.Status != audit.AttemptCanceled {
+			t.Fatalf("attempt = %+v", a)
+		}
+	})
+}
+
+func TestEndAttemptOnErrorCanceled(t *testing.T) {
+	for name, ctx := range map[string]context.Context{"err": audit.WithEvidence(context.Background(), time.Now(), nil), "ctx": canceledCtx()} {
+		t.Run(name, func(t *testing.T) {
+			err := errors.New("x")
+			if name == "err" {
+				err = fmt.Errorf("w: %w", context.Canceled)
+			}
+			audit.BeginAttempt(ctx, "p", "m")
+			EndAttemptOnError(ctx, err)
+			if a := closedAttempt(t, ctx); a.Status != audit.AttemptCanceled {
+				t.Fatalf("attempt = %+v", a)
+			}
+		})
+	}
+}
+
+func TestEndStreamAttempt(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		completed bool
+		err       error
+		ctx       func() context.Context
+		status    string
+	}{
+		{"clean", true, nil, func() context.Context { return audit.WithEvidence(context.Background(), time.Now(), nil) }, audit.AttemptOK},
+		{"incomplete", false, nil, func() context.Context { return audit.WithEvidence(context.Background(), time.Now(), nil) }, audit.AttemptStreamFailed},
+		{"error", true, errors.New("reset"), func() context.Context { return audit.WithEvidence(context.Background(), time.Now(), nil) }, audit.AttemptStreamFailed},
+		{"canceled err", false, context.Canceled, func() context.Context { return audit.WithEvidence(context.Background(), time.Now(), nil) }, audit.AttemptCanceled},
+		{"canceled ctx", false, errors.New("x"), canceledCtx, audit.AttemptCanceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := tc.ctx()
+			audit.BeginAttempt(ctx, "p", "m")
+			EndStreamAttempt(ctx, tc.completed, tc.err)
+			if a := closedAttempt(t, ctx); a.Status != tc.status || a.HTTP != 200 {
+				t.Fatalf("attempt = %+v, want %s", a, tc.status)
 			}
 		})
 	}

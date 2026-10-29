@@ -390,9 +390,8 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			retriable = h.serveComplete(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		}
 		if retriable {
-			// Close the attempt before releasing the reservation so budget
-			// settlement never counts toward its duration.
-			audit.EndOpenAttempt(attemptReq.Context(), requestpolicy.RetryStatus(attemptReq.Context(), crossModelNext), 0)
+			// Safety net: the serve path already ended the attempt (a no-op then).
+			audit.EndOpenAttempt(attemptReq.Context(), audit.AttemptUpstreamError, 0)
 		}
 		finishBudget()
 		if !retriable {
@@ -424,6 +423,11 @@ func (h *InvokeHandler) inspectConverseStructure(ctx context.Context, raw []byte
 // shape for a model not enabled/available in that region). Deliberately
 // narrow: only these are ever retried across a D5 model-level fallback
 // boundary; any other 4xx stays a client error.
+func errModelNotFound(err error) bool {
+	var ue *providers.UpstreamError
+	return errors.As(err, &ue) && isModelNotFound(ue.HTTPStatus(), ue.Body)
+}
+
 func isModelNotFound(statusCode int, body []byte) bool {
 	if statusCode == http.StatusNotFound {
 		return true
@@ -435,7 +439,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last && h.retryError(err, crossModelNext) {
-			requestpolicy.NoteAttemptFailure(req.Context(), err)
+			requestpolicy.EndRetriedAttempt(req.Context(), err, 0, crossModelNext && errModelNotFound(err))
 			return true
 		}
 		requestpolicy.EndAttemptOnError(req.Context(), err)
@@ -456,7 +460,8 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 	}
 	if resp == nil {
 		if !last {
-			// No response and no error: nothing to note (no upstream status).
+			// No response and no error: no upstream status to note.
+			audit.EndOpenAttempt(req.Context(), audit.AttemptUpstreamError, 0)
 			return true
 		}
 		audit.EndOpenAttempt(req.Context(), audit.AttemptUpstreamError, 0)
@@ -467,7 +472,7 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 		return false
 	}
 	if !last && (resp.StatusCode >= http.StatusInternalServerError || resp.StatusCode == http.StatusTooManyRequests || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
-		audit.NoteAttemptHTTP(req.Context(), resp.StatusCode)
+		requestpolicy.EndRetriedAttempt(req.Context(), nil, resp.StatusCode, crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))
 		return true
 	}
 	// The provider exchange is over: close the attempt before settlement and
@@ -525,7 +530,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last && h.retryError(err, crossModelNext) {
-			requestpolicy.NoteAttemptFailure(req.Context(), err)
+			requestpolicy.EndRetriedAttempt(req.Context(), err, 0, crossModelNext && errModelNotFound(err))
 			return true
 		}
 		requestpolicy.EndAttemptOnError(req.Context(), err)
@@ -570,8 +575,8 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	// committed, so the failure surfaces as an exception frame on the wire
 	// and a Partial audit record — mirroring anthropicapi's
 	// auditCompletedPartial path, never a clean 200 completion record.
-	partialFinish := func() bool {
-		audit.EndOpenAttempt(req.Context(), audit.AttemptStreamFailed, http.StatusOK)
+	partialFinish := func(cause error) bool {
+		requestpolicy.EndStreamAttempt(req.Context(), false, cause)
 		if writeExceptionFrame(w, enc, "internalServerException", "stream interrupted") == nil {
 			flusher.Flush()
 		}
@@ -592,17 +597,17 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	}
 	for ev, err := range seq {
 		if err != nil {
-			return partialFinish()
+			return partialFinish(err)
 		}
 		if ev == nil {
 			continue
 		}
 		if h.converse {
 			if len(ev.Raw) == 0 {
-				return partialFinish()
+				return partialFinish(nil)
 			}
 			if _, err := w.Write(ev.Raw); err != nil {
-				return partialFinish()
+				return partialFinish(err)
 			}
 			flusher.Flush()
 			if ev.Chunk == nil {
@@ -625,14 +630,14 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		}
 		chunkJSON, err := json.Marshal(ev.Chunk)
 		if err != nil {
-			return partialFinish()
+			return partialFinish(err)
 		}
 		if ttft == 0 {
 			ttft = time.Since(start).Seconds()
 			audit.MarkFirstToken(req.Context())
 		}
 		if err := writeChunkFrame(w, enc, chunkJSON); err != nil {
-			return partialFinish()
+			return partialFinish(err)
 		}
 		flusher.Flush()
 		// FOLD every usage-bearing frame rather than overwriting (ADR-030) —
@@ -652,14 +657,10 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		}
 	}
 	if h.converse && (!streamCompleted || streamFailed || lastUsage == nil) {
-		return partialFinish()
+		return partialFinish(nil)
 	}
 
-	if streamCompleted && !streamFailed {
-		audit.EndOpenAttempt(req.Context(), audit.AttemptOK, http.StatusOK)
-	} else {
-		audit.EndOpenAttempt(req.Context(), audit.AttemptStreamFailed, http.StatusOK)
-	}
+	requestpolicy.EndStreamAttempt(req.Context(), streamCompleted && !streamFailed, nil)
 	cost := h.settle(p, providerName, model, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 	requestpolicy.SettleBudget(req, cost, lastUsage, streamCompleted && !streamFailed)
 	if streamCompleted && !streamFailed && lastUsage != nil {
