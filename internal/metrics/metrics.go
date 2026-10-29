@@ -123,7 +123,7 @@ func New() *Metrics {
 		}, []string{"team", "from_model", "to_model"}),
 		modelFallback: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "inferplane_model_fallback_total",
-			Help: "Requests for an unrouted model served by a configured one (ADR-029), by source and served model.",
+			Help: "Requests for an unrouted model resolved to a configured one (ADR-029), by source and resolved model.",
 			// The requested name is client input and never a label: source is
 			// a closed set and model is the configured served model.
 		}, []string{"source", "model"}),

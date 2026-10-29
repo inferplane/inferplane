@@ -54,7 +54,8 @@ func denyCodeOf(r audit.Record) string {
 	if r.Outcome.Error != nil {
 		return *r.Outcome.Error
 	}
-	if r.Event == "request_started" && r.Outcome.Status >= 400 && r.Request.Routing != nil {
+	if r.Event == "request_started" && r.Outcome.Status >= 400 && r.Request.Routing != nil &&
+		r.Request.Routing.Reason != "model_fallback" { // fallback is evidence, not a denial
 		return r.Request.Routing.Reason
 	}
 	return ""

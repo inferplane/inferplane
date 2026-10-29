@@ -310,3 +310,15 @@ func TestDenyCodeOnlyFromGatewayDecisions(t *testing.T) {
 		t.Fatalf("gateway decision: deny_code=%q kind=%s", row.DenyCode, row.Kind)
 	}
 }
+
+// A model fallback is evidence on the routing ref, never a denial: a refusal
+// without an error code on fallback traffic has no deny code.
+func TestModelFallbackIsNotADenyCode(t *testing.T) {
+	refused := rec("01JC0000000000000000000073", "request_started", 400, func(r *audit.Record) {
+		r.Request.Routing = &audit.RoutingRef{Reason: "model_fallback", ModelFallbackFrom: "claude-sonnet-9", ModelFallbackSource: "family"}
+	})
+	row, _ := ProjectAuditEvent(refused, nil)
+	if row.DenyCode != "" || row.RoutingReason != "model_fallback" {
+		t.Fatalf("fallback refusal: deny_code=%q routing_reason=%q", row.DenyCode, row.RoutingReason)
+	}
+}
