@@ -174,7 +174,7 @@ verification are unchanged.
 | Field | Type | Values and bounds |
 |---|---|---|
 | `provider` | string | Configured provider name, never a URL. |
-| `model` | string | Model sent to that provider. |
+| `model` | string | Gateway model name the attempt served (the configured model, after alias and fallback resolution); not the upstream model ID sent to the provider. |
 | `status` | string | `ok`, `upstream_error`, `model_not_found`, `stream_failed`, `timeout`, `canceled`. |
 | `http` | integer | The upstream's own status; omitted when the upstream never answered. |
 | `start_ms`, `dur_ms` | integer | Offset from request start; duration. |

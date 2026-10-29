@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 5e19314867344fe7dcae39ed12591f71e76f19ce135016e84eebf41fe1ac78d1
+translation_source_sha256: a8def42b461a99bfbf8265deb540dd01129456a2794db28cdda975a75963d673
 ---
 
 # 데이터 구현 {#data}
@@ -119,7 +119,7 @@ MatchingRoutingPolicies는 하나의 원자 스냅샷에서 호출자 소유 규
 | 필드 | 타입 | 값과 한계 |
 |---|---|---|
 | `provider` | 문자열 | 설정된 공급자 이름이며 URL이 아닙니다. |
-| `model` | 문자열 | 해당 공급자에 보낸 모델. |
+| `model` | 문자열 | 이 시도가 처리한 게이트웨이 모델 이름(별칭·대체 해석 뒤의 설정 모델). 공급자에 보낸 업스트림 모델 ID가 아닙니다. |
 | `status` | 문자열 | `ok`, `upstream_error`, `model_not_found`, `stream_failed`, `timeout`, `canceled`. |
 | `http` | 정수 | 업스트림 자체의 상태 코드. 업스트림이 응답하지 않았으면 생략. |
 | `start_ms`, `dur_ms` | 정수 | 요청 시작 기준 오프셋, 소요 시간. |
