@@ -535,6 +535,7 @@ const MSG = {
   "audit.verdictBlock": { en: "block", ko: "차단", zh: "拦截", ja: "ブロック" },
   "audit.verdictUnknown": { en: "unparsed", ko: "해석 불가", zh: "无法解析", ja: "解釈不可" },
   "audit.noAttempt": { en: "No provider attempt was made; the gateway answered this request itself.", ko: "provider 시도가 없었습니다. 게이트웨이가 이 요청에 직접 응답했습니다.", zh: "没有向提供方发起尝试，由网关直接响应了此请求。", ja: "プロバイダーへの試行はなく、ゲートウェイがこのリクエストに直接応答しました。" },
+  "audit.attemptTimingMissing": { en: "Attempt timing was not recorded (written before attempt timing existed).", ko: "시도별 시간이 기록되지 않았습니다(시도별 시간 기록 전에 쓰인 기록).", zh: "未记录尝试计时（写于尝试计时功能之前）。", ja: "試行ごとの時間は記録されていません（試行ごとの計測より前の記録）。" },
   "audit.recordHash": { en: "hash (chain position, not a verification)", ko: "hash (체인 위치이며 검증 결과가 아님)", zh: "hash（链位置，非验证结果）", ja: "hash（チェーン位置であり検証結果ではない）" },
   "audit.openKey": { en: "Open in Virtual keys", ko: "가상 키에서 열기", zh: "在虚拟密钥中打开", ja: "仮想キーで開く" },
   "audit.showingFirst": { en: "Showing the first {n}. Narrow the filters to see the rest.", ko: "처음 {n}건만 보여줍니다. 나머지는 필터를 좁혀 확인하세요.", zh: "仅显示前 {n} 条。请缩小筛选范围查看其余内容。", ja: "最初の {n} 件のみ表示しています。残りはフィルターを絞って確認してください。" },

@@ -53,7 +53,7 @@ func TestAuditI18nKeysHaveFourLanguages(t *testing.T) {
 		keys["audit.wf."+wf] = true
 	}
 	// Copy changes that must exist in all four languages even if a call site moves.
-	for _, k := range []string{"audit.wf.denied", "audit.autoHint", "audit.autoNotObserved", "audit.classNotReported", "audit.verdictAllow", "audit.verdictBlock", "audit.verdictUnknown", "audit.noTiming", "audit.keyAmbiguous", "audit.noAttempt", "audit.recordHash", "audit.openKey", "audit.showingFirst", "audit.signatureWarn"} {
+	for _, k := range []string{"audit.wf.denied", "audit.autoHint", "audit.autoNotObserved", "audit.classNotReported", "audit.verdictAllow", "audit.verdictBlock", "audit.verdictUnknown", "audit.noTiming", "audit.keyAmbiguous", "audit.noAttempt", "audit.recordHash", "audit.openKey", "audit.showingFirst", "audit.signatureWarn", "audit.attemptTimingMissing"} {
 		keys[k] = true
 	}
 	if strings.Contains(string(dict), `"audit.verdicts"`) {

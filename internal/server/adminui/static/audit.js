@@ -266,7 +266,7 @@ function renderAuditDetail(detail) {
   d.appendChild(auditEl("p", "microlabel", msg("audit.detailTitle")));
   d.appendChild(auditEl("h2", "", e.model_requested + (e.model_actual && e.model_actual !== e.model_requested ? " → " + e.model_actual : "")));
   d.appendChild(auditEl("p", "mono hint", msg("audit.record") + " " + e.id));
-  d.appendChild(renderAuditWaterfall(detail.waterfall || { rows: [] }));
+  d.appendChild(renderAuditWaterfall(detail.waterfall || { rows: [] }, rec));
 
   const actor = auditEl("dl", "audit-kv");
   const key = auditEl("span", "", auditKeyLabel(e.key_id) + " · " + e.key_id + " ");
@@ -369,11 +369,23 @@ function auditSection(title, child) {
   return s;
 }
 
-function renderAuditWaterfall(w) {
+// A record with latency but no attempts was answered by the gateway itself
+// only when it names no provider and has no usage (the count_tokens shape).
+// Responses records written before attempt timing existed have both.
+function auditAnsweredLocally(rec) {
+  return !(rec && rec.request && rec.request.provider) && !(rec && rec.usage);
+}
+
+function renderAuditWaterfall(w, rec) {
   const box = auditEl("div", "audit-wf");
   box.appendChild(auditEl("p", "microlabel", msg("audit.timeline") + " · " + auditDuration(w.total_ms)));
   if (!w.total_ms) {
     box.appendChild(auditEl("p", "hint", msg("audit.noTiming")));
+    return box;
+  }
+  if ((!w.rows || !w.rows.length) && !auditAnsweredLocally(rec)) {
+    // Provider time is inside total_ms, so no "gateway work" bar is drawn for it.
+    box.appendChild(auditEl("p", "hint", msg("audit.attemptTimingMissing")));
     return box;
   }
   if (!w.rows || !w.rows.length) {

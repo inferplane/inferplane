@@ -54,13 +54,23 @@ assert.deepEqual(labels, ["Attempt · bedrock · timeout", "Gateway denial"]);
 assert.ok(after.all().filter(n => /audit-wf-bar/.test(n.className)).every(n => /fail/.test(n.className) && !/NaN/.test(n.style.width)));
 assert.equal(run('msg("audit.wf.denied")'), "Gateway denial");
 // A current record with latency but no attempts (e.g. count_tokens) is not "legacy": one neutral full-width bar plus a short hint.
-const noAttempts = vm.runInContext('renderAuditWaterfall({ total_ms: 35, rows: [] })', ctx).all();
+const noAttempts = vm.runInContext('renderAuditWaterfall({ total_ms: 35, rows: [] }, { request: { ingress: "anthropic", routing: { requested_model: "m" } } })', ctx).all();
 assert.ok(!noAttempts.some(n => n.textContent === run('msg("audit.noTiming")')));
 assert.ok(noAttempts.some(n => n.textContent === run('msg("audit.noAttempt")')));
 const bars = noAttempts.filter(n => /audit-wf-bar/.test(n.className));
 assert.equal(bars.length, 1);
 assert.deepEqual([bars[0].style.left, bars[0].style.width], ["0%", "100%"]);
 assert.ok(!/fail|ok/.test(bars[0].className.replace("audit-wf-bar", "")));
+assert.ok(!noAttempts.some(n => n.textContent === run('msg("audit.attemptTimingMissing")')));
+// A pre-upgrade Responses record has latency, provider and usage but no attempts:
+// attempt timing was not recorded, the gateway did not answer it itself.
+const preUpgrade = vm.runInContext('renderAuditWaterfall({ total_ms: 900, rows: [] }, { request: { ingress: "responses", provider: "openai" }, usage: { input_tokens: 10, output_tokens: 2 } })', ctx).all();
+assert.ok(preUpgrade.some(n => n.textContent === run('msg("audit.attemptTimingMissing")')));
+assert.ok(!preUpgrade.some(n => n.textContent === run('msg("audit.noAttempt")') || n.textContent === run('msg("audit.noTiming")')));
+assert.equal(preUpgrade.filter(n => /audit-wf-bar/.test(n.className)).length, 0); // no "gateway work" bar for provider time
+assert.equal(run('msg("audit.attemptTimingMissing")'), "Attempt timing was not recorded (written before attempt timing existed).");
+// Usage alone (provider name missing) is still not a gateway-only answer.
+assert.ok(vm.runInContext('renderAuditWaterfall({ total_ms: 5, rows: [] }, { request: {}, usage: { input_tokens: 1 } })', ctx).all().some(n => n.textContent === run('msg("audit.attemptTimingMissing")')));
 assert.equal(run('auditShownNote(100, 100)'), run('msg("audit.showingFirst")').replace("{n}", "100"));
 assert.equal(run('auditShownNote(5, "")'), "");
 console.log("audit_console.cjs: ok");
