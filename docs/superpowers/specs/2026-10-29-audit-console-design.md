@@ -46,7 +46,8 @@ On this EC2 development host, using a separate test `mayu` (the running
    and result "masked".
 5. An audit file written by the current `main` binary still passes
    `mayu audit verify` after the upgrade, new records verify too, and boot
-   replay upgrades those older index rows to projection version 2.
+   replay projects the records still in that file into the console table,
+   including denials written before the upgrade.
 6. No raw Claude Code session ID appears in the audit file, `/metrics`, the
    process log or any admin API response.
 7. Auto mode: if classifier calls reach the gateway (early verification 2), at
@@ -79,6 +80,24 @@ On this EC2 development host, using a separate test `mayu` (the running
 10. **Bodies** stay behind ADR-018 capture; viewing goes through the existing
     `/admin/bodies/{ref}` and records `body_accessed`.
 
+## Amendments during planning (2026-10-29)
+
+Reading the code for the plan changed these points of the reviewed design:
+
+1. Denials are `request_started` records with an outcome, which the existing
+   `events` table never ingests. The console therefore gets its own
+   `audit_events` table instead of new columns and a projection-version bump
+   on `events`; Usage numbers do not change.
+2. Messages, Chat and Invoke wrote no `latency`; every terminal record now
+   carries it.
+3. `auto_mode.verdict` may be `unknown` so the console can count classifier
+   calls it could not read.
+4. Keys have no name; the console shows `metadata.name` or the `key_id`.
+5. A disabled index shows the standard enable card; the navigation stays.
+6. The trace link template reaches the console through `/admin/capabilities`.
+7. The view uses no browser storage (ADR-001).
+8. Mode A has no rebuild endpoint; the lag hint says a restart replays.
+
 ## Current state
 
 | Area | Today on `main` | Reference |
@@ -109,10 +128,10 @@ client ──► ingress (messages · chat · invoke/converse · responses)
             │                        fallback_used/fallback_chain filled)
             ▼
          audit writer ─► file sink (hash chain) ─► analytics sink
-                                                   projection v2:
+                                                   audit_events:
                                                    kind, key_id, codes, class,
                                                    session, timings, record_json
-                                                   + event_categories
+                                                   + audit_event_categories
             ▼
          /admin/audit/{events,sessions,summary}  (full-admin, read-only)
             ▼
@@ -140,7 +159,7 @@ type ClientRef struct {
     SessionRef   string `json:"session_ref,omitempty"`   // "s1:" + 32 hex
 }
 type AutoModeRef struct {
-    Verdict   string `json:"verdict"`   // block | allow
+    Verdict   string `json:"verdict"`   // block | allow | unknown (classifier-like, not parsed)
     Stage     string `json:"stage"`     // s1 | s2 | fast (values fixed by early verification 2)
     Signature string `json:"signature"` // e.g. "claude-code-2.1"
 }
@@ -156,6 +175,10 @@ type AutoModeRef struct {
   `true` and `outcome.fallback_chain` lists the attempted providers in order.
   Both fields are already part of the documented wire shape; until now they
   were never set. Older records are unchanged.
+- Every terminal record (completed, or started with an outcome) gets
+  `latency{total_ms, ttft_ms}` measured from the request start, and `client`.
+  Before this change only the Responses path wrote `latency`
+  (`internal/server/responsesapi/observe.go:119`).
 - A context helper owns the attempt list: `audit.WithAttemptLog(ctx)`,
   `audit.BeginAttempt(ctx, provider, model) func(status string, http int)`,
   `audit.AttemptsFrom(ctx)`. The list is safe for concurrent use and copied
@@ -181,7 +204,8 @@ type AutoModeRef struct {
   consistent `<block>yes|no` value remains; a stage-1 call must also have
   stopped on the `</block>` stop sequence. Requests that look like classifier
   calls but do not match increment
-  `inferplane_audit_auto_mode_unparsed_total` (no labels). The detector never
+  `inferplane_audit_auto_mode_unparsed_total` (no labels) and are recorded with
+  `verdict: unknown`. The detector never
   changes the response bytes.
 
 ### Configuration
@@ -196,46 +220,61 @@ type AutoModeRef struct {
 - `session_ref`: `key_scoped` (default when the block is absent) or `off`.
 - `auto_mode`: `on` (default) or `off`.
 - `trace_link_template`: optional. `config validate` rejects anything that is
-  not `http`/`https` or lacks `{trace_id}`. The console opens it in a new tab;
-  CSP does not change.
+  not `http`/`https` or lacks `{trace_id}`. `/admin/capabilities` carries it;
+  the console fills in a 32-hex `trace_id` and opens it in a new tab. CSP
+  does not change.
 
-### Analytics projection version 2 (`internal/analytics`, `pgstore`)
+### Audit event projection (`internal/analytics`, `pgstore`)
 
-New `events` columns (SQLite and Postgres, additive `ALTER TABLE`):
-`key_id`, `kind`, `deny_code`, `routing_reason`, `privacy`, `masked`,
-`request_class`, `session_ref`, `trace_id`, `ingress`, `stream`,
-`fallback`, `attempt_count`, `auto_verdict`, `auto_stage`, `auto_signature`,
-`total_ms`, `ttft_ms`, `model_requested`, `model_actual`, `record_json`.
-New table `event_categories(id, category, PRIMARY KEY(id, category))`.
-New indexes on `(ts)`, `(kind, ts)`, `(key_id, ts)`, `(session_ref, ts)`.
+The console reads a new table, `audit_events`, in the same analytics index
+(SQLite in Mode A, Postgres in Mode B). The existing `events` table and the
+Usage views keep their meaning.
 
-- Writes use `projection_version = 2` and upgrade any row with
-  `projection_version < 2`. A version-2 row stays first-write-wins.
-- Boot replay of the file sink upgrades rows whose records are still in that
-  file. Rows whose records are no longer in any file stay at version 1: they
-  keep their usage data, show "earlier format", and are excluded from filters
-  on new columns. Counts on new columns say "version-2 records".
+- **Which records:** every terminal request record: `request_completed`, and
+  `request_started` that carries an `outcome`. Every gateway denial is written
+  the second way (`internal/server/anthropicapi/messages.go:736-753`), and
+  `events` never sees it because `analytics.Observable` accepts only
+  `request_completed` (`internal/analytics/evidence.go:32`). Admitted
+  `request_started` records and admin events are skipped.
+- **Columns:** `id`, `ts`, `ts_ms`, `event`, `kind`, `team`, `key_id`,
+  `ingress`, `stream`, `status`, `deny_code`, `routing_reason`, `privacy`,
+  `masked`, `would_restrict`, `pii`, `policy_ref`, `planned_boundary`,
+  `actual_boundary`, `request_class`, `session_ref`, `trace_id`,
+  `model_requested`, `model_actual`, `provider`, `fallback`, `attempt_count`,
+  `auto_verdict`, `auto_stage`, `auto_signature`, `input_tokens`,
+  `output_tokens`, `cost_micros`, `total_ms`, `ttft_ms`, `has_body`,
+  `record_json`. Table `audit_event_categories(id, category)`. Indexes on
+  `ts_ms`, `(kind, ts_ms)`, `(key_id, ts_ms)`, `(session_ref, ts_ms)`.
+- **Idempotent:** keyed by the record ULID with `ON CONFLICT DO NOTHING`.
+- **Coverage:** Mode A fills the table from the live audit sink and, at boot,
+  by replaying each configured file sink. Records no longer in any file sink
+  never enter the table, so the console shows the oldest covered time instead
+  of claiming completeness. Mode B fills it from the audit segments its
+  aggregator already reads.
 - `record_json` is the exact audit line. It feeds the detail view so the view
   survives audit-file rotation; tampering with this copy is detectable with
   `mayu audit verify` against the chain.
 - **Kind derivation** (first match wins):
-  1. `auto_mode_blocked` — `auto_mode.verdict == block`
-  2. `privacy_blocked` — status ≥ 400 and (`routing.reason` ∈
-     {`sensitive_blocked`, `mask_failed`} or `routing.privacy == block`)
-  3. `policy_denied` — status ≥ 400 and (`outcome.error` ∈ `audit.DenyReason`
-     or `routing.reason` ∈ {`model_forbidden`, `no_safe_route`})
-  4. `upstream_error` — any other status ≥ 400, or `partial`. This also
+  1. `auto_mode_blocked`: `auto_mode.verdict == block`
+  2. `privacy_blocked`: status ≥ 400 and (`routing.privacy == block`, or
+     the code (`outcome.error`, else `routing.reason`) is one of
+     `sensitive_blocked`, `mask_failed`, `masking_failed`)
+  3. `policy_denied`: status ≥ 400 and the code is an `audit.DenyReason`
+     value or one of `model_forbidden`, `no_safe_route`,
+     `budget_target_changed`, `budget_authority_unavailable`
+  4. `upstream_error`: any other status ≥ 400, or `partial`. This also
      covers gateway-side request errors such as a context overflow, so the
      console labels this kind “Error”, not “Upstream error”.
-  5. `privacy_masked` — `routing.masked` or legacy `request.pii_masked`
-  6. `privacy_internal` — `routing.privacy == internal_only`
+  5. `privacy_masked`: `routing.masked` or legacy `request.pii_masked`
+  6. `privacy_internal`: `routing.privacy == internal_only`
   7. `ok`
-- The existing `error_code` column keeps its meaning; `deny_code` is separate.
+- `events.error_code` keeps its meaning; `audit_events.deny_code` is separate.
 
 ### Admin API (`internal/server/auditconsoleapi`, mounted with analytics)
 
 All routes: `AdminAuth` + `requireAdmin`. Mounted only when the analytics index
-is on; `/admin/capabilities` gains `audit_console: bool`.
+is on; `/admin/capabilities` gains `audit_console: bool` and
+`trace_link_template` (empty when unset).
 
 | Route | Purpose |
 |---|---|
@@ -247,7 +286,7 @@ is on; `/admin/capabilities` gains `audit_console: bool`.
 
 - Invalid parameters return `400` with one of `invalid_kind`, `invalid_limit`,
   `invalid_cursor`, `invalid_range`, `invalid_filter`.
-- A version-1 row requested by ID returns `409 detail_unavailable`.
+- An ID that is not in the console table returns `404 not_found`.
 - String fields come from closed sets or from the audit record itself; no
   raw session ID, secret or key plaintext exists to return.
 - Policy name and rule appear for routing denials (they are in
@@ -259,8 +298,8 @@ is on; `/admin/capabilities` gains `audit_console: bool`.
 - New `static/audit.js` (same pattern as `evaluation.js`), nav item **Audit**
   after **Logs**, i18n keys in all four languages, styles in `style.css`.
   No Observability placeholder is added; sub-project B adds its own item.
-- Header: period, team, key filters (key names resolve to `key_id` from the
-  already-loaded key list), index freshness from `/admin/analytics/health`,
+- Header: period, team, key filters (keys have no name field; the console
+  shows `metadata.name` when set, otherwise the `key_id`), index freshness from `/admin/analytics/health`,
   and a "verify chain" button that calls the existing `/admin/audit/verify`.
 - Cards: requests, policy denials, PII detections, auto mode blocks
   (dashed "estimate" badge), each with a 12-bucket sparkline.
@@ -271,10 +310,12 @@ is on; `/admin/capabilities` gains `audit_console: bool`.
   auto mode verdict, body button (only when `body_ref` and bodies are on),
   `trace_id` with the optional external link, `hash`/`prev_hash` shown as
   chain position, never as "verified".
-- Empty and degraded states: index off (nav disabled with reason), index lag
-  banner with rebuild hint, earlier-format rows, key no longer in the key
+- Empty and degraded states: index off (the view shows the enable card, like
+  other sections), index lag banner (Mode A: a restart replays the file sink;
+  Mode B: rebuild), coverage start, key no longer in the key
   store, body expired or capture off, auto mode not observed, signature
-  mismatch warning when unparsed classifier calls rise.
+  mismatch warning when unparsed classifier calls rise. The view keeps
+  nothing in browser storage (ADR-001 data-free console).
 
 ## Security and privacy
 
@@ -301,9 +342,9 @@ is on; `/admin/capabilities` gains `audit_console: bool`.
   `<block>` inside `<thinking>`, conflicting blocks, wrong stop sequence,
   streamed deltas, the 16 KiB bound, non-auxiliary requests. Fixtures come from
   a real 2.1.312 capture with secrets removed.
-- **Index:** v1→v2 upgrade by replay, v2 first-write-wins, kind table,
-  categories table, SQLite always; Postgres when `INFERPLANE_TEST_PG_DSN` is set.
-- **Admin API:** filters, keyset paging, 400 codes, 409 for version-1 rows,
+- **Index:** replay projects completed and denied records, re-ingest is
+  idempotent, kind table, categories table, SQLite always; Postgres when `INFERPLANE_TEST_PG_DSN` is set.
+- **Admin API:** filters, keyset paging, 400 codes, 404 for unknown IDs,
   401/403, capability flag.
 - **Console:** Node checks in `testdata/audit_console.cjs` (rendering rules,
   badges, empty states), i18n key parity in `adminui_test.go`, Playwright QA
@@ -374,8 +415,8 @@ A입니다. 하위 프로젝트 B(OTel 내보내기 대시보드, exporter·규�
 4. email을 마스킹하는 privacy 규칙은 category `email`, 결과 "마스킹"인 PII 행을
    만듭니다.
 5. 현재 `main` 바이너리가 쓴 감사 파일이 업그레이드 뒤에도 `mayu audit verify`를
-   통과하고, 새 기록도 통과하며, 부팅 replay가 그 옛 인덱스 행을 projection 버전
-   2로 올립니다.
+   통과하고, 새 기록도 통과하며, 부팅 replay가 그 파일에 남은 기록(업그레이드 전에
+   기록된 거부 포함)을 콘솔 표로 투영합니다.
 6. Claude Code 세션 ID 원문이 감사 파일, `/metrics`, 프로세스 로그, admin API
    응답 어디에도 나오지 않습니다.
 7. auto mode: 분류기 호출이 gateway에 오면(먼저 확인할 항목 2) 판정이 최소 1건
@@ -405,6 +446,24 @@ A입니다. 하위 프로젝트 B(OTel 내보내기 대시보드, exporter·규�
    기록하고, 항상 추정으로 표시합니다.
 10. **본문**은 ADR-018 캡처를 그대로 따릅니다. 열람은 기존
     `/admin/bodies/{ref}`를 거치고 `body_accessed`를 남깁니다.
+
+## 계획 중 바뀐 점 (2026-10-29)
+
+계획을 쓰며 코드를 읽은 결과, 검토한 설계에서 다음을 바꿨습니다.
+
+1. 거부는 outcome이 붙은 `request_started` 기록이고, 기존 `events` 표는 이것을
+   수집하지 않습니다. 그래서 `events`에 열을 더하고 projection 버전을 올리는 대신
+   콘솔 전용 `audit_events` 표를 둡니다. 사용량 수치는 바뀌지 않습니다.
+2. Messages, Chat, Invoke는 `latency`를 기록하지 않았습니다. 이제 요청의 마지막
+   기록에는 모두 붙습니다.
+3. 콘솔이 해석하지 못한 분류기 호출 수를 셀 수 있도록 `auto_mode.verdict`에
+   `unknown`을 둡니다.
+4. 키에는 이름이 없으므로 콘솔은 `metadata.name` 또는 `key_id`를 보여줍니다.
+5. 인덱스가 꺼져 있으면 표준 활성화 안내 카드를 보여주고, 메뉴는 그대로 둡니다.
+6. trace 링크 템플릿은 `/admin/capabilities`로 콘솔에 전달합니다.
+7. 이 화면은 브라우저 저장소를 쓰지 않습니다(ADR-001).
+8. Mode A에는 rebuild 엔드포인트가 없으므로, 지연 안내는 재시작하면 replay된다고
+   알려 줍니다.
 
 ## 현재 상태
 
@@ -436,10 +495,10 @@ client ──► ingress (messages · chat · invoke/converse · responses)
             │                    fallback_used/fallback_chain 채움)
             ▼
          감사 writer ─► file sink (hash chain) ─► analytics sink
-                                                  projection v2:
+                                                  audit_events:
                                                   kind, key_id, 코드, class,
                                                   세션, 시간, record_json
-                                                  + event_categories
+                                                  + audit_event_categories
             ▼
          /admin/audit/{events,sessions,summary}  (full-admin, 읽기 전용)
             ▼
@@ -467,7 +526,7 @@ type ClientRef struct {
     SessionRef   string `json:"session_ref,omitempty"`   // "s1:" + hex 32자
 }
 type AutoModeRef struct {
-    Verdict   string `json:"verdict"`   // block | allow
+    Verdict   string `json:"verdict"`   // block | allow | unknown (분류기 형태지만 해석 불가)
     Stage     string `json:"stage"`     // s1 | s2 | fast (먼저 확인할 항목 2로 확정)
     Signature string `json:"signature"` // 예: "claude-code-2.1"
 }
@@ -479,10 +538,13 @@ type AutoModeRef struct {
 
 - `attempts`는 최대 8개입니다(더 길면 앞의 7개와 마지막 1개). `request_completed`
   기록에만 붙습니다.
-- `attempts`가 2개 이상이면 `outcome.fallback_used`를 `true`로, 
+- `attempts`가 2개 이상이면 `outcome.fallback_used`를 `true`로,
   `outcome.fallback_chain`을 시도한 provider 순서로 채웁니다. 두 필드는 이미
   문서화된 wire 형식이지만 지금까지 한 번도 채워지지 않았습니다. 옛 기록은 바뀌지
   않습니다.
+- 요청의 마지막 기록(완료, 또는 outcome이 붙은 시작 기록)에는 요청 시작부터 잰
+  `latency{total_ms, ttft_ms}`와 `client`를 붙입니다. 지금까지 `latency`는
+  Responses 경로만 기록했습니다(`internal/server/responsesapi/observe.go:119`).
 - 시도 목록은 context helper가 관리합니다: `audit.WithAttemptLog(ctx)`,
   `audit.BeginAttempt(ctx, provider, model) func(status string, http int)`,
   `audit.AttemptsFrom(ctx)`. 동시 접근에 안전하고, `RoutingFrom`처럼 기록을 만들
@@ -505,7 +567,8 @@ type AutoModeRef struct {
   `<thinking>…</thinking>`을 지운 뒤, 일관된 `<block>yes|no` 값이 정확히 하나
   남을 때만 판정을 기록합니다. 1단계 호출은 `</block>` stop sequence로 멈췄어야
   합니다. 분류기 호출처럼 보이지만 맞지 않는 요청은
-  `inferplane_audit_auto_mode_unparsed_total`(label 없음)을 올립니다. 판정기는
+  `inferplane_audit_auto_mode_unparsed_total`(label 없음)을 올리고
+  `verdict: unknown`으로 기록합니다. 판정기는
   응답 바이트를 바꾸지 않습니다.
 
 ### 설정
@@ -520,46 +583,59 @@ type AutoModeRef struct {
 - `session_ref`: `key_scoped`(블록이 없을 때 기본) 또는 `off`.
 - `auto_mode`: `on`(기본) 또는 `off`.
 - `trace_link_template`: 선택. `http`/`https`가 아니거나 `{trace_id}`가 없으면
-  `config validate`가 거부합니다. 콘솔은 새 탭으로 열기만 하고 CSP는 바꾸지
-  않습니다.
+  `config validate`가 거부합니다. `/admin/capabilities`로 전달하고, 콘솔은 hex
+  32자 `trace_id`를 넣어 새 탭으로 엽니다. CSP는 바꾸지 않습니다.
 
-### analytics projection 버전 2 (`internal/analytics`, `pgstore`)
+### 감사 이벤트 투영 (`internal/analytics`, `pgstore`)
 
-`events`에 새 열(SQLite·Postgres, 추가형 `ALTER TABLE`):
-`key_id`, `kind`, `deny_code`, `routing_reason`, `privacy`, `masked`,
-`request_class`, `session_ref`, `trace_id`, `ingress`, `stream`,
-`fallback`, `attempt_count`, `auto_verdict`, `auto_stage`, `auto_signature`,
-`total_ms`, `ttft_ms`, `model_requested`, `model_actual`, `record_json`.
-새 표 `event_categories(id, category, PRIMARY KEY(id, category))`.
-새 인덱스 `(ts)`, `(kind, ts)`, `(key_id, ts)`, `(session_ref, ts)`.
+콘솔은 같은 analytics 인덱스(Mode A는 SQLite, Mode B는 Postgres)에 새로 만든
+`audit_events` 표를 읽습니다. 기존 `events` 표와 사용량 화면의 의미는 바뀌지
+않습니다.
 
-- 쓰기는 `projection_version = 2`로 하고, `projection_version < 2`인 행을
-  갱신합니다. 버전 2 행은 first-write-wins를 유지합니다.
-- file sink의 부팅 replay는 그 파일에 기록이 남아 있는 행을 올립니다. 어느 파일에도
-  기록이 없는 행은 버전 1로 남습니다. 사용량 데이터는 유지되고 "이전 형식"으로
-  표시되며, 새 열 필터에서는 빠집니다. 새 열 기준 건수에는 "버전 2 기록 기준"을
-  붙입니다.
+- **대상 기록:** 요청의 마지막 기록 전부입니다. `request_completed`와,
+  `outcome`이 붙은 `request_started`입니다. gateway 거부는 모두 뒤의 형태로
+  기록됩니다(`internal/server/anthropicapi/messages.go:736-753`).
+  `analytics.Observable`이 `request_completed`만 받으므로 `events`에는 거부가
+  들어가지 않습니다(`internal/analytics/evidence.go:32`). 허용된
+  `request_started`와 admin 이벤트는 건너뜁니다.
+- **열:** `id`, `ts`, `ts_ms`, `event`, `kind`, `team`, `key_id`, `ingress`,
+  `stream`, `status`, `deny_code`, `routing_reason`, `privacy`, `masked`,
+  `would_restrict`, `pii`, `policy_ref`, `planned_boundary`,
+  `actual_boundary`, `request_class`, `session_ref`, `trace_id`,
+  `model_requested`, `model_actual`, `provider`, `fallback`, `attempt_count`,
+  `auto_verdict`, `auto_stage`, `auto_signature`, `input_tokens`,
+  `output_tokens`, `cost_micros`, `total_ms`, `ttft_ms`, `has_body`,
+  `record_json`. 표 `audit_event_categories(id, category)`. 인덱스 `ts_ms`,
+  `(kind, ts_ms)`, `(key_id, ts_ms)`, `(session_ref, ts_ms)`.
+- **멱등:** 기록 ULID를 키로 `ON CONFLICT DO NOTHING`.
+- **범위:** Mode A는 실시간 감사 sink와, 부팅 때 설정된 file sink replay로
+  표를 채웁니다. 어느 file sink에도 없는 기록은 표에 들어가지 않으므로, 콘솔은
+  전부라고 주장하지 않고 가장 오래된 기록 시각을 보여줍니다. Mode B는
+  aggregator가 이미 읽는 감사 세그먼트로 채웁니다.
 - `record_json`은 감사 줄 그대로입니다. 상세 화면은 이것을 읽으므로 감사 파일이
   회전되어도 깨지지 않습니다. 이 사본이 조작되면 체인에 대한
   `mayu audit verify`로 드러납니다.
 - **kind 판정** (처음 맞는 것):
-  1. `auto_mode_blocked` — `auto_mode.verdict == block`
-  2. `privacy_blocked` — status ≥ 400이고 (`routing.reason` ∈
-     {`sensitive_blocked`, `mask_failed`} 또는 `routing.privacy == block`)
-  3. `policy_denied` — status ≥ 400이고 (`outcome.error` ∈ `audit.DenyReason`
-     또는 `routing.reason` ∈ {`model_forbidden`, `no_safe_route`})
-  4. `upstream_error` — 그 밖의 status ≥ 400, 또는 `partial`. context 초과 같은
+  1. `auto_mode_blocked`: `auto_mode.verdict == block`
+  2. `privacy_blocked`: status ≥ 400이고 (`routing.privacy == block`이거나,
+     코드(`outcome.error`, 없으면 `routing.reason`)가 `sensitive_blocked`,
+     `mask_failed`, `masking_failed` 중 하나)
+  3. `policy_denied`: status ≥ 400이고 코드가 `audit.DenyReason` 값이거나
+     `model_forbidden`, `no_safe_route`, `budget_target_changed`,
+     `budget_authority_unavailable` 중 하나
+  4. `upstream_error`: 그 밖의 status ≥ 400, 또는 `partial`. context 초과 같은
      gateway 쪽 요청 오류도 여기에 들어가므로, 콘솔에서는 이 kind를 “업스트림 오류”가
      아니라 “오류”로 표시합니다.
-  5. `privacy_masked` — `routing.masked` 또는 옛 `request.pii_masked`
-  6. `privacy_internal` — `routing.privacy == internal_only`
+  5. `privacy_masked`: `routing.masked` 또는 옛 `request.pii_masked`
+  6. `privacy_internal`: `routing.privacy == internal_only`
   7. `ok`
-- 기존 `error_code` 열은 의미를 그대로 두고, `deny_code`를 따로 둡니다.
+- `events.error_code`의 의미는 그대로 두고, `audit_events.deny_code`를 따로 둡니다.
 
 ### admin API (`internal/server/auditconsoleapi`, analytics와 함께 마운트)
 
 모든 경로: `AdminAuth` + `requireAdmin`. analytics 인덱스가 켜졌을 때만
-마운트하고, `/admin/capabilities`에 `audit_console: bool`을 추가합니다.
+마운트하고, `/admin/capabilities`에 `audit_console: bool`과
+`trace_link_template`(설정이 없으면 빈 값)을 추가합니다.
 
 | 경로 | 용도 |
 |---|---|
@@ -571,7 +647,7 @@ type AutoModeRef struct {
 
 - 잘못된 파라미터는 `400`과 `invalid_kind`, `invalid_limit`, `invalid_cursor`,
   `invalid_range`, `invalid_filter` 중 하나를 돌려줍니다.
-- 버전 1 행을 ID로 요청하면 `409 detail_unavailable`을 돌려줍니다.
+- 콘솔 표에 없는 ID는 `404 not_found`를 돌려줍니다.
 - 문자열 필드는 닫힌 집합이거나 감사 기록 자체에서 옵니다. 세션 ID 원문, 비밀,
   키 평문은 애초에 돌려줄 데이터가 없습니다.
 - 정책 이름과 rule은 라우팅 거부에서만 보입니다(`routing.policies`에 있음).
@@ -583,7 +659,8 @@ type AutoModeRef struct {
 - 새 `static/audit.js`(`evaluation.js`와 같은 방식), **로그** 다음에 **감사**
   메뉴, 네 언어의 i18n 키, `style.css` 스타일. Observability 자리 표시 메뉴는
   넣지 않습니다. 하위 프로젝트 B가 자기 메뉴를 추가합니다.
-- 상단: 기간·팀·키 필터(키 이름은 이미 불러온 키 목록에서 `key_id`로 바꿈),
+- 상단: 기간·팀·키 필터(키에는 이름 필드가 없으므로 `metadata.name`이 있으면 그것을,
+  없으면 `key_id`를 보여줌),
   `/admin/analytics/health`의 인덱스 최신성, 기존 `/admin/audit/verify`를 부르는
   "체인 검증" 버튼.
 - 카드: 요청, 정책 거부, PII 탐지, auto mode 차단(점선 "추정" 배지), 카드마다
@@ -594,9 +671,10 @@ type AutoModeRef struct {
   이동), 세션, provider, 토큰, 비용, PII·거부 근거, auto mode 판정, 본문 버튼
   (`body_ref`가 있고 본문 저장이 켜졌을 때만), `trace_id`와 선택적 외부 링크,
   `hash`/`prev_hash`는 체인 위치로만 표시하고 "검증됨"이라고 하지 않습니다.
-- 빈 상태·저하 상태: 인덱스 꺼짐(메뉴 비활성과 이유), 인덱스 지연 배너와
-  rebuild 안내, 이전 형식 행, 키 저장소에 없는 키, 본문 만료·캡처 꺼짐, auto
-  mode 관측 안 됨, 판정 불가가 늘 때 서명 불일치 경고.
+- 빈 상태·저하 상태: 인덱스 꺼짐(다른 섹션처럼 활성화 안내 카드), 인덱스 지연
+  배너(Mode A는 재시작 시 file sink replay, Mode B는 rebuild), 기록 범위 시작 시각, 키 저장소에 없는 키, 본문 만료·캡처 꺼짐, auto
+  mode 관측 안 됨, 판정 불가가 늘 때 서명 불일치 경고. 이 화면은 브라우저 저장소에
+  아무것도 남기지 않습니다(ADR-001 데이터 없는 콘솔).
 
 ## 보안과 개인정보
 
@@ -622,9 +700,9 @@ type AutoModeRef struct {
   서로 다른 block, 잘못된 stop sequence, stream delta, 16 KiB 한도, auxiliary가
   아닌 요청을 표로 테스트합니다. fixture는 실제 2.1.312 캡처에서 비밀을 빼고
   만듭니다.
-- **인덱스:** replay로 v1→v2 승격, v2 first-write-wins, kind 표, category 표.
+- **인덱스:** replay가 완료·거부 기록을 투영, 재수집 멱등, kind 표, category 표.
   SQLite는 항상, Postgres는 `INFERPLANE_TEST_PG_DSN`이 있을 때.
-- **admin API:** 필터, keyset 페이지, 400 코드, 버전 1 행의 409, 401/403,
+- **admin API:** 필터, keyset 페이지, 400 코드, 없는 ID의 404, 401/403,
   capability 값.
 - **콘솔:** `testdata/audit_console.cjs` Node 검사(렌더링 규칙, 배지, 빈 상태),
   `adminui_test.go`의 i18n 키 일치, 1280px·390px Playwright 검사(가로 넘침 없음,

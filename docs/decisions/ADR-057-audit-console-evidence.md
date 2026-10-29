@@ -30,9 +30,9 @@ it cannot answer three of these questions today:
   ignored, so a session cannot be reconstructed.
 - Claude Code auto mode classifier decisions look like ordinary model calls.
 
-The analytics index (ADR-015, ADR-018) is a derived read model with
-first-write-wins version-1 rows, so new columns would stay empty without a
-projection version change.
+The analytics index (ADR-015, ADR-018) projects only `request_completed`
+records, but every gateway denial is written as a `request_started` record with
+an outcome, so denials are absent from the index today.
 
 ADR-044 keeps scoped session hints out of audit and metrics: affinity pins use
 scoped HMAC digests in a bounded local store. Grouping requests by session in
@@ -76,7 +76,9 @@ which was the main request. Rejected.
    - `client{request_class, session_ref}`. `request_class` is kept only if it is
      one of `main`, `subagent`, `workflow`, `compaction`, `auxiliary`,
      `side_reply`.
-   - `auto_mode{verdict, stage, signature}`, an estimate.
+   - `auto_mode{verdict, stage, signature}`, an estimate; `verdict` is
+     `block`, `allow` or `unknown`.
+   - Terminal records also carry `latency{total_ms, ttft_ms}` on every ingress.
 2. When a request makes more than one attempt, `outcome.fallback_used` and
    `outcome.fallback_chain` are written from `attempts`. Older records are
    unchanged.
@@ -94,10 +96,11 @@ which was the main request. Rejected.
    text, stores no text, and counts non-matching classifier-like calls in one
    unlabelled metric. `signature` names the client format version. The console
    always labels these verdicts as estimates.
-5. The analytics projection moves to version 2: new columns, a category table
-   and the exact audit line (`record_json`). Version-2 writes upgrade older rows
-   during replay. `kind` is derived in the index, never written to the audit
-   chain.
+5. The analytics index gains an `audit_events` table and a category table that
+   project every terminal request record (completed records and denied
+   `request_started` records) with the exact audit line (`record_json`). The
+   existing `events` table is unchanged. `kind` is derived in the index, never
+   written to the audit chain.
 6. A read-only audit API (`/admin/audit/events`, `/events/{id}`, `/sessions`,
    `/sessions/{ref}`, `/summary`) is full-admin only and mounted only with the
    analytics index.
@@ -121,8 +124,8 @@ which was the main request. Rejected.
   data. Turning `session_ref` off stops new links but does not remove old ones.
 - Auto mode verdicts depend on Claude Code's response format. A format change
   yields no verdicts (and a rising unparsed count), not wrong ones.
-- Index rows whose audit lines are no longer in any file sink stay at
-  version 1 and cannot be filtered by the new columns.
+- Records no longer in any file sink are not in the console table; the
+  console shows the time its coverage starts.
 - Governance denials still carry no policy name; the console shows their code
   and scope only.
 
@@ -157,8 +160,9 @@ Claude Code 세션 하나가 무엇을 했는지, 어떤 민감 정보가 탐지
   세션을 다시 구성할 수 없습니다.
 - Claude Code auto mode 분류기 결정은 일반 모델 호출처럼 보입니다.
 
-analytics 인덱스(ADR-015, ADR-018)는 파생 read model이고 버전 1 행은
-first-write-wins입니다. projection 버전을 올리지 않으면 새 열은 비어 있게 됩니다.
+analytics 인덱스(ADR-015, ADR-018)는 `request_completed`만 투영하는데, gateway
+거부는 모두 outcome이 붙은 `request_started`로 기록됩니다. 그래서 지금 인덱스에는
+거부가 없습니다.
 
 ADR-044는 범위가 정해진 세션 hint를 감사와 metrics 밖에 둡니다. affinity pin은
 제한된 로컬 저장소의 scoped HMAC digest를 씁니다. 감사 체인에서 요청을 세션으로
@@ -201,7 +205,9 @@ Claude Code 세션 ID는 무작위 UUID이므로, 키에 묶인 도메인 분리
      provider 이름과 닫힌 상태값만 씁니다.
    - `client{request_class, session_ref}`. `request_class`는 `main`, `subagent`,
      `workflow`, `compaction`, `auxiliary`, `side_reply` 중 하나일 때만 남깁니다.
-   - `auto_mode{verdict, stage, signature}`. 추정값입니다.
+   - `auto_mode{verdict, stage, signature}`. 추정값이고, `verdict`는 `block`,
+     `allow`, `unknown` 중 하나입니다.
+   - 요청의 마지막 기록에는 모든 ingress에서 `latency{total_ms, ttft_ms}`도 붙습니다.
 2. 요청이 두 번 이상 시도되면 `attempts`로 `outcome.fallback_used`와
    `outcome.fallback_chain`을 채웁니다. 옛 기록은 바뀌지 않습니다.
 3. `session_ref = "s1:" + hex(sha256("inferplane-session-v1\0" + key_id + "\0" + session_id)[:16])`.
@@ -216,9 +222,10 @@ Claude Code 세션 ID는 무작위 UUID이므로, 키에 묶인 도메인 분리
    멈췄어야 합니다. gateway는 텍스트를 최대 16 KiB만 읽고 저장하지 않으며, 맞지
    않는 분류기 형태 호출은 label 없는 metric 하나로 셉니다. `signature`는
    클라이언트 형식 버전입니다. 콘솔은 이 판정을 항상 추정으로 표시합니다.
-5. analytics projection을 버전 2로 올립니다. 새 열, category 표, 감사 줄 원본
-   (`record_json`)을 둡니다. 버전 2 쓰기는 replay 중에 옛 행을 올립니다. `kind`는
-   인덱스에서 파생하고 감사 체인에는 쓰지 않습니다.
+5. analytics 인덱스에 `audit_events` 표와 category 표를 추가합니다. 요청의 마지막
+   기록(완료 기록과 거부된 `request_started` 기록)을 감사 줄 원본(`record_json`)과
+   함께 투영합니다. 기존 `events` 표는 바뀌지 않습니다. `kind`는 인덱스에서 파생하고
+   감사 체인에는 쓰지 않습니다.
 6. 읽기 전용 감사 API(`/admin/audit/events`, `/events/{id}`, `/sessions`,
    `/sessions/{ref}`, `/summary`)는 full-admin 전용이고 analytics 인덱스가 있을
    때만 마운트합니다.
@@ -239,8 +246,8 @@ Claude Code 세션 ID는 무작위 UUID이므로, 키에 묶인 도메인 분리
   `session_ref`를 꺼도 새 연결만 멈추고 과거 연결은 남습니다.
 - auto mode 판정은 Claude Code 응답 형식에 의존합니다. 형식이 바뀌면 잘못된
   판정이 아니라 판정 없음(판정 불가 수 증가)이 됩니다.
-- 감사 줄이 어느 file sink에도 남지 않은 인덱스 행은 버전 1로 남고, 새 열로
-  필터할 수 없습니다.
+- 어느 file sink에도 남지 않은 기록은 콘솔 표에 없습니다. 콘솔은 기록 범위가
+  시작되는 시각을 보여줍니다.
 - 거버넌스 거부에는 여전히 정책 이름이 없습니다. 콘솔은 코드와 범위만
   보여줍니다.
 
