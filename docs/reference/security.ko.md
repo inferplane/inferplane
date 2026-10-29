@@ -1,6 +1,6 @@
 ---
 translation_source: reference/security.md
-translation_source_sha256: 75363703f595d5b3e3a996ec8c7b0e08975bba9d9ea68e73261ba3010c08325c
+translation_source_sha256: 94a98160732864f00e19c23a6af8331f4825a655f99cc526fb6ffc988f614ea9
 ---
 
 # 보안 {#security}
@@ -56,7 +56,7 @@ InternalOnly는 승인된 정규 모델과 매 시도의 명시적 internal 공�
 
 거부된 분산 개인정보 세대는 유효 복구 전까지 해당 주체를 차단합니다. 로컬 시작 정책도 토폴로지 검사 후 서비스합니다. 새 규칙 전에 모든 바이너리·CRD를 올리고 첫 CP 동기화 전 보호에는 require_sync, 정책 나이에는 max_policy_age를 사용합니다. 계산 API는 준비되지 않거나 오래되거나 거부된 상태에서 로컬/200입니다. [한계·배포](../policy-routing.md)를 참고하세요.
 
-ADR-044의 유한한 완전 Mask는 외부 체인 반환 전에 수행하며 InternalOnly와 함께여도 필요합니다. 안전하지 않은 구조·숫자 변경, 남은 탐지, 불완전 변환은 거부합니다. 내부 모델 라벨만으로 Responses 원격 도구의 외부 호출을 허용할 수 없습니다. 엄격 예산은 거부된 정책 갱신을 차단하고 이후 컨텍스트·어피니티·폴백을 모두 필터링합니다. 세션 힌트는 범위가 지정된 HMAC 입력일 뿐 Principal이나 감사 차원이 아닙니다. 유일한 예외는 감사 기록의 ADR-057 키 범위 세션 다이제스트입니다([아래](#audit-console-adr-057)).
+ADR-044의 유한한 완전 Mask는 외부 체인 반환 전에 수행하며 InternalOnly와 함께여도 필요합니다. 안전하지 않은 구조·숫자 변경, 남은 탐지, 불완전 변환은 거부합니다. 내부 모델 라벨만으로 Responses 원격 도구의 외부 호출을 허용할 수 없습니다. 엄격 예산은 거부된 정책 갱신을 차단하고 이후 컨텍스트·어피니티·폴백을 모두 필터링합니다. 세션 힌트는 범위가 지정된 HMAC 입력일 뿐 Principal이나 감사 차원이 아닙니다. 유일한 예외는 감사 기록과 분석 인덱스(메트릭 제외)의 ADR-057 키 범위 세션 다이제스트입니다([아래](#audit-console-adr-057)).
 
 내장 인증서·키 TLS 설정은 데이터 영역에만 적용됩니다. 관리 영역의 원격 접속은
 별도 TLS 종단 또는 보호된 터널을 필요로 합니다.
@@ -141,13 +141,27 @@ ADR-044 규칙의 범위가 한정된 예외이며, ADR-044 친화도 고정은 
 있으며, Claude Code는 무작위 UUID를 보냅니다.
 
 **자동 모드는 추정입니다.** 판정은 Anthropic 형식 응답에서 읽으며 Claude Code의 현재 형식에
-의존합니다. 형식이 바뀌면 잘못된 판정이 아니라 판정 없음과 미해석 건수 증가가 나타납니다.
-게이트웨이는 응답당 최대 16 KiB 텍스트만 읽고, 응답 텍스트를 저장하지 않으며, 응답을
-바꾸지 않습니다. 해석되지 않은 차단 호출(요청 중지 시퀀스에 `</block>` 포함)과 Bedrock 서버
-안전장치(`dangerous_tool_use` 유형 `safeguard_results`)는 `unknown`이 되고 레이블 없는
-`inferplane_audit_auto_mode_unparsed_total`을 늘립니다. `</severity>` 호출과 심각도 응답은
-기록도 집계도 하지 않습니다. 콘솔은 모든 판정을 추정으로 표시합니다.
-`audit.client_evidence.auto_mode: "off"`로 끕니다.
+의존합니다. 게이트웨이는 응답당 최대 16 KiB 텍스트만 읽고, 응답 텍스트를 저장하지 않으며,
+응답을 바꾸지 않습니다. 해석되지 않은 차단 호출 또는 서버 안전장치는 `unknown`으로
+기록하고 레이블 없는 `inferplane_audit_auto_mode_unparsed_total`을 늘립니다.
+`</severity>` 호출과 심각도 응답은 기록도 집계도 하지 않습니다. 콘솔은 모든 판정을
+추정으로 표시합니다. `audit.client_evidence.auto_mode: "off"`로 끕니다.
+
+단계별 규칙입니다.
+
+- `s1`, 차단 호출: 요청 중지 시퀀스에 `</block>`이 있습니다. `<thinking>` 텍스트를 제거한
+  뒤 응답에 일관된 `<block>yes` 또는 `<block>no`가 하나 있어야 하며 `yes`는 `block`,
+  `no`는 `allow`입니다. 응답이 `</block>`에서 멈췄거나 텍스트가 `</block>`으로 태그를
+  닫을 때만 인정합니다. 게이트웨이가 변환한 Bedrock Converse 응답은 시퀀스 이름 없이
+  `stop_reason` `stop_sequence`만 보고하며, 이는 `</block>`이 유일한 요청 중지 시퀀스일
+  때만 `</block>`에서 멈춘 것으로 봅니다. 그 밖의 경우(값 충돌, 16 KiB 초과 텍스트 포함)는
+  `unknown`입니다.
+- `s2`, auxiliary 클래스 텍스트 규칙: `x-claude-code-request-class`가 `auxiliary`인
+  요청에만 적용하며 중지 시퀀스가 필요 없습니다. Claude Code 2.1.312는 이 헤더를 보내지
+  않아 해당 클라이언트에서는 동작하지 않습니다.
+- `server`, Bedrock 서버 안전장치: `safeguard_results`의 `dangerous_tool_use` 항목입니다.
+  모든 tool use가 `not_flagged`이면 `allow`, 그 밖의 상태나 결과는 `unknown`, tool use가
+  없으면 기록하지 않습니다.
 
 **접근.** `/admin/audit/*` 다섯 경로는 읽기 전용이며 full-admin 전용입니다. 응답에는
 다이제스트, 닫힌 코드, 저장된 감사 행만 있고 원본 세션 ID·프롬프트·응답 텍스트는 없습니다.

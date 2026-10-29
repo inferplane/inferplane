@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 9c8e9adb2373fecf7611375629bddd0007a9195b93328c348a51ac4020f967ab
+translation_source_sha256: 2b6bc5f19e00ab4946fe73afc025dc38a713c7762246adfe3566972acf5ae2b0
 ---
 
 # 데이터 구현 {#data}
@@ -134,7 +134,7 @@ MatchingRoutingPolicies는 하나의 원자 스냅샷에서 호출자 소유 규
 | `client.request_class` | 문자열 | `main`, `subagent`, `workflow`, `compaction`, `auxiliary`, `side_reply`. `x-claude-code-request-class` 헤더에서만 오며 다른 값은 버립니다. Claude Code 2.1.312는 이 헤더를 보내지 않아 실제 트래픽에서는 필드가 없습니다. |
 | `client.session_ref` | 문자열 | `s1:` + 16진수 32자리([보안](security.ko.md#audit-console-adr-057) 참고). |
 | `auto_mode.verdict` | 문자열 | `block`, `allow`, `unknown`. 추정값이며 `request_completed` 기록에만 있습니다. |
-| `auto_mode.stage` | 문자열 | `s1`, `s2`, `server`. |
+| `auto_mode.stage` | 문자열 | `s1`(차단 호출), `s2`(auxiliary 클래스 텍스트 규칙), `server`(Bedrock 안전장치). 규칙은 [보안](security.ko.md#audit-console-adr-057) 참고. |
 | `auto_mode.signature` | 문자열 | `claude-code-2.1`. 규칙이 따르는 클라이언트 응답 형식입니다. |
 
 `latency{total_ms, ttft_ms}`는 이제 모든 수신 계층의 종결 기록에 기록됩니다. `ttft_ms`가
@@ -168,7 +168,7 @@ Usage 수치는 바뀌지 않습니다. 정확한 감사 행은 `record_json`에
 
 커버리지: Mode A는 설정된 파일 싱크에서 만들며 재시작하면 다시 재생하고 재구축
 엔드포인트가 없습니다. Mode B `POST /admin/analytics/rebuild`는 감사 테이블을 다른 파생
-테이블과 함께 비운 뒤 원본에서 다시 채웁니다. 어떤 원본에도 남아 있지 않은 기록은 콘솔에
+테이블과 함께 비우고, 기존 수집 경로가 다시 채웁니다. 어떤 원본에도 남아 있지 않은 기록은 콘솔에
 없으며, 요약의 `coverage_start_ms`가 인덱스가 가진 가장 이른 시각입니다.
 
 ### 설정

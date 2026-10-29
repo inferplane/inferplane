@@ -190,7 +190,7 @@ request denied after an earlier attempt keeps that attempt.
 | `client.request_class` | string | `main`, `subagent`, `workflow`, `compaction`, `auxiliary`, `side_reply`, from the `x-claude-code-request-class` header only; any other value is dropped. Claude Code 2.1.312 does not send it, so the field is absent on real traffic. |
 | `client.session_ref` | string | `s1:` plus 32 hex digits (see [security](security.md#audit-console-adr-057)). |
 | `auto_mode.verdict` | string | `block`, `allow`, `unknown`. An estimate. Only `request_completed` records carry it. |
-| `auto_mode.stage` | string | `s1`, `s2`, `server`. |
+| `auto_mode.stage` | string | `s1` (block call), `s2` (auxiliary-class text rule), `server` (Bedrock safeguard); rules in [security](security.md#audit-console-adr-057). |
 | `auto_mode.signature` | string | `claude-code-2.1`, the client response format the rules follow. |
 
 `latency{total_ms, ttft_ms}` is now written on every terminal record on every
@@ -226,8 +226,8 @@ their deny code. A partial stream is `upstream_error`.
 
 Coverage: Mode A is built from the configured file sinks, which a restart
 replays, and has no rebuild endpoint. Mode B `POST /admin/analytics/rebuild`
-truncates the audit tables with the other derived tables and repopulates them
-from the sources. A record no longer in any source is not in the console;
+truncates the audit tables with the other derived tables, and the existing
+ingest path repopulates them. A record no longer in any source is not in the console;
 `coverage_start_ms` in the summary is the earliest time the index holds.
 
 ### Configuration

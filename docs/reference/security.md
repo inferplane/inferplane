@@ -70,7 +70,8 @@ Responses remote-tool egress cannot be authorized merely by an internal model
 label. Strict budget constraints also gate rejected policy updates and filter
 every subsequent context choice, affinity hit and fallback. Session hints are
 scoped HMAC inputs only; they never become principals or audit dimensions. The one
-exception is the ADR-057 key-scoped session digest in audit records ([below](#audit-console-adr-057)).
+exception is the ADR-057 key-scoped session digest in audit records and the
+analytics index, never metrics ([below](#audit-console-adr-057)).
 
 ### Opt-in PII classifiers (systemone)
 
@@ -158,15 +159,29 @@ not remove links already in the chain. A client that sends low-entropy IDs would
 make the digest guessable; Claude Code sends random UUIDs.
 
 **Auto mode is an estimate.** Verdicts come from Anthropic-format responses and
-depend on Claude Code's current format; a format change yields no verdict and a
-rising unparsed count, not a wrong one. The gateway reads at most 16 KiB of text
-per response, stores no response text, and never changes the response. Block
-calls (request stop sequences contain `</block>`) and Bedrock server safeguards
-(`safeguard_results` of type `dangerous_tool_use`) that do not parse are
-`unknown` and increment `inferplane_audit_auto_mode_unparsed_total`, which has
-no labels. `</severity>` calls and severity replies are never recorded or
-counted. The console labels every verdict an estimate.
-`audit.client_evidence.auto_mode: "off"` disables it.
+depend on Claude Code's current format. The gateway reads at most 16 KiB of text
+per response, stores no response text, and never changes the response. An
+unparsed block call or server safeguard is recorded as `unknown` and increments
+`inferplane_audit_auto_mode_unparsed_total`, which has no labels. `</severity>`
+calls and severity replies are neither recorded nor counted. The console labels
+every verdict an estimate. `audit.client_evidence.auto_mode: "off"` disables it.
+
+The rules, by stage:
+
+- `s1`, a block call: the request's stop sequences contain `</block>`. After
+  removing `<thinking>` text, the reply must contain one consistent
+  `<block>yes` or `<block>no`; `yes` is `block` and `no` is `allow`. It is
+  accepted only when the reply stopped on `</block>` or its text closes the tag
+  with `</block>`. Gateway-translated Bedrock Converse replies report
+  `stop_reason` `stop_sequence` without naming the sequence; that counts as a
+  stop on `</block>` only when `</block>` is the sole requested stop sequence.
+  Anything else, including conflicting values or text over 16 KiB, is `unknown`.
+- `s2`, the auxiliary-class text rule: only for requests whose
+  `x-claude-code-request-class` is `auxiliary`, with no stop sequence required.
+  Claude Code 2.1.312 does not send that header, so it is dormant with that client.
+- `server`, a Bedrock server safeguard: a `dangerous_tool_use` entry in
+  `safeguard_results`. All tool uses `not_flagged` is `allow`; any other status
+  or outcome is `unknown`; no tool uses records nothing.
 
 **Access.** The five `/admin/audit/*` routes are read-only and full-admin only.
 Responses carry digests, closed codes and the stored audit line, never the raw

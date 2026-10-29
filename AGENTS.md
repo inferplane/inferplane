@@ -1,4 +1,4 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 87cd3274f9c1 · generated-at: 2026-10-29 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 648bc1387acb · generated-at: 2026-10-29 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
 > from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
 > per-AI copy).
@@ -135,7 +135,8 @@ credentials, or a real IdP (httptest fakes only).
 - Audit additions are append-only/omitempty; metric dimensions remain bounded.
   No prompt, detected value, session ID, user or key ID enters new metric labels.
   Hash/scoped hints stay out of audit/metrics except the ADR-057 key-scoped
-  session digest, which is written to audit records only (never the raw ID).
+  session digest, which goes to audit records and the analytics index, never
+  metrics (and never the raw ID).
 - Evaluate task success, total settled cost including cold-cache/retries and
   latency before enabling Enforce. Model names do not attest privacy or price.
 
