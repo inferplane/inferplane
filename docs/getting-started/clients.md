@@ -34,7 +34,10 @@ Examples: [Anthropic/Bedrock](../../examples/config.json), [self-hosted](../../e
 ## Claude Code MCP tool search
 
 Claude Code 2.1.304 and later enable MCP tool search (deferred tool loading)
-by default through a custom `ANTHROPIC_BASE_URL`. Older clients require
+by default through a custom `ANTHROPIC_BASE_URL`, and 2.1.311 keeps it on through
+the gateway on every route: it turns tool search off only for some models, for
+`ENABLE_TOOL_SEARCH=false` or with experimental betas disabled, never because of
+the endpoint. Older clients require
 `ENABLE_TOOL_SEARCH=true` (or an `auto` setting) to enable it through `mayu`.
 Set `ENABLE_TOOL_SEARCH=false` to send every MCP tool definition up front.
 From 2.1.305, an unrecognized HTTP 400/422 can trigger a retry without tool
@@ -42,11 +45,39 @@ search, enlarging the prompt. A context refusal must retain its recognizable
 error semantics; a generic validation error is insufficient.
 See the [official gateway tool-search behavior](https://code.claude.com/docs/en/mcp#tool-search-through-an-llm-gateway).
 Anthropic and Bedrock `invoke_model` routes forward `defer_loading`, the search tool
-and `tool_reference` history unchanged, and privacy inspection accepts those blocks;
-Bedrock Converse cannot express them and drops the search tool, so deferred tools
-load up front there. Verified on 2026-09-24 against Bedrock InvokeModel (Claude Haiku 4.5):
-server-side search, a client-side `tool_reference` result and streaming, with and
-without a `sensitiveData` policy. This is not qualification of every MCP server or model.
+and `tool_reference` history unchanged, and privacy inspection accepts those blocks.
+On Bedrock Converse (non-Claude models) Claude Code still defers tools: a loaded
+tool's definition arrives in the next request's tools, and the gateway sends a
+`tool_reference` result as `Loaded tool: <name>` text. Earlier gateway builds sent
+an empty tool result there, so the model could conclude the search found nothing.
+Verified on 2026-10-27 with Claude Code 2.1.311 through the gateway: deferred
+loading on Haiku 5.5 (InvokeModel) and a ToolSearch → CronList call on
+gpt-6.1-terra (Converse); and on 2026-09-24 against Bedrock InvokeModel (Claude
+Haiku 4.5): server-side search, a client-side `tool_reference` result and
+streaming, with and without a `sensitiveData` policy. This is not qualification of
+every MCP server or model.
+
+## Claude Code model aliases and auto mode
+
+Claude Code resolves its built-in `sonnet` alias to Sonnet 5 through the gateway
+unless `ANTHROPIC_DEFAULT_SONNET_MODEL` names another public model ID, for example
+`global.anthropic.claude-sonnet-5-5`; `ANTHROPIC_DEFAULT_OPUS_MODEL` and
+`ANTHROPIC_DEFAULT_HAIKU_MODEL` pin the other aliases. Auto mode
+(`--permission-mode auto`) facts measured with Claude Code 2.1.311 on 2026-10-27:
+
+- The main model must be on Claude Code's allow-list. On Bedrock it rejects
+  Opus/Sonnet 4.6 and earlier and every Haiku except Haiku 5.5; non-Claude models
+  pass and use the local classifier.
+- Claude model IDs must use the hyphenated version (`global.anthropic.claude-opus-4-8`).
+  The dotted form (`claude-opus-4.8`) is read as an older, unsupported version.
+- The local classifier model (`global.anthropic.claude-sonnet-5` unless
+  `CLAUDE_CODE_AUTO_MODE_MODEL` is set) must be routed by the gateway and allowed
+  for the key. Claude Code ignores Sonnet 5.5, Opus 5.5 and Opus 5 there. A
+  mistyped Claude ID can be served by another model through the gateway's
+  same-family fallback; check the `x-inferplane-model-fallback` header or
+  `inferplane_model_fallback_total`.
+- With a non-Claude main model every tool call also sends a classifier request;
+  include it in the budget.
 
 For Responses, distinguish native mode from the stateless bridge. Opaque native history and hosted/native-only tools cannot simply move to an arbitrary Chat Completions backend. Start a new session when required by the [launcher contract](../codex-launcher.md).
 
