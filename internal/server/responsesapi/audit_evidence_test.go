@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -240,5 +241,32 @@ func TestResponsesCommittedStreamFailureAttemptEndsBeforeSettlement(t *testing.T
 	}
 	if gap := recs[0].Latency.TotalMs - (a.StartMs + a.DurMs); gap < 15 {
 		t.Fatalf("attempt %+v includes settlement: gap %d ms", a, gap)
+	}
+}
+
+// A terminal non-2xx on the last target ends the attempt with the upstream's
+// own status before settlement, not later from Finish.
+func TestResponsesTerminalNon2xxAttemptEndsBeforeSettlement(t *testing.T) {
+	for _, code := range []int{400, 500} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			f := newStreamFixture(t)
+			f.first.complete = func() (*providers.ProxyResponse, error) {
+				return &providers.ProxyResponse{StatusCode: 503, RawBody: []byte(`{}`)}, nil
+			}
+			f.fallback.complete = func() (*providers.ProxyResponse, error) {
+				return &providers.ProxyResponse{StatusCode: code, RawBody: []byte(`{"error":{"code":"bad"}}`)}, nil
+			}
+			recs := f.serveBody(t, httptest.NewRecorder(), slowSettleCtx(), `{"model":"premium","input":"hello"}`)
+			if len(recs) != 2 || recs[1].Latency == nil {
+				t.Fatalf("records = %+v", recs)
+			}
+			a := lastAttempt(t, recs)
+			if a.Status != audit.AttemptUpstreamError || a.HTTP != code {
+				t.Fatalf("attempt = %+v", a)
+			}
+			if gap := recs[1].Latency.TotalMs - (a.StartMs + a.DurMs); gap < 15 {
+				t.Fatalf("attempt %+v includes settlement: gap %d ms", a, gap)
+			}
+		})
 	}
 }
