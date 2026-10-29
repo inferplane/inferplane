@@ -30,6 +30,7 @@ Start with the [Grafana dashboard](../../deploy/grafana/inferplane.json). Config
 | `gen_ai_server_time_to_first_token_seconds` | Upstream or request-path latency |
 | `inferplane_fallback_total` / circuit state | Provider failure or incompatibility |
 | `inferplane_usage_windows_dropped_total` | Analytics delivery loss; distinguish from authority accounting |
+| `process_resident_memory_bytes`, `go_memstats_heap_inuse_bytes`, `go_goroutines` | Memory growth: the gateway holds several copies of every request body being processed (about 5.5× measured), so concurrent large bodies dominate |
 
 Choose thresholds from measured traffic and the selected profile. Prometheus spend is observational; integer accounting records and authority commitments determine available balance.
 

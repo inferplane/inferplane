@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
 type Metrics struct {
@@ -124,6 +125,11 @@ func New() *Metrics {
 		m.fallbackTotal, m.circuitState, m.quotaUtil, m.budgetUtil, m.budgetSpend, m.pricingMiss,
 		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected, m.substitution, m.routingDecisions,
 		m.autoModeUnparsed)
+	// Go runtime (heap, GC, goroutines) and process (RSS, CPU, file
+	// descriptors) collectors: their families carry no request data and only
+	// fixed labels. Without them a large-body memory burst was visible only
+	// through /proc (2026-10-27 path check).
+	reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	m.classifiers = newClassifierMetrics(reg)
 	// Prometheus only emits a labeled metric family once it has at least one
 	// observed child series. Pre-initialize the token-usage family to zero so
