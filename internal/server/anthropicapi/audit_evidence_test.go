@@ -2,7 +2,10 @@ package anthropicapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -16,6 +19,7 @@ import (
 	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
+	"github.com/inferplane/inferplane/pkg/schema"
 	"github.com/inferplane/inferplane/providers"
 	"github.com/inferplane/inferplane/providers/testing/mockprovider"
 )
@@ -68,6 +72,9 @@ func terminal(t *testing.T, recs []audit.Record) audit.Record {
 	return audit.Record{}
 }
 
+// fallbackRouter chains two providers for ONE model (m1 is only the upstream
+// id), so the step between them is same-model, not a cross-model boundary;
+// the 404 cross-model case below uses model_fallbacks instead.
 func fallbackRouter() *router.Router {
 	provs := map[string]providers.Provider{
 		"bad":  statusProvider{code: 503, body: []byte(`{"type":"error"}`)},
@@ -136,5 +143,125 @@ func TestMessagesRawSessionIDNeverAudited(t *testing.T) {
 	w.Close()
 	if strings.Contains(buf.String(), rawSession) {
 		t.Fatal("raw session ID reached the audit chain")
+	}
+}
+
+// evStream is a configurable provider for stream/complete evidence tests.
+type evStream struct {
+	events    []*providers.StreamEvent
+	midErr    error
+	streamErr error
+	complete  error
+}
+
+func (evStream) Name() string               { return "ev" }
+func (evStream) Models() []schema.ModelInfo { return nil }
+func (p evStream) Complete(context.Context, *providers.ProxyRequest) (*providers.ProxyResponse, error) {
+	return nil, p.complete
+}
+func (p evStream) Stream(context.Context, *providers.ProxyRequest) (iter.Seq2[*providers.StreamEvent, error], error) {
+	if p.streamErr != nil {
+		return nil, p.streamErr
+	}
+	return func(yield func(*providers.StreamEvent, error) bool) {
+		for _, e := range p.events {
+			if !yield(e, nil) {
+				return
+			}
+		}
+		if p.midErr != nil {
+			yield(nil, p.midErr)
+		}
+	}, nil
+}
+
+func chunkEv(typ string) *providers.StreamEvent {
+	return &providers.StreamEvent{Raw: []byte("event: " + typ + "\ndata: {}\n\n"), Chunk: &schema.ChatChunk{Type: typ}}
+}
+
+func serveEvidence(t *testing.T, prov providers.Provider, stream bool) audit.Record {
+	t.Helper()
+	w, buf := evidenceWriter(t)
+	models := map[string]config.ModelConfig{"m": {Targets: []config.Target{{Provider: "p", Model: "m"}}}}
+	h := NewMessagesHandlerFull(router.New(holderFor(map[string]providers.Provider{"p": prov}, models)), w, nil)
+	body := `{"model":"m","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	if stream {
+		body = `{"model":"m","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	}
+	h.ServeHTTP(httptest.NewRecorder(), evidenceRequest(body, keystore.Principal{KeyID: "ik_x", Team: "t", AllowedModels: []string{"*"}}))
+	w.Close()
+	return terminal(t, records(t, buf))
+}
+
+func TestMessagesStreamInBandErrorIsStreamFailed(t *testing.T) {
+	done := serveEvidence(t, evStream{events: []*providers.StreamEvent{chunkEv("message_start"), chunkEv("error")}}, true)
+	if len(done.Attempts) != 1 || done.Attempts[0].Status != audit.AttemptStreamFailed {
+		t.Fatalf("attempts = %+v", done.Attempts)
+	}
+}
+
+func TestMessagesStreamEOFWithoutStopIsStreamFailed(t *testing.T) {
+	done := serveEvidence(t, evStream{events: []*providers.StreamEvent{chunkEv("message_start")}}, true)
+	if len(done.Attempts) != 1 || done.Attempts[0].Status != audit.AttemptStreamFailed {
+		t.Fatalf("attempts = %+v", done.Attempts)
+	}
+}
+
+func TestMessagesStreamMidErrorIsStreamFailedPartial(t *testing.T) {
+	done := serveEvidence(t, evStream{events: []*providers.StreamEvent{chunkEv("message_start")}, midErr: errors.New("boom")}, true)
+	if len(done.Attempts) != 1 || done.Attempts[0].Status != audit.AttemptStreamFailed || !done.Outcome.Partial {
+		t.Fatalf("attempts = %+v outcome = %+v", done.Attempts, done.Outcome)
+	}
+}
+
+func TestMessagesStreamCleanIsOKAndEndsBeforeTotal(t *testing.T) {
+	done := serveEvidence(t, evStream{events: []*providers.StreamEvent{chunkEv("message_start"), chunkEv("message_stop")}}, true)
+	a := done.Attempts[0]
+	if a.Status != audit.AttemptOK || a.HTTP != 200 || a.StartMs+a.DurMs > done.Latency.TotalMs {
+		t.Fatalf("attempt = %+v latency = %+v", a, done.Latency)
+	}
+}
+
+func TestMessagesStreamPreTTFT404CrossModelIsModelNotFound(t *testing.T) {
+	provs := map[string]providers.Provider{
+		"bad":  evStream{streamErr: &providers.UpstreamError{StatusCode: 404, Body: []byte(`{}`)}},
+		"good": mockprovider.New("claude-sonnet-4-6"),
+	}
+	models := map[string]config.ModelConfig{
+		"claude-opus-5":     {Targets: []config.Target{{Provider: "bad", Model: "claude-opus-5"}}},
+		"claude-sonnet-4-6": {Targets: []config.Target{{Provider: "good", Model: "claude-sonnet-4-6"}}},
+	}
+	w, buf := evidenceWriter(t)
+	h := NewMessagesHandlerFull(router.New(holderForWithFallbacks(provs, models, map[string]string{"claude-opus-5": "claude-sonnet-4-6"})), w, nil)
+	h.ServeHTTP(httptest.NewRecorder(), evidenceRequest(`{"model":"claude-opus-5","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"hi"}]}`,
+		keystore.Principal{KeyID: "ik_n", Team: "t", AllowedModels: []string{"*"}}))
+	w.Close()
+	done := terminal(t, records(t, buf))
+	if len(done.Attempts) != 2 || done.Attempts[0].Status != audit.AttemptModelNotFound || done.Attempts[0].HTTP != 404 {
+		t.Fatalf("attempts = %+v", done.Attempts)
+	}
+}
+
+func TestMessagesLastTargetTransportErrorRecordsNoGateway502(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		done := serveEvidence(t, evStream{complete: errors.New("down"), streamErr: errors.New("down")}, stream)
+		if len(done.Attempts) != 1 || done.Attempts[0].Status != audit.AttemptUpstreamError || done.Attempts[0].HTTP != 0 {
+			t.Fatalf("stream=%v attempts = %+v", stream, done.Attempts)
+		}
+	}
+}
+
+func TestMessagesLastTargetDeadlineIsTimeout(t *testing.T) {
+	done := serveEvidence(t, evStream{complete: context.DeadlineExceeded}, false)
+	if len(done.Attempts) != 1 || done.Attempts[0].Status != audit.AttemptTimeout {
+		t.Fatalf("attempts = %+v", done.Attempts)
+	}
+}
+
+func TestMessagesFinalAttemptEndsBeforeTotal(t *testing.T) {
+	done := serveEvidence(t, evStream{events: []*providers.StreamEvent{chunkEv("message_start"), chunkEv("message_stop")}}, true)
+	a := done.Attempts[len(done.Attempts)-1]
+	if a.StartMs+a.DurMs > done.Latency.TotalMs {
+		t.Fatalf("attempt %+v ends after total %d", a, done.Latency.TotalMs)
 	}
 }

@@ -123,6 +123,21 @@ func (e *evidence) endLocked(idx int, status string, httpStatus int) {
 	}
 }
 
+// EndOpenAttempt closes the open attempt now with a closed status and the
+// upstream HTTP status (0 when the upstream never answered). Later closes,
+// including Finish, leave it unchanged.
+func EndOpenAttempt(ctx context.Context, status string, httpStatus int) {
+	e := evidenceFrom(ctx)
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	if e.open >= 0 {
+		e.endLocked(e.open, status, httpStatus)
+	}
+	e.mu.Unlock()
+}
+
 // NoteAttemptHTTP records the upstream status of the open attempt.
 func NoteAttemptHTTP(ctx context.Context, httpStatus int) {
 	e := evidenceFrom(ctx)

@@ -163,3 +163,25 @@ func TestOpenAttemptHTTP(t *testing.T) {
 		t.Fatalf("after attempt ended: got %d, want 0", got)
 	}
 }
+
+func TestEndOpenAttemptFreezesDuration(t *testing.T) {
+	EndOpenAttempt(context.Background(), AttemptOK, 200) // no collector: no-op
+	ctx := WithEvidence(context.Background(), time.Now(), nil)
+	EndOpenAttempt(ctx, AttemptOK, 200) // no open attempt: no-op
+	BeginAttempt(ctx, "p", "m")
+	NoteAttemptHTTP(ctx, 503)
+	EndOpenAttempt(ctx, AttemptStreamFailed, 0) // 0 keeps the noted status
+	time.Sleep(30 * time.Millisecond)
+	rec := &Record{Event: "request_completed", Outcome: &OutcomeRef{Status: 200}}
+	Finish(ctx, rec)
+	if len(rec.Attempts) != 1 {
+		t.Fatalf("attempts = %+v", rec.Attempts)
+	}
+	a := rec.Attempts[0]
+	if a.Status != AttemptStreamFailed || a.HTTP != 503 {
+		t.Fatalf("attempt = %+v", a)
+	}
+	if a.StartMs+a.DurMs >= rec.Latency.TotalMs {
+		t.Fatalf("attempt end %d not before total %d", a.StartMs+a.DurMs, rec.Latency.TotalMs)
+	}
+}
