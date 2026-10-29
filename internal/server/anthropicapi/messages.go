@@ -15,6 +15,7 @@ import (
 
 	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/internal/bodystore"
+	"github.com/inferplane/inferplane/internal/clientctx"
 	"github.com/inferplane/inferplane/internal/filter"
 	"github.com/inferplane/inferplane/internal/governance"
 	"github.com/inferplane/inferplane/internal/keystore"
@@ -536,6 +537,11 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	if h.bodies != nil && resp.StatusCode < 400 {
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, resp.RawBody)
 	}
+	if resp.StatusCode/100 == 2 {
+		tap := clientctx.AutoModeTapFor(req.Context(), pr.Parsed) // nil when auto mode evidence is off
+		tap.ObserveResponse(resp.Parsed)
+		h.recordAutoMode(req.Context(), tap)
+	}
 	h.auditCompleted(req.Context(), recID, p, model, upstream, resp.StatusCode, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
 	recordSpanSettled(req, prov.Name(), providerName, upstream, usage, cost, resp.StatusCode < 400, false)
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, resp.StatusCode, time.Since(start).Seconds(), 0)
@@ -596,6 +602,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 	var lastUsage *schema.Usage
 	var ttft float64
 	var streamCompleted, streamFailed bool
+	tap := clientctx.AutoModeTapFor(req.Context(), pr.Parsed) // nil when auto mode evidence is off
 	for ev, err := range seq {
 		if err != nil {
 			// upstream broke mid-stream: the 200 is already committed, so the
@@ -646,6 +653,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 				lastUsage = schema.MergeUsage(lastUsage, ev.Chunk.Usage)
 			}
 			usage = usageRef(lastUsage)
+			tap.ObserveChunk(ev.Chunk) // after the verbatim tee; reads, never mutates
 		}
 	}
 	requestpolicy.EndStreamAttempt(req.Context(), streamCompleted && !streamFailed, nil)
@@ -664,10 +672,28 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 	if h.bodies != nil {
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, nil)
 	}
+	if streamCompleted && !streamFailed {
+		h.recordAutoMode(req.Context(), tap)
+	}
 	h.auditCompleted(req.Context(), recID, p, model, upstream, 200, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
 	recordSpanSettled(req, prov.Name(), providerName, upstream, usage, cost, true, false) // committed stream success
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, 200, time.Since(start).Seconds(), ttft)
 	return false
+}
+
+// recordAutoMode stores the tap's estimated Claude Code auto mode verdict
+// before the terminal record is written, where audit.Finish stamps it
+// (ADR-057), and counts an unparsed block call or server safeguard. Only
+// successful responses reach it; the response bytes are never changed.
+func (h *MessagesHandler) recordAutoMode(ctx context.Context, tap *clientctx.AutoModeTap) {
+	ref, unparsed := tap.Result()
+	if ref == nil {
+		return
+	}
+	audit.SetAutoMode(ctx, ref)
+	if unparsed {
+		h.metrics.ObserveAutoModeUnparsed()
+	}
 }
 
 // settle maps the observed schema.Usage to pricing.Usage and runs the
