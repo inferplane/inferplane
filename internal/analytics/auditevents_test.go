@@ -40,8 +40,12 @@ func TestKindOf(t *testing.T) {
 	if got := KindOf(rec("8", "request_started", 403, func(r *audit.Record) { r.Outcome.Error = str("model_forbidden") })); got != KindPolicyDenied {
 		t.Fatalf("responses model_forbidden = %s", got)
 	}
-	if got := KindOf(rec("9", "request_started", 400, func(r *audit.Record) { r.Outcome.Error = str("context_window_exceeded") })); got != KindUpstreamError {
-		t.Fatalf("context error = %s", got)
+	// The gateway refused before any upstream call: a policy denial on the
+	// Responses 400 and on the 403 of Messages, Chat and Bedrock alike.
+	for _, status := range []int{400, 403} {
+		if got := KindOf(rec("9", "request_started", status, func(r *audit.Record) { r.Outcome.Error = str("context_window_exceeded") })); got != KindPolicyDenied {
+			t.Fatalf("context error %d = %s", status, got)
+		}
 	}
 	failed := audit.AttemptRef{Provider: "a", Status: "upstream_error", HTTP: 503, StartMs: 1, DurMs: 5}
 	if got := KindOf(rec("10", "request_completed", 503, func(r *audit.Record) {

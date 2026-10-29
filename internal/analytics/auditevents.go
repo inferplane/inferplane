@@ -28,7 +28,7 @@ var AuditKinds = []string{KindOK, KindPolicyDenied, KindPrivacyBlocked, KindPriv
 
 var (
 	privacyBlockCodes = map[string]bool{"sensitive_blocked": true, "mask_failed": true, "masking_failed": true}
-	policyDenyCodes   = map[string]bool{"model_forbidden": true, "no_safe_route": true, "budget_target_changed": true, "budget_authority_unavailable": true}
+	policyDenyCodes   = map[string]bool{"model_forbidden": true, "no_safe_route": true, "budget_target_changed": true, "budget_authority_unavailable": true, "context_window_exceeded": true}
 	closedCode        = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
 )
 
