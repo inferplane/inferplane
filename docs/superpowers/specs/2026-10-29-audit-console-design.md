@@ -291,8 +291,9 @@ is on; `/admin/capabilities` gains `audit_console: bool` and
 - Policy name and rule appear for routing denials (`routing.policies`) and for
   governance denials (`governance.policy`). A governance denial set by the
   config file, a team record, a lease, a key option or the budget store shows
-  that source and the limit kind instead; one recorded before the `governance`
-  field shows "not recorded".
+  that source and the limit kind instead; a limit denial recorded before the
+  `governance` field shows "not recorded", an unavailable budget authority
+  shows "no limit named", and a denial whose code names no limit shows "—".
 
 ### Console (`internal/server/adminui`)
 
@@ -452,16 +453,21 @@ changed these points:
 1. Governance denials record the refusing limit in a new append-only
    `governance{scope, limit, source, policy}` field. The console table gains
    `gov_scope`, `gov_limit` and `gov_source`, and the Denials "policy · rule"
-   column and the trace denial section show the rule or the setting; denials
-   recorded earlier show "not recorded (older record)".
+   column and the trace denial section show the rule or the setting. A limit
+   denial recorded earlier (a rate, token, quota or budget code, or
+   `pricing_missing`) shows "not recorded (older record)";
+   `budget_authority_unavailable` without a source shows "no limit named", and
+   every other code (RBAC, request checks, upstream errors) shows "—".
 2. Reservation refusals on Messages, Chat and Invoke carry
    `budget_authority_unavailable`, as Responses did, so the console files them
    as policy denials.
 3. Mode A's live sink writes a row and its categories in one transaction and
    logs a refused row. Mode B writes a tick's rows in one savepoint, skips only
-   rows Postgres rejects as data (SQLSTATE class 22 or 23), and aborts the tick
-   on any other error without advancing its checkpoint.
-4. A Responses legacy-mask failure always writes its `mask_failed` denial.
+   rows Postgres refuses for their content (SQLSTATE class 22, 23 or 54), and
+   aborts the whole tick, its Usage rows included, on any other error without
+   advancing its checkpoint.
+4. Every ingress writes a legacy-mask refusal as a `mask_failed` denial
+   (`masking_failed` for an unreadable `MaskRequired` body), Responses included.
 5. `examples/policies/pii-email-mask.yaml` is the masking rule for success
    criterion 4.
 
@@ -749,7 +755,8 @@ type AutoModeRef struct {
 - 정책 이름과 rule은 라우팅 거부(`routing.policies`)와 거버넌스 거부
   (`governance.policy`)에서 보입니다. 설정 파일, 팀 레코드, 리스, 키 옵션, 예산 저장소가
   정한 거버넌스 거부는 그 출처와 한도 종류를 보여주고, `governance` 필드 이전에 기록된
-  거부는 "기록 안 됨"으로 보여줍니다.
+  한도 거부는 "기록 안 됨", 예산 권한을 쓸 수 없던 거부는 "지정된 한도 없음", 코드가
+  한도를 가리키지 않는 거부는 "—"로 보여줍니다.
 
 ### 콘솔 (`internal/server/adminui`)
 
@@ -896,14 +903,17 @@ Claude Code 2.1.312(`--permission-mode auto -p`, 셸 명령 하나)를 임시 ga
 1. 거버넌스 거부는 새 append-only 필드 `governance{scope, limit, source, policy}`에
    거부한 한도를 기록합니다. 콘솔 표에 `gov_scope`, `gov_limit`, `gov_source`가 생기고,
    거부 이력의 "정책 · rule" 열과 trace 상세의 거부 항목이 규칙이나 설정을 보여줍니다.
-   이전에 기록된 거부는 "기록 안 됨(이전 기록)"으로 보입니다.
+   이전에 기록된 한도 거부(속도, 토큰, 쿼터, 예산 코드나 `pricing_missing`)는 "기록 안 됨(이전
+   기록)", 출처가 없는 `budget_authority_unavailable`은 "지정된 한도 없음", 그 밖의
+   코드(RBAC, 요청 검사, 업스트림 오류)는 "—"로 보입니다.
 2. Messages, Chat, Invoke의 예약 거부도 Responses처럼 `budget_authority_unavailable`을
    가지므로 콘솔이 정책 거부로 분류합니다.
 3. Mode A 실시간 싱크는 행과 category를 한 트랜잭션으로 쓰고 거부된 행을 로그에 남깁니다.
-   Mode B는 한 틱의 행을 savepoint 하나로 쓰고, Postgres가 데이터로 거부한 행(SQLSTATE
-   클래스 22 또는 23)만 건너뛰며, 그 밖의 오류에는 체크포인트를 진행하지 않고 틱을
-   중단합니다.
-4. Responses의 legacy mask 실패는 항상 `mask_failed` 거부 기록을 남깁니다.
+   Mode B는 한 틱의 행을 savepoint 하나로 쓰고, Postgres가 내용 때문에 거부한 행(SQLSTATE
+   클래스 22, 23 또는 54)만 건너뛰며, 그 밖의 오류에는 체크포인트를 진행하지 않고 Usage 행을
+   포함한 틱 전체를 중단합니다.
+4. 모든 ingress는 Responses를 포함해 legacy mask 거부를 `mask_failed` 거부 기록(읽을 수 없는
+   `MaskRequired` 본문은 `masking_failed`)으로 남깁니다.
 5. 성공 기준 4의 마스킹 규칙은 `examples/policies/pii-email-mask.yaml`입니다.
 
 ## 범위 밖

@@ -121,6 +121,11 @@ which was the main request. Rejected.
 6. A read-only audit API (`/admin/audit/events`, `/events/{id}`, `/sessions`,
    `/sessions/{ref}`, `/summary`) is full-admin only and mounted only with the
    analytics index.
+7. Every ingress writes a closed `outcome.error` code on the denials the console
+   reviews (amended 2026-10-29): `budget_authority_unavailable` for a
+   pre-dispatch reservation refusal and `mask_failed` for a legacy-mask refusal
+   (`masking_failed` for an unreadable `MaskRequired` body). The console files
+   the mask codes as privacy blocks and the reservation code as a policy denial.
 
 ## Consequences
 
@@ -144,8 +149,9 @@ which was the main request. Rejected.
 - Records no longer in any file sink are not in the console table; the
   console shows the time its coverage starts.
 - Governance denials recorded before the `governance` field have no source;
-  the console says so. Policy and rule names, which are operator text, now
-  enter the chain on every governance denial.
+  the console marks such a limit denial as an older record. Policy and rule
+  names, which are operator text, now enter the chain on every governance
+  denial.
 
 ## References
 
@@ -261,6 +267,10 @@ Claude Code 세션 ID는 무작위 UUID이므로, 키에 묶인 도메인 분리
 6. 읽기 전용 감사 API(`/admin/audit/events`, `/events/{id}`, `/sessions`,
    `/sessions/{ref}`, `/summary`)는 full-admin 전용이고 analytics 인덱스가 있을
    때만 마운트합니다.
+7. 모든 ingress는 콘솔이 살펴보는 거부에 닫힌 `outcome.error` 코드를 씁니다(2026-10-29
+   추가). 발송 전 예약 거부는 `budget_authority_unavailable`, legacy mask 거부는
+   `mask_failed`(읽을 수 없는 `MaskRequired` 본문은 `masking_failed`)입니다. 콘솔은
+   mask 코드를 개인정보 차단으로, 예약 거부 코드를 정책 거부로 분류합니다.
 
 ## 영향
 
@@ -280,8 +290,8 @@ Claude Code 세션 ID는 무작위 UUID이므로, 키에 묶인 도메인 분리
   판정이 아니라 판정 없음(판정 불가 수 증가)이 됩니다.
 - 어느 file sink에도 남지 않은 기록은 콘솔 표에 없습니다. 콘솔은 기록 범위가
   시작되는 시각을 보여줍니다.
-- `governance` 필드 이전에 기록된 거버넌스 거부에는 출처가 없으며 콘솔이 그렇게
-  표시합니다. 운영자가 정한 텍스트인 정책·규칙 이름이 이제 모든 거버넌스 거부마다
+- `governance` 필드 이전에 기록된 거버넌스 거부에는 출처가 없으며 콘솔은 그런 한도
+  거부를 이전 기록으로 표시합니다. 운영자가 정한 텍스트인 정책·규칙 이름이 이제 모든 거버넌스 거부마다
   체인에 들어갑니다.
 
 ## 참고 자료
