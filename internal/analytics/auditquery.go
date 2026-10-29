@@ -197,7 +197,7 @@ func (b *sqlb) filter(f AuditFilter) {
 		b.conds = append(b.conds, "e.pii = 1")
 	}
 	if f.AutoOnly {
-		b.conds = append(b.conds, "e.auto_verdict <> ''")
+		b.conds = append(b.conds, "e.auto_verdict IN ('block', 'unknown')")
 	}
 }
 

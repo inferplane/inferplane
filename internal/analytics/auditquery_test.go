@@ -69,6 +69,9 @@ func TestAuditAllFiltersPaginateWithoutDuplicates(t *testing.T) {
 	}
 	var want []string
 	for i := 28; i >= 0; i -= 2 { // even rows, newest id first
+		if i%3 == 0 {
+			continue // auto=true lists block/unknown verdicts only; rows with i%3==0 are allow
+		}
 		want = append(want, fmt.Sprintf("01JC00000000000000000001%02d", i))
 	}
 	if !slices.Equal(ids, want) {
@@ -164,7 +167,7 @@ func TestAuditSummaryFiltersAndBuckets(t *testing.T) {
 	seedAuditRows(t, ix, base)
 	since, until := base.UnixMilli(), base.Add(6*time.Hour).UnixMilli()
 	full := AuditFilter{Kinds: []string{KindOK, KindPrivacyMasked, KindAutoModeBlocked, KindPolicyDenied}, Team: "platform", KeyID: "ik_a", Model: "sonnet",
-		Provider: "anthropic", Category: "email", Class: "main", TraceID: "trace1", PII: true, AutoOnly: true, SinceMs: since, UntilMs: until}
+		Provider: "anthropic", Category: "email", Class: "main", TraceID: "trace1", PII: true, SinceMs: since, UntilMs: until} // no AutoOnly: it would drop the allow rows these counts include
 	sum, err := ix.AuditSummary(full)
 	if err != nil {
 		t.Fatal(err)
@@ -322,5 +325,23 @@ func TestPostgresDialectPlaceholdersMatchArgs(t *testing.T) {
 	}
 	if execs != 3 {
 		t.Fatalf("insert statements = %d, want 1 row + 2 categories", execs)
+	}
+}
+
+// auto=true lists only block and unparsed verdicts; allow verdicts are
+// counted in the summary but never listed.
+func TestAuditAutoOnlyExcludesAllow(t *testing.T) {
+	ix := openIndex(t)
+	seedAuditRows(t, ix, time.Date(2026, 10, 29, 0, 0, 0, 0, time.UTC))
+	got, _, err := ix.AuditEvents(AuditFilter{AutoOnly: true, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]int{}
+	for _, e := range got {
+		seen[e.AutoVerdict]++
+	}
+	if seen["allow"] != 0 || seen["block"] != 10 || seen["unknown"] != 10 || len(got) != 20 {
+		t.Fatalf("auto-only verdicts = %v (rows %d)", seen, len(got))
 	}
 }
