@@ -163,7 +163,7 @@ No-rule traffic omits the field. See [decision semantics](../policy-routing.md#r
 
 ## Audit console evidence (ADR-057)
 
-The console reads three append-only, `omitempty` additions to terminal audit
+The console reads four append-only, `omitempty` additions to terminal audit
 records (a `request_completed` record, or a `request_started` record that carries
 an outcome, which is how every gateway denial is written), plus a console-only
 projection in the analytics index. Older records and the exact-byte chain
@@ -199,13 +199,41 @@ attempt, `outcome.fallback_used` and `outcome.fallback_chain` (the attempts'
 provider names) are written from `attempts`; they were declared before but
 never written.
 
+### Governance denial source
+
+A gateway denial record also carries `governance` when the refusing component
+names its limit. It is written on `request_started` records with an outcome
+only.
+
+| Field | Type | Values and bounds |
+|---|---|---|
+| `governance.scope` | string | `team`, `key`, `user`, `gateway` (a setting of the whole gateway, such as pricing). |
+| `governance.limit` | string | `rpm`, `tpm`, `tokens_per_day`, `tokens_per_month`, `budget_month`, `budget_day`, `budget` (a lease gate, which reports no window), `pricing`. |
+| `governance.source` | string | `config` (config file `teams` or `pricing.on_missing`), `team_record` (`/admin/teams`, or the shared team snapshot), `policy`, `lease` (control-plane budget lease), `key` (the key's own option), `budget_store` (the budget store or the local liability ledger was full; no limit refused). Omitted when the governor was built without sources. |
+| `governance.policy` | object | `{name, generation, rule}` of the binding GovernancePolicy rule when `source` is `policy`. `generation` is omitted when the authority does not report one (ADR-045 grants). |
+
+The source is the layer whose value binds after composition: a policy rule
+narrower than the config or team record, the config or team record when it is
+stricter or equal, a lease allowance that clamps a budget, or the key's option.
+Local `PreCheck`, the pricing guard, the ADR-054 local liability reservation,
+the ADR-045 authority and ADR-046 shared admission all name their limit; a
+refusal by an unavailable store names none. Reservation refusals carry
+`outcome.error` `budget_authority_unavailable` on every ingress. The field
+holds names only: never the limit value, a counter, key material or a user
+identifier. Policy and rule names are operator text and enter the chain
+verbatim. A denial written before this field has no `governance`.
+
 ### Console tables
 
 Both stores gain `audit_events` (one row per terminal record) and
 `audit_event_categories (id, category)`, created with the existing index. The
 `events` table and Usage numbers are unchanged. The exact audit line is kept in
 `record_json` in both modes (Mode B keeps the bytes the aggregator read from the
-segment, not a re-encoding). Projection is first-write-wins on `id`.
+segment, not a re-encoding). Projection is first-write-wins on `id`. A table
+created before the governance columns gains `gov_scope`, `gov_limit` and
+`gov_source` when the index opens (SQLite adds each missing column; Postgres
+adds them once, under migration marker 2). Existing rows keep empty values,
+which the console shows as not recorded, and boot replay does not rewrite them.
 
 Free text taken from the record (`model_requested`, `model_actual`, `provider`,
 `policy_ref`, the boundaries, `request_class`, `session_ref`, `trace_id`,
@@ -219,12 +247,17 @@ the same batch.
 | Column group | Columns |
 |---|---|
 | Identity and time | `id` (primary key), `ts`, `ts_ms`, `event`, `kind`, `team`, `key_id`, `ingress`, `stream`, `status` |
-| Decision | `deny_code`, `routing_reason`, `privacy`, `masked`, `would_restrict`, `pii`, `policy_ref`, `planned_boundary`, `actual_boundary` |
+| Decision | `deny_code`, `routing_reason`, `privacy`, `masked`, `would_restrict`, `pii`, `policy_ref`, `planned_boundary`, `actual_boundary`, `gov_scope`, `gov_limit`, `gov_source` |
 | Client and trace | `request_class`, `session_ref`, `trace_id` |
 | Routing | `model_requested`, `model_actual`, `provider`, `fallback`, `attempt_count` |
 | Auto mode | `auto_verdict`, `auto_stage`, `auto_signature` |
 | Usage | `input_tokens`, `output_tokens`, `cost_micros`, `total_ms`, `ttft_ms`, `has_body` |
 | Source | `record_json` |
+
+`policy_ref` names the governance rule of a governance denial
+(`name#generation·rule`, or `name·rule` without a generation). Otherwise it is
+the first routing policy, except on a denial with a governance or RBAC deny
+code: a routing rule the request also matched did not refuse it.
 
 `kind` is derived in the index and never written to the audit chain. First
 match wins: `auto_mode_blocked` (verdict `block`), `privacy_blocked`,

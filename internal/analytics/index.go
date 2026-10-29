@@ -65,7 +65,23 @@ var eventsMigrationColumns = []string{
 // present without losing existing rows. A fresh database already has them
 // from the CREATE TABLE above, so this is a no-op there.
 func migrateEventsColumns(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(events)`)
+	return migrateColumns(db, "events", eventsMigrationColumns)
+}
+
+// migrateAuditEventColumns adds the console columns of
+// AuditEventsMigrationColumns to an audit_events table created before them.
+func migrateAuditEventColumns(db *sql.DB) error {
+	stmts := make([]string, len(AuditEventsMigrationColumns))
+	for i, col := range AuditEventsMigrationColumns {
+		stmts[i] = "ALTER TABLE audit_events ADD COLUMN " + col
+	}
+	return migrateColumns(db, "audit_events", stmts)
+}
+
+// migrateColumns runs each "ALTER TABLE <table> ADD COLUMN <name> ..."
+// statement whose column the table does not have yet.
+func migrateColumns(db *sql.DB, table string, stmts []string) error {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		return err
 	}
@@ -85,16 +101,16 @@ func migrateEventsColumns(db *sql.DB) error {
 		return err
 	}
 	rows.Close()
-	for _, stmt := range eventsMigrationColumns {
+	for _, stmt := range stmts {
 		// Each ALTER statement's target column name is token index 5:
-		// "ALTER(0) TABLE(1) events(2) ADD(3) COLUMN(4) <name>(5) ...".
+		// "ALTER(0) TABLE(1) <table>(2) ADD(3) COLUMN(4) <name>(5) ...".
 		fields := strings.Fields(stmt)
 		col := fields[5]
 		if existing[col] {
 			continue
 		}
 		if _, err := db.Exec(stmt); err != nil {
-			return fmt.Errorf("migrate events.%s: %w", col, err)
+			return fmt.Errorf("migrate %s.%s: %w", table, col, err)
 		}
 	}
 	return nil
@@ -126,6 +142,10 @@ func OpenSQLite(path string) (*Index, error) {
 		return nil, err
 	}
 	if _, err := db.Exec(AuditEventsDDL); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := migrateAuditEventColumns(db); err != nil {
 		db.Close()
 		return nil, err
 	}

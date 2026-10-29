@@ -243,6 +243,23 @@ func (s *Store) ensureSchema(ctx context.Context) (retErr error) {
 	if _, err := tx.Exec(ctx, analytics.AuditEventsDDL); err != nil {
 		return fmt.Errorf("create audit console tables: %w", err)
 	}
+	// Console columns added after the console tables shipped (ADR-057
+	// governance evidence). The marker keeps later boots from taking the ALTER
+	// lock again; existing rows keep the empty default.
+	var consoleColumnsInstalled bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM analytics_schema_migrations WHERE version = 2)`).Scan(&consoleColumnsInstalled); err != nil {
+		return fmt.Errorf("read audit console migration marker: %w", err)
+	}
+	if !consoleColumnsInstalled {
+		for _, col := range analytics.AuditEventsMigrationColumns {
+			if _, err := tx.Exec(ctx, `ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS `+col); err != nil {
+				return fmt.Errorf("migrate audit console columns: %w", err)
+			}
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO analytics_schema_migrations(version) VALUES (2)`); err != nil {
+			return fmt.Errorf("record audit console migration: %w", err)
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit analytics schema migration: %w", err)
 	}

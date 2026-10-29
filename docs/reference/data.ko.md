@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: a8def42b461a99bfbf8265deb540dd01129456a2794db28cdda975a75963d673
+translation_source_sha256: c712aabed1e6cb9ab2cc2ceb649f848af63883c73c53c2595aa8fdef528b6cd0
 ---
 
 # 데이터 구현 {#data}
@@ -111,7 +111,7 @@ MatchingRoutingPolicies는 하나의 원자 스냅샷에서 호출자 소유 규
 
 콘솔은 종결 감사 기록(`request_completed` 기록, 또는 결과를 가진 `request_started`
 기록으로, 게이트웨이 거부가 이렇게 기록됩니다)에 추가된 append-only `omitempty` 필드
-세 가지와 분석 인덱스의 콘솔 전용 투영을 읽습니다. 기존 기록과 정확 바이트 체인 검증은
+네 가지와 분석 인덱스의 콘솔 전용 투영을 읽습니다. 기존 기록과 정확 바이트 체인 검증은
 바뀌지 않습니다.
 
 `attempts[]`는 최대 8개이며 처음 7개와 마지막 하나입니다.
@@ -142,13 +142,37 @@ MatchingRoutingPolicies는 하나의 원자 스냅샷에서 호출자 소유 규
 `outcome.fallback_chain`(시도한 공급자 이름)을 `attempts`에서 기록합니다. 이전에는 선언만
 있고 기록되지 않았습니다.
 
+### 거버넌스 거부 출처
+
+게이트웨이 거부 기록은 거부한 구성 요소가 자기 한도를 알려 줄 때 `governance`도 가집니다.
+결과를 가진 `request_started` 기록에만 기록합니다.
+
+| 필드 | 타입 | 값과 한계 |
+|---|---|---|
+| `governance.scope` | 문자열 | `team`, `key`, `user`, `gateway`(가격처럼 게이트웨이 전체에 걸친 설정). |
+| `governance.limit` | 문자열 | `rpm`, `tpm`, `tokens_per_day`, `tokens_per_month`, `budget_month`, `budget_day`, `budget`(구간을 알리지 않는 리스 게이트), `pricing`. |
+| `governance.source` | 문자열 | `config`(설정 파일의 `teams` 또는 `pricing.on_missing`), `team_record`(`/admin/teams` 또는 공유 팀 스냅샷), `policy`, `lease`(control plane 예산 리스), `key`(키 자체 옵션), `budget_store`(예산 저장소나 로컬 부채 원장이 가득 찬 경우로, 한도가 거부한 것이 아님). 거버너가 출처 없이 만들어졌으면 생략합니다. |
+| `governance.policy` | 객체 | `source`가 `policy`일 때 적용된 GovernancePolicy 규칙의 `{name, generation, rule}`. 권한 저장소가 세대를 알려 주지 않으면(ADR-045 할당) `generation`을 생략합니다. |
+
+출처는 합성 뒤 실제로 적용되는 계층입니다. 설정이나 팀 레코드보다 좁은 정책 규칙, 더
+엄격하거나 같은 설정·팀 레코드, 예산을 제한하는 리스 할당량, 또는 키 옵션입니다. 로컬
+`PreCheck`, 가격 가드, ADR-054 로컬 부채 예약, ADR-045 권한 저장소, ADR-046 공유 승인이
+모두 자기 한도를 기록하며, 사용할 수 없는 저장소의 거부는 한도를 기록하지 않습니다. 예약
+거부는 모든 수신 계층에서 `outcome.error` `budget_authority_unavailable`을 가집니다. 이
+필드에는 이름만 있고 한도 값, 카운터, 키 자료, 사용자 식별자는 없습니다. 정책과 규칙 이름은
+운영자가 정한 텍스트로 체인에 그대로 들어갑니다. 이 필드가 생기기 전의 거부 기록에는
+`governance`가 없습니다.
+
 ### 콘솔 테이블
 
 두 저장소 모두 `audit_events`(종결 기록 하나당 한 행)와
 `audit_event_categories (id, category)`를 기존 인덱스와 함께 만듭니다. `events` 테이블과
 Usage 수치는 바뀌지 않습니다. 정확한 감사 행은 두 모드 모두 `record_json`에 보관합니다(Mode B는
 다시 인코딩한 값이 아니라 집계기가 세그먼트에서 읽은 바이트를 보관). 투영은 `id`에
-대해 먼저 쓴 값이 우선입니다.
+대해 먼저 쓴 값이 우선입니다. 거버넌스 열이 생기기 전에 만든 테이블은 인덱스를 열 때
+`gov_scope`, `gov_limit`, `gov_source`를 얻습니다(SQLite는 없는 열마다 추가하고, Postgres는
+마이그레이션 표식 2로 한 번 추가). 기존 행은 빈 값을 유지하며 콘솔은 이를 기록 없음으로
+보여 주고, 부팅 재생은 이 행을 다시 쓰지 않습니다.
 
 기록에서 가져온 자유 텍스트(`model_requested`, `model_actual`, `provider`, `policy_ref`,
 경계 값, `request_class`, `session_ref`, `trace_id`, `auto_signature`)는 NUL 바이트를
@@ -160,12 +184,16 @@ Usage 수치는 바뀌지 않습니다. 정확한 감사 행은 두 모드 모�
 | 열 그룹 | 열 |
 |---|---|
 | 식별·시각 | `id`(기본 키), `ts`, `ts_ms`, `event`, `kind`, `team`, `key_id`, `ingress`, `stream`, `status` |
-| 판단 | `deny_code`, `routing_reason`, `privacy`, `masked`, `would_restrict`, `pii`, `policy_ref`, `planned_boundary`, `actual_boundary` |
+| 판단 | `deny_code`, `routing_reason`, `privacy`, `masked`, `would_restrict`, `pii`, `policy_ref`, `planned_boundary`, `actual_boundary`, `gov_scope`, `gov_limit`, `gov_source` |
 | 클라이언트·추적 | `request_class`, `session_ref`, `trace_id` |
 | 라우팅 | `model_requested`, `model_actual`, `provider`, `fallback`, `attempt_count` |
 | 자동 모드 | `auto_verdict`, `auto_stage`, `auto_signature` |
 | 사용량 | `input_tokens`, `output_tokens`, `cost_micros`, `total_ms`, `ttft_ms`, `has_body` |
 | 원본 | `record_json` |
+
+`policy_ref`는 거버넌스 거부에서 거버넌스 규칙을 가리킵니다(`name#generation·rule`, 세대가
+없으면 `name·rule`). 그 밖에는 첫 라우팅 정책이며, 거버넌스나 RBAC 거부 코드를 가진 거부는
+예외입니다. 요청이 함께 일치한 라우팅 규칙이 그 요청을 거부한 것이 아니기 때문입니다.
 
 `kind`는 인덱스에서 파생하며 감사 체인에는 기록하지 않습니다. 먼저 맞는 규칙이 적용됩니다.
 `auto_mode_blocked`(판정 `block`), `privacy_blocked`, `policy_denied`, `upstream_error`,
