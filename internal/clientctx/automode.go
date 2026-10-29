@@ -50,9 +50,10 @@ var (
 // safeguard_results field. It stores no text in its result. A nil tap ignores
 // everything and reports nothing.
 type AutoModeTap struct {
-	blockCall    bool // request stop sequences contain </block>
-	severityCall bool // request stops on </severity> and is not a block call
-	auxiliary    bool // x-claude-code-request-class: auxiliary
+	blockCall     bool // request stop sequences contain </block>
+	onlyBlockStop bool // </block> is the only requested stop sequence
+	severityCall  bool // request stops on </severity> and is not a block call
+	auxiliary     bool // x-claude-code-request-class: auxiliary
 
 	text                     strings.Builder
 	truncated                bool
@@ -65,10 +66,12 @@ type AutoModeTap struct {
 // whether the client declared it auxiliary.
 func NewAutoModeTap(requestStops []string, auxiliary bool) *AutoModeTap {
 	block := slices.Contains(requestStops, blockStop)
+	only := block && !slices.ContainsFunc(requestStops, func(s string) bool { return s != blockStop })
 	return &AutoModeTap{
-		blockCall:    block,
-		severityCall: !block && slices.Contains(requestStops, severityStop),
-		auxiliary:    auxiliary,
+		blockCall:     block,
+		onlyBlockStop: only,
+		severityCall:  !block && slices.Contains(requestStops, severityStop),
+		auxiliary:     auxiliary,
 	}
 }
 
@@ -225,21 +228,27 @@ func safeguardVerdict(raw json.RawMessage) string {
 
 // Result returns the verdict to record, or nil, and whether it counts as an
 // unparsed block call or server safeguard. Precedence: block call, then the
-// auxiliary full text rule, then the server safeguard. Severity calls and
-// replies ending in <severity> are never recorded or counted.
+// auxiliary full text rule, then the server safeguard. Severity calls, and
+// severity replies on block calls or auxiliary requests, are never recorded
+// or counted, whatever else the response carries.
 func (t *AutoModeTap) Result() (ref *audit.AutoModeRef, unparsed bool) {
 	if t == nil || t.severityCall {
 		return nil, false
 	}
-	if t.blockCall {
-		if v, ok := t.blockCallVerdict(); ok {
-			return autoModeRef(v, StageS1), v == VerdictUnknown
+	var matches [][]string
+	if t.readsText() && !t.truncated {
+		visible := thinkingRE.ReplaceAllString(t.text.String(), "")
+		matches = blockRE.FindAllStringSubmatch(visible, -1)
+		if len(matches) == 0 && severityEndRE.MatchString(visible) {
+			return nil, false // no block decision; the threshold is unknown
 		}
 	}
-	if t.auxiliary {
-		if v, ok := t.auxiliaryVerdict(); ok {
-			return autoModeRef(v, StageS2), false
-		}
+	if t.blockCall {
+		v := t.blockCallVerdict(matches)
+		return autoModeRef(v, StageS1), v == VerdictUnknown
+	}
+	if t.auxiliary && strings.Contains(t.text.String(), "<block>") {
+		return autoModeRef(t.auxiliaryVerdict(matches), StageS2), false
 	}
 	if t.safeguard != "" {
 		return autoModeRef(t.safeguard, StageServer), t.safeguard == VerdictUnknown
@@ -251,56 +260,43 @@ func autoModeRef(verdict, stage string) *audit.AutoModeRef {
 	return &audit.AutoModeRef{Verdict: verdict, Stage: stage, Signature: AutoModeSignature}
 }
 
-// blockCallVerdict: after removing <thinking>, exactly one consistent
-// <block>yes|no, accepted when the reply stopped on </block> or the text
-// closes </block> after the value. Anything else is unknown.
-func (t *AutoModeTap) blockCallVerdict() (string, bool) {
-	if t.truncated {
-		return VerdictUnknown, true
-	}
-	visible := thinkingRE.ReplaceAllString(t.text.String(), "")
-	matches := blockRE.FindAllStringSubmatch(visible, -1)
-	if len(matches) == 0 {
-		if severityEndRE.MatchString(visible) {
-			return "", false
-		}
-		return VerdictUnknown, true
+// blockCallVerdict: given the <block> matches outside <thinking>, exactly one
+// consistent yes|no, accepted when the reply stopped on </block> or the text
+// closes </block> after the value. Anything else, including truncation, is
+// unknown.
+func (t *AutoModeTap) blockCallVerdict(matches [][]string) string {
+	if t.truncated || len(matches) == 0 {
+		return VerdictUnknown
 	}
 	verdict, closed := consistentBlock(matches)
-	if verdict == "" {
-		return VerdictUnknown, true
+	if verdict == "" || (!t.stoppedOnBlock() && !closed) {
+		return VerdictUnknown
 	}
-	stopped := t.stopReason == "stop_sequence" && t.stopSequence == blockStop
-	if !stopped && !closed {
-		return VerdictUnknown, true
+	return verdict
+}
+
+// stoppedOnBlock reports a stop on </block>. The gateway's Converse
+// translation reports stop_reason stop_sequence without naming the sequence
+// (stop_sequence null), which identifies </block> only when it is the sole
+// requested stop; with several stops that reply stays ambiguous.
+func (t *AutoModeTap) stoppedOnBlock() bool {
+	if t.stopReason != "stop_sequence" {
+		return false
 	}
-	return verdict, true
+	return t.stopSequence == blockStop || (t.stopSequence == "" && t.onlyBlockStop)
 }
 
 // auxiliaryVerdict is the full text rule for a declared auxiliary request
 // whose reply mentions <block>: exactly one consistent value outside
 // <thinking>, no stop sequence required.
-func (t *AutoModeTap) auxiliaryVerdict() (string, bool) {
-	raw := t.text.String()
-	if !strings.Contains(raw, "<block>") {
-		return "", false
+func (t *AutoModeTap) auxiliaryVerdict(matches [][]string) string {
+	if t.truncated || len(matches) == 0 {
+		return VerdictUnknown
 	}
-	if t.truncated {
-		return VerdictUnknown, true
+	if verdict, _ := consistentBlock(matches); verdict != "" {
+		return verdict
 	}
-	visible := thinkingRE.ReplaceAllString(raw, "")
-	matches := blockRE.FindAllStringSubmatch(visible, -1)
-	if len(matches) == 0 {
-		if severityEndRE.MatchString(visible) {
-			return "", false
-		}
-		return VerdictUnknown, true
-	}
-	verdict, _ := consistentBlock(matches)
-	if verdict == "" {
-		return VerdictUnknown, true
-	}
-	return verdict, true
+	return VerdictUnknown
 }
 
 // consistentBlock returns the single value all matches agree on ("" when

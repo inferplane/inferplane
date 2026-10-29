@@ -82,6 +82,16 @@ func TestAutoModeVerdicts(t *testing.T) {
 		{"block call stopped on another sequence", blockStops, false, respJSON("<block>yes", "stop_sequence", "</severity>", ""), VerdictUnknown, StageS1, true},
 		{"block call truncated past 16 KiB", blockStops, false, respJSON(long+"<block>yes</block>", "end_turn", "", ""), VerdictUnknown, StageS1, true},
 		{"block call with other stops too", []string{"\n\nHuman:", "</block>"}, false, respJSON("<block>no", "stop_sequence", "</block>", ""), VerdictAllow, StageS1, false},
+		// The gateway's Converse translation (mode (b), non-Claude model on
+		// /invoke) reports stop_reason stop_sequence but never fills
+		// stop_sequence; with </block> the only requested stop it can only
+		// have stopped there. With several stops it stays ambiguous.
+		{"block call no, stop_sequence null, only </block> requested", blockStops, false, respJSON("<block>no", "stop_sequence", "", ""), VerdictAllow, StageS1, false},
+		{"block call yes, stop_sequence empty, only </block> requested", blockStops, false, strings.Replace(respJSON("<block>yes", "stop_sequence", "", ""), `"stop_sequence":null`, `"stop_sequence":""`, 1), VerdictBlock, StageS1, false},
+		{"block call no, stop_sequence null, several stops", []string{"\n\nHuman:", "</block>"}, false, respJSON("<block>no", "stop_sequence", "", ""), VerdictUnknown, StageS1, true},
+		{"block call no, stop_sequence null, end_turn", blockStops, false, respJSON("<block>no", "end_turn", "", ""), VerdictUnknown, StageS1, true},
+		// "Exactly one consistent value": repeated agreeing values are one value.
+		{"block call two agreeing values", blockStops, false, respJSON("<block>no</block><block>no</block>", "max_tokens", "", ""), VerdictAllow, StageS1, false},
 
 		// Severity calls and replies ending in <severity>: never recorded.
 		{"severity call 5", severityStops, false, respJSON("<severity>5</severity>", "end_turn", "", ""), "", "", false},
@@ -91,6 +101,10 @@ func TestAutoModeVerdicts(t *testing.T) {
 		{"unstopped reasoning reply, auxiliary", nil, true, respJSON("<thinking>remote script piped to sh</thinking><severity>35</severity>", "end_turn", "", ""), "", "", false},
 		{"auxiliary severity after a thinking-only block", nil, true, respJSON("<thinking><block>yes</block></thinking><severity>35</severity>", "end_turn", "", ""), "", "", false},
 		{"block call answered with severity only", blockStops, false, respJSON("<severity>5</severity>", "end_turn", "", ""), "", "", false},
+		// A severity reply records nothing, even when a safeguard rides along.
+		{"block call severity reply with safeguard", blockStops, false, respJSON("<severity>5</severity>", "end_turn", "", `,"safeguard_results":`+safeguard(`{"type":"unavailable"}`)), "", "", false},
+		{"auxiliary severity reply with safeguard", nil, true, respJSON("<thinking>remote script</thinking><severity>35</severity>", "end_turn", "", `,"safeguard_results":`+notFlagged()), "", "", false},
+		{"auxiliary thinking-only block, severity reply, safeguard", nil, true, respJSON("<thinking><block>yes</block></thinking><severity>35</severity>", "end_turn", "", `,"safeguard_results":`+notFlagged()), "", "", false},
 
 		// Auxiliary full text rule (stage s2), header-based.
 		{"auxiliary thinking then block yes", nil, true, respJSON("<thinking>maybe <block>no</block></thinking>\n<block>yes</block>", "end_turn", "", ""), VerdictBlock, StageS2, false},
@@ -175,17 +189,35 @@ func capturedDelta(safeguardResults string) string {
 }
 
 func TestAutoModeStreamBlockCall(t *testing.T) {
-	tap := NewAutoModeTap(blockStops, false)
-	for _, f := range []string{
-		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"<blo"}}`,
-		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ck>yes"}}`,
-		`{"type":"message_delta","delta":{"stop_reason":"stop_sequence","stop_sequence":"</block>"}}`,
-	} {
-		tap.ObserveChunk(chunk(t, f))
+	cases := []struct {
+		name     string
+		stops    []string
+		delta    string // final message_delta delta
+		verdict  string
+		unparsed bool
+	}{
+		{"stopped on </block>", blockStops, `{"stop_reason":"stop_sequence","stop_sequence":"</block>"}`, VerdictBlock, false},
+		// The gateway's Converse stream translation emits "stop_sequence": null.
+		{"stop_sequence null, only </block> requested", blockStops, `{"stop_reason":"stop_sequence","stop_sequence":null}`, VerdictBlock, false},
+		{"stop_sequence absent, only </block> requested", blockStops, `{"stop_reason":"stop_sequence"}`, VerdictBlock, false},
+		{"stop_sequence null, several stops", []string{"\n\nHuman:", "</block>"}, `{"stop_reason":"stop_sequence","stop_sequence":null}`, VerdictUnknown, true},
+		{"end_turn", blockStops, `{"stop_reason":"end_turn","stop_sequence":null}`, VerdictUnknown, true},
 	}
-	ref, unparsed := tap.Result()
-	if ref == nil || ref.Verdict != VerdictBlock || ref.Stage != StageS1 || unparsed {
-		t.Fatalf("stream ref=%+v unparsed=%v", ref, unparsed)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tap := NewAutoModeTap(c.stops, false)
+			for _, f := range []string{
+				`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"<blo"}}`,
+				`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ck>yes"}}`,
+				`{"type":"message_delta","delta":` + c.delta + `}`,
+			} {
+				tap.ObserveChunk(chunk(t, f))
+			}
+			ref, unparsed := tap.Result()
+			if ref == nil || ref.Verdict != c.verdict || ref.Stage != StageS1 || unparsed != c.unparsed {
+				t.Fatalf("stream ref=%+v unparsed=%v", ref, unparsed)
+			}
+		})
 	}
 }
 

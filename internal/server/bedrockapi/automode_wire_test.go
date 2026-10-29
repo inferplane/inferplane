@@ -332,3 +332,31 @@ func TestConverseStreamRecordsNoAutoMode(t *testing.T) {
 		t.Fatalf("auto_mode=%+v unparsed=%v", r.done.AutoMode, r.unparsed)
 	}
 }
+
+// Mode (b) through the gateway's own Converse translation: the model honours
+// the stop sequence, but the translated reply carries stop_reason
+// stop_sequence with stop_sequence null, complete and streamed. With
+// </block> the only requested stop, that is a stop on </block>.
+func TestInvokeBlockCallTranslatedStopRecordsVerdict(t *testing.T) {
+	reply := `{"id":"","type":"message","role":"assistant","model":"kimi-k3","content":[{"type":"text","text":"<block>no"}],"stop_reason":"stop_sequence","stop_sequence":null,"usage":{"input_tokens":3478,"output_tokens":3}}`
+	r := serveInvokeAutoMode(t, invokeCompleteHandler, bedrockInvokeReply{body: reply}, "kimi-k3", "/model/kimi-k3/invoke", amBlockBody, clientctx.DefaultMode())
+	requireAutoMode(t, r.done.AutoMode, clientctx.VerdictAllow, clientctx.StageS1)
+	if r.unparsed != 0 {
+		t.Fatalf("%s = %v, want 0", amUnparsed, r.unparsed)
+	}
+
+	stream := bedrockInvokeStream{payloads: []string{
+		`{"type":"message_start","message":{"id":"","type":"message","role":"assistant","model":"kimi-k3","content":[],"stop_reason":null,"stop_sequence":null}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"<block>yes"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","delta":{"stop_reason":"stop_sequence","stop_sequence":null},"usage":{"input_tokens":3478,"output_tokens":3}}`,
+		`{"type":"message_stop"}`,
+	}}
+	r = serveInvokeAutoMode(t, invokeStreamHandler, stream, "kimi-k3", "/model/kimi-k3/invoke-with-response-stream", amBlockBody, clientctx.DefaultMode())
+	requireAutoMode(t, r.done.AutoMode, clientctx.VerdictBlock, clientctx.StageS1)
+	if r.unparsed != 0 {
+		t.Fatalf("%s = %v, want 0", amUnparsed, r.unparsed)
+	}
+	requireNoResponseText(t, r.all)
+}
