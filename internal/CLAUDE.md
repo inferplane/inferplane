@@ -159,6 +159,8 @@ checked arithmetic and declared usage bounds guard refunds. Process restart burn
 old OPEN grants, never restores credit. No central Postgres or control-plane HTTP call is added to node-local inference.
 The private SQLite journal still performs transactional Reserve/Finish writes on
 the request path under a process mutex; benchmark that serialized work separately.
+An exhausted hard budget refuses with `governance.BudgetDenial` naming its policy
+and rule for the audit record (ADR-057); grants carry no document generation.
 
 ## Shared gateway profile (ADR-046)
 
@@ -171,6 +173,9 @@ Shared policy money uses authority_accounts alongside node-local grants. Soft
 pending reservations remain liabilities but do not prematurely latch soft tiers.
 Counts are always local; DB failures deny generation. Mutable SQLite topology is
 unsupported. Separate per-replica audit segments are still required.
+A refusal names its definition in `SharedDenial.Governance` (a policy rule with
+its generation, the team snapshot or the key option; ADR-057), for the audit
+record only, never the client response.
 
 ## Governed model comparison (ADR-052)
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
+	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/internal/governance"
 	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/policy"
@@ -22,9 +23,46 @@ const sharedRateScale int64 = 60_000_000
 type sharedDefinition struct {
 	id                                          accountKey
 	scope, kind, policy, rule, window, moneyKey string
-	limit                                       int64
+	limit, generation                           int64
 	hard                                        bool
 	start, end                                  time.Time
+}
+
+// denial names this definition as the limit that refused an admission
+// (ADR-057): a policy rule, else the key option or the team record the
+// authenticated snapshot carries. Names only, never the limit or counters.
+func (d sharedDefinition) denial() *audit.GovernanceRef {
+	ref := &audit.GovernanceRef{Scope: audit.GovScopeTeam, Limit: d.limitName(), Source: audit.GovSourceTeamRecord}
+	switch d.scope {
+	case "key":
+		ref.Scope, ref.Source = audit.GovScopeKey, audit.GovSourceKey
+	case "user", "team-user":
+		ref.Scope = audit.GovScopeUser
+	}
+	if d.policy != "" {
+		ref.Source = audit.GovSourcePolicy
+		ref.Policy = &audit.PolicyRuleRef{Name: d.policy, Generation: d.generation, Rule: d.rule}
+	}
+	return ref
+}
+
+func (d sharedDefinition) limitName() string {
+	day := d.window == string(v1alpha1.PeriodCalendarDay)
+	switch d.kind {
+	case "rpm":
+		return audit.GovLimitRPM
+	case "tpm":
+		return audit.GovLimitTPM
+	case "tokens":
+		if day {
+			return audit.GovLimitTokensPerDay
+		}
+		return audit.GovLimitTokensPerMonth
+	}
+	if day {
+		return audit.GovLimitBudgetDay
+	}
+	return audit.GovLimitBudgetMonth
 }
 
 func (d sharedDefinition) rate() int64 {
@@ -125,11 +163,13 @@ func sharedDefinitions(ctx context.Context, tx pgx.Tx, p keystore.Principal, now
 	add("key", p.KeyID, "tpm", "", "", p.TPM, true, "")
 	add("key", p.KeyID, "microUSD", "", "", p.BudgetUSDMicros, true, v1alpha1.PeriodCalendarMonth)
 	add("key", p.KeyID, "microUSD", "", "", p.BudgetUSDMicrosPerDay, true, v1alpha1.PeriodCalendarDay)
+	generations := make(map[string]int64, len(docs))
 	for _, doc := range docs {
 		parsed, err := policy.FromV1Alpha1(&doc)
 		if err != nil {
 			return nil, nil, sharedError(err)
 		}
+		generations[parsed.Name] = parsed.Generation
 		if !sharedMatch(parsed.Subject.Team, parsed.Subject.User, p) {
 			continue
 		}
@@ -158,6 +198,9 @@ func sharedDefinitions(ctx context.Context, tx pgx.Tx, p keystore.Principal, now
 		defs = append(defs, sharedDefinition{id: accountKey{"money:" + b.Key, b.WindowID}, scope: sharedScope(b.Team, b.User),
 			kind: "microUSD", policy: b.Policy, rule: b.Rule, window: string(period), moneyKey: b.Key,
 			limit: b.LimitMicroUSD, hard: b.HardCap, start: b.WindowStart, end: b.WindowEnd})
+	}
+	for i := range defs {
+		defs[i].generation = generations[defs[i].policy] // zero for team/key settings
 	}
 	sort.Slice(defs, func(i, j int) bool {
 		if defs[i].id.key != defs[j].id.key {
@@ -281,13 +324,13 @@ func sharedCheckCapacity(d sharedDefinition, c *sharedCounter, accounts map[acco
 	}
 	if d.hard && exhausted {
 		if d.kind == "microUSD" {
-			return &governance.SharedDenial{Status: 402, Reason: "shared monetary budget exhausted"}
+			return &governance.SharedDenial{Status: 402, Reason: "shared monetary budget exhausted", Governance: d.denial()}
 		}
 		retry := 1
 		if d.rate() > 0 {
 			retry = 60
 		}
-		return &governance.SharedDenial{Status: 429, Reason: "shared rate or token quota exhausted", RetryAfter: retry}
+		return &governance.SharedDenial{Status: 429, Reason: "shared rate or token quota exhausted", RetryAfter: retry, Governance: d.denial()}
 	}
 	return nil
 }
