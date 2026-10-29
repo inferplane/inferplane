@@ -469,6 +469,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 				// it governs both windows — same shape as config.BudgetConfig.
 				BudgetMicrosPerDay: rec.BudgetUSDMicrosPerDay,
 				BudgetDayExceeded:  rec.BudgetOnExceeded,
+				Sources:            teamRecordSources(),
 			}), true
 		}
 		tp, ok := policies[team]
@@ -490,16 +491,28 @@ func newGateway(cfgPath string) (*gateway, error) {
 		// here would not deny the team; it would make it UNGOVERNED, which
 		// is strictly worse than enforcing the declared budget/rate.
 		// Policy rates constrain the base; a wider nonzero overlay must
-		// not replace an already stricter config/keystore rate.
-		rpm := restrictiveRate(base.RatePerMin, tl.RPM)
-		tpm := restrictiveRate(base.TokensPerMinute, tl.TPM)
+		// not replace an already stricter config/keystore rate. Each
+		// dimension keeps the source of whichever layer binds (ADR-057).
+		sources := base.Sources
+		rpm, rpmFromPolicy := restrictiveRate(base.RatePerMin, tl.RPM)
+		if rpmFromPolicy {
+			sources.Rate = policySource(tl.RPMRule)
+		}
+		tpm, tpmFromPolicy := restrictiveRate(base.TokensPerMinute, tl.TPM)
+		if tpmFromPolicy {
+			sources.TokenRate = policySource(tl.TPMRule)
+		}
 		budgetMicros, budgetExceeded := base.BudgetMicrosPerMonth, base.BudgetExceeded
 		if tl.BudgetMicrosPerMonth > 0 {
 			mode := "warn"
 			if tl.BudgetHard {
 				mode = "block"
 			}
-			budgetMicros, budgetExceeded = restrictiveBudget(budgetMicros, budgetExceeded, tl.BudgetMicrosPerMonth, mode)
+			var fromPolicy bool
+			budgetMicros, budgetExceeded, fromPolicy = restrictiveBudget(budgetMicros, budgetExceeded, tl.BudgetMicrosPerMonth, mode)
+			if fromPolicy {
+				sources.Budget = policySource(tl.BudgetRule)
+			}
 		}
 		budgetDayMicros, budgetDayExceeded := base.BudgetMicrosPerDay, base.BudgetDayExceeded
 		if tl.BudgetMicrosPerDay > 0 {
@@ -507,7 +520,11 @@ func newGateway(cfgPath string) (*gateway, error) {
 			if tl.BudgetDayHard {
 				mode = "block"
 			}
-			budgetDayMicros, budgetDayExceeded = restrictiveBudget(budgetDayMicros, budgetDayExceeded, tl.BudgetMicrosPerDay, mode)
+			var fromPolicy bool
+			budgetDayMicros, budgetDayExceeded, fromPolicy = restrictiveBudget(budgetDayMicros, budgetDayExceeded, tl.BudgetMicrosPerDay, mode)
+			if fromPolicy {
+				sources.BudgetDay = policySource(tl.BudgetDayRule)
+			}
 		}
 		// Budget-lease clamp (ADR-034): within a lease the local limit is
 		// the granted allowance, so enforcement needs no network round
@@ -525,10 +542,10 @@ func newGateway(cfgPath string) (*gateway, error) {
 		// would enforce whichever window happened to be tighter against the
 		// OTHER window's limit.
 		if leases != nil {
-			clamp := func(limit int64, exceeded string, period v1alpha1.BudgetPeriod) (int64, string) {
+			clamp := func(limit int64, exceeded string, period v1alpha1.BudgetPeriod) (int64, string, bool) {
 				l, ok := leases.Get(team, period)
 				if !ok {
-					return limit, exceeded
+					return limit, exceeded, false
 				}
 				allowance := l.AllowanceMicroUSD
 				if allowance < 1 {
@@ -540,8 +557,13 @@ func newGateway(cfgPath string) (*gateway, error) {
 				}
 				return restrictiveBudget(limit, exceeded, allowance, mode)
 			}
-			budgetMicros, budgetExceeded = clamp(budgetMicros, budgetExceeded, v1alpha1.PeriodCalendarMonth)
-			budgetDayMicros, budgetDayExceeded = clamp(budgetDayMicros, budgetDayExceeded, v1alpha1.PeriodCalendarDay)
+			var fromLease bool
+			if budgetMicros, budgetExceeded, fromLease = clamp(budgetMicros, budgetExceeded, v1alpha1.PeriodCalendarMonth); fromLease {
+				sources.Budget = governance.LimitSource{Source: audit.GovSourceLease}
+			}
+			if budgetDayMicros, budgetDayExceeded, fromLease = clamp(budgetDayMicros, budgetDayExceeded, v1alpha1.PeriodCalendarDay); fromLease {
+				sources.BudgetDay = governance.LimitSource{Source: audit.GovSourceLease}
+			}
 		}
 		// A strict tier's soft reference is a switching threshold, not a
 		// smaller hard admission cap. If no real cap exists for this window,
@@ -566,6 +588,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 			BudgetExceeded:       budgetExceeded,
 			BudgetMicrosPerDay:   budgetDayMicros,
 			BudgetDayExceeded:    budgetDayExceeded,
+			Sources:              sources,
 		})
 		// AdminContact rides with the binding budget rule (from the policy
 		// document, never the lease clamp — a lease grant carries no
@@ -620,6 +643,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 			BudgetMicrosPerDay:   ul.BudgetMicrosPerDay,
 			BudgetExceeded:       exceeded,
 			AdminContact:         contact,
+			Sources:              governance.UserSources{Budget: policySource(ul.BudgetRule), BudgetDay: policySource(ul.BudgetDayRule)},
 		}, true
 	})
 	// modelAccess rules narrow every ingress RBAC decision through the router's
