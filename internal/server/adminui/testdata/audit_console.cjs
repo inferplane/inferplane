@@ -11,7 +11,8 @@ class El {
   setAttribute(k, v) { this.attrs[k] = v; }
   all() { return [this, ...this.children.flatMap(c => c.all())]; }
 }
-const ctx = vm.createContext({ navigator: { language: "en" }, document: { getElementById: () => null, createElement: t => new El(t), documentElement: {} }, Node: El, URLSearchParams, console });
+class Text extends El { constructor(text) { super("#text"); this.textContent = text; } }
+const ctx = vm.createContext({ navigator: { language: "en" }, document: { getElementById: () => null, createElement: t => new El(t), createTextNode: t => new Text(t), documentElement: {} }, Node: El, URLSearchParams, console });
 for (const f of ["i18n.js", "audit.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "static", f), "utf8"), ctx, { filename: f });
 const run = (src) => vm.runInContext(src, ctx);
 assert.equal(run('auditKindClass("policy_denied")'), "err");
@@ -40,11 +41,29 @@ assert.equal(run('auditScope("team_budget_exceeded")'), "team");
 assert.equal(run('auditScope("key_rate_limited")'), "key");
 assert.equal(run('auditScope("sensitive_blocked")'), "route");
 // Governance denials name their limit (ADR-057); a denial recorded before that evidence says so.
-assert.equal(run('auditDenySource("team-rate#2·rpm", "policy", "rpm")'), "team-rate#2·rpm");
-assert.equal(run('auditDenySource("", "key", "rpm")'), "key setting · requests/min");
-assert.equal(run('auditDenySource("", "lease", "budget")'), "control-plane lease · budget");
-assert.equal(run('auditDenySource("", "budget_store", "budget_month")'), "budget store full · monthly budget");
-assert.equal(run('auditDenySource("", "", "")'), run('msg("audit.policyNotRecorded")'));
+assert.equal(run('auditDenySource("team_rate_limited", "team-rate#2·rpm", "policy", "rpm")'), "team-rate#2·rpm");
+assert.equal(run('auditDenySource("key_rate_limited", "", "key", "rpm")'), "key setting · requests/min");
+assert.equal(run('auditDenySource("team_budget_exceeded", "", "lease", "budget")'), "control-plane lease · budget");
+assert.equal(run('auditDenySource("budget_authority_unavailable", "", "budget_store", "budget_month")'), "budget store full · monthly budget");
+// A routing rule still wins over the code (routing denials, privacy blocks).
+assert.equal(run('auditDenySource("sensitive_blocked", "privacy#7·protect", "", "")'), "privacy#7·protect");
+// "older record" only for codes that name a limit when written today.
+for (const code of ["team_rate_limited", "team_token_rate_limited", "team_quota_exceeded", "key_rate_limited", "key_token_rate_limited",
+  "team_budget_exceeded", "key_budget_exceeded", "user_budget_exceeded", "pricing_missing"]) {
+  assert.equal(run(`auditDenySource("${code}", "", "", "")`), run('msg("audit.policyNotRecorded")'), code);
+}
+// An unavailable authority or store names no limit, by design.
+assert.equal(run('auditDenySource("budget_authority_unavailable", "", "", "")'), run('msg("audit.noLimitNamed")'));
+assert.equal(run('msg("audit.noLimitNamed")'), "no limit named");
+// Every other code names no limit and is never called an older record.
+for (const code of ["context_window_exceeded", "model_not_allowed", "region_blocked", "invalid_token_estimate", "mask_failed", "masking_failed",
+  "sensitive_blocked", "no_safe_route", "upstream_timeout", ""]) {
+  assert.equal(run(`auditDenySource("${code}", "", "", "")`), "—", code);
+}
+// A deny code may break after each "_" (so count and last time stay in view); its text is unchanged.
+const code = vm.runInContext('auditCode("budget_authority_unavailable")', ctx);
+assert.deepEqual(code.children.map(n => n.tag === "#text" ? n.textContent : "<" + n.tag + ">"), ["budget_", "<wbr>", "authority_", "<wbr>", "unavailable"]);
+assert.deepEqual(vm.runInContext('auditCode("ok")', ctx).children.map(n => n.textContent), ["ok"]);
 assert.equal(run('auditDenyScope("budget_authority_unavailable", "key")'), "key");
 assert.equal(run('auditDenyScope("key_rate_limited", "")'), "key");
 assert.equal(run('auditDenyScope("pricing_missing", "gateway")'), "gateway");

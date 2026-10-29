@@ -481,6 +481,7 @@ const MSG = {
   "audit.billing": { en: "Provider billing", ko: "provider 과금", zh: "提供方计费", ja: "プロバイダー課金" },
   "audit.noBilling": { en: "none · denied before dispatch", ko: "없음 · dispatch 전 거부", zh: "无 · 发送前拒绝", ja: "なし · 送信前に拒否" },
   "audit.policyNotRecorded": { en: "not recorded (older record)", ko: "기록 안 됨(이전 기록)", zh: "未记录（旧记录）", ja: "未記録（古い記録）" },
+  "audit.noLimitNamed": { en: "no limit named", ko: "지정된 한도 없음", zh: "未指明限额", ja: "上限の指定なし" },
   "audit.source.config": { en: "config file", ko: "설정 파일", zh: "配置文件", ja: "設定ファイル" },
   "audit.source.team_record": { en: "team record", ko: "팀 레코드", zh: "团队记录", ja: "チームレコード" },
   "audit.source.policy": { en: "policy", ko: "정책", zh: "策略", ja: "ポリシー" },
