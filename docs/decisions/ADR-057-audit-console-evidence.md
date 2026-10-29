@@ -77,7 +77,7 @@ which was the main request. Rejected.
      one of `main`, `subagent`, `workflow`, `compaction`, `auxiliary`,
      `side_reply`.
    - `auto_mode{verdict, stage, signature}`, an estimate; `verdict` is
-     `block`, `allow` or `unknown`.
+     `block`, `allow` or `unknown`; `stage` is `s1`, `s2` or `server`.
    - Terminal records also carry `latency{total_ms, ttft_ms}` on every ingress.
 2. When a request makes more than one attempt, `outcome.fallback_used` and
    `outcome.fallback_chain` are written from `attempts`. Older records are
@@ -89,13 +89,24 @@ which was the main request. Rejected.
    on by default and `audit.client_evidence.session_ref: "off"` disables it.
    This is a scoped exception to ADR-044's rule for audit and metrics; ADR-044
    pins are unchanged.
-4. An auto mode verdict is recorded only when an `auxiliary` request's
-   Anthropic-format response matches Claude Code's parser rule exactly: after
-   removing `<thinking>` blocks, exactly one consistent `<block>yes|no` value,
-   and a stage-1 call stopped on `</block>`. The gateway reads at most 16 KiB of
-   text, stores no text, and counts non-matching classifier-like calls in one
-   unlabelled metric. `signature` names the client format version. The console
-   always labels these verdicts as estimates.
+4. An auto mode verdict is recorded only when it parses unambiguously from an
+   Anthropic-format response, and does not require the request class header
+   (Claude Code 2.1.312 does not send it):
+   - Block call: stop sequences contain `</block>`; after removing `<thinking>`,
+     exactly one consistent `<block>yes|no`, and the reply stopped on `</block>`
+     or closes it in the text; stage `s1`. Otherwise `unknown` and the counter.
+   - Server safeguard: `safeguard_results[]` with a `dangerous_tool_use` entry
+     (complete or streamed). `status.type` `available` with every `tool_uses`
+     entry `{type: evaluated, outcome: not_flagged}` is `allow`; any other
+     status or outcome is `unknown` plus the counter; empty `tool_uses` records
+     nothing; stage `server`.
+   - The full text rule, including stage `s2` (`<thinking>` replies with no stop
+     sequence), runs only when `request_class == auxiliary`.
+   - `</severity>` calls and replies ending in `<severity>` are never recorded.
+   The gateway reads at most 16 KiB of text, stores no text, and counts
+   non-matching classifier-like calls in one unlabelled metric. `signature`
+   (`claude-code-2.1`) names the client format version. The console always
+   labels these verdicts as estimates.
 5. The analytics index gains an `audit_events` table and a category table that
    project every terminal request record (completed records and denied
    `request_started` records) with the exact audit line (`record_json`). The
@@ -206,7 +217,7 @@ Claude Code 세션 ID는 무작위 UUID이므로, 키에 묶인 도메인 분리
    - `client{request_class, session_ref}`. `request_class`는 `main`, `subagent`,
      `workflow`, `compaction`, `auxiliary`, `side_reply` 중 하나일 때만 남깁니다.
    - `auto_mode{verdict, stage, signature}`. 추정값이고, `verdict`는 `block`,
-     `allow`, `unknown` 중 하나입니다.
+     `allow`, `unknown` 중 하나이며 `stage`는 `s1`, `s2`, `server`입니다.
    - 요청의 마지막 기록에는 모든 ingress에서 `latency{total_ms, ttft_ms}`도 붙습니다.
 2. 요청이 두 번 이상 시도되면 `attempts`로 `outcome.fallback_used`와
    `outcome.fallback_chain`을 채웁니다. 옛 기록은 바뀌지 않습니다.
@@ -216,11 +227,21 @@ Claude Code 세션 ID는 무작위 UUID이므로, 키에 묶인 도메인 분리
    판단이나 라우팅에는 쓰지 않습니다. 기본으로 켜고,
    `audit.client_evidence.session_ref: "off"`로 끕니다. ADR-044 규칙에 대한
    감사·metrics 범위의 예외이며, ADR-044 pin은 그대로입니다.
-4. auto mode 판정은 `auxiliary` 요청의 Anthropic 형식 응답이 Claude Code 파서
-   규칙과 정확히 맞을 때만 기록합니다. `<thinking>` 블록을 지운 뒤 일관된
-   `<block>yes|no` 값이 정확히 하나여야 하고, 1단계 호출은 `</block>`에서
-   멈췄어야 합니다. gateway는 텍스트를 최대 16 KiB만 읽고 저장하지 않으며, 맞지
-   않는 분류기 형태 호출은 label 없는 metric 하나로 셉니다. `signature`는
+4. auto mode 판정은 Anthropic 형식 응답에서 모호하지 않게 해석될 때만
+   기록하며, class 헤더를 요구하지 않습니다(Claude Code 2.1.312는 보내지
+   않습니다).
+   - block 호출: stop sequence에 `</block>`이 있고, `<thinking>`을 지운 뒤
+     일관된 `<block>yes|no`가 정확히 하나이며, 응답이 `</block>`에서 멈췄거나
+     텍스트가 닫습니다. 단계 `s1`. 그 외는 `unknown`과 카운터.
+   - 서버 safeguard: `dangerous_tool_use` 항목이 있는 `safeguard_results[]`(완전
+     응답 또는 stream). `status.type`이 `available`이고 모든 `tool_uses`가
+     `{type: evaluated, outcome: not_flagged}`이면 `allow`, 그 밖의 status·outcome은
+     `unknown`과 카운터, 빈 `tool_uses`는 기록 없음. 단계 `server`.
+   - 단계 `s2`(stop sequence 없는 `<thinking>` 응답)를 포함한 전체 텍스트 규칙은
+     `request_class == auxiliary`일 때만 동작합니다.
+   - `</severity>` 호출과 `<severity>`로 끝나는 응답은 기록하지 않습니다.
+   gateway는 텍스트를 최대 16 KiB만 읽고 저장하지 않으며, 맞지 않는 분류기 형태
+   호출은 label 없는 metric 하나로 셉니다. `signature`(`claude-code-2.1`)는
    클라이언트 형식 버전입니다. 콘솔은 이 판정을 항상 추정으로 표시합니다.
 5. analytics 인덱스에 `audit_events` 표와 category 표를 추가합니다. 요청의 마지막
    기록(완료 기록과 거부된 `request_started` 기록)을 감사 줄 원본(`record_json`)과

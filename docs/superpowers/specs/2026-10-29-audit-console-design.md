@@ -120,7 +120,7 @@ client ──► ingress (messages · chat · invoke/converse · responses)
             ▼
          fallback loop ── Begin/End per provider attempt ──► AttemptRef[]
             │
-            ▼  auxiliary + Claude-format response only
+            ▼  Claude-format response only (rules: Resulting decisions)
          auto mode detector (bounded text tap, exact parser rule)
             │
             ▼
@@ -160,7 +160,7 @@ type ClientRef struct {
 }
 type AutoModeRef struct {
     Verdict   string `json:"verdict"`   // block | allow | unknown (classifier-like, not parsed)
-    Stage     string `json:"stage"`     // s1 | s2 | fast (values fixed by early verification 2)
+    Stage     string `json:"stage"`     // s1 | s2 | server
     Signature string `json:"signature"` // e.g. "claude-code-2.1"
 }
 // Record gains, at the END:
@@ -196,17 +196,14 @@ type AutoModeRef struct {
 - **Attempts.** Each fallback loop (Messages, Chat, Invoke, Converse,
   Responses) calls `BeginAttempt` before dispatch and ends it with a closed
   status. Requests denied before dispatch have no attempts.
-- **Auto mode detector.** Runs only when `request_class == auxiliary`, the
-  response is in Anthropic Messages format (Messages and Invoke ingress), and
-  the detector is enabled. It reads at most the first 16 KiB of assistant text
-  (non-streaming body, or text deltas for a stream), removes
-  `<thinking>…</thinking>`, and records a verdict only when exactly one
-  consistent `<block>yes|no` value remains; a stage-1 call must also have
-  stopped on the `</block>` stop sequence. Requests that look like classifier
-  calls but do not match increment
+- **Auto mode detector.** Runs only for Anthropic Messages-format responses
+  (Messages and Invoke ingress) and when the detector is enabled. It reads at
+  most the first 16 KiB of assistant text (non-streaming body, or text deltas
+  for a stream), stores no text, and never changes the response bytes. What it
+  records is fixed by "Resulting decisions" in "Early verification results".
+  Classifier-like calls that do not parse increment
   `inferplane_audit_auto_mode_unparsed_total` (no labels) and are recorded with
-  `verdict: unknown`. The detector never
-  changes the response bytes.
+  `verdict: unknown`.
 
 ### Configuration
 
@@ -338,9 +335,12 @@ is on; `/admin/capabilities` gains `audit_console: bool` and
   before dispatch yields none; the same session ID under two keys yields two
   refs; class values outside the set are dropped; the raw session ID never
   appears in the audit line, `/metrics` or captured logs.
-- **Auto mode detector:** table tests for stage 1, stage 2, fast path,
-  `<block>` inside `<thinking>`, conflicting blocks, wrong stop sequence,
-  streamed deltas, the 16 KiB bound, non-auxiliary requests. Fixtures come from
+- **Auto mode detector:** table tests for the block call (stage `s1`), the server
+  safeguard (stage `server`, including unknown status or outcome and empty
+  `tool_uses`), the auxiliary-only full rule (stage `s2`), `</severity>` and
+  `<severity>` replies never recorded, `<block>` inside `<thinking>`,
+  conflicting blocks, wrong stop sequence, streamed deltas, the 16 KiB bound,
+  requests without the class header. Fixtures come from
   a real 2.1.312 capture with secrets removed.
 - **Index:** replay projects completed and denied records, re-ingest is
   idempotent, kind table, categories table, SQLite always; Postgres when `INFERPLANE_TEST_PG_DSN` is set.
@@ -387,8 +387,8 @@ with a Claude main model, (b) Bedrock with a non-Claude main model (`kimi-k3`),
   `status` `{type: "available", tool_uses: {<tool_use id>: {type: "evaluated",
   outcome: "not_flagged"}}}` (`tool_uses` is `{}` on the turn without a tool
   call). Only `not_flagged` was observed; flagged outcomes were not (the probe
-  command ran). Stage `server` is possible from this field once a flagged
-  outcome is verified.
+  command ran). Stage `server` is taken from this field; flagged outcomes
+  are mapped once a sample is captured (see Resulting decisions).
 - Modes (b) and (c): classifier calls are non-streaming (`stream` absent in
   Bedrock `invoke`, absent in the Anthropic request), `max_tokens` 64, and
   carry one stop sequence in the benign probe. Two kinds occur in this order per tool call:
@@ -411,6 +411,34 @@ with a Claude main model, (b) Bedrock with a non-Claude main model (`kimi-k3`),
   8192 and the missing stop sequence, not by a marker.
 - Main calls stream (`stream: true` in Anthropic mode, `invoke-with-response-stream`
   in Bedrock mode), so the stream tap is still required.
+
+Resulting decisions:
+
+- Request class comes only from the `x-claude-code-request-class` header (closed
+  set). Claude Code 2.1.312 does not send it, so with this client `request_class`
+  is absent and the console says the class is not reported. No inference from
+  the body.
+- The auto mode detector does not require `request_class == auxiliary`. It
+  records only what parses unambiguously:
+  1. Block call: a request whose stop sequences contain `</block>`. The verdict
+     is exactly one consistent `<block>yes|no` after removing `<thinking>`,
+     accepted when the reply stopped on `</block>` or the text itself closes
+     `</block>`; stage `s1`. Otherwise `unknown` and the unparsed counter.
+  2. Server safeguard: an Anthropic-format response (Messages or Invoke,
+     complete or streamed) carrying `safeguard_results[]` with an entry of type
+     `dangerous_tool_use`. If `status.type` is `available` and every `tool_uses`
+     entry is `{type: evaluated, outcome: not_flagged}`, the verdict is `allow`;
+     any other status or outcome value is `unknown` and increments the counter;
+     an empty `tool_uses` records nothing; stage `server`.
+  3. The full text rule, including stage `s2` (`<thinking>` replies with no stop
+     sequence), runs only when `request_class == auxiliary`. It is dormant with
+     2.1.312 and kept for clients that send the header.
+  4. `</severity>` calls and reasoning replies that end in `<severity>` are never
+     recorded: they carry no block decision and the threshold is unknown.
+  The signature stays `claude-code-2.1` for all three. With 2.1.312, mode (b)
+  high-severity blocks and any real server `flagged` outcome appear only as
+  `unknown` (plus the counter) until a captured sample maps them.
+- Stage values are `s1`, `s2`, `server`; the earlier `fast` placeholder is dropped.
 
 ## Out of scope
 
@@ -532,7 +560,7 @@ client ──► ingress (messages · chat · invoke/converse · responses)
             ▼
          fallback 루프 ── provider 시도마다 Begin/End ──► AttemptRef[]
             │
-            ▼  auxiliary + Claude 형식 응답만
+            ▼  Claude 형식 응답만 (규칙: 그에 따른 결정)
          auto mode 판정기 (크기 제한 텍스트 탭, 정확한 파서 규칙)
             │
             ▼
@@ -572,7 +600,7 @@ type ClientRef struct {
 }
 type AutoModeRef struct {
     Verdict   string `json:"verdict"`   // block | allow | unknown (분류기 형태지만 해석 불가)
-    Stage     string `json:"stage"`     // s1 | s2 | fast (먼저 확인할 항목 2로 확정)
+    Stage     string `json:"stage"`     // s1 | s2 | server
     Signature string `json:"signature"` // 예: "claude-code-2.1"
 }
 // Record 끝에 추가:
@@ -606,15 +634,13 @@ type AutoModeRef struct {
 - **시도.** 모든 fallback 루프(Messages, Chat, Invoke, Converse, Responses)가
   dispatch 전에 `BeginAttempt`를 부르고 닫힌 상태값으로 끝냅니다. dispatch 전에
   거부된 요청은 시도가 없습니다.
-- **auto mode 판정기.** `request_class == auxiliary`, 응답이 Anthropic Messages
-  형식(Messages·Invoke ingress), 판정기가 켜져 있을 때만 동작합니다. assistant
-  텍스트의 앞 16 KiB까지만 읽고(비 stream 본문 또는 stream의 text delta),
-  `<thinking>…</thinking>`을 지운 뒤, 일관된 `<block>yes|no` 값이 정확히 하나
-  남을 때만 판정을 기록합니다. 1단계 호출은 `</block>` stop sequence로 멈췄어야
-  합니다. 분류기 호출처럼 보이지만 맞지 않는 요청은
+- **auto mode 판정기.** Anthropic Messages 형식 응답(Messages·Invoke ingress)이고
+  판정기가 켜져 있을 때만 동작합니다. assistant 텍스트의 앞 16 KiB까지만 읽고
+  (비 stream 본문 또는 stream의 text delta), 텍스트를 저장하지 않으며, 응답
+  바이트를 바꾸지 않습니다. 무엇을 기록하는지는 "먼저 확인한 결과"의 "그에 따른
+  결정"이 정합니다. 분류기 호출처럼 보이지만 해석되지 않는 요청은
   `inferplane_audit_auto_mode_unparsed_total`(label 없음)을 올리고
-  `verdict: unknown`으로 기록합니다. 판정기는
-  응답 바이트를 바꾸지 않습니다.
+  `verdict: unknown`으로 기록합니다.
 
 ### 설정
 
@@ -741,9 +767,11 @@ type AutoModeRef struct {
 - **ingress(다섯 경로 모두):** 503→200 fallback이면 시도 2개, dispatch 전
   거부면 0개, 같은 세션 ID라도 키가 다르면 ref 2개, 집합 밖 class는 버림, 세션 ID
   원문이 감사 줄·`/metrics`·수집한 로그에 없음.
-- **auto mode 판정기:** 1단계, 2단계, fast 경로, `<thinking>` 안의 `<block>`,
-  서로 다른 block, 잘못된 stop sequence, stream delta, 16 KiB 한도, auxiliary가
-  아닌 요청을 표로 테스트합니다. fixture는 실제 2.1.312 캡처에서 비밀을 빼고
+- **auto mode 판정기:** block 호출(단계 `s1`), 서버 safeguard(단계 `server`,
+  알 수 없는 status·outcome과 빈 `tool_uses` 포함), auxiliary 전용 전체 규칙(단계
+  `s2`), `</severity>`·`<severity>` 응답은 기록하지 않음, `<thinking>` 안의
+  `<block>`, 서로 다른 block, 잘못된 stop sequence, stream delta, 16 KiB 한도,
+  class 헤더가 없는 요청을 표로 테스트합니다. fixture는 실제 2.1.312 캡처에서 비밀을 빼고
   만듭니다.
 - **인덱스:** replay가 완료·거부 기록을 투영, 재수집 멱등, kind 표, category 표.
   SQLite는 항상, Postgres는 `INFERPLANE_TEST_PG_DSN`이 있을 때.
@@ -783,8 +811,8 @@ Claude Code 2.1.312(`--permission-mode auto -p`, 셸 명령 하나)를 임시 ga
   `dangerous_tool_use`, `status` `{type: "available", tool_uses: {<tool_use id>:
   {type: "evaluated", outcome: "not_flagged"}}}`가 있습니다(도구 호출이 없는
   턴은 `tool_uses`가 `{}`). 관찰된 값은 `not_flagged`뿐이며 차단 판정 값은 보지
-  못했습니다(프로브 명령이 실행됨). 차단 값을 확인하면 이 필드로 단계 `server`를
-  만들 수 있습니다.
+  못했습니다(프로브 명령이 실행됨). 단계 `server`는 이 필드에서 가져오고, 차단 값은 표본을
+  캡처하면 매핑합니다(그에 따른 결정 참고).
 - 모드 (b), (c): 분류기 호출은 stream이 아니고(`stream` 없음), `max_tokens` 64,
   무해한 프로브에서 stop sequence 하나를 가집니다. 도구 호출마다 순서대로 두 종류가 나옵니다.
   `</severity>`((b)의 응답 `<severity>5</severity>`) 다음에 `</block>`((c)의 응답
@@ -805,6 +833,34 @@ Claude Code 2.1.312(`--permission-mode auto -p`, 셸 명령 하나)를 임시 ga
   식별합니다.
 - 메인 호출은 stream입니다(Anthropic 모드 `stream: true`, Bedrock 모드
   `invoke-with-response-stream`). stream tap은 계속 필요합니다.
+
+그에 따른 결정:
+
+- 요청 class는 `x-claude-code-request-class` 헤더(닫힌 집합)에서만 얻습니다.
+  Claude Code 2.1.312는 이 헤더를 보내지 않으므로 이 클라이언트에서는
+  `request_class`가 없고, 콘솔은 class가 보고되지 않았다고 표시합니다. 본문으로
+  추정하지 않습니다.
+- auto mode 판정기는 `request_class == auxiliary`를 요구하지 않습니다. 모호하지
+  않게 해석되는 것만 기록합니다.
+  1. block 호출: stop sequence에 `</block>`이 있는 요청. 판정은 `<thinking>`을 지운
+     뒤 일관된 `<block>yes|no`가 정확히 하나일 때이며, 응답이 `</block>`에서
+     멈췄거나 텍스트가 `</block>`을 직접 닫을 때 받아들입니다. 단계 `s1`. 그
+     외에는 `unknown`이고 unparsed 카운터를 올립니다.
+  2. 서버 safeguard: `safeguard_results[]`에 `dangerous_tool_use` 항목이 있는
+     Anthropic 형식 응답(Messages 또는 Invoke, 완전 응답 또는 stream).
+     `status.type`이 `available`이고 모든 `tool_uses` 항목이 `{type: evaluated,
+     outcome: not_flagged}`이면 `allow`입니다. 그 밖의 status나 outcome 값은
+     `unknown`이고 카운터를 올립니다. `tool_uses`가 비어 있으면 기록하지
+     않습니다. 단계 `server`.
+  3. 단계 `s2`(stop sequence 없는 `<thinking>` 응답)를 포함한 전체 텍스트 규칙은
+     `request_class == auxiliary`일 때만 동작합니다. 2.1.312에서는 쓰이지 않고,
+     헤더를 보내는 클라이언트를 위해 둡니다.
+  4. `</severity>` 호출과 `<severity>`로 끝나는 추론 응답은 기록하지 않습니다.
+     block 판정이 없고 임계값도 모릅니다.
+  signature는 셋 모두 `claude-code-2.1`입니다. 2.1.312에서는 모드 (b)의 높은
+  severity 차단과 실제 서버 `flagged` 결과가 캡처 표본으로 매핑하기 전까지
+  `unknown`(과 카운터)으로만 보입니다.
+- 단계 값은 `s1`, `s2`, `server`이고, 앞서 둔 `fast` 자리표시자는 뺍니다.
 
 ## 범위 밖
 
