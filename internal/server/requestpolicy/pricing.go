@@ -28,7 +28,7 @@ func PricingGuard(table *pricing.Table, targets []governance.PricedTarget, raw [
 	if json.Unmarshal(raw, &fields) != nil || topLevelKeyCount(raw, "service_tier") > 1 {
 		// Unmarshal keeps the last duplicate while the verbatim body may be read
 		// first-wins upstream, so an ambiguous tier is refused rather than priced.
-		return governance.GovDecision{Status: 400, Reason: "invalid request for configured pricing", Code: audit.DenyPricingMissing}
+		return governance.GovDecision{Status: 400, Reason: "invalid request for configured pricing", Code: audit.DenyPricingMissing, Governance: governance.PricingDenial()}
 	}
 	value := bytes.TrimSpace(fields["service_tier"])
 	if len(value) == 0 || bytes.Equal(value, []byte("null")) {
@@ -38,7 +38,7 @@ func PricingGuard(table *pricing.Table, targets []governance.PricedTarget, raw [
 	if json.Unmarshal(value, &service) == nil && service == "default" {
 		return decision
 	}
-	return governance.GovDecision{Status: 402, Reason: "no configured price for the requested service tier", Code: audit.DenyPricingMissing}
+	return governance.GovDecision{Status: 402, Reason: "no configured price for the requested service tier", Code: audit.DenyPricingMissing, Governance: governance.PricingDenial()}
 }
 
 // topLevelKeyCount counts decoded occurrences of key in a JSON object's top

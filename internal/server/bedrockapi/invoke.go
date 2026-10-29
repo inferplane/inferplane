@@ -330,6 +330,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// NOT gated on h.gov: on_missing "block" is a pricing setting, and a
 	// deployment with governance off would otherwise serve unpriced traffic free.
 	if dec := requestpolicy.PricingGuard(table, pricedTargets(chain), raw); !dec.Allowed {
+		audit.SetGovernance(req.Context(), dec.Governance)
 		h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, false, traceID)
 		h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
 		tracing.SetStatus(span, false, "pricing missing")
@@ -339,6 +340,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if h.gov != nil {
 		dec := h.gov.PreCheck(subjectOf(p), keyPolicyOf(p), estimateTokens(raw))
 		if !dec.Allowed {
+			audit.SetGovernance(req.Context(), dec.Governance)
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, piiMasked, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "governance deny")
@@ -376,7 +378,8 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if reserveErr != nil {
 			status := requestpolicy.BudgetStatus(reserveErr)
 			requestpolicy.BudgetErrorHeaders(w, reserveErr)
-			h.audit(req.Context(), p, model, ct.Upstream, &audit.OutcomeRef{Status: status}, false, traceID)
+			audit.SetGovernance(req.Context(), governance.DenialGovernance(reserveErr))
+			h.audit(req.Context(), p, model, ct.Upstream, &audit.OutcomeRef{Status: status, Error: audit.DenyBudgetAuthorityUnavailable.Ptr()}, false, traceID)
 			writeErr(w, status, "budget authority unavailable")
 			return
 		}

@@ -30,6 +30,11 @@ const (
 	// DenyInvalidTokenEstimate identifies a caller precondition failure,
 	// independently of whether any configured rate limit was exhausted.
 	DenyInvalidTokenEstimate DenyReason = "invalid_token_estimate"
+	// DenyBudgetAuthorityUnavailable: the per-attempt money reservation
+	// (local liability, ADR-045 authority or ADR-046 shared admission)
+	// refused before dispatch. The record's governance field names the limit
+	// when the refusing store reports one (ADR-057).
+	DenyBudgetAuthorityUnavailable DenyReason = "budget_authority_unavailable"
 )
 
 // Ptr returns d as a plain string pointer.
@@ -43,7 +48,7 @@ func KnownDenyReason(code string) bool {
 	switch DenyReason(code) {
 	case DenyModelNotAllowed, DenyTeamRateLimited, DenyTeamTokenRateLimited, DenyTeamQuotaExceeded,
 		DenyKeyRateLimited, DenyKeyTokenRateLimited, DenyTeamBudgetExceeded, DenyKeyBudgetExceeded,
-		DenyUserBudgetExceeded, DenyRegionBlocked, DenyPricingMissing, DenyInvalidTokenEstimate:
+		DenyUserBudgetExceeded, DenyRegionBlocked, DenyPricingMissing, DenyInvalidTokenEstimate, DenyBudgetAuthorityUnavailable:
 		return true
 	}
 	return false
