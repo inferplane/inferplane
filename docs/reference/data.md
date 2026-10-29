@@ -232,7 +232,9 @@ match wins: `auto_mode_blocked` (verdict `block`), `privacy_blocked`,
 For a status of 400 or more, a completed record whose last attempt failed is
 `upstream_error` before any code matching, because the code is the upstream's;
 gateway decisions and legacy completed records without attempts are matched by
-their deny code. A partial stream is `upstream_error`.
+their deny code. Below 400, a partial stream is `upstream_error`, and so is a
+completed stream whose last attempt is `stream_failed` (an upstream error event
+or a missing end of stream after the 200 was sent).
 
 Coverage: Mode A is built from the configured file sinks, which a restart
 replays, and has no rebuild endpoint. Mode B `POST /admin/analytics/rebuild`

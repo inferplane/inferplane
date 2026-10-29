@@ -98,7 +98,9 @@ func boundedCode(s string) string {
 // last attempt failed is an upstream error whatever its error code says (the
 // code is the upstream's, and may collide with a gateway deny code); code
 // matching applies to gateway decisions (started + outcome) and to legacy
-// completed records that carry no attempts.
+// completed records that carry no attempts. Below 400, a partial stream and a
+// committed stream whose last attempt is stream_failed (an upstream error
+// event, or no message_stop, after the 200 was sent) are upstream errors.
 func KindOf(r audit.Record) string {
 	if r.AutoMode != nil && r.AutoMode.Verdict == "block" {
 		return KindAutoModeBlocked
@@ -125,8 +127,9 @@ func KindOf(r audit.Record) string {
 			return KindUpstreamError
 		}
 	}
+	streamFailed := r.Event == "request_completed" && len(r.Attempts) > 0 && r.Attempts[len(r.Attempts)-1].Status == audit.AttemptStreamFailed
 	switch {
-	case partial:
+	case partial || streamFailed:
 		return KindUpstreamError
 	case masked:
 		return KindPrivacyMasked

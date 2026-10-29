@@ -78,6 +78,28 @@ func TestKindOf(t *testing.T) {
 	if got := KindOf(rec("13", "request_completed", 429, func(r *audit.Record) { r.Outcome.Error = str("key_rate_limited") })); got != KindPolicyDenied {
 		t.Fatalf("legacy completed deny without attempts = %s", got)
 	}
+	// A committed stream that ended with an upstream error event, or without
+	// message_stop, is written 200, not partial, last attempt stream_failed.
+	streamFailed := audit.AttemptRef{Provider: "anthropic", Model: "m", Status: audit.AttemptStreamFailed, HTTP: 200}
+	if got := KindOf(rec("16", "request_completed", 200, func(r *audit.Record) { r.Attempts = []audit.AttemptRef{streamFailed} })); got != KindUpstreamError {
+		t.Fatalf("200 + last attempt stream_failed = %s", got)
+	}
+	if got := KindOf(rec("17", "request_completed", 200, func(r *audit.Record) {
+		r.Request.Routing = &audit.RoutingRef{Masked: true}
+		r.Attempts = []audit.AttemptRef{streamFailed}
+	})); got != KindUpstreamError {
+		t.Fatalf("masked stream that failed = %s (failure wins like partial)", got)
+	}
+	if got := KindOf(rec("18", "request_completed", 200, func(r *audit.Record) {
+		r.Attempts = []audit.AttemptRef{streamFailed, okAttempt[0]}
+	})); got != KindOK {
+		t.Fatalf("earlier stream_failed, last ok = %s", got)
+	}
+	if got := KindOf(rec("19", "request_completed", 200, func(r *audit.Record) {
+		r.Attempts = []audit.AttemptRef{{Provider: "a", Status: audit.AttemptCanceled, HTTP: 200}}
+	})); got != KindOK {
+		t.Fatalf("client-canceled stream = %s (only stream_failed is an upstream error)", got)
+	}
 }
 
 func TestAuditObservable(t *testing.T) {

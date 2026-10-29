@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 301288bbc2f75fa9aea73199e73bc5877c22524e1c99df44feba9ab7f31b1614
+translation_source_sha256: 80b8725e5b4e588bd4e21f86201def824a342e9738e7197b6af104a8e07c8817
 ---
 
 # 데이터 구현 {#data}
@@ -171,8 +171,9 @@ Usage 수치는 바뀌지 않습니다. 정확한 감사 행은 두 모드 모�
 `auto_mode_blocked`(판정 `block`), `privacy_blocked`, `policy_denied`, `upstream_error`,
 `privacy_masked`, `privacy_internal`, `ok` 순입니다. 상태가 400 이상일 때 마지막 시도가
 실패한 완료 기록은 코드가 업스트림의 것이므로 코드 매칭보다 먼저 `upstream_error`입니다.
-게이트웨이 결정과 시도가 없는 과거 완료 기록은 거부 코드로 분류합니다. 부분 스트림은
-`upstream_error`입니다.
+게이트웨이 결정과 시도가 없는 과거 완료 기록은 거부 코드로 분류합니다. 400 미만에서는
+부분 스트림이 `upstream_error`이며, 마지막 시도가 `stream_failed`인 완료 스트림(200을 보낸
+뒤 업스트림 오류 이벤트가 오거나 스트림 끝이 오지 않은 경우)도 `upstream_error`입니다.
 
 커버리지: Mode A는 설정된 파일 싱크에서 만들며 재시작하면 다시 재생하고 재구축
 엔드포인트가 없습니다. Mode B `POST /admin/analytics/rebuild`는 감사 테이블을 다른 파생
