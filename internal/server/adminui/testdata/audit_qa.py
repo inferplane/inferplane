@@ -132,6 +132,16 @@ TRACE_LAYOUT_JS = """() => {
            latencyLines: lines(row.cells[7]), latInside: l.left >= w.left - 1 && l.right <= w.right + 1,
            latClipped: lat.scrollWidth > lat.clientWidth, header: lat.textContent };
 }"""
+CHIPS_JS = """() => [...document.querySelectorAll('#audit-kinds .audit-chip')].map(b => ({
+  label: b.textContent, pressed: b.getAttribute('aria-pressed') === 'true', bg: getComputedStyle(b).backgroundColor }))"""
+SOLID = 'rgb(103, 83, 216)'
+
+
+def check_chips(page, pressed_label):
+    chips = page.evaluate(CHIPS_JS)
+    for c in chips:
+        assert c['pressed'] == (c['label'] == pressed_label), chips
+        assert (c['bg'] == SOLID) == c['pressed'], f'pressed chips are solid, others ghost: {chips}'
 
 
 def run_scenario(page, base, width, scheme, screenshots):
@@ -177,6 +187,14 @@ def run_scenario(page, base, width, scheme, screenshots):
     assert layout['header'] == en('audit.latency'), layout
     page.evaluate("() => { document.querySelector('#audit-trace-table').closest('.table-scroll').scrollLeft = 0; }")
     assert text('#audit-trace-table thead th:first-child') == en('audit.time')
+
+    # Kind chips: ghost when off, solid when pressed.
+    check_chips(page, en('audit.all'))
+    page.locator('#audit-kinds .audit-chip', has_text=en('audit.kind.policy_denied')).click()
+    check_chips(page, en('audit.kind.policy_denied'))
+    page.locator('#audit-kinds .audit-chip', has_text=en('audit.all')).click()
+    check_chips(page, en('audit.all'))
+    wait("() => document.querySelectorAll('#audit-trace-table tbody tr').length === 3")
 
     # Main record: 4 waterfall rows, trace link, chain position shows hash next to prev_hash.
     page.locator('#audit-trace-table tbody tr').first.click()

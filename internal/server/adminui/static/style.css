@@ -104,8 +104,11 @@ table.data td.outcome { min-width: 155px; overflow-wrap: normal; }
 .audit-tab { border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; color:var(--dim); padding:10px 14px; white-space:nowrap; }
 .audit-tab[aria-selected="true"] { color:var(--accent); border-bottom-color:var(--accent); }
 .audit-kinds { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
-.audit-chip { border-radius:999px; font-size:11px; padding:4px 10px; }
-.audit-chip[aria-pressed="true"] { background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
+/* Kind chips are filters: ghost when off, solid when pressed. */
+.audit-chip { border-radius:999px; font-size:11px; padding:4px 10px; background:var(--panel); color:var(--text); border-color:var(--line); }
+.audit-chip:hover { background:var(--panel-2); border-color:var(--dim); filter:none; }
+.audit-chip[aria-pressed="true"] { background:#6753d8; border-color:#6753d8; color:#fff; }
+.audit-chip[aria-pressed="true"]:hover { background:#6753d8; filter:brightness(.94); }
 /* List and detail sit side by side only where the full trace table fits; below that the detail follows the list. */
 .audit-split { display:grid; grid-template-columns:minmax(0,1fr) minmax(380px,440px); gap:18px; align-items:start; }
 .audit-two { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; align-items:start; margin-bottom:18px; }
