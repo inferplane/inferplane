@@ -139,7 +139,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		raw = result.SanitizedBody
 	}
 	if h.mask.Enabled(p.Team) && !result.Decision.Masked {
-		sanitized, maskErr := sensitivity.NewRedactorWithMasker(h.mask.Filter).Redact(req.Context(), "responses", raw)
+		sanitized, masked, maskErr := legacyMask(req.Context(), sensitivity.NewRedactorWithMasker(h.mask.Filter), raw)
 		if maskErr != nil {
 			result.Decision.Reason = "mask_failed"
 			req = requestpolicy.Observe(w, req, result, h.metrics)
@@ -147,11 +147,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			writeError(w, 403, "permission_error", "request could not be completely masked")
 			return
 		}
-		parsed, err = responses.RequestToCanonical(sanitized)
-		if err != nil {
-			writeError(w, 403, "permission_error", "request could not be completely masked")
-			return
-		}
+		parsed = masked
 		result.Decision.Masked = !bytes.Equal(raw, sanitized)
 		if result.Decision.Masked && len(result.Decision.Policies) == 0 {
 			result.Decision.Reason = "legacy_mask"
