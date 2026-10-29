@@ -367,36 +367,98 @@ func TestVerifyAzpOnSingleAudience(t *testing.T) {
 	}
 }
 
-// slowFailingKeySet fails verification after a delay and counts entries —
-// the concurrency probe for the miss limiter's single-flight gate.
-type slowFailingKeySet struct {
-	entered atomic.Int64
-	delay   time.Duration
-}
-
-func (s *slowFailingKeySet) VerifySignature(ctx context.Context, _ string) ([]byte, error) {
-	s.entered.Add(1)
-	time.Sleep(s.delay)
-	return nil, context.DeadlineExceeded
-}
-
-// TestMissLimiterSingleFlight (P4 gate): a concurrent forged-kid burst must
-// reach the inner (network-backed) key set at most once — concurrent callers
-// fail fast instead of racing past an un-armed lastMiss.
-func TestMissLimiterSingleFlight(t *testing.T) {
-	inner := &slowFailingKeySet{delay: 100 * time.Millisecond}
-	l := &missLimitedKeySet{inner: inner, window: time.Second}
-
+// A forged-kid burst must reach the IdP's JWKS endpoint at most once per
+// window: concurrent misses share one fetch instead of racing past an
+// un-armed window (P4 gate).
+func TestJWKSForgedKidBurstFetchesOncePerWindow(t *testing.T) {
+	idp := newFakeIdP(t)
+	v := newTestVerifier(idp, cid)
+	if _, err := v.Verify(context.Background(), idp.mint(t, "RS256", "r1", cid, nil)); err != nil {
+		t.Fatal(err)
+	}
+	before := idp.hits.jwks.Load()
+	forged := idp.mint(t, "RS256", "unknown-kid", cid, nil)
 	var wg sync.WaitGroup
 	for i := 0; i < 16; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			l.VerifySignature(context.Background(), "a.b.c")
+			if _, err := v.Verify(context.Background(), forged); err == nil {
+				t.Error("unknown kid verified")
+			}
 		}()
 	}
 	wg.Wait()
-	if got := inner.entered.Load(); got != 1 {
-		t.Fatalf("inner key set entered %d times during concurrent burst, want 1", got)
+	if got := idp.hits.jwks.Load() - before; got != 1 {
+		t.Fatalf("forged-kid burst fetched the JWKS %d times, want 1", got)
+	}
+}
+
+// The old global limiter refused every token for the window after any
+// failure, so a forged-kid flood locked out a legitimate, cached key.
+func TestJWKSKnownKidVerifiesDuringForgedFlood(t *testing.T) {
+	idp := newFakeIdP(t)
+	v := newTestVerifier(idp, cid)
+	valid := idp.mint(t, "RS256", "r1", cid, nil)
+	if _, err := v.Verify(context.Background(), valid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Verify(context.Background(), idp.mint(t, "RS256", "unknown-kid", cid, nil)); err == nil {
+		t.Fatal("unknown kid verified")
+	}
+	before := idp.hits.jwks.Load()
+	if _, err := v.Verify(context.Background(), valid); err != nil {
+		t.Fatalf("cached kid refused inside the miss window: %v", err)
+	}
+	if idp.hits.jwks.Load() != before {
+		t.Fatal("a cached kid must verify without a fetch")
+	}
+}
+
+// A rotated kid is picked up by the next fetch the window allows, even when
+// a flood token triggers that fetch; it then verifies from cache.
+func TestJWKSRotationSurvivesUnknownKidFlood(t *testing.T) {
+	idp := newFakeIdP(t)
+	v := newTestVerifier(idp, cid)
+	if _, err := v.Verify(context.Background(), idp.mint(t, "RS256", "r1", cid, nil)); err != nil {
+		t.Fatal(err)
+	}
+	forged := idp.mint(t, "RS256", "unknown-kid", cid, nil)
+	_, _ = v.Verify(context.Background(), forged) // arms the miss window
+	idp.rotated.Store(true)
+	time.Sleep(250 * time.Millisecond)            // past newTestVerifier's 200ms window
+	_, _ = v.Verify(context.Background(), forged) // the flood's allowed fetch also brings r2
+	before := idp.hits.jwks.Load()
+	if _, err := v.Verify(context.Background(), idp.mint(t, "RS256", "r2", cid, nil)); err != nil {
+		t.Fatalf("rotated kid blocked by the flood: %v", err)
+	}
+	if idp.hits.jwks.Load() != before {
+		t.Fatal("rotated kid should verify from the flood-refreshed cache")
+	}
+}
+
+// Concurrent verifications of a valid token never wait on or fail because of
+// one another (the old single-flight gate refused all but one).
+func TestJWKSConcurrentValidTokensNeverRefused(t *testing.T) {
+	idp := newFakeIdP(t)
+	v := newTestVerifier(idp, cid)
+	valid := idp.mint(t, "ES256", "e1", cid, nil)
+	if _, err := v.Verify(context.Background(), valid); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	var failed atomic.Int64
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := v.Verify(context.Background(), valid); err != nil {
+				failed.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if n := failed.Load(); n != 0 {
+		t.Fatalf("%d concurrent valid verifications refused", n)
 	}
 }
