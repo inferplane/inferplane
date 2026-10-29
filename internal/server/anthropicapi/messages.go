@@ -395,6 +395,7 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		defer finishBudget() // also retain authority if a provider panics
 		attemptReq := reservedReq.WithContext(audit.WithRoutingAttempt(reservedReq.Context(), ct.Model, ct.ProviderName, ct.DataBoundary))
 		attemptReq = requestpolicy.WithAffinityAttempt(attemptReq, h.r, result.AffinityToken, ct)
+		endAttempt := audit.BeginAttempt(attemptReq.Context(), ct.ProviderName, ct.Model)
 		var retriable bool
 		if stream {
 			retriable = h.serveStream(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
@@ -407,6 +408,7 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		// Pre-TTFT failure with a next target available → record + fall back.
 		h.r.RecordResult(ct.ProviderName, ct.Identity, false)
+		endAttempt(requestpolicy.RetryStatus(attemptReq.Context(), crossModelNext), 0)
 		reason := "upstream_error"
 		if crossModelNext {
 			reason = "model_not_found"
@@ -452,6 +454,7 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last && retryMessagesError(err, crossModelNext) {
+			requestpolicy.NoteAttemptFailure(req.Context(), err)
 			return true // transport error → fall back
 		}
 		// Tee a non-2xx upstream error verbatim (status/body) so the client
@@ -483,6 +486,7 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	// found" response — narrow on purpose: a plain 400 unrelated to the
 	// requested model must stay a client error, never replayed elsewhere.
 	if !last && (resp.StatusCode >= 500 || resp.StatusCode == 429 || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
+		audit.NoteAttemptHTTP(req.Context(), resp.StatusCode)
 		return true
 	}
 	if resp.Headers != nil {
@@ -535,6 +539,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last && retryMessagesError(err, crossModelNext) {
+			requestpolicy.NoteAttemptFailure(req.Context(), err)
 			return true // pre-TTFT failure → fall back
 		}
 		// Tee a non-2xx upstream error verbatim (status/body) so the client
@@ -605,6 +610,7 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 		}
 		if ttft == 0 {
 			ttft = time.Since(start).Seconds() // first streamed event = time to first token
+			audit.MarkFirstToken(req.Context())
 		}
 		w.Write(ev.Raw) // tee original bytes verbatim
 		flusher.Flush()
@@ -749,6 +755,7 @@ func (h *MessagesHandler) audit(ctx context.Context, p keystore.Principal, model
 	if traceID != "" {
 		rec.TraceID = &traceID
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 
@@ -785,6 +792,7 @@ func (h *MessagesHandler) auditCompleted(ctx context.Context, id string, p keyst
 	if guardrailVersion != "" {
 		rec.GuardrailVersion = &guardrailVersion
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 
@@ -808,6 +816,7 @@ func (h *MessagesHandler) auditCompletedPartial(ctx context.Context, p keystore.
 	if traceID != "" {
 		rec.TraceID = &traceID
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 
