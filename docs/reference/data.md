@@ -232,8 +232,9 @@ Both stores gain `audit_events` (one row per terminal record) and
 segment, not a re-encoding). Projection is first-write-wins on `id`. A table
 created before the governance columns gains `gov_scope`, `gov_limit` and
 `gov_source` when the index opens (SQLite adds each missing column; Postgres
-adds them once, under migration marker 2). Existing rows keep empty values,
-which the console shows as not recorded, and boot replay does not rewrite them.
+adds them once, under migration marker 2). Existing rows keep empty values, so
+the console shows a limit denial among them as not recorded (older record), and
+boot replay does not rewrite them.
 The same one-time step clears a stale routing `policy_ref` that an earlier
 release wrote on governance- and RBAC-coded denial rows, because that rule did
 not refuse the request; routing denials keep theirs.
@@ -242,17 +243,29 @@ Free text taken from the record (`model_requested`, `model_actual`, `provider`,
 `policy_ref`, the boundaries, `request_class`, `session_ref`, `trace_id`,
 `auto_signature`) drops NUL bytes, replaces invalid UTF-8 and is cut to 256
 bytes, the filter cap; a client's model string reaches denial records
-unvalidated. The projection is best-effort per record. Mode A boot replay gives
-each row its own savepoint in the replay transaction, and the live sink writes
-each row with its categories in one transaction; a row the store refuses is
-skipped and logged by record ID and store code only, never blocks the Usage
-rows, and is offered again by the next boot replay. Mode B writes a tick's rows
-in one savepoint and, only when that fails with a data error (SQLSTATE class 22
-or 23), retries them row by row, each in its own savepoint; a row refused that
-way is skipped and logged the same way and never blocks the Usage rows or the
-checkpoint. Any other Mode B failure (a timeout, a deadlock, a lost connection)
-aborts the tick without advancing the checkpoint, so the next tick retries it;
-the logged error names only the SQLSTATE.
+unvalidated. In Mode A the projection is best-effort per record: boot replay
+gives each row its own savepoint in the replay transaction, and the live sink
+writes each row with its categories in one transaction; a row the store refuses
+is skipped and logged by record ID and store code only, never blocks the Usage
+rows, and is offered again by the next boot replay. Mode B writes a tick's
+console rows in the transaction that also holds its Usage rows and checkpoint,
+in one savepoint. Only when that fails with a row error (SQLSTATE class 22 or
+23, or class 54 for a program limit such as an oversized `id` or `key_id`
+index entry) does it retry the rows one by one, each in its own savepoint; a
+row refused that way is skipped and logged the same way, and the tick commits.
+Any other console error aborts the whole tick: its Usage rows and checkpoint do
+not commit either, so nothing is lost and the next tick retries the same
+records. A transient error (a timeout, a deadlock, a lost connection) clears by
+itself. A persistent one, for example `42501` after a grant change, `42P01` or
+`42703` after a schema change, or `P0001` from an operator trigger, holds back
+Usage and console ingestion alike on every tick until it is fixed; it shows as
+a repeated `analytics mode_b tick failed` log line and a growing `lag_seconds`
+in `GET /admin/analytics/health`. Fix the grant, schema or trigger and the next
+tick resumes from the unchanged checkpoint; if the derived tables were edited
+by hand, `POST /admin/analytics/rebuild` re-derives them from the retained
+segments. A console error is logged by its SQLSTATE only, never the Postgres
+message; an error without a SQLSTATE (a client-side failure such as a lost
+connection) is logged as the pgx client error.
 
 | Column group | Columns |
 |---|---|

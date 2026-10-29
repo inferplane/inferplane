@@ -251,17 +251,19 @@ func (s *Store) ensureSchema(ctx context.Context) (retErr error) {
 		return fmt.Errorf("read audit console migration marker: %w", err)
 	}
 	if !consoleColumnsInstalled {
+		// The earlier release also wrote the first routing rule on governance-
+		// and RBAC-coded denials, which that rule did not refuse. Before these
+		// columns no row can hold a governance rule, so this only clears
+		// misattributed routing rules. It runs before the ALTERs, so the
+		// table's ACCESS EXCLUSIVE lock is held only from the first ALTER to
+		// the commit, not across this table scan.
+		if _, err := tx.Exec(ctx, `UPDATE audit_events SET policy_ref = '' WHERE status >= 400 AND policy_ref <> '' AND deny_code = ANY($1)`, audit.KnownDenyReasons()); err != nil {
+			return fmt.Errorf("clear stale routing policy_ref: %w", err)
+		}
 		for _, col := range analytics.AuditEventsMigrationColumns {
 			if _, err := tx.Exec(ctx, `ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS `+col); err != nil {
 				return fmt.Errorf("migrate audit console columns: %w", err)
 			}
-		}
-		// The earlier release also wrote the first routing rule on governance-
-		// and RBAC-coded denials, which that rule did not refuse. Before these
-		// columns no row can hold a governance rule, so this only clears
-		// misattributed routing rules.
-		if _, err := tx.Exec(ctx, `UPDATE audit_events SET policy_ref = '' WHERE status >= 400 AND policy_ref <> '' AND deny_code = ANY($1)`, audit.KnownDenyReasons()); err != nil {
-			return fmt.Errorf("clear stale routing policy_ref: %w", err)
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO analytics_schema_migrations(version) VALUES (2)`); err != nil {
 			return fmt.Errorf("record audit console migration: %w", err)
@@ -550,14 +552,17 @@ func (s *Store) ingestItems(ctx context.Context, holder string, epoch int64, ite
 }
 
 // projectAuditEvents stores a batch's console rows inside ONE savepoint of the
-// ingest transaction, so a tick holds one subtransaction instead of one per
-// row (Postgres caches 64 per backend; overflowing that cache slows snapshots
-// for every session on the server, ADR-046 admission included). Only when the
-// batch fails with a data error does it retry row by row, each row in its own
-// savepoint. A row Postgres rejects as data (SQLSTATE class 22 or 23) is
-// skipped and logged by record ID and SQLSTATE only; any other failure (a
-// timeout, a deadlock, a lost connection) is returned, so the tick rolls back
-// without advancing its checkpoint and the next tick retries the records.
+// ingest transaction, so a tick in which no row fails holds one subtransaction
+// instead of one per row (Postgres caches 64 per backend; overflowing that
+// cache slows snapshots for every session on the server, ADR-046 admission
+// included). Only when the batch fails with a row error does it retry row by
+// row, each row in its own savepoint, so that tick holds up to one
+// subtransaction per row. A row Postgres refuses for its own content
+// (SQLSTATE class 22, 23 or 54, see dataError) is skipped and logged by record
+// ID and SQLSTATE only; any other failure (a timeout, a deadlock, a lost
+// connection, a revoked grant, a schema change, an operator trigger) is
+// returned, so the tick rolls back with its usage rows and without advancing
+// its checkpoint, and every later tick retries the records until it succeeds.
 func projectAuditEvents(ctx context.Context, tx pgx.Tx, rows []analytics.AuditEventRow) error {
 	if len(rows) == 0 {
 		return nil
@@ -615,12 +620,22 @@ func inSavepoint(ctx context.Context, tx pgx.Tx, fn func(pgx.Tx) error) error {
 	return nil
 }
 
-// dataError reports Postgres rejecting the row's own data: SQLSTATE class 22
-// (data exception) or 23 (integrity constraint violation). Retrying such a
-// row cannot succeed; every other failure may.
+// dataError reports Postgres refusing the row for its own content: SQLSTATE
+// class 22 (data exception), 23 (integrity constraint violation) or 54
+// (program limit exceeded, e.g. an outsized id or key_id over the btree
+// index entry maximum). Retrying such a row cannot succeed; every other
+// failure may.
 func dataError(err error) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && (strings.HasPrefix(pgErr.Code, "22") || strings.HasPrefix(pgErr.Code, "23"))
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	for _, class := range []string{"22", "23", "54"} {
+		if strings.HasPrefix(pgErr.Code, class) {
+			return true
+		}
+	}
+	return false
 }
 
 // consoleError names a failed console write by SQLSTATE only: the tick error

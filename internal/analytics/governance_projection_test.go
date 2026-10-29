@@ -156,3 +156,29 @@ func TestAuditEventsMigrationKeepsRowsAndReplays(t *testing.T) {
 		}
 	}
 }
+
+// Non-empty governance columns read back through the detail and the list
+// query, each into its own field: the three values differ, so a swapped scan
+// target in either query fails here.
+func TestAuditGovernanceColumnsReadBack(t *testing.T) {
+	ix := openIndex(t)
+	denial := governanceDenial("01JC0000000000000000000046")
+	if err := ix.IngestAudit(denial, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := [3]string{"team", "rpm", "policy"}
+	d, ok, err := ix.AuditEvent(denial.ID)
+	if err != nil || !ok {
+		t.Fatalf("detail ok=%v err=%v", ok, err)
+	}
+	if got := [3]string{d.Event.GovScope, d.Event.GovLimit, d.Event.GovSource}; got != want || d.Event.PolicyRef != "team-rate#2·rpm" {
+		t.Fatalf("detail governance = %v policy %q, want %v", got, d.Event.PolicyRef, want)
+	}
+	events, _, err := ix.AuditEvents(AuditFilter{})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("events = %+v err=%v", events, err)
+	}
+	if e := events[0]; [3]string{e.GovScope, e.GovLimit, e.GovSource} != want || e.PolicyRef != "team-rate#2·rpm" {
+		t.Fatalf("list governance = %+v", e)
+	}
+}
