@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -150,5 +151,94 @@ func TestResponsesDenialCarriesClient(t *testing.T) {
 	}
 	if denied == nil || denied.Client == nil || denied.Latency == nil {
 		t.Fatalf("denied record = %+v", denied)
+	}
+}
+
+func lastAttempt(t *testing.T, recs []audit.Record) audit.AttemptRef {
+	t.Helper()
+	if len(recs) == 0 || len(recs[len(recs)-1].Attempts) == 0 {
+		t.Fatalf("records = %+v", recs)
+	}
+	a := recs[len(recs)-1].Attempts
+	return a[len(a)-1]
+}
+
+// A transport error carries no upstream status: the gateway's own 502 must
+// never be written into the attempt (Finish's fallback would write it).
+func TestResponsesLastTargetTransportErrorRecordsNoGateway502(t *testing.T) {
+	t.Run("complete", func(t *testing.T) {
+		f := newStreamFixture(t)
+		boom := func() (*providers.ProxyResponse, error) { return nil, errors.New("dial tcp: refused") }
+		f.first.complete, f.fallback.complete = boom, boom
+		recs := f.serveBody(t, httptest.NewRecorder(), evidenceCtx(), `{"model":"premium","input":"hello"}`)
+		if a := lastAttempt(t, recs); a.Status != audit.AttemptUpstreamError || a.HTTP != 0 || len(recs) != 2 {
+			t.Fatalf("attempt = %+v records=%d", a, len(recs))
+		}
+	})
+	t.Run("stream-open", func(t *testing.T) {
+		f := newStreamFixture(t)
+		f.first.openErr = errors.New("dial tcp: refused")
+		f.fallback.openErr = errors.New("dial tcp: refused")
+		recs := f.serve(t, httptest.NewRecorder(), evidenceCtx())
+		if a := lastAttempt(t, recs); a.Status != audit.AttemptUpstreamError || a.HTTP != 0 || len(recs) != 2 {
+			t.Fatalf("attempt = %+v records=%d", a, len(recs))
+		}
+	})
+	t.Run("stream-precommit", func(t *testing.T) {
+		f := newStreamFixture(t)
+		f.first.steps = []streamStep{{err: errors.New("reset")}}
+		f.fallback.steps = []streamStep{{err: errors.New("reset")}}
+		recs := f.serve(t, httptest.NewRecorder(), evidenceCtx())
+		if a := lastAttempt(t, recs); a.Status != audit.AttemptUpstreamError || a.HTTP != 0 || len(recs) != 2 {
+			t.Fatalf("attempt = %+v records=%d", a, len(recs))
+		}
+	})
+}
+
+// A 2xx the gateway cannot use is answered 502, but the attempt keeps the
+// upstream's own 200.
+func TestResponsesUnusable2xxKeepsUpstreamStatusOnAttempt(t *testing.T) {
+	t.Run("no-usage", func(t *testing.T) {
+		f := newStreamFixture(t)
+		f.first.complete = func() (*providers.ProxyResponse, error) {
+			return &providers.ProxyResponse{StatusCode: 200, RawBody: []byte(`{"id":"r"}`)}, nil
+		}
+		rec := httptest.NewRecorder()
+		recs := f.serveBody(t, rec, evidenceCtx(), `{"model":"premium","input":"hello"}`)
+		if a := lastAttempt(t, recs); rec.Code != 502 || a.Status != audit.AttemptUpstreamError || a.HTTP != 200 {
+			t.Fatalf("code=%d attempt = %+v", rec.Code, a)
+		}
+	})
+	t.Run("unrenderable", func(t *testing.T) {
+		f := newStreamFixture(t)
+		f.first.name = "openai_responses"
+		in, out := int64(10), int64(2)
+		f.first.complete = func() (*providers.ProxyResponse, error) {
+			return &providers.ProxyResponse{StatusCode: 200,
+				Parsed: &schema.ChatResponse{ID: "r", Usage: &schema.Usage{InputTokens: &in, OutputTokens: &out}}}, nil
+		}
+		rec := httptest.NewRecorder()
+		recs := f.serveBody(t, rec, evidenceCtx(), `{"model":"premium","input":"hello"}`)
+		if a := lastAttempt(t, recs); rec.Code != 502 || a.Status != audit.AttemptUpstreamError || a.HTTP != 200 {
+			t.Fatalf("code=%d attempt = %+v", rec.Code, a)
+		}
+	})
+}
+
+// After the stream committed, the attempt ends before the error event, the
+// settlement and the record write; it is not left for Finish to close.
+func TestResponsesCommittedStreamFailureAttemptEndsBeforeSettlement(t *testing.T) {
+	f := newStreamFixture(t)
+	f.first.steps = []streamStep{startStep(observedStreamUsage()), {err: &providers.UpstreamError{StatusCode: 500}}}
+	recs := f.serve(t, httptest.NewRecorder(), slowSettleCtx())
+	if len(recs) != 1 || recs[0].Latency == nil {
+		t.Fatalf("records = %+v", recs)
+	}
+	a := lastAttempt(t, recs)
+	if a.Status != audit.AttemptStreamFailed || a.HTTP != 200 {
+		t.Fatalf("attempt = %+v", a)
+	}
+	if gap := recs[0].Latency.TotalMs - (a.StartMs + a.DurMs); gap < 15 {
+		t.Fatalf("attempt %+v includes settlement: gap %d ms", a, gap)
 	}
 }

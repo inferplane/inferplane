@@ -73,9 +73,11 @@ func (a attempt) complete(w http.ResponseWriter, last bool) bool {
 		writeCodedError(w, resp.StatusCode, "upstream request failed", a.errorCode)
 		return false
 	}
-	// The provider exchange is over: close the attempt before rendering,
-	// settlement, body capture and the record write. An unusable 2xx body is
-	// the gateway's verdict (the 502 below), not the upstream's status.
+	// The provider exchange is over. Every exit below closes the attempt before
+	// settlement, body capture and the record write: the unusable-body exits
+	// right here, the success path after rendering and before the client write.
+	// An unusable 2xx body is the gateway's verdict (the 502), not the
+	// upstream's status, so those attempts keep the upstream's 2xx.
 	if resp.Parsed == nil || resp.Parsed.Usage == nil {
 		audit.EndOpenAttempt(a.req.Context(), audit.AttemptUpstreamError, resp.StatusCode)
 		a.finish(502, nil, nil, false, 0)
