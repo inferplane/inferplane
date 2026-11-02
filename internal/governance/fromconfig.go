@@ -34,6 +34,8 @@ type Limits struct {
 	BudgetExceeded       string // block|warn
 	BudgetMicrosPerDay   int64
 	BudgetDayExceeded    string // block|warn
+	// Sources names where each limit was set (ADR-057); copied unchanged.
+	Sources TeamSources
 }
 
 // PolicyFromLimits builds a TeamPolicy from already-resolved limits (budget in
@@ -58,6 +60,7 @@ func PolicyFromLimits(l Limits) TeamPolicy {
 		BudgetExceeded:       l.BudgetExceeded,
 		BudgetMicrosPerDay:   l.BudgetMicrosPerDay,
 		BudgetDayExceeded:    l.BudgetDayExceeded,
+		Sources:              l.Sources,
 	}
 }
 
@@ -85,6 +88,7 @@ func PoliciesFromConfig(in map[string]ConfigTeam) map[string]TeamPolicy {
 			BudgetExceeded:       c.BudgetExceeded,
 			BudgetMicrosPerDay:   usdToMicros(c.BudgetUSDPerDay),
 			BudgetDayExceeded:    c.BudgetExceeded,
+			Sources:              ConfigSources(),
 		})
 	}
 	return out

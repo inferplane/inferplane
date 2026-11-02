@@ -24,3 +24,21 @@ func TestTieredPricingRefusesUnpricedServiceBeforeBilling(t *testing.T) {
 		}
 	}
 }
+
+// Every pricing refusal names pricing.on_missing as its source (ADR-057).
+func TestPricingRefusalsNamePricingSetting(t *testing.T) {
+	table := pricing.New(pricing.OnMissingBlock, map[pricing.Key]pricing.Rate{{Provider: "p", Model: "m"}: {InputPerMTok: 1, ShortContextLimit: 100, LongContext: &pricing.Rate{InputPerMTok: 2}}})
+	for _, tc := range []struct {
+		targets []governance.PricedTarget
+		body    string
+	}{
+		{[]governance.PricedTarget{{Provider: "p", Upstream: "unpriced"}}, `{"input":"hello"}`},
+		{[]governance.PricedTarget{{Provider: "p", Upstream: "m"}}, `{"service_tier":"priority"}`},
+		{[]governance.PricedTarget{{Provider: "p", Upstream: "m"}}, `{"service_tier":"priority","service_tier":"default"}`},
+	} {
+		dec := PricingGuard(table, tc.targets, []byte(tc.body))
+		if dec.Allowed || dec.Governance == nil || *dec.Governance != *governance.PricingDenial() {
+			t.Fatalf("body=%s decision=%+v governance=%+v", tc.body, dec, dec.Governance)
+		}
+	}
+}

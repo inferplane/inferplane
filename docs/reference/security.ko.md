@@ -1,6 +1,6 @@
 ---
 translation_source: reference/security.md
-translation_source_sha256: 94a98160732864f00e19c23a6af8331f4825a655f99cc526fb6ffc988f614ea9
+translation_source_sha256: ad697495295e2a931752893a867a0c8d8a01ed7ba3a7f0890b248db14e4e29d5
 ---
 
 # 보안 {#security}
@@ -162,6 +162,12 @@ ADR-044 규칙의 범위가 한정된 예외이며, ADR-044 친화도 고정은 
 - `server`, Bedrock 서버 안전장치: `safeguard_results`의 `dangerous_tool_use` 항목입니다.
   모든 tool use가 `not_flagged`이면 `allow`, 그 밖의 상태나 결과는 `unknown`, tool use가
   없으면 기록하지 않습니다.
+
+**거버넌스 거부.** 거부 기록은 `governance`에 거부한 한도를 적습니다. 범위, 한도 종류,
+설정된 곳, 정책이면 정책 이름·세대·규칙입니다. 한도 값, 카운터, 키 자료, 사용자 식별자는
+들어가지 않습니다. 정책과 규칙 이름은 운영자가 정한 텍스트로, 체인에는 그대로 저장되고 분석
+인덱스에는 길이를 제한하고 정리해(256바이트로 자르고 NUL을 버리며 잘못된 UTF-8을 대체 문자로
+바꿈) 저장되므로 비밀을 넣지 마세요.
 
 **접근.** `/admin/audit/*` 다섯 경로는 읽기 전용이며 full-admin 전용입니다. 응답에는
 다이제스트, 닫힌 코드, 저장된 감사 행만 있고 원본 세션 ID·프롬프트·응답 텍스트는 없습니다.

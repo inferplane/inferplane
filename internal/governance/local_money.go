@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/internal/budget"
 )
 
@@ -16,6 +17,20 @@ type localMoneyScope struct {
 	win   budget.Window
 	limit int64
 	hard  bool
+	gov   audit.GovernanceRef // the limit this scope names when it refuses
+}
+
+// exhausted is this scope's refusal (ADR-057). A store at capacity refuses
+// whatever the limit says, so the store is named instead.
+func (s localMoneyScope) exhausted(atCapacity bool) error {
+	ref := s.gov
+	if atCapacity {
+		ref = audit.GovernanceRef{Scope: ref.Scope, Limit: ref.Limit, Source: audit.GovSourceBudgetStore}
+	} else if ref.Policy != nil {
+		p := *ref.Policy
+		ref.Policy = &p
+	}
+	return &BudgetDenial{Err: ErrLocalBudgetExhausted, Governance: &ref}
 }
 
 type localMoneyState struct {
@@ -43,22 +58,22 @@ func (g *Governor) localMoneyScopes(s Subject, kp KeyPolicy) []localMoneyScope {
 		return nil
 	}
 	var scopes []localMoneyScope
-	add := func(scope, id string, limit int64, mode string, win budget.Window) {
+	add := func(scope, id string, limit int64, mode string, win budget.Window, gov audit.GovernanceRef) {
 		if limit > 0 {
-			scopes = append(scopes, localMoneyScope{budget.Key(scope, id, win), win, limit, mode != "warn"})
+			scopes = append(scopes, localMoneyScope{budget.Key(scope, id, win), win, limit, mode != "warn", gov})
 		}
 	}
 	month, day := g.monthWindow(), g.dayWindow()
 	if p, ok := g.policyOf(s.Team); ok {
-		add(budget.ScopeTeam, s.Team, p.BudgetMicrosPerMonth, p.BudgetExceeded, month)
-		add(budget.ScopeTeam, s.Team, p.BudgetMicrosPerDay, p.BudgetDayExceeded, day)
+		add(budget.ScopeTeam, s.Team, p.BudgetMicrosPerMonth, p.BudgetExceeded, month, limitRef(audit.GovScopeTeam, audit.GovLimitBudgetMonth, p.Sources.Budget))
+		add(budget.ScopeTeam, s.Team, p.BudgetMicrosPerDay, p.BudgetDayExceeded, day, limitRef(audit.GovScopeTeam, audit.GovLimitBudgetDay, p.Sources.BudgetDay))
 	}
-	add(budget.ScopeKey, s.KeyID, kp.BudgetMicrosPerMonth, "", month)
-	add(budget.ScopeKey, s.KeyID, kp.BudgetMicrosPerDay, "", day)
+	add(budget.ScopeKey, s.KeyID, kp.BudgetMicrosPerMonth, "", month, limitRef(audit.GovScopeKey, audit.GovLimitBudgetMonth, keySource))
+	add(budget.ScopeKey, s.KeyID, kp.BudgetMicrosPerDay, "", day, limitRef(audit.GovScopeKey, audit.GovLimitBudgetDay, keySource))
 	if s.User != "" && g.userLookup != nil {
 		if p, ok := g.userLookup(s.Team, s.User); ok {
-			add(budget.ScopeUser, userBudgetID(s), p.BudgetMicrosPerMonth, p.BudgetExceeded, month)
-			add(budget.ScopeUser, userBudgetID(s), p.BudgetMicrosPerDay, p.BudgetExceeded, day)
+			add(budget.ScopeUser, userBudgetID(s), p.BudgetMicrosPerMonth, p.BudgetExceeded, month, limitRef(audit.GovScopeUser, audit.GovLimitBudgetMonth, p.Sources.Budget))
+			add(budget.ScopeUser, userBudgetID(s), p.BudgetMicrosPerDay, p.BudgetExceeded, day, limitRef(audit.GovScopeUser, audit.GovLimitBudgetDay, p.Sources.BudgetDay))
 		}
 	}
 	return scopes
@@ -98,7 +113,9 @@ func (g *Governor) ReserveLocalBudget(s Subject, kp KeyPolicy, bound int64, boun
 			}
 		}
 		if len(g.localMoney)+len(scopes) > 100_000 {
-			return nil, ErrLocalBudgetExhausted
+			// The gateway-wide liability ledger is full: no limit refused.
+			return nil, &BudgetDenial{Err: ErrLocalBudgetExhausted,
+				Governance: denial(audit.GovScopeGateway, audit.GovLimitBudget, LimitSource{Source: audit.GovSourceBudgetStore})}
 		}
 	}
 	permit := &LocalBudgetPermit{scopes: scopes, subject: s}
@@ -113,9 +130,11 @@ func (g *Governor) ReserveLocalBudget(s Subject, kp KeyPolicy, bound int64, boun
 			g.localMoney[scope.key] = state
 		}
 		spent := g.bud.Spent(scope.key, scope.win)
-		if state.frozen || spent >= scope.limit || state.held >= scope.limit-spent ||
-			g.bud.Check(scope.key, state.held, scope.limit, scope.win) != budget.Allow {
-			return nil, ErrLocalBudgetExhausted
+		if state.frozen || spent >= scope.limit || state.held >= scope.limit-spent {
+			return nil, scope.exhausted(false)
+		}
+		if dec := g.bud.Check(scope.key, state.held, scope.limit, scope.win); dec != budget.Allow {
+			return nil, scope.exhausted(dec == budget.BlockCapacity)
 		}
 		amount := bound
 		if !bounded {

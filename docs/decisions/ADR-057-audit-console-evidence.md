@@ -69,7 +69,7 @@ which was the main request. Rejected.
 
 ## Decision
 
-1. Audit records gain three append-only, `omitempty` fields after
+1. Audit records gain four append-only, `omitempty` fields after
    `guardrail_version`:
    - `attempts[]{provider, model, status, http, start_ms, dur_ms}`, at most
      eight entries, provider names and closed statuses only.
@@ -79,6 +79,10 @@ which was the main request. Rejected.
    - `auto_mode{verdict, stage, signature}`, an estimate; `verdict` is
      `block`, `allow` or `unknown`; `stage` is `s1`, `s2` or `server`.
    - Terminal records also carry `latency{total_ms, ttft_ms}` on every ingress.
+   - `governance{scope, limit, source, policy{name, generation, rule}}` on a
+     gateway denial record (amended 2026-10-29): the limit that refused the
+     request and where it was set, which is a policy rule, the config file, a
+     team record, a lease, the key's option or the budget store. Names only.
 2. When a request makes more than one attempt, `outcome.fallback_used` and
    `outcome.fallback_chain` are written from `attempts`. Older records are
    unchanged.
@@ -111,10 +115,17 @@ which was the main request. Rejected.
    project every terminal request record (completed records and denied
    `request_started` records) with the exact audit line (`record_json`). The
    existing `events` table is unchanged. `kind` is derived in the index, never
-   written to the audit chain.
+   written to the audit chain. The console table also carries `gov_scope`,
+   `gov_limit` and `gov_source`; a migration adds them, empty, to tables created
+   before them.
 6. A read-only audit API (`/admin/audit/events`, `/events/{id}`, `/sessions`,
    `/sessions/{ref}`, `/summary`) is full-admin only and mounted only with the
    analytics index.
+7. Every ingress writes a closed `outcome.error` code on the denials the console
+   reviews (amended 2026-10-29): `budget_authority_unavailable` for a
+   pre-dispatch reservation refusal and `mask_failed` for a legacy-mask refusal
+   (`masking_failed` for an unreadable `MaskRequired` body). The console files
+   the mask codes as privacy blocks and the reservation code as a policy denial.
 
 ## Consequences
 
@@ -137,8 +148,10 @@ which was the main request. Rejected.
   yields no verdicts (and a rising unparsed count), not wrong ones.
 - Records no longer in any file sink are not in the console table; the
   console shows the time its coverage starts.
-- Governance denials still carry no policy name; the console shows their code
-  and scope only.
+- Governance denials recorded before the `governance` field have no source;
+  the console marks such a limit denial as an older record. Policy and rule
+  names, which are operator text, now enter the chain on every governance
+  denial.
 
 ## References
 
@@ -210,7 +223,7 @@ Claude Code 세션 ID는 무작위 UUID이므로, 키에 묶인 도메인 분리
 
 ## 결정
 
-1. 감사 기록 `guardrail_version` 뒤에 append-only, `omitempty` 필드 세 개를
+1. 감사 기록 `guardrail_version` 뒤에 append-only, `omitempty` 필드 네 개를
    추가합니다.
    - `attempts[]{provider, model, status, http, start_ms, dur_ms}`. 최대 8개,
      provider 이름과 닫힌 상태값만 씁니다.
@@ -219,6 +232,9 @@ Claude Code 세션 ID는 무작위 UUID이므로, 키에 묶인 도메인 분리
    - `auto_mode{verdict, stage, signature}`. 추정값이고, `verdict`는 `block`,
      `allow`, `unknown` 중 하나이며 `stage`는 `s1`, `s2`, `server`입니다.
    - 요청의 마지막 기록에는 모든 ingress에서 `latency{total_ms, ttft_ms}`도 붙습니다.
+   - 게이트웨이 거부 기록의 `governance{scope, limit, source, policy{name, generation, rule}}`
+     (2026-10-29 추가). 요청을 거부한 한도와 그 한도를 정한 곳(정책 규칙, 설정 파일, 팀
+     레코드, 리스, 키 옵션, 예산 저장소)이며 이름만 담습니다.
 2. 요청이 두 번 이상 시도되면 `attempts`로 `outcome.fallback_used`와
    `outcome.fallback_chain`을 채웁니다. 옛 기록은 바뀌지 않습니다.
 3. `session_ref = "s1:" + hex(sha256("inferplane-session-v1\0" + key_id + "\0" + session_id)[:16])`.
@@ -246,10 +262,15 @@ Claude Code 세션 ID는 무작위 UUID이므로, 키에 묶인 도메인 분리
 5. analytics 인덱스에 `audit_events` 표와 category 표를 추가합니다. 요청의 마지막
    기록(완료 기록과 거부된 `request_started` 기록)을 감사 줄 원본(`record_json`)과
    함께 투영합니다. 기존 `events` 표는 바뀌지 않습니다. `kind`는 인덱스에서 파생하고
-   감사 체인에는 쓰지 않습니다.
+   감사 체인에는 쓰지 않습니다. 콘솔 표에는 `gov_scope`, `gov_limit`, `gov_source`도
+   있으며, 이전에 만든 표에는 마이그레이션이 빈 값으로 추가합니다.
 6. 읽기 전용 감사 API(`/admin/audit/events`, `/events/{id}`, `/sessions`,
    `/sessions/{ref}`, `/summary`)는 full-admin 전용이고 analytics 인덱스가 있을
    때만 마운트합니다.
+7. 모든 ingress는 콘솔이 살펴보는 거부에 닫힌 `outcome.error` 코드를 씁니다(2026-10-29
+   추가). 발송 전 예약 거부는 `budget_authority_unavailable`, legacy mask 거부는
+   `mask_failed`(읽을 수 없는 `MaskRequired` 본문은 `masking_failed`)입니다. 콘솔은
+   mask 코드를 개인정보 차단으로, 예약 거부 코드를 정책 거부로 분류합니다.
 
 ## 영향
 
@@ -269,8 +290,9 @@ Claude Code 세션 ID는 무작위 UUID이므로, 키에 묶인 도메인 분리
   판정이 아니라 판정 없음(판정 불가 수 증가)이 됩니다.
 - 어느 file sink에도 남지 않은 기록은 콘솔 표에 없습니다. 콘솔은 기록 범위가
   시작되는 시각을 보여줍니다.
-- 거버넌스 거부에는 여전히 정책 이름이 없습니다. 콘솔은 코드와 범위만
-  보여줍니다.
+- `governance` 필드 이전에 기록된 거버넌스 거부에는 출처가 없으며 콘솔은 그런 한도
+  거부를 이전 기록으로 표시합니다. 운영자가 정한 텍스트인 정책·규칙 이름이 이제 모든 거버넌스 거부마다
+  체인에 들어갑니다.
 
 ## 참고 자료
 

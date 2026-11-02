@@ -139,7 +139,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		raw = result.SanitizedBody
 	}
 	if h.mask.Enabled(p.Team) && !result.Decision.Masked {
-		sanitized, maskErr := sensitivity.NewRedactorWithMasker(h.mask.Filter).Redact(req.Context(), "responses", raw)
+		sanitized, masked, maskErr := legacyMask(req.Context(), sensitivity.NewRedactorWithMasker(h.mask.Filter), raw)
 		if maskErr != nil {
 			result.Decision.Reason = "mask_failed"
 			req = requestpolicy.Observe(w, req, result, h.metrics)
@@ -147,11 +147,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			writeError(w, 403, "permission_error", "request could not be completely masked")
 			return
 		}
-		parsed, err = responses.RequestToCanonical(sanitized)
-		if err != nil {
-			writeError(w, 403, "permission_error", "request could not be completely masked")
-			return
-		}
+		parsed = masked
 		result.Decision.Masked = !bytes.Equal(raw, sanitized)
 		if result.Decision.Masked && len(result.Decision.Policies) == 0 {
 			result.Decision.Reason = "legacy_mask"
@@ -181,6 +177,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		priced = append(priced, governance.PricedTarget{Provider: ct.ProviderName, Upstream: ct.Upstream})
 	}
 	if dec := requestpolicy.PricingGuard(table, priced, raw); !dec.Allowed {
+		audit.SetGovernance(req.Context(), dec.Governance)
 		h.denied(req, p, model, dec.Status, string(dec.Code), start)
 		writeError(w, dec.Status, "insufficient_quota", dec.Reason)
 		return
@@ -189,6 +186,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if h.gov != nil {
 		dec := h.gov.PreCheck(subject(p), keyPolicy(p), estimate)
 		if !dec.Allowed {
+			audit.SetGovernance(req.Context(), dec.Governance)
 			h.denied(req, p, model, dec.Status, string(dec.Code), start)
 			writeError(w, dec.Status, governanceErrorType(dec.Status), dec.Reason)
 			return
@@ -208,6 +206,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if i > 0 && h.gov != nil {
 			dec := h.gov.PreCheck(subject(p), keyPolicy(p), estimate)
 			if !dec.Allowed {
+				audit.SetGovernance(req.Context(), dec.Governance)
 				h.denied(req, p, model, dec.Status, string(dec.Code), start)
 				writeError(w, dec.Status, governanceErrorType(dec.Status), dec.Reason)
 				return
@@ -243,7 +242,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if reserveErr != nil {
 			status := requestpolicy.BudgetStatus(reserveErr)
 			requestpolicy.BudgetErrorHeaders(w, reserveErr)
-			h.denied(req, p, model, status, "budget_authority_unavailable", start)
+			audit.SetGovernance(req.Context(), governance.DenialGovernance(reserveErr))
+			h.denied(req, p, model, status, string(audit.DenyBudgetAuthorityUnavailable), start)
 			writeError(w, status, "insufficient_quota", "budget authority unavailable")
 			return
 		}

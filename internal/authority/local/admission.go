@@ -3,12 +3,28 @@ package local
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/internal/governance"
 	"github.com/inferplane/inferplane/internal/policy"
 )
+
+// budgetDenial names the policy budget that ran out of authority. ADR-045
+// grants carry the policy and rule name but no document generation.
+func budgetDenial(b policy.AuthorityBudget) *audit.GovernanceRef {
+	ref := &audit.GovernanceRef{Scope: audit.GovScopeTeam, Limit: audit.GovLimitBudgetMonth, Source: audit.GovSourcePolicy,
+		Policy: &audit.PolicyRuleRef{Name: b.Policy, Rule: b.Rule}}
+	if b.User != "" {
+		ref.Scope = audit.GovScopeUser
+	}
+	if b.WindowEnd.Sub(b.WindowStart) == 24*time.Hour {
+		ref.Limit = audit.GovLimitBudgetDay
+	}
+	return ref
+}
 
 // Reserve durably reserves the entire bound from one grant per matching hard
 // budget, atomically across all scopes. Missing credit only queues a background
@@ -79,7 +95,10 @@ func (s *Store) Reserve(ctx context.Context, subject governance.Subject, bound i
 				return err
 			}
 			if exhausted {
-				denied = governance.ErrAuthorityExhausted
+				// The first exhausted hard budget names the refusal (ADR-057).
+				if !errors.Is(denied, governance.ErrAuthorityExhausted) {
+					denied = &governance.BudgetDenial{Err: governance.ErrAuthorityExhausted, Governance: budgetDenial(b)}
+				}
 			} else if denied == nil {
 				denied = governance.ErrAuthorityUnavailable
 			}

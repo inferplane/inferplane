@@ -46,14 +46,21 @@ func TestAuditI18nKeysHaveFourLanguages(t *testing.T) {
 	for _, kind := range []string{"ok", "policy_denied", "privacy_blocked", "privacy_masked", "privacy_internal", "upstream_error", "auto_mode_blocked"} {
 		keys["audit.kind."+kind] = true
 	}
-	for _, scope := range []string{"team", "key", "user", "route"} {
+	for _, scope := range []string{"team", "key", "user", "route", "gateway"} {
 		keys["audit.scope."+scope] = true
+	}
+	// Governance sources and limits are looked up by value (ADR-057).
+	for _, source := range []string{"config", "team_record", "policy", "lease", "key", "budget_store"} {
+		keys["audit.source."+source] = true
+	}
+	for _, limit := range []string{"rpm", "tpm", "tokens_per_day", "tokens_per_month", "budget_month", "budget_day", "budget", "pricing"} {
+		keys["audit.limit."+limit] = true
 	}
 	for _, wf := range []string{"gateway", "settle", "denied"} {
 		keys["audit.wf."+wf] = true
 	}
 	// Copy changes that must exist in all four languages even if a call site moves.
-	for _, k := range []string{"audit.wf.denied", "audit.autoHint", "audit.autoNotObserved", "audit.classNotReported", "audit.verdictAllow", "audit.verdictBlock", "audit.verdictUnknown", "audit.noTiming", "audit.keyAmbiguous", "audit.noAttempt", "audit.recordHash", "audit.openKey", "audit.showingFirst", "audit.signatureWarn", "audit.attemptTimingMissing", "audit.time", "audit.period", "audit.last"} {
+	for _, k := range []string{"audit.wf.denied", "audit.autoHint", "audit.autoNotObserved", "audit.classNotReported", "audit.verdictAllow", "audit.verdictBlock", "audit.verdictUnknown", "audit.noTiming", "audit.keyAmbiguous", "audit.noAttempt", "audit.recordHash", "audit.openKey", "audit.showingFirst", "audit.signatureWarn", "audit.attemptTimingMissing", "audit.time", "audit.period", "audit.last", "audit.policyNotRecorded", "audit.noLimitNamed"} {
 		keys[k] = true
 	}
 	if strings.Contains(string(dict), `"audit.verdicts"`) {
