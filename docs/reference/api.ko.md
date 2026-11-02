@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: ddd2db42fe511dc2868e4e56d9ea8b92eccb249afc9473ff15b424d4905eedef
+translation_source_sha256: 5a9d7c8c94b999f7e3b6a100392582f8b29e749a0eb351265f06f9bbf4e8b993
 ---
 
 # API 구현 {#api}
@@ -62,7 +62,7 @@ count 엔드포인트, TPM·쿼터 추정, 금전 예약, 개인정보 검사, �
 독립적입니다. 남은 입력이 한도에 들어가지 않으면 압축은 계속 실패할 수 있으며,
 모델 한도를 더 크게 가정하면 안 됩니다.
 
-키 인증이 성공하면 count_tokens는 별칭을 정규화하고 라우팅·준비 상태 거부에도 200을 반환합니다. 없거나 잘못된 키는 핸들러 실행 전 401을 받습니다. 같은 프로토콜이면 원문 전달, 다르면 정규 변환을 적용합니다. 별칭은 RBAC·라우팅·감사·메트릭 전에 정규 이름으로 바꿉니다. Anthropic 원문 경로는 최상위 model만 바꾸고 중첩 cache_control과 HTML 이스케이프 상태를 보존합니다. 오류는 수신 형식이며 허용된 가용 모델 목록을 표시합니다. `server.max_request_bytes`를 넘는 본문은 Content-Length 선언 여부와 관계없이 수신 형식의 HTTP 413을 받습니다. Anthropic은 `request_too_large`, Chat Completions·Responses는 `invalid_request_error`, Bedrock은 `ValidationException`입니다(이전에는 `{"error":"request body too large"}`였고 길이를 선언하지 않으면 400이었습니다). count 엔드포인트는 계속 로컬 추정치로 200을 반환합니다.
+키 인증이 성공하면 count_tokens는 별칭을 정규화하고 라우팅·준비 상태 거부에도 200을 반환합니다. 없거나 잘못된 키는 핸들러 실행 전 401을 받습니다. 같은 프로토콜이면 원문 전달, 다르면 정규 변환을 적용합니다. 별칭은 RBAC·라우팅·감사·메트릭 전에 정규 이름으로 바꿉니다. Anthropic 원문 경로는 최상위 model만 바꾸고 중첩 cache_control과 HTML 이스케이프 상태를 보존합니다. 오류는 수신 형식이며 허용된 가용 모델 목록을 표시합니다. `server.max_request_bytes`를 넘는 본문은 Content-Length 선언 여부와 관계없이 수신 형식의 HTTP 413을 받습니다. Anthropic은 `request_too_large`, Chat Completions·Responses는 `invalid_request_error`, Bedrock은 `ValidationException`입니다(이전에는 `{"error":"request body too large"}`였고 길이를 선언하지 않으면 400이었습니다). count 엔드포인트는 계속 로컬 추정치로 200을 반환합니다. `server.max_inflight_request_bytes`를 설정하면 동시 처리 본문 예산에 들어가지 못한 생성 요청은 같은 형식의 503과 `Retry-After: 2`를 받습니다(Anthropic `overloaded_error`, Chat Completions·Responses는 코드 `gateway_overloaded`의 `server_error`, Bedrock `ServiceUnavailableException`). 들어가지 못한 count 요청은 본문을 버퍼링하지 않고 로컬에서 답합니다(HTTP 200, 4바이트당 1토큰).
 
 **모델 폴백:** 한 단계 model_fallbacks와 기본 동일 계열 휴리스틱을 허용 검사 전에 적용합니다. 미설정 이름만 허용된 키는 다른 모델을 대신 받지 않고 거부됩니다. 이미 설정된 모델도 업스트림 404이면 기존 폴백 루프에서 교차 모델을 시도하되, 나중 추가한 타깃을 FilterModelAllowed로 다시 검사합니다. 응답 x-inferplane-model-fallback은 공급자 폴백 헤더와 독립적입니다. 미설정 이름 대체(업스트림 404 교차 모델 재시도는 헤더만 설정)는 Responses를 포함한 모든 생성 수신 경로가 이를 프로세스당 서로 다른 쌍마다 한 번 `router: model fallback source=… requested=… served=…`로 기록하고, `inferplane_model_fallback_total{source,model}`을 세며, 감사에 `routing.reason: model_fallback`과 `model_fallback_from`·`model_fallback_source`를 남깁니다. 응답하는 모델은 바뀌지 않습니다.
 

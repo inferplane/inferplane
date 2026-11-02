@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: 9c42547d936ee5e182d6510fefe804ca7b7fe592b881bf22fe833e3a2ee46a85
+translation_source_sha256: 8f12908fb99b9a13880bec5f63868d316ab8e29c7bfda1674428c395eb76cc7d
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -37,6 +37,7 @@ translation_source_sha256: 9c42547d936ee5e182d6510fefe804ca7b7fe592b881bf22fe833
 | `inferplane_usage_windows_dropped_total` | 분석 전달 손실. 권한 회계와 구분 |
 | `process_resident_memory_bytes`, `go_memstats_heap_inuse_bytes`, `go_goroutines` | 메모리 증가. 처리 중인 요청 본문마다 여러 사본을 보유하므로(실측 약 5.5배) 동시에 들어온 큰 본문이 대부분을 차지 |
 | `inferplane_model_fallback_total` | 라우팅되지 않은 모델 ID 요청(오타·새 별칭). 로그 `router: model fallback`에 요청 ID가 남음 |
+| `inferplane_inflight_refusals_total`, `inferplane_inflight_request_bytes` | 동시 처리 본문 예산(`server.max_inflight_request_bytes`)이 작업량보다 작거나 큰 요청이 몰림 |
 
 실측 트래픽과 프로파일에 따라 임계값을 정하세요. Prometheus 비용은 관측값입니다. 사용 가능한 잔액은 정수 회계 기록과 확정된 권한 예약이 결정합니다.
 
@@ -49,6 +50,7 @@ translation_source_sha256: 9c42547d936ee5e182d6510fefe804ca7b7fe592b881bf22fe833
 | 권한 프로파일의 402 | 금전 소진 또는 보수적 상한이 잔액보다 큼 |
 | 429 | 요청률·토큰 할당량 소진과 집행 범위 |
 | 첫 요청 전 503 | 필수 동기화, 공유 네임스페이스·바인딩, 최초 권한, DB·저널 |
+| 큰 요청이 몰릴 때 `Retry-After: 2`와 503 | 동시 처리 본문 예산(`server.max_inflight_request_bytes`), `inferplane_inflight_refusals_total` |
 | 재시도 가능한 권한 대기 | `Retry-After` 준수. 요청을 통과시키려고 회계 상한을 낮추지 않기 |
 | HTTP 200 스트림 조기 종료 | 종료 프로토콜 오류, 관측 사용량, 유지된 의무 |
 | 생성은 거부되는데 계산 값이 0 | 계산은 로컬/200 유지. 준비 상태·키 저장소 확인 |

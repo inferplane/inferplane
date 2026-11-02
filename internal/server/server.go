@@ -51,10 +51,11 @@ type AuthConfigView struct {
 type DataMuxOption func(*dataMuxOptions)
 
 type dataMuxOptions struct {
-	usage           *telemetry.Collector
-	maxRequestBytes int64
-	governanceGate  func() (bool, string)
-	clientEvidence  clientctx.Mode
+	usage            *telemetry.Collector
+	maxRequestBytes  int64
+	maxInflightBytes int64
+	governanceGate   func() (bool, string)
+	clientEvidence   clientctx.Mode
 }
 
 func newDataMuxOptions() dataMuxOptions {
@@ -94,6 +95,13 @@ const defaultMaxRequestBytes = 64 << 20
 // caller that does not go through config.Load still gets a bound.
 func WithMaxRequestBytes(n int64) DataMuxOption {
 	return func(o *dataMuxOptions) { o.maxRequestBytes = n }
+}
+
+// WithMaxInflightRequestBytes bounds the request-body bytes all KeyAuth-guarded
+// requests hold at once (server.max_inflight_request_bytes). n<=0 leaves it
+// off, the default.
+func WithMaxInflightRequestBytes(n int64) DataMuxOption {
+	return func(o *dataMuxOptions) { o.maxInflightBytes = n }
 }
 
 // DataMux builds the data-plane (:8080) handler: Anthropic, Bedrock, and OpenAI
@@ -241,6 +249,9 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 	}
 	if aud != nil {
 		governed = auditGateMiddleware(aud.Ready, governed)
+	}
+	if o.maxInflightBytes > 0 {
+		governed = inflightMiddleware(&inflightBudget{limit: o.maxInflightBytes}, limit, m, governed)
 	}
 	dataMux.Handle("/", maxBytesMiddleware(limit, KeyAuth(store, clientctx.Middleware(o.clientEvidence, governed))))
 	return dataMux

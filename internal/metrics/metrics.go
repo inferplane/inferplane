@@ -42,6 +42,8 @@ type Metrics struct {
 	substitution       *prometheus.CounterVec // inferplane_model_substitution_total (ADR-041)
 	routingDecisions   *prometheus.CounterVec // inferplane_routing_decisions_total
 	modelFallback      *prometheus.CounterVec // inferplane_model_fallback_total (ADR-029)
+	inflightBytes      prometheus.Gauge       // inferplane_inflight_request_bytes
+	inflightRefusals   *prometheus.CounterVec // inferplane_inflight_refusals_total
 	autoModeUnparsed   prometheus.Counter     // inferplane_audit_auto_mode_unparsed_total (ADR-057)
 	classifiers        *classifierMetrics     // PII classifier collectors (classifier.go)
 }
@@ -127,11 +129,18 @@ func New() *Metrics {
 			// The requested name is client input and never a label: source is
 			// a closed set and model is the configured served model.
 		}, []string{"source", "model"}),
+		inflightBytes: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "inferplane_inflight_request_bytes", Help: "Request-body bytes reserved against server.max_inflight_request_bytes.",
+		}),
+		inflightRefusals: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "inferplane_inflight_refusals_total",
+			Help: "Requests that did not fit server.max_inflight_request_bytes: generation refused with 503, count answered locally.",
+		}, []string{"route"}),
 	}
 	reg.MustRegister(m.tokenUsage, m.requestDuration, m.ttft, m.requestsTotal,
 		m.fallbackTotal, m.circuitState, m.quotaUtil, m.budgetUtil, m.budgetSpend, m.pricingMiss,
 		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected, m.substitution, m.routingDecisions,
-		m.autoModeUnparsed, m.modelFallback)
+		m.autoModeUnparsed, m.modelFallback, m.inflightBytes, m.inflightRefusals)
 	// Go runtime (heap, GC, goroutines) and process (RSS, CPU, file
 	// descriptors) collectors: their families carry no request data and only
 	// fixed labels. Without them a large-body memory burst was visible only
@@ -168,6 +177,27 @@ func (m *Metrics) ObserveRoutingDecision(team, mode, reason string) {
 		reason = "unknown"
 	}
 	m.routingDecisions.WithLabelValues(team, mode, reason).Inc()
+}
+
+// SetInflightRequestBytes reports the bytes currently reserved by the
+// data plane's in-flight request budget.
+func (m *Metrics) SetInflightRequestBytes(n int64) {
+	if m == nil {
+		return
+	}
+	m.inflightBytes.Set(float64(n))
+}
+
+// IncInflightRefusal counts one request that did not fit the in-flight budget;
+// route is "generation" or "count".
+func (m *Metrics) IncInflightRefusal(route string) {
+	if m == nil {
+		return
+	}
+	if route != "count" {
+		route = "generation"
+	}
+	m.inflightRefusals.WithLabelValues(route).Inc()
 }
 
 // Registry exposes the registry for the /metrics handler.

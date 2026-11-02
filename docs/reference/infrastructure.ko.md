@@ -1,6 +1,6 @@
 ---
 translation_source: reference/infrastructure.md
-translation_source_sha256: 40bc363b684ef26196b4649f09ceb830ae1238f79dded9b8039af39b8b65f839
+translation_source_sha256: 08645bf97a006c5e402cb5befae02bab121a7e540ff230c8d21f925d2da39c07
 ---
 
 # 인프라 {#infrastructure}
@@ -34,6 +34,7 @@ mayu·inferplaned를 각각 정적 바이너리로 빌드해 별도의 distroles
 - 형식이 정의된 설정은 알 수 없는 필드, 음수 한도, 잘못된 `on_exceeded`, 범위를 벗어난 금전 한도를 거부합니다. 비활성 주석 `_comment`, `_comment_*`, `_*_example`은 허용하며 맵 이름·분류기 옵션은 자유 형식입니다. 0이 아닌 `quota.tokens_per_month`는 지원하지 않습니다. 월별 `tokenQuota` 집행은 공유 Postgres 프로파일이 필요합니다.
 - `mayu config validate --config config.json`은 `LoadRaw`를 통해 오프라인 스키마·비밀 참조를 검증합니다. 런타임 저장소를 열거나 공급자·AWS 자격 증명을 구성하거나 업스트림에 접속하지 않습니다. 선언이 유효해도 런타임 준비 상태를 증명하지 않으며 해당 의존성은 `serve`에서 검사합니다.
 - 두 게이트웨이 리스너에는 요청 헤더를 읽는 10초 제한이 있습니다. 긴 SSE 스트림을 끊는 전체 응답 시간 제한은 없습니다.
+- `server.max_request_bytes`(기본 64 MiB)는 요청 본문 하나를 제한합니다. `server.max_inflight_request_bytes`(기본 0, 꺼짐. 켜면 요청당 한도 이상)는 모든 데이터 영역 요청이 동시에 보유하는 본문 바이트를 제한합니다. 요청마다 Content-Length만큼, 길이를 선언하지 않으면 요청당 한도 전체를 핸들러가 끝날 때까지 예약하며 스트림은 끝날 때까지 유지합니다. 들어가지 못한 생성 요청은 수신 형식의 503과 `Retry-After: 2`를 받고, count 요청은 4바이트당 1토큰의 로컬 추정치로 HTTP 200을 유지합니다. 수신 경로는 본문마다 여러 사본을 보유하므로(2026-10-27 실측 약 5.5배) 예산은 (메모리 한도 − 유휴 RSS) / 6로 잡고 `GOMEMLIMIT`과 컨테이너·systemd 메모리 한도도 설정하세요.
 - 로컬 기본은 복제본 하나입니다. ADR-046 공유 Postgres는 여러 게이트웨이를 지원하며 차트가 잘못된 로컬 복제를 거부합니다. 영속 공유는 독립 PVC의 StatefulSet·필수 안티어피니티·중단 예산입니다. [공유 거버넌스](../shared-governance.md)를 참고하세요.
 - **영속성:** 로컬은 기존 Deployment·PVC 동작, 공유는 키·카운터를 Postgres에 두고 복제본별 PVC에 감사 구간을 저장합니다. WAL을 공유하지 마세요.
 - 차트는 existingSecret만 참조하고 비밀을 만들지 않습니다.

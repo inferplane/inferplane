@@ -43,6 +43,16 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
   establish runtime readiness. `serve` checks those runtime dependencies.
 - Both gateway listeners have a 10-second request-header deadline. There is no
   total response deadline that would cut off long-running SSE streams.
+- `server.max_request_bytes` (default 64 MiB) bounds one request body.
+  `server.max_inflight_request_bytes` (default 0, off; otherwise at least the
+  per-request cap) bounds the body bytes all data-plane requests hold at once.
+  Each request reserves its Content-Length, or the whole per-request cap when the
+  length is undeclared, until its handler returns; a stream holds it until it
+  ends. A generation request that does not fit gets a protocol-shaped 503 with
+  `Retry-After: 2`; a count request stays HTTP 200 with a local estimate of four
+  bytes per token. Ingress holds several copies of each body (about 5.5×
+  measured on 2026-10-27), so size the budget as (memory limit − idle RSS) / 6
+  and also set `GOMEMLIMIT` and the container or systemd memory limit.
 - Default/local mode is single-replica. ADR-046 shared Postgres mode supports multiple gateways; the chart rejects unsafe local replication. Persistent shared mode renders a StatefulSet with separate PVCs, required node anti-affinity and a disruption budget. See [shared governance](../shared-governance.md).
 - **Persistence:** local mode retains its existing Deployment/PVC behavior. Shared mode stores keys and counters in Postgres; per-replica PVCs hold independent audit segments. Do not share one audit WAL between replicas.
 - The chart references an `existingSecret` and never creates secrets (design §7).
