@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
@@ -26,14 +25,12 @@ const maxJWKSBytes = 1 << 20
 // network. A forged-kid flood therefore costs the IdP at most one fetch per
 // window and cannot block a known key; a newly rotated kid is picked up by
 // the next fetch the window allows, including one a flood triggers (P2 gate
-// r1/r3, 2026-10-27 path check).
+// r1/r3; measured 2026-10-27).
 type jwksKeySet struct {
 	url    string
 	client *http.Client
 	window time.Duration
 	now    func() time.Time
-
-	fetches atomic.Int64 // observability for tests
 
 	mu       sync.Mutex
 	keys     []jose.JSONWebKey
@@ -66,7 +63,9 @@ var errNoKey = errors.New("jwks: no key verifies the token signature")
 // verifyAfterFetch handles a cache miss. It waits for a running fetch, fails
 // fast inside the miss window, or performs the fetch itself: the fetching
 // caller keeps the fetch in flight until it has armed the window, so a
-// concurrent miss can never start a second fetch in between.
+// concurrent miss can never start a second fetch in between. The flight is
+// settled in a defer, so even a panic during the fetch releases the waiters
+// and arms the window.
 func (s *jwksKeySet) verifyAfterFetch(ctx context.Context, kid string, jws *jose.JSONWebSignature) ([]byte, error) {
 	s.mu.Lock()
 	if done := s.inflight; done != nil {
@@ -92,29 +91,30 @@ func (s *jwksKeySet) verifyAfterFetch(ctx context.Context, kid string, jws *jose
 	s.inflight = done
 	s.mu.Unlock()
 
+	var keys []jose.JSONWebKey
+	fetched, ok := false, false
+	defer func() {
+		s.mu.Lock()
+		if fetched {
+			s.keys = keys
+		}
+		if !ok {
+			s.lastMiss = s.now() // unknown kid, forged signature, failed fetch or panic
+		}
+		s.inflight = nil
+		s.mu.Unlock()
+		close(done)
+	}()
+
 	// Detached from ctx: waiters share this fetch, and a canceled request
 	// must not abort it for them. The client timeout bounds it.
-	s.fetches.Add(1)
 	keys, err := s.download()
-	var payload []byte
-	ok := false
-	if err == nil {
-		payload, ok = verifyWith(keys, kid, jws)
-	}
-	s.mu.Lock()
-	if err == nil {
-		s.keys = keys
-	}
-	if !ok {
-		s.lastMiss = s.now() // unknown kid, forged signature or failed fetch
-	}
-	s.inflight = nil
-	s.mu.Unlock()
-	close(done)
-	switch {
-	case err != nil:
+	if err != nil {
 		return nil, err
-	case !ok:
+	}
+	fetched = true
+	payload, ok := verifyWith(keys, kid, jws)
+	if !ok {
 		return nil, errNoKey
 	}
 	return payload, nil

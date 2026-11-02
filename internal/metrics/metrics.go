@@ -144,7 +144,7 @@ func New() *Metrics {
 	// Go runtime (heap, GC, goroutines) and process (RSS, CPU, file
 	// descriptors) collectors: their families carry no request data and only
 	// fixed labels. Without them a large-body memory burst was visible only
-	// through /proc (2026-10-27 path check).
+	// through /proc (measured 2026-10-27).
 	reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	m.classifiers = newClassifierMetrics(reg)
 	// Prometheus only emits a labeled metric family once it has at least one
@@ -177,15 +177,6 @@ func (m *Metrics) ObserveRoutingDecision(team, mode, reason string) {
 		reason = "unknown"
 	}
 	m.routingDecisions.WithLabelValues(team, mode, reason).Inc()
-}
-
-// SetInflightRequestBytes reports the bytes currently reserved by the
-// data plane's in-flight request budget.
-func (m *Metrics) SetInflightRequestBytes(n int64) {
-	if m == nil {
-		return
-	}
-	m.inflightBytes.Set(float64(n))
 }
 
 // AddInflightRequestBytes adjusts the in-flight gauge by delta; deltas commute,

@@ -462,3 +462,28 @@ func TestJWKSConcurrentValidTokensNeverRefused(t *testing.T) {
 		t.Fatalf("%d concurrent valid verifications refused", n)
 	}
 }
+
+type panicTransport struct{}
+
+func (panicTransport) RoundTrip(*http.Request) (*http.Response, error) { panic("jwks transport") }
+
+// A fetch that panics must still settle its flight: the next miss fails fast
+// inside the armed window instead of waiting on a flight nobody will close.
+func TestJWKSPanickingFetchSettlesTheFlight(t *testing.T) {
+	idp := newFakeIdP(t)
+	s := newJWKSKeySet(idp.srv.URL+"/keys", &http.Client{Transport: panicTransport{}}, time.Hour)
+	token := idp.mint(t, "RS256", "r1", cid, nil)
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("the fetch did not panic")
+			}
+		}()
+		_, _ = s.VerifySignature(context.Background(), token)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := s.VerifySignature(ctx, token); err == nil || ctx.Err() != nil {
+		t.Fatalf("miss after a panicked fetch = %v (ctx %v), want a fast refusal", err, ctx.Err())
+	}
+}

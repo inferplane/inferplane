@@ -170,6 +170,9 @@ func promptOverflow(err error) *providers.UpstreamError {
 	if !ok {
 		return nil
 	}
+	// One server-log line, like upstreamError's, but with the validated counts
+	// only (0 when the evidence carried none): no provider text is logged here.
+	log.Printf("bedrock: upstream error status=400 code=ValidationException: prompt overflow tokens=%d maximum=%d", tokens, maximum)
 	return &providers.UpstreamError{StatusCode: 400, Body: providers.PromptTooLongBody(tokens, maximum)}
 }
 
