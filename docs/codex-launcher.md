@@ -88,9 +88,9 @@ including when it resolves another model. The helper adds no global
 context-window override.
 
 For an explicitly selected portable Responses model, gateway context admission
-uses the ingress estimate (`internal/tokenest`, the same value as the handler's
-preflight) plus the requested output budget. This is an estimate, not the
-backend's tokenizer. The sensitivity
+uses the ingress estimate (`internal/tokenest`; the router applies the same
+estimator to the explicitly requested model) plus the requested output budget.
+This is an estimate, not the backend's tokenizer. The sensitivity
 inspector's larger byte-based ceiling also accounts for recursively decoded JSON;
 it must not be mistaken for this model's actual input-token count. Automatic
 alternatives, strict budget targets and InternalOnly targets keep conservative
@@ -394,7 +394,7 @@ On the stateless bridge, a request too large for every compatible target's
 declared context window returns HTTP 400 with
 `error.code="context_length_exceeded"`, so Codex compacts. It used to get 403
 `no policy-permitted compatible Responses target` and resend the same request
-five times (2026-10-27 path check).
+five times (measured 2026-10-27).
 
 For diagnosis compare the same model, region, history and client settings.
 Cumulative session token usage is not current context occupancy. A lower

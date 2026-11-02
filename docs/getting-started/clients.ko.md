@@ -1,6 +1,6 @@
 ---
 translation_source: getting-started/clients.md
-translation_source_sha256: 5d23b5bc631986c3a7ff27e4dbf578b3f97f759e9b91838ad52252bb9277830c
+translation_source_sha256: 1718111362470d99486fb8f7214fa097b586bea7cfa96f61b6575a3adc76cac4
 ---
 
 # 클라이언트와 공급자 연결 {#connect-clients-and-providers}
@@ -39,9 +39,9 @@ translation_source_sha256: 5d23b5bc631986c3a7ff27e4dbf578b3f97f759e9b91838ad5225
 ## Claude Code MCP 도구 검색 {#claude-code-mcp-tool-search}
 
 Claude Code 2.1.304부터 사용자 지정 `ANTHROPIC_BASE_URL`에서도 MCP 도구 검색(지연 로딩)을
-기본으로 켜며, 2.1.311은 게이트웨이를 거치는 모든 경로에서 이를 유지합니다. 도구 검색을
-끄는 조건은 일부 모델, `ENABLE_TOOL_SEARCH=false`, 실험 beta 비활성화뿐이며 엔드포인트는
-조건이 아닙니다. 이전 버전은 `mayu`를 통해 쓰려면 `ENABLE_TOOL_SEARCH=true` 또는
+기본으로 켜며, 2.1.311은 게이트웨이를 거쳐 시험한 경로(InvokeModel·Converse)에서 이를
+유지했습니다. 도구 검색을 끄는 조건은 일부 모델, `ENABLE_TOOL_SEARCH=false`, 실험 beta
+비활성화뿐이며 엔드포인트는 조건이 아닙니다. 이전 버전은 `mayu`를 통해 쓰려면 `ENABLE_TOOL_SEARCH=true` 또는
 `auto` 설정이 필요합니다. 모든 도구 정의를 처음부터 보내려면 `ENABLE_TOOL_SEARCH=false`를
 설정하세요. 2.1.305부터 인식하지 못한 HTTP 400/422이면 도구 검색 없이 재시도하여
 프롬프트가 커질 수 있습니다. 컨텍스트 초과 오류는 클라이언트가 인식하는 의미를 유지해야
@@ -52,7 +52,8 @@ Anthropic과 Bedrock `invoke_model` 경로는
 블록을 인식합니다. Bedrock Converse(Claude 외 모델)에서도 Claude Code는 도구를 지연
 로딩합니다. 불러온 도구 정의는 다음 요청의 tools에 들어가고, 게이트웨이는 `tool_reference`
 결과를 `Loaded tool: <이름>` 텍스트로 보냅니다. 이전 게이트웨이 빌드는 이 결과를 빈 도구
-결과로 보내 모델이 검색 결과가 없다고 판단할 수 있었습니다. 2026-10-27 Claude Code
+결과로 보내 모델이 검색 결과가 없다고 판단할 수 있었습니다. `Loaded tool:` 표시는 실제
+실행이 아닌 단위 테스트로 검증합니다. 이 표시를 넣기 전인 2026-10-27 Claude Code
 2.1.311로 게이트웨이를 거쳐 Haiku 5.5(InvokeModel)의 지연 로딩과 gpt-6.1-terra(Converse)의
 ToolSearch → CronList 호출을 확인했고, 2026-09-24 Bedrock InvokeModel(Claude Haiku 4.5)에서
 서버 측 검색, 클라이언트 측 `tool_reference` 결과, 스트리밍을 `sensitiveData` 정책 유무별로

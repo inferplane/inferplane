@@ -34,10 +34,10 @@ Examples: [Anthropic/Bedrock](../../examples/config.json), [self-hosted](../../e
 ## Claude Code MCP tool search
 
 Claude Code 2.1.304 and later enable MCP tool search (deferred tool loading)
-by default through a custom `ANTHROPIC_BASE_URL`, and 2.1.311 keeps it on through
-the gateway on every route: it turns tool search off only for some models, for
-`ENABLE_TOOL_SEARCH=false` or with experimental betas disabled, never because of
-the endpoint. Older clients require
+by default through a custom `ANTHROPIC_BASE_URL`, and 2.1.311 kept it on through
+the gateway on the routes tested (InvokeModel and Converse): it turns tool search
+off only for some models, for `ENABLE_TOOL_SEARCH=false` or with experimental
+betas disabled, never because of the endpoint. Older clients require
 `ENABLE_TOOL_SEARCH=true` (or an `auto` setting) to enable it through `mayu`.
 Set `ENABLE_TOOL_SEARCH=false` to send every MCP tool definition up front.
 From 2.1.305, an unrecognized HTTP 400/422 can trigger a retry without tool
@@ -50,9 +50,10 @@ On Bedrock Converse (non-Claude models) Claude Code still defers tools: a loaded
 tool's definition arrives in the next request's tools, and the gateway sends a
 `tool_reference` result as `Loaded tool: <name>` text. Earlier gateway builds sent
 an empty tool result there, so the model could conclude the search found nothing.
-Verified on 2026-10-27 with Claude Code 2.1.311 through the gateway: deferred
-loading on Haiku 5.5 (InvokeModel) and a ToolSearch → CronList call on
-gpt-6.1-terra (Converse); and on 2026-09-24 against Bedrock InvokeModel (Claude
+The `Loaded tool:` rendering is covered by unit tests, not by a live run.
+Verified on 2026-10-27 with Claude Code 2.1.311 through the gateway, before that
+rendering: deferred loading on Haiku 5.5 (InvokeModel) and a ToolSearch → CronList
+call on gpt-6.1-terra (Converse); and on 2026-09-24 against Bedrock InvokeModel (Claude
 Haiku 4.5): server-side search, a client-side `tool_reference` result and
 streaming, with and without a `sensitiveData` policy. This is not qualification of
 every MCP server or model.

@@ -6651,7 +6651,7 @@ Expected: one new commit; `git status --short` lists no modified tracked files.
 - No repository files. Writes only under `/home/atomoh/.tmp/inferplane-path-remediation-20261029/verify/` (config, throwaway keys, fixture bodies, responses, logs) and `$L/logs/`.
 
 **Interfaces:**
-- Consumes the branch `mayu` binary, `internal/tokenest/testdata/fixtures` (Task 10), Bedrock through the EC2 instance role (`auth.mode: default`; account 180294183052, never the samples account).
+- Consumes the branch `mayu` binary, `internal/tokenest/testdata/fixtures` (Task 10), Bedrock through the EC2 instance role (`auth.mode: default`; the EC2 instance role's account).
 
 **Cost control (Design decision 16):** only `measured-prose-624k` and `measured-dense-398k` are meant to be billed (gpt-oss, $0.15/M input, `max_tokens` 16: about $0.03 together). Every other request is refused by the gateway, or by Bedrock because it exceeds the model's real window (gpt-oss 131,072 tokens: the overflow bodies by ≈2%, the calibration bodies by ≈2×; Claude Haiku 4.5 200,000 tokens: the Claude bodies by ≈2× on the o200k count), and Bedrock does not bill a refused request. Each loop stops at the first unexpected 200, so the worst case is one accepted Claude body (≈$0.40) on top of the expected $0.03. Step 7 sums the audited cost.
 

@@ -13,7 +13,7 @@ import (
 	"github.com/inferplane/inferplane/pkg/schema"
 )
 
-// The 2026-10-27 path check: CLAUDE_CODE_AUTO_MODE_MODEL set to a nonexistent
+// Measured 2026-10-27: CLAUDE_CODE_AUTO_MODE_MODEL set to a nonexistent
 // global.anthropic.claude-sonnet-9 was silently served by sonnet-5-5. The
 // served model stays the same; the substitution is now visible.
 func TestModelFallbackIsVisibleOnEveryIngress(t *testing.T) {

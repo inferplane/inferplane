@@ -142,6 +142,13 @@ unchanged. Those conservative checks can still refuse a multimodal request.
 Offline tests cover transport-size independence, oversized visible text,
 opaque/malformed inputs, exact forwarding and preserved governance refusal.
 
+**Superseded in part (2026-10-29):** the generation preflight, the count API
+estimates, TPM and token-quota admission now use the content-aware
+`internal/tokenest` estimate instead of bytes/4; inline images at recognized
+content positions count a nominal 1,600 tokens instead of being subtracted. See
+the [API reference](../reference/api.md). The rest of this section is retained as
+design history.
+
 ### Native error recovery signals (2026-10-08)
 
 Native Responses HTTP errors must preserve a bounded allowlist of protocol

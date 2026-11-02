@@ -8,7 +8,7 @@ import (
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 )
 
-// The 2026-10-27 path check: Claude Code's ToolSearch result on a Converse
+// Measured 2026-10-27: Claude Code's ToolSearch result on a Converse
 // model became an empty tool result, so the model could conclude the search
 // found nothing even though the tool definitions arrived on the next turn.
 func TestToolResultTextNamesLoadedTools(t *testing.T) {

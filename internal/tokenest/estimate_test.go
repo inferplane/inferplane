@@ -47,8 +47,8 @@ func TestEstimateTracksTokenizerPerClass(t *testing.T) {
 	}
 }
 
-// The 2026-10-27 path check measured these whole requests through the
-// gateway. bytes/4 rejected the prose case at 76% of the real window and let
+// These whole requests were measured through the gateway on 2026-10-27.
+// bytes/4 rejected the prose case at 76% of the real window and let
 // the dense case through to a Bedrock rejection.
 func TestEstimateReproducesMeasuredCases(t *testing.T) {
 	for _, tc := range []struct {
@@ -220,7 +220,7 @@ func TestEstimateChargesInlineImagesAtTheirNominalCost(t *testing.T) {
 		t.Run(tc.protocol, func(t *testing.T) {
 			got := Estimate(tc.protocol, []byte(tc.body))
 			if got < imageTokens || got > imageTokens+60 {
-				t.Fatalf("image request = %d tokens, want the %d-token image ceiling plus small text", got, imageTokens)
+				t.Fatalf("image request = %d tokens, want the nominal %d-token image cost plus small text", got, imageTokens)
 			}
 			if old := int64(len(tc.body) / 4); old < 3*imageTokens {
 				t.Fatalf("fixture too small to show the base64 discount: bytes/4 = %d", old)

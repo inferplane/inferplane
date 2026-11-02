@@ -1,6 +1,6 @@
 ---
 translation_source: reference/security.md
-translation_source_sha256: 9365808df993e7e9d3bb2ee67102731622202b7cf235fe120aed05fc8a9e74e4
+translation_source_sha256: 8e3e22c92417df5ae7d0ca6c51b2ae18c93571099105e8e5a0bb36a3baf12f54
 ---
 
 # 보안 {#security}
@@ -15,7 +15,7 @@ translation_source_sha256: 9365808df993e7e9d3bb2ee67102731622202b7cf235fe120aed0
 | --- | --- | --- |
 | 데이터 인증 | `internal/server/auth.go` | KeyAuth가 가상 키를 Principal로 해석 |
 | 관리 인증 | `internal/server/adminauth.go` | 하나의 Bearer에서 정적 비상 토큰·OIDC를 완전 분기. 401·403 구분과 거부 감사 |
-| OIDC 검증 | `internal/adminauth/` | 형태 판정, 그룹→팀, 알고리즘 고정, aud/azp, ±60초 오차, 발견 부정 캐시. `jwks.go`는 캐시된 키로 먼저 검증하고, 실패 후에는 대기 시간창마다 한 번만 JWKS를 단일 요청으로 다시 받으므로 모르는 kid·위조 서명 범람이 캐시된 키나 새로 교체된 키를 막지 못함 |
+| OIDC 검증 | `internal/adminauth/` | 형태 판정, 그룹→팀, 알고리즘 고정, aud/azp, ±60초 오차, 발견 부정 캐시. `jwks.go`는 캐시된 키로 먼저 검증하고, 실패 후에는 대기 시간창마다 한 번만 JWKS를 단일 요청으로 다시 받으므로 모르는 kid·위조 서명 범람이 캐시된 키를 막지 못하고, 새로 교체된 키는 대기 시간창 하나 안에 반영됨 |
 | 콘솔 SSO | `internal/server/adminui/static/app.js` | 브라우저 Code+PKCE, 게이트웨이는 리소스 서버. sessionStorage에는 verifier/state/nonce만 일시 저장, ID 토큰은 메모리만. 오류보다 state를 먼저 확인하고 textContent·replaceState·nonce 검사를 적용. 발견 엔드포인트 HTTPS 필수 |
 | 콘솔 CSP | `adminui.go`, gateway.go의 ssoConnectSrc | login_origins가 있으면 self·issuer origin·허용 로그인 origin만 connect-src에 추가. script/style은 self. 없으면 기존 CSP·숨긴 SSO 유지 |
 | CLI 로그인 | `cmd/mayu/login.go`, `internal/server/authapi/` | 콘솔과 별도의 client_id·검증기, 루프백 PKCE. HTTPS 또는 루프백, 발견 주소는 issuer 동일 출처·하위 도메인. issuer/client_id TOFU 고정, reset 없는 변경 거부. refresh token 캐시 없음. 만료·owner는 서버 결정, 주체별 발급 제한 |

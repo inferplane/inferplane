@@ -51,7 +51,7 @@ func TestInlineImageContextPreflightPreservesAdmissionAndWire(t *testing.T) {
 		for _, mode := range []string{"ordinary", "stream", "text-overflow", "tpm-block"} {
 			t.Run(path+"/"+mode, func(t *testing.T) {
 				probe := &contextOverflowProbe{Provider: mockprovider.New("m")}
-				// The image counts at its 1,600-token ceiling: within 2,000
+				// The image counts at its nominal 1,600 tokens: within 2,000
 				// together with short text, over it with 1,000 more words.
 				holder := newHolder(map[string]providers.Provider{"p": probe}, map[string]config.ModelConfig{
 					"m": {Targets: []config.Target{{Provider: "p", Model: "m"}}, ContextWindow: 2000, Capabilities: []string{"vision"}},

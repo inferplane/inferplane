@@ -23,7 +23,7 @@ func responsesBody(t *testing.T, stream bool, input string, tools bool) string {
 	return string(raw)
 }
 
-// The 2026-10-27 path check: Codex on the stateless bridge got 403 "no
+// Measured 2026-10-27: Codex on the stateless bridge got 403 "no
 // policy-permitted compatible Responses target" for an over-window request
 // and retried it unchanged five times. A size-only refusal is now the same
 // recoverable 400 the native preflight returns; other refusals keep 403.

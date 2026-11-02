@@ -337,11 +337,10 @@ func governanceGateMiddleware(gate func() (bool, string), next http.Handler) htt
 // oversized body must not OOM the gateway). A declared Content-Length over
 // the limit is rejected immediately with 413 — cheap, nothing is read. An
 // undeclared or understated length is still capped by http.MaxBytesReader,
-// whose read error surfaces through the SAME io.ReadAll each generation
-// ingress already treats as a malformed body — so this wrap changes no
-// handler's error path, only whether/when it fires. The two count_tokens
-// handlers use a local estimate on read errors. Declared oversized counts must
-// also reach that bounded reader, preserving their 200 contract after KeyAuth.
+// whose read error each generation ingress answers with the same
+// protocol-shaped 413. The two count_tokens handlers use a local estimate on
+// read errors. Declared oversized counts must also reach that bounded reader,
+// preserving their 200 contract after KeyAuth.
 func maxBytesMiddleware(limit int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count := strings.HasSuffix(r.URL.Path, "/count_tokens") || strings.HasSuffix(r.URL.Path, "/count-tokens")

@@ -183,7 +183,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	tracing.SetGenAIRequest(span, model)
-	// The router applied this same estimate to the explicitly requested model.
+	// The router applies the same estimator to the explicitly requested model.
 	estimate := tokenest.Estimate("responses", raw)
 	if limit := requestpolicy.ContextWindow(st, model); limit > 0 && estimate > limit {
 		h.denied(req, p, model, 400, "context_window_exceeded", start)

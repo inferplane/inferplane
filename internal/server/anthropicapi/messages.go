@@ -303,7 +303,7 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// VALID requests; anything borderline falls through to the upstream's
 	// exact check, whose recognized overflow is mapped to the same recoverable
 	// error (providers/bedrock/errors.go). Inline images count at their
-	// per-image ceiling, not as base64 text. Runs before PreCheck so a refused
+	// nominal per-image cost, not as base64 text. Runs before PreCheck so a refused
 	// request never charges the TPM estimate. Keep the Anthropic "prompt is too
 	// long: N tokens > M" spelling: Claude Code uses it to recognize overflow
 	// and size compaction. A generic 400 instead triggers model fallback with

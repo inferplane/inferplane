@@ -3,9 +3,9 @@
 // tokenizer: it splits decoded JSON text into character-class runs the way BPE
 // tokenizers pre-split text and charges each run a calibrated rate
 // (estimate_test.go records the calibration against o200k_base and the
-// 2026-10-27 gateway measurements). Inline images cost a fixed per-image
-// ceiling; other base64 payloads keep the historical rate of four bytes per
-// token. The package is a stdlib-only leaf.
+// 2026-10-27 gateway measurements). Inline images cost a fixed nominal
+// per-image amount; other base64 payloads keep the historical rate of four
+// bytes per token. The package is a stdlib-only leaf.
 package tokenest
 
 import (
@@ -132,7 +132,7 @@ func stringEnd(raw []byte, start int) int {
 
 // valueCost charges one quoted string value. Opaque base64 (and base64 data
 // URLs) keep four bytes per token: decoding and tokenizing them as text would
-// overstate them, and only images have a known token ceiling.
+// overstate them, and only images have a known nominal token cost.
 func valueCost(quoted []byte) (int64, bool) {
 	content := quoted[1 : len(quoted)-1]
 	if opaqueBase64(content) {

@@ -15,7 +15,7 @@ import (
 	"github.com/inferplane/inferplane/providers/testing/mockprovider"
 )
 
-// The 2026-10-27 path check: a 65 MiB Content-Length got
+// Measured 2026-10-27: a 65 MiB Content-Length got
 // {"error":"request body too large"} on every ingress, an envelope no client
 // parses, and an undeclared oversized body got a generic 400 on most of them.
 func TestOversizedBodyIsProtocolShaped(t *testing.T) {
