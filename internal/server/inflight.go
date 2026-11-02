@@ -56,18 +56,18 @@ func countPath(path string) bool {
 func inflightMiddleware(b *inflightBudget, requestLimit int64, m *metrics.Metrics, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := r.ContentLength
-		if n < 0 {
-			n = requestLimit
+		if n < 0 || n > requestLimit {
+			n = requestLimit // an oversized declaration is refused by the cap, never reserved in full
 		}
 		if n == 0 {
 			next.ServeHTTP(w, r)
 			return
 		}
-		used, ok := b.acquire(n)
+		_, ok := b.acquire(n)
 		if !ok {
 			if countPath(r.URL.Path) {
 				m.IncInflightRefusal("count")
-				writeLocalCount(w, r)
+				writeLocalCount(w, r, requestLimit)
 				return
 			}
 			m.IncInflightRefusal("generation")
@@ -76,19 +76,20 @@ func inflightMiddleware(b *inflightBudget, requestLimit int64, m *metrics.Metric
 				"gateway is processing too many large requests; retry shortly")
 			return
 		}
-		m.SetInflightRequestBytes(used)
-		defer func() { m.SetInflightRequestBytes(b.release(n)) }()
+		m.AddInflightRequestBytes(n)
+		defer func() { b.release(n); m.AddInflightRequestBytes(-n) }()
 		next.ServeHTTP(w, r)
 	})
 }
 
 // writeLocalCount answers a count request without holding its body: the
 // declared length, or the bytes drained from a bounded undeclared body.
-func writeLocalCount(w http.ResponseWriter, r *http.Request) {
+func writeLocalCount(w http.ResponseWriter, r *http.Request, requestLimit int64) {
 	size := r.ContentLength
 	if size < 0 {
 		size, _ = io.Copy(io.Discard, r.Body)
 	}
+	size = min(size, requestLimit) // the count handlers never see more than the cap
 	field := "input_tokens"
 	if strings.HasPrefix(r.URL.Path, "/model/") {
 		field = "inputTokens" // Bedrock CountTokens shape

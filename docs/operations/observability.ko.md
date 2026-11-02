@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: 8f12908fb99b9a13880bec5f63868d316ab8e29c7bfda1674428c395eb76cc7d
+translation_source_sha256: 0ca3d11d2741395f08f2fdc447e61985be44c1dc8338d9282217ab0f0c145637
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -37,7 +37,7 @@ translation_source_sha256: 8f12908fb99b9a13880bec5f63868d316ab8e29c7bfda1674428c
 | `inferplane_usage_windows_dropped_total` | 분석 전달 손실. 권한 회계와 구분 |
 | `process_resident_memory_bytes`, `go_memstats_heap_inuse_bytes`, `go_goroutines` | 메모리 증가. 처리 중인 요청 본문마다 여러 사본을 보유하므로(실측 약 5.5배) 동시에 들어온 큰 본문이 대부분을 차지 |
 | `inferplane_model_fallback_total` | 라우팅되지 않은 모델 ID 요청(오타·새 별칭). 로그 `router: model fallback`에 요청 ID가 남음 |
-| `inferplane_inflight_refusals_total`, `inferplane_inflight_request_bytes` | 동시 처리 본문 예산(`server.max_inflight_request_bytes`)이 작업량보다 작거나 큰 요청이 몰림 |
+| `inferplane_inflight_refusals_total`, `inferplane_inflight_request_bytes` | 동시 처리 본문 예산(`server.max_inflight_request_bytes`)이 작업량보다 작거나, 큰 요청이 몰리거나, 느리거나 멈춘 요청 본문이 끝나거나 연결이 닫힐 때까지 예약을 붙잡고 있음(예산은 `server.max_request_bytes`의 여러 배로 설정, `route`는 `generation` 또는 `count`) |
 
 실측 트래픽과 프로파일에 따라 임계값을 정하세요. Prometheus 비용은 관측값입니다. 사용 가능한 잔액은 정수 회계 기록과 확정된 권한 예약이 결정합니다.
 

@@ -32,7 +32,7 @@ Start with the [Grafana dashboard](../../deploy/grafana/inferplane.json). Config
 | `inferplane_usage_windows_dropped_total` | Analytics delivery loss; distinguish from authority accounting |
 | `process_resident_memory_bytes`, `go_memstats_heap_inuse_bytes`, `go_goroutines` | Memory growth: the gateway holds several copies of every request body being processed (about 5.5× measured), so concurrent large bodies dominate |
 | `inferplane_model_fallback_total` | Clients requesting unrouted model IDs (a typo or a newer alias); the log line `router: model fallback` names the requested ID |
-| `inferplane_inflight_refusals_total`, `inferplane_inflight_request_bytes` | In-flight body budget (`server.max_inflight_request_bytes`) too small for the workload, or a burst of large requests |
+| `inferplane_inflight_refusals_total`, `inferplane_inflight_request_bytes` | In-flight body budget (`server.max_inflight_request_bytes`) too small for the workload, a burst of large requests, or a slow or stalled request body holding its reservation until it finishes or the connection closes (size the budget at several times `server.max_request_bytes`; `route` is `generation` or `count`) |
 
 Choose thresholds from measured traffic and the selected profile. Prometheus spend is observational; integer accounting records and authority commitments determine available balance.
 

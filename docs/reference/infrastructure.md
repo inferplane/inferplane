@@ -52,7 +52,12 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
   `Retry-After: 2`; a count request stays HTTP 200 with a local estimate of four
   bytes per token. Ingress holds several copies of each body (about 5.5×
   measured on 2026-10-27), so size the budget as (memory limit − idle RSS) / 6
-  and also set `GOMEMLIMIT` and the container or systemd memory limit.
+  and also set `GOMEMLIMIT` and the container or systemd memory limit. A request
+  whose body arrives slowly or stalls keeps its reservation until the body
+  finishes, the client gives up or the connection closes (there is no body read
+  deadline), so size the budget at several times `server.max_request_bytes`: an
+  equal value lets one stalled upload refuse every other request. Watch
+  `inferplane_inflight_refusals_total{route}`.
 - Default/local mode is single-replica. ADR-046 shared Postgres mode supports multiple gateways; the chart rejects unsafe local replication. Persistent shared mode renders a StatefulSet with separate PVCs, required node anti-affinity and a disruption budget. See [shared governance](../shared-governance.md).
 - **Persistence:** local mode retains its existing Deployment/PVC behavior. Shared mode stores keys and counters in Postgres; per-replica PVCs hold independent audit segments. Do not share one audit WAL between replicas.
 - The chart references an `existingSecret` and never creates secrets (design §7).

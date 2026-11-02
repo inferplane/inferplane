@@ -188,6 +188,15 @@ func (m *Metrics) SetInflightRequestBytes(n int64) {
 	m.inflightBytes.Set(float64(n))
 }
 
+// AddInflightRequestBytes adjusts the in-flight gauge by delta; deltas commute,
+// so concurrent updates cannot leave a stale value at idle.
+func (m *Metrics) AddInflightRequestBytes(delta int64) {
+	if m == nil {
+		return
+	}
+	m.inflightBytes.Add(float64(delta))
+}
+
 // IncInflightRefusal counts one request that did not fit the in-flight budget;
 // route is "generation" or "count".
 func (m *Metrics) IncInflightRefusal(route string) {

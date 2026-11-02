@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/inferplane/inferplane/internal/adminauth"
@@ -201,4 +202,69 @@ func TestInflightBudgetHeldByStreamsAndUndeclaredLengths(t *testing.T) {
 	}
 	close(held.release)
 	<-done
+}
+
+func inflightGauge(t *testing.T, m *metrics.Metrics) float64 {
+	t.Helper()
+	families, err := m.Registry().Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() == "inferplane_inflight_request_bytes" {
+			return family.GetMetric()[0].GetGauge().GetValue()
+		}
+	}
+	t.Fatal("inferplane_inflight_request_bytes not registered")
+	return 0
+}
+
+// A count declaring more than the per-request cap reserves at most the cap and,
+// when it does not fit, is answered with the cap-bound estimate the count
+// handlers themselves would give (never CL/4).
+func TestInflightOversizedCountIsClamped(t *testing.T) {
+	const limit = 4096
+	b := &inflightBudget{limit: limit}
+	var reserved int64
+	h := inflightMiddleware(b, limit, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reserved = b.used
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader("{}"))
+	req.ContentLength = 1 << 40
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if reserved != limit {
+		t.Fatalf("oversized declared length reserved %d, want the %d cap", reserved, limit)
+	}
+
+	b.used = limit // budget full
+	for path, field := range map[string]string{"/v1/messages/count_tokens": "input_tokens", "/model/m/count-tokens": "inputTokens"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
+		req.ContentLength = 1 << 40
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		var out map[string]int64
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || out[field] != limit/4 {
+			t.Fatalf("%s = %d %s, want 200 with %d", path, rec.Code, rec.Body.String(), limit/4)
+		}
+	}
+}
+
+func TestInflightGaugeReturnsToZero(t *testing.T) {
+	m := metrics.New()
+	b := &inflightBudget{limit: 1 << 30}
+	h := inflightMiddleware(b, 1<<20, m, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	var wg sync.WaitGroup
+	for i := range 200 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("x"))
+			req.ContentLength = int64(100 + i)
+			h.ServeHTTP(httptest.NewRecorder(), req)
+		}()
+	}
+	wg.Wait()
+	if g := inflightGauge(t, m); g != 0 {
+		t.Fatalf("idle gauge = %v, want 0", g)
+	}
 }
