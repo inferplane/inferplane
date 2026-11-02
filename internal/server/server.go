@@ -335,13 +335,7 @@ func maxBytesMiddleware(limit int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count := strings.HasSuffix(r.URL.Path, "/count_tokens") || strings.HasSuffix(r.URL.Path, "/count-tokens")
 		if r.ContentLength > limit && !count {
-			if strings.HasPrefix(r.URL.Path, "/model/") {
-				bedrockapi.WriteError(w, http.StatusRequestEntityTooLarge, "request body too large")
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusRequestEntityTooLarge)
-			_, _ = w.Write([]byte(`{"error":"request body too large"}`))
+			writeIngressError(w, r.URL.Path, http.StatusRequestEntityTooLarge, "request_too_large", "invalid_request_error", "", "request body too large")
 			return
 		}
 		if r.ContentLength > limit && count {

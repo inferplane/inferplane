@@ -116,6 +116,13 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	raw, err := io.ReadAll(req.Body)
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			// An undeclared length over server.max_request_bytes gets the same
+			// 413 as a declared one (server.maxBytesMiddleware).
+			writeErr(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "could not read request body")
 		return
 	}

@@ -61,12 +61,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	req = req.WithContext(ctx)
 	raw, err := io.ReadAll(req.Body)
 	if err != nil {
-		status := http.StatusBadRequest
 		var oversized *http.MaxBytesError
 		if errors.As(err, &oversized) {
-			status = http.StatusRequestEntityTooLarge
+			writeError(w, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body too large")
+			return
 		}
-		writeError(w, status, "invalid_request_error", "could not read request body")
+		writeError(w, http.StatusBadRequest, "invalid_request_error", "could not read request body")
 		return
 	}
 	parsed, err := responses.RequestToCanonical(raw)
