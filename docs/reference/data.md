@@ -78,7 +78,9 @@ partial TTL counts remain recorded. Uncertain usage debits only validated observ
 tokens to daily quota, while TPM retains the admission estimate as a minimum;
 no estimated daily-quota debit is fabricated. Negative admission estimates use
 the distinct `invalid_token_estimate` audit deny code before consuming any
-limits. See ADR-039.
+limits. See ADR-039. The admission estimate is `internal/tokenest`'s
+content-aware request estimate, the same value as the context gate and the local
+count answer.
 
 ### 4. Code Pointers
 

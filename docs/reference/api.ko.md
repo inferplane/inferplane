@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: 5a9d7c8c94b999f7e3b6a100392582f8b29e749a0eb351265f06f9bbf4e8b993
+translation_source_sha256: 04eb185ffe00bff7bb35f6d73270dcb52a004b9a6cf435aca9dd63f7e5963494
 ---
 
 # API 구현 {#api}
@@ -48,19 +48,22 @@ Messages·Chat Completions·Responses·Bedrock 수신과 상태·메트릭·키 
 
 ### 3. 주요 결정 {#3-key-decisions}
 
-Messages·Chat Completions·Bedrock Invoke의 컨텍스트 사전 검사 실패는 각 수신
+Messages·Chat Completions·Bedrock Invoke/Converse의 컨텍스트 사전 검사 실패는 각 수신
 프로토콜의 오류 형식 안에 `prompt is too long: N tokens > M maximum` 문구를
 넣어 HTTP 400으로 반환합니다. Claude Code는 이 문구를 일반 모델 폴백 대신
 압축 복구 대상으로 인식하고 초과량을 추출합니다. `N`은 업스트림 토크나이저의
-실측값이 아닌 거친 텍스트 추정치입니다. 원문 바이트/4가 선언 한도를 넘으면,
-Responses를 포함한 생성 사전 검사에서 알려진 콘텐츠 위치의 유효한 인라인 이미지
-base64를 제외하고 다시 검사합니다. 이미지 토큰과 전체 컨텍스트의 검증은
-업스트림이 담당하며, 제외했다고 이미지가 한도 안에 들어간다는 뜻은 아닙니다.
-텍스트·도구 스키마와 인자·알 수 없는 미디어·불투명 상태는 계속 계산합니다.
-count 엔드포인트, TPM·쿼터 추정, 금전 예약, 개인정보 검사, 자동·엄격 타깃의
-보수적인 용량 검사는 바꾸지 않습니다. 클라이언트 표시 윈도우와 게이트웨이 선언은
-독립적입니다. 남은 입력이 한도에 들어가지 않으면 압축은 계속 실패할 수 있으며,
-모델 한도를 더 크게 가정하면 안 됩니다.
+실측값이 아닌 게이트웨이의 내용 기반 추정치(`internal/tokenest`)입니다. 디코딩한 JSON
+텍스트를 문자 종류별 구간으로 나눠 보정된 비율을 적용하며(영문 산문·코드·숫자 위주
+텍스트는 o200k_base 대비 3% 이내, 자연스러운 한국어는 약 9% 많게, 무작위에 가까운
+음절과 hex는 적게 추정), 알려진 콘텐츠 위치의 인라인 이미지는 하나당 1,600토큰,
+그 밖의 base64(문서·서명·불투명 상태)는 4바이트당 1토큰으로 셉니다. 바이트/4는 영문
+산문을 약 60% 과대 추정해 실제 창의 76%에서 거절했고 숫자·hex·한국어는 과소
+추정했습니다. 같은 추정치를 로컬 `count_tokens` 응답, TPM PreCheck 예약, 명시적으로
+선택한 Responses 모델의 라우팅 용량에 사용합니다. 금전 예약, 개인정보 검사, 자동·엄격
+타깃의 보수적인 용량 검사는 바꾸지 않습니다. 경계에 가까운 요청은 업스트림으로 가며,
+인식된 업스트림 초과 오류는 같은 복구 가능 오류로 바뀝니다. 클라이언트 표시 윈도우와
+게이트웨이 선언은 독립적입니다. 남은 입력이 한도에 들어가지 않으면 압축은 계속 실패할
+수 있으며, 모델 한도를 더 크게 가정하면 안 됩니다.
 
 키 인증이 성공하면 count_tokens는 별칭을 정규화하고 라우팅·준비 상태 거부에도 200을 반환합니다. 없거나 잘못된 키는 핸들러 실행 전 401을 받습니다. 같은 프로토콜이면 원문 전달, 다르면 정규 변환을 적용합니다. 별칭은 RBAC·라우팅·감사·메트릭 전에 정규 이름으로 바꿉니다. Anthropic 원문 경로는 최상위 model만 바꾸고 중첩 cache_control과 HTML 이스케이프 상태를 보존합니다. 오류는 수신 형식이며 허용된 가용 모델 목록을 표시합니다. `server.max_request_bytes`를 넘는 본문은 Content-Length 선언 여부와 관계없이 수신 형식의 HTTP 413을 받습니다. Anthropic은 `request_too_large`, Chat Completions·Responses는 `invalid_request_error`, Bedrock은 `ValidationException`입니다(이전에는 `{"error":"request body too large"}`였고 길이를 선언하지 않으면 400이었습니다). count 엔드포인트는 계속 로컬 추정치로 200을 반환합니다. `server.max_inflight_request_bytes`를 설정하면 동시 처리 본문 예산에 들어가지 못한 생성 요청은 같은 형식의 503과 `Retry-After: 2`를 받습니다(Anthropic `overloaded_error`, Chat Completions·Responses는 코드 `gateway_overloaded`의 `server_error`, Bedrock `ServiceUnavailableException`). 들어가지 못한 count 요청은 본문을 버퍼링하지 않고 로컬에서 답합니다(HTTP 200, 4바이트당 1토큰).
 

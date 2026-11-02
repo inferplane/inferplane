@@ -88,8 +88,9 @@ including when it resolves another model. The helper adds no global
 context-window override.
 
 For an explicitly selected portable Responses model, gateway context admission
-uses the existing ingress estimate, `max(1, request_bytes / 4)`, plus the requested
-output budget. This is an estimate, not the backend's tokenizer. The sensitivity
+uses the ingress estimate (`internal/tokenest`, the same value as the handler's
+preflight) plus the requested output budget. This is an estimate, not the
+backend's tokenizer. The sensitivity
 inspector's larger byte-based ceiling also accounts for recursively decoded JSON;
 it must not be mistaken for this model's actual input-token count. Automatic
 alternatives, strict budget targets and InternalOnly targets keep conservative

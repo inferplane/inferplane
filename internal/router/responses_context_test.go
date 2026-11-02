@@ -11,6 +11,7 @@ import (
 	"github.com/inferplane/inferplane/internal/config"
 	"github.com/inferplane/inferplane/internal/responses"
 	"github.com/inferplane/inferplane/internal/sensitivity"
+	"github.com/inferplane/inferplane/internal/tokenest"
 )
 
 func responsesContextConfig() *config.Config {
@@ -30,8 +31,9 @@ func responsesContextConfig() *config.Config {
 func responsesContextSetup(t *testing.T, cfg *config.Config, tools bool) (*Router, RequestRoutingInput) {
 	t.Helper()
 	r, in := routingSetup(t, cfg)
-	// Entirely synthetic, exactly 8192 wire bytes: the existing ingress
-	// estimate is 2048 input tokens, plus the explicit 64-token output bound.
+	// Entirely synthetic, exactly 8192 wire bytes: the ingress estimate stays
+	// far below the 4096-token window while the inspector's conservative byte
+	// ceiling exceeds it; the explicit output bound is 64 tokens.
 	prefix := `{"model":"premium","input":"Contact person@example.test. `
 	suffix := `","max_output_tokens":64`
 	if tools {
@@ -77,7 +79,7 @@ func TestResponsesRequestedContextUsesIngressEstimate(t *testing.T) {
 
 // requestedTokens is the ingress estimate the router applies to the explicitly
 // requested Responses model (handler preflight uses the same value).
-func requestedTokens(raw []byte) int64 { return max(int64(1), int64(len(raw)/4)) }
+func requestedTokens(raw []byte) int64 { return tokenest.Estimate("responses", raw) }
 
 func TestResponsesRequestedContextRetainsAdmissionGuards(t *testing.T) {
 	_, probe := responsesContextSetup(t, responsesContextConfig(), true)

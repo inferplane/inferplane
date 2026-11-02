@@ -15,6 +15,7 @@ import (
 	"github.com/inferplane/inferplane/internal/live"
 	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/sensitivity"
+	"github.com/inferplane/inferplane/internal/tokenest"
 	"github.com/inferplane/inferplane/providers"
 )
 
@@ -711,7 +712,7 @@ func (b requestBoundary) filter(chain []ChainTarget, automatic bool) []ChainTarg
 			// capability checks and invalid-estimate rejection unchanged.
 			if b.in.Protocol == "responses" && !automatic && ct.Model == requested && ct.Model == b.in.Model &&
 				b.models == nil && b.budgetModel == "" && capacity.InputTokens >= 0 {
-				capacity.InputTokens = max(int64(1), int64(len(b.in.RawBody)/4))
+				capacity.InputTokens = tokenest.Estimate(b.in.Protocol, b.in.RawBody)
 			}
 			if b.ignoreContext && capacity.InputTokens >= 0 && capacity.OutputTokens >= 0 {
 				capacity.InputTokens, capacity.OutputTokens = 0, 0

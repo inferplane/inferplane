@@ -18,6 +18,7 @@ import (
 	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/limiter"
 	"github.com/inferplane/inferplane/internal/router"
+	"github.com/inferplane/inferplane/internal/tokenest"
 	"github.com/inferplane/inferplane/providers"
 	"github.com/inferplane/inferplane/providers/testing/mockprovider"
 )
@@ -50,8 +51,10 @@ func TestInlineImageContextPreflightPreservesAdmissionAndWire(t *testing.T) {
 		for _, mode := range []string{"ordinary", "stream", "text-overflow", "tpm-block"} {
 			t.Run(path+"/"+mode, func(t *testing.T) {
 				probe := &contextOverflowProbe{Provider: mockprovider.New("m")}
+				// The image counts at its 1,600-token ceiling: within 2,000
+				// together with short text, over it with 1,000 more words.
 				holder := newHolder(map[string]providers.Provider{"p": probe}, map[string]config.ModelConfig{
-					"m": {Targets: []config.Target{{Provider: "p", Model: "m"}}, ContextWindow: 1000, Capabilities: []string{"vision"}},
+					"m": {Targets: []config.Target{{Provider: "p", Model: "m"}}, ContextWindow: 2000, Capabilities: []string{"vision"}},
 				})
 				var gov *governance.Governor
 				if mode == "tpm-block" {
@@ -138,8 +141,12 @@ func TestContextOverflowSupportsClientCompaction(t *testing.T) {
 				} else if reply.Error.Type != "invalid_request_error" {
 					t.Fatalf("lost ingress error type: %s", rec.Body.String())
 				}
+				protocol := map[bool]string{true: "bedrock", false: "anthropic"}[strings.HasPrefix(path, "/model/")]
+				if path == "/v1/chat/completions" {
+					protocol = "openai"
+				}
 				counts := clientCounts.FindStringSubmatch(message)
-				if len(counts) != 3 || counts[1] != strconv.Itoa(len(body)/4) || counts[2] != strconv.Itoa(window) {
+				if len(counts) != 3 || counts[1] != strconv.FormatInt(tokenest.Estimate(protocol, []byte(body)), 10) || counts[2] != strconv.Itoa(window) {
 					t.Fatalf("client cannot recognize overflow and size its compaction: %q", message)
 				}
 				if !strings.Contains(message, "estimate") || !strings.Contains(strings.ToLower(message), "compact") {

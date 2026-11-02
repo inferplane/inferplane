@@ -32,6 +32,7 @@ import (
 	"github.com/inferplane/inferplane/internal/router"
 	"github.com/inferplane/inferplane/internal/server/requestpolicy"
 	"github.com/inferplane/inferplane/internal/telemetry"
+	"github.com/inferplane/inferplane/internal/tokenest"
 	"github.com/inferplane/inferplane/internal/tracing"
 	"github.com/inferplane/inferplane/pkg/schema"
 	"github.com/inferplane/inferplane/pkg/ulid"
@@ -280,14 +281,11 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	table := st.Pricing()
 	// Context-window fast-fail (same rule and rationale as anthropicapi's —
 	// estimate-only, before PreCheck, clear message; deliberate per-package
-	// duplication like subjectOf).
+	// duplication like subjectOf). The same estimate feeds PreCheck.
+	est := estimateTokens(raw)
 	if win := requestpolicy.ContextWindow(st, model); win > 0 {
-		est := estimateTokens(raw)
 		if est > win {
-			est = requestpolicy.ContextTextEstimate("openai", raw)
-		}
-		if est > win {
-			msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum (gateway text estimate excluding inline image payloads; model %s has a %d-token context window). Compact the conversation or reduce the input.", est, win, model, win)
+			msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum (gateway estimate; model %s has a %d-token context window). Compact the conversation or reduce the input.", est, win, model, win)
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "context window exceeded")
@@ -309,7 +307,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if h.gov != nil {
-		dec := h.gov.PreCheck(subjectOf(p), keyPolicyOf(p), estimateTokens(raw))
+		dec := h.gov.PreCheck(subjectOf(p), keyPolicyOf(p), est)
 		if !dec.Allowed {
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
@@ -700,14 +698,10 @@ func (h *ChatHandler) observeTokens(model, provider, team string, u *schema.Usag
 	h.metrics.ObserveTokenUsage("cache_write_1h", model, provider, team, write1h)
 }
 
-// estimateTokens is the conservative input-token estimate fed to the governance
-// pre-check. ~4 bytes per token over the raw request body.
+// estimateTokens is the Chat Completions context gate and PreCheck estimate
+// (internal/tokenest).
 func estimateTokens(raw []byte) int64 {
-	n := int64(len(raw) / 4)
-	if n < 1 {
-		n = 1
-	}
-	return n
+	return tokenest.Estimate("openai", raw)
 }
 
 // recordSpanResponse sets response-side GenAI attributes + terminal status on the

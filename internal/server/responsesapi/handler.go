@@ -24,6 +24,7 @@ import (
 	"github.com/inferplane/inferplane/internal/sensitivity"
 	"github.com/inferplane/inferplane/internal/server/requestpolicy"
 	"github.com/inferplane/inferplane/internal/telemetry"
+	"github.com/inferplane/inferplane/internal/tokenest"
 	"github.com/inferplane/inferplane/internal/tracing"
 	"github.com/inferplane/inferplane/providers"
 )
@@ -182,8 +183,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	tracing.SetGenAIRequest(span, model)
-	estimate := max(int64(1), int64(len(raw)/4))
-	if limit := requestpolicy.ContextWindow(st, model); limit > 0 && estimate > limit && requestpolicy.ContextTextEstimate("responses", raw) > limit {
+	// The router applied this same estimate to the explicitly requested model.
+	estimate := tokenest.Estimate("responses", raw)
+	if limit := requestpolicy.ContextWindow(st, model); limit > 0 && estimate > limit {
 		h.denied(req, p, model, 400, "context_window_exceeded", start)
 		writeCodedError(w, 400, "request exceeds the configured context window", "context_length_exceeded")
 		return

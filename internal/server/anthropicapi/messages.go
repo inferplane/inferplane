@@ -293,28 +293,24 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Pricing table from the SAME generation we resolved on (ADR-006): a reload
 	// between now and Settle must not bill at a different generation's rates.
 	table := st.Pricing()
+	// One content-aware estimate (internal/tokenest) of the final body serves
+	// the context gate, every retry target's gate and the TPM PreCheck.
+	est := estimateTokens(raw)
 	// Context-window fast-fail: when the operator declared the model's window
-	// (config models.<name>.context_window) and the COARSE non-image byte
-	// estimate already exceeds it, refuse with a message naming both numbers —
-	// the upstream's own rejection reaches the client as an opaque scrubbed
-	// ValidationException (providers/bedrock/errors.go never echoes upstream
-	// text). Estimate-only, no max_tokens added: the estimate is an upper-ish
-	// bound and adding output budget would false-reject borderline VALID
-	// requests; anything borderline falls through to the upstream's exact
-	// check. Large inline-image requests need a second pass: base64 transport
-	// bytes are not text tokens, and image/combined-context validation belongs
-	// to the upstream. This does not change the governance/settlement estimate.
-	// Runs before PreCheck so a refused request never charges the TPM estimate.
-	// Keep the Anthropic "prompt is too long: N tokens > M" spelling: Claude
-	// Code uses it to recognize overflow and size compaction. A generic 400
-	// instead triggers model fallback with the same oversized history.
+	// (config models.<name>.context_window) and the estimate already exceeds
+	// it, refuse with a message naming both numbers. Estimate-only, no
+	// max_tokens added: adding output budget would false-reject borderline
+	// VALID requests; anything borderline falls through to the upstream's
+	// exact check, whose recognized overflow is mapped to the same recoverable
+	// error (providers/bedrock/errors.go). Inline images count at their
+	// per-image ceiling, not as base64 text. Runs before PreCheck so a refused
+	// request never charges the TPM estimate. Keep the Anthropic "prompt is too
+	// long: N tokens > M" spelling: Claude Code uses it to recognize overflow
+	// and size compaction. A generic 400 instead triggers model fallback with
+	// the same oversized history.
 	if win := requestpolicy.ContextWindow(st, model); win > 0 {
-		est := estimateTokens(raw)
 		if est > win {
-			est = requestpolicy.ContextTextEstimate("anthropic", raw)
-		}
-		if est > win {
-			msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum (gateway text estimate excluding inline image payloads; model %s has a %d-token context window). Compact the conversation or reduce the input.", est, win, model, win)
+			msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum (gateway estimate; model %s has a %d-token context window). Compact the conversation or reduce the input.", est, win, model, win)
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "context window exceeded")
@@ -338,7 +334,7 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if h.gov != nil {
-		dec := h.gov.PreCheck(subjectOf(p), keyPolicyOf(p), estimateTokens(raw))
+		dec := h.gov.PreCheck(subjectOf(p), keyPolicyOf(p), est)
 		if !dec.Allowed {
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, false, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
@@ -361,14 +357,12 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	for i, ct := range chain {
 		// Revalidate the current target before reserving or dispatching:
 		// a fallback model can have a smaller window than the first choice.
-		if win := requestpolicy.ContextWindow(st, ct.Model); i > 0 && win > 0 && estimateTokens(raw) > win {
-			if est := requestpolicy.ContextTextEstimate("anthropic", raw); est > win {
-				msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum (gateway text estimate excluding inline image payloads; model %s has a %d-token context window). Compact the conversation or reduce the input.", est, win, ct.Model, win)
-				h.audit(req.Context(), p, ct.Model, ct.Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
-				h.metrics.ObserveRequest(ingressName, ct.Model, ct.ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
-				writeErr(w, http.StatusBadRequest, "invalid_request_error", msg)
-				return
-			}
+		if win := requestpolicy.ContextWindow(st, ct.Model); i > 0 && win > 0 && est > win {
+			msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum (gateway estimate; model %s has a %d-token context window). Compact the conversation or reduce the input.", est, win, ct.Model, win)
+			h.audit(req.Context(), p, ct.Model, ct.Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
+			h.metrics.ObserveRequest(ingressName, ct.Model, ct.ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
+			writeErr(w, http.StatusBadRequest, "invalid_request_error", msg)
+			return
 		}
 		// Inject the trace context into a CLONE of the inbound headers per attempt
 		// (ADR-011 gate): never mutate the shared req.Header or bleed across
