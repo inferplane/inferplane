@@ -190,8 +190,14 @@ func decodedCost(content []byte) int64 {
 		case 'n', 'r':
 			c.add('\n')
 			i += 2
-		case 't', 'b', 'f':
+		case 't':
 			c.add('\t')
+			i += 2
+		case 'b':
+			c.add('\b')
+			i += 2
+		case 'f':
+			c.add('\f')
 			i += 2
 		case 'u':
 			r, size := unicodeEscape(content[i:])

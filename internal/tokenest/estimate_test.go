@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/inferplane/inferplane/internal/tokenest/tokenesttest"
 )
@@ -256,5 +257,40 @@ func BenchmarkEstimateDense16MiB(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		Estimate("anthropic", body)
+	}
+}
+
+// Byte-level BPE tokenizers emit at most one token per UTF-8 byte, and rare
+// scripts approach that bound (o200k_base: about 0.99 tokens per byte for
+// random CJK Extension B, Tangut and Cuneiform; one token per character for
+// backspace and form feed). The estimate keeps at least bytes/4 for these
+// classes, so a reservation never falls below the plain byte-length rule.
+func TestEstimateKeepsByteBoundForRareRunes(t *testing.T) {
+	gen := func(lo, n rune) string {
+		var b strings.Builder
+		for i := rune(0); i < 40_000; i++ {
+			b.WriteRune(lo + i%n)
+		}
+		return b.String()
+	}
+	for _, tc := range []struct{ name, text string }{
+		{"cjk extension b", gen(0x20000, 0xA6D0)},
+		{"tangut", gen(0x17000, 0x17F0)},
+		{"cuneiform", gen(0x12000, 0x399)},
+		{"yi", gen(0xA000, 0x48C)},
+		{"cherokee", gen(0x13A0, 0x55)},
+		{"canadian syllabics", gen(0x1401, 0x26B)},
+		{"lone symbol before rare letter", strings.Repeat(string(rune(0x1F600))+string(rune(0x20000)), 20_000)},
+	} {
+		got := Estimate("anthropic", tokenesttest.AnthropicBody("m", tc.text))
+		if floor := int64(len(tc.text) / 4); got < floor {
+			t.Errorf("%s: estimate %d < UTF-8 bytes/4 = %d (%d runes)", tc.name, got, floor, utf8.RuneCountInString(tc.text))
+		}
+	}
+	for _, esc := range []string{bs + "b", bs + "f", bs + "u000b"} {
+		body := []byte(`{"messages":[{"role":"user","content":"` + strings.Repeat(esc, 40_000) + `"}]}`)
+		if got := Estimate("anthropic", body); got < 20_000 {
+			t.Errorf("%q x 40000: estimate %d, want at least half a token per character", esc, got)
+		}
 	}
 }

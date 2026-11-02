@@ -10,7 +10,7 @@ import (
 // rates are calibrated against the o200k_base tokenizer and the 2026-10-27
 // gateway measurements (see estimate_test.go).
 const (
-	letterRun  = 8   // letter weight per token in one word piece (non-ASCII letters weigh 2)
+	letterRun  = 8   // letter weight per token in one word piece (non-ASCII letters weigh 2, or 2 per UTF-8 byte at three bytes and above)
 	digitRun   = 3   // digits per token: tokenizers group at most three
 	punctRun   = 2   // ASCII punctuation per token
 	spaceRun   = 8   // spaces or tabs per token
@@ -55,7 +55,7 @@ func classOfSlow(r rune) class {
 		return clsLetter
 	case r >= '0' && r <= '9':
 		return clsDigit
-	case r == ' ' || r == '\t' || r == '\v' || r == '\f':
+	case r == ' ' || r == '\t':
 		return clsSpace
 	case r == '\n' || r == '\r':
 		return clsBreak
@@ -84,6 +84,7 @@ type counter struct {
 	n         int // runes in the current run
 	weight    int // letter weight of the current run
 	lastLower bool
+	nextASCII bool // the rune that ends the current run is ASCII
 	cost      int64
 }
 
@@ -118,7 +119,9 @@ func (c *counter) charge(next class) {
 	case clsCJK:
 		c.cost += cjkCost * int64(c.n)
 	case clsSymbol:
-		if c.n > 1 || !word(next) {
+		// A lone symbol shares a pretoken with the next word, but its own
+		// bytes still need tokens unless that word starts with ASCII.
+		if c.n > 1 || !word(next) || !c.nextASCII {
 			c.cost += symbolCost * int64(c.n)
 		}
 	}
@@ -128,14 +131,20 @@ func (c *counter) add(r rune) {
 	cls := classOf(r)
 	upper := r >= 'A' && r <= 'Z'
 	if cls != c.cls || (cls == clsLetter && upper && c.lastLower) {
+		c.nextASCII = r < utf8.RuneSelf
 		c.charge(cls)
 		c.cls, c.n, c.weight = cls, 0, 0
 	}
 	c.n++
-	if r < utf8.RuneSelf {
+	switch size := utf8.RuneLen(r); {
+	case r < utf8.RuneSelf:
 		c.weight++
-	} else {
+	case size <= 2:
 		c.weight += 2
+	default:
+		// Three- and four-byte letters outside Hangul/CJK are mostly rare in
+		// tokenizer vocabularies: at least a quarter token per UTF-8 byte.
+		c.weight += 2 * size
 	}
 	c.lastLower = r >= 'a' && r <= 'z'
 }
