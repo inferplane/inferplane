@@ -200,6 +200,7 @@ internal/          - Private packages (gateway internals)
   clientctx/       - Bounded client evidence: request class, key-scoped session digest, auto mode verdict tap (ADR-057)
   responses/       - Responses observation, stateless tool adapters, native/translated SSE
   tier/            - ADR-041 budget-tier substitution: per-team Table, window-latched activation, shared by controlplane/ and proxy/
+  tokenest/        - Content-aware input-token estimate (stdlib leaf) for context gates, count fallbacks and TPM admission
   governance/      - Rate / quota / budget enforcement (PreCheck + Settle)
   keystore/        - Virtual-key/team stores (SQLite default, explicit shared Postgres), Principal + RBAC
   providerstore/   - Opt-in DB-authoritative provider/model topology (ADR-008)
