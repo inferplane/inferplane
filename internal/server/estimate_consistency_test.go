@@ -73,6 +73,34 @@ func TestCountAndContextGateAgree(t *testing.T) {
 	}
 }
 
+// A Bedrock count answered locally (here the readiness gate refuses, as for a
+// shared-authority gateway) estimates the decoded InvokeModel body: the same
+// number the context gate reports for it, not the base64 wrapper's estimate.
+func TestBedrockLocalCountAgreesWithContextGate(t *testing.T) {
+	body := tokenesttest.AnthropicBody("m", tokenesttest.ClassNamed("prose").Text(5, 8000))
+	want := tokenest.Estimate("bedrock", body)
+	wrapper, _ := json.Marshal(map[string]any{"input": map[string]any{"invokeModel": map[string]any{"body": base64.StdEncoding.EncodeToString(body)}}})
+	if tokenest.Estimate("bedrock", wrapper) == want {
+		t.Fatal("fixture cannot tell the wrapper's estimate from the body's")
+	}
+	var refusal struct{ Message string }
+	rec := estimateDo(estimateMux(1000, nil), "/model/m/invoke", body)
+	_ = json.Unmarshal(rec.Body.Bytes(), &refusal)
+	if match := regexp.MustCompile(`prompt is too long: (\d+) tokens`).FindStringSubmatch(refusal.Message); match == nil || match[1] != strconv.FormatInt(want, 10) {
+		t.Fatalf("gate = %d %s, want estimate %d", rec.Code, rec.Body.String(), want)
+	}
+	holder := newHolder(map[string]providers.Provider{"p": mockprovider.New("m")},
+		map[string]config.ModelConfig{"m": {Targets: []config.Target{{Provider: "p", Model: "m"}}, ContextWindow: 1000}})
+	store := stubStore{key: "dev-key", p: keystore.Principal{KeyID: "ik_abc", Team: "t", AllowedModels: []string{"*"}}}
+	unready := DataMux(router.New(holder), holder, store, nil, nil, nil, nil, nil, nil, nil, adminauth.MappingConfig{}, nil, 0,
+		WithGovernanceGate(func() (bool, string) { return false, "not synced" }))
+	var out struct{ InputTokens int64 }
+	rec = estimateDo(unready, "/model/m/count-tokens", wrapper)
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || out.InputTokens != want {
+		t.Fatalf("local count = %d %s, want %d", rec.Code, rec.Body.String(), want)
+	}
+}
+
 // The TPM reservation follows the content estimate: prose that bytes/4
 // over-counted is now admitted, hex that it under-counted is now refused.
 func TestTPMPreCheckUsesContentEstimate(t *testing.T) {

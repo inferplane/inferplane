@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 6e17519803e485cf8ccc6f9972226dd101417be2d40555fe2e5be215d9e8e8a2
+translation_source_sha256: 131677c6c55a89e6499466ff6d2e8982b0c2d8035e22b9086a2b0e6551fa5382
 ---
 
 # 데이터 구현 {#data}
@@ -60,7 +60,8 @@ translation_source_sha256: 6e17519803e485cf8ccc6f9972226dd101417be2d40555fe2e5be
 최솟값으로 유지합니다. 추정치로 일일 quota 차감을 만들지 않습니다. 음수 승인 추정치는
 어떤 한도도 소비하기 전에 별도의 감사 거부 코드 `invalid_token_estimate`로 거부합니다.
 ADR-039를 참고하세요. 승인 추정치는 컨텍스트 사전 검사·로컬 count 응답과 같은
-`internal/tokenest`의 내용 기반 요청 추정치입니다.
+`internal/tokenest`의 내용 기반 요청 추정치입니다(Bedrock count는 디코딩한 InvokeModel
+본문을 추정하고, 동시 처리 본문 예산에 들어가지 못한 count는 4바이트당 1토큰으로 응답).
 
 ### 4. 코드 위치 {#4-code-pointers}
 

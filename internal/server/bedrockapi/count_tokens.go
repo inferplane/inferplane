@@ -52,22 +52,28 @@ func (h *CountTokensHandler) SetObservability(aud *audit.Writer, m *metrics.Metr
 // crashes Claude Code, so every failure falls back to a local estimate.
 func (h *CountTokensHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	raw, readErr := io.ReadAll(req.Body)
-	n := estimateTokens(raw)
 	ready := true
 	if h.ready != nil {
 		ready, _ = h.ready()
 	}
 	// Even a valid JSON prefix from MaxBytesReader is NOT a complete request.
 	// Never forward partial content, including declared oversized requests.
+	var n int64
 	if readErr == nil && ready && !requestpolicy.LocalCount(req.Context()) {
 		n = h.count(w, req, raw)
+	} else {
+		n = localEstimate(raw)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]int64{"inputTokens": n})
 }
 
-func (h *CountTokensHandler) count(w http.ResponseWriter, req *http.Request, raw []byte) int64 {
+// decodeInvokeBody returns the InvokeModel body inside a count request's
+// input.invokeModel.body. That field is a base64 blob per the AWS API
+// reference (InvokeModelTokensRequest: "Base64-encoded binary data object");
+// a wrapper that does not decode to one reports false.
+func decodeInvokeBody(raw []byte) ([]byte, bool) {
 	var wrapper struct {
 		Input struct {
 			InvokeModel struct {
@@ -76,15 +82,30 @@ func (h *CountTokensHandler) count(w http.ResponseWriter, req *http.Request, raw
 		} `json:"input"`
 	}
 	if err := json.Unmarshal(raw, &wrapper); err != nil || wrapper.Input.InvokeModel.Body == nil {
-		return estimateTokens(raw)
+		return nil, false
 	}
-
-	// input.invokeModel.body is a base64 blob per the AWS API reference
-	// (InvokeModelTokensRequest: "Base64-encoded binary data object"). If a
-	// client ever sends it as raw JSON instead, the decode fails and we fall
-	// through to the coarse local estimate — still 200, never an error.
-	innerBody, err := base64.StdEncoding.DecodeString(*wrapper.Input.InvokeModel.Body)
+	inner, err := base64.StdEncoding.DecodeString(*wrapper.Input.InvokeModel.Body)
 	if err != nil {
+		return nil, false
+	}
+	return inner, true
+}
+
+// localEstimate is the answer when no upstream counter is asked: the estimate
+// of the decoded InvokeModel body, the number the generation context gate
+// reports for that body, or of the wrapper itself when it does not decode.
+func localEstimate(raw []byte) int64 {
+	if inner, ok := decodeInvokeBody(raw); ok {
+		return estimateTokens(inner)
+	}
+	return estimateTokens(raw)
+}
+
+func (h *CountTokensHandler) count(w http.ResponseWriter, req *http.Request, raw []byte) int64 {
+	// A wrapper that does not decode (a client sending the body as raw JSON,
+	// for example) gets the local estimate of the wrapper: still 200.
+	innerBody, ok := decodeInvokeBody(raw)
+	if !ok {
 		return estimateTokens(raw)
 	}
 

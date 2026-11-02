@@ -80,7 +80,8 @@ no estimated daily-quota debit is fabricated. Negative admission estimates use
 the distinct `invalid_token_estimate` audit deny code before consuming any
 limits. See ADR-039. The admission estimate is `internal/tokenest`'s
 content-aware request estimate, the same value as the context gate and the local
-count answer.
+count answer (a Bedrock count estimates its decoded InvokeModel body; a count
+that does not fit the in-flight byte budget is answered at four bytes per token).
 
 ### 4. Code Pointers
 
