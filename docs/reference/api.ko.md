@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: dc95944d7667003155e2413e1ab0cd239cf380a078de2be5462dad7598632548
+translation_source_sha256: a4a82baa4136036f562b45c727fdf237f44bc7f9b8515a5d937087acbfe4434f
 ---
 
 # API 구현 {#api}
@@ -57,7 +57,7 @@ Messages·Chat Completions·Bedrock Invoke/Converse의 컨텍스트 사전 검�
 텍스트는 o200k_base 대비 3% 이내, 자연스러운 한국어는 o200k_base보다 약 9% 많게,
 무작위에 가까운 음절과 hex는 적게 추정), 알려진 콘텐츠 위치의 인라인 이미지는 하나당
 1,600토큰, 그 밖의 base64(문서·서명·불투명 상태)는 4바이트당 1토큰으로 셉니다.
-Claude 토크나이저는 자연스러운 한국어를 이 추정치의 약 1.7배로 셌습니다(2026-10-29
+Claude 토크나이저는 자연스러운 한국어를 이 추정치의 약 1.7배로 셌습니다(2026-11-02
 측정). 과소 추정된 요청은 업스트림으로 가며, 업스트림의 초과 오류는 복구 가능한
 prompt-too-long 오류로 반환됩니다. 바이트/4는 영문 산문을 약 60% 과대 추정해 창의 약
 62%를 넘는 산문을 거절했고(약 97k토큰으로 측정된 요청을 128k 창에서 거절) 숫자·hex·
