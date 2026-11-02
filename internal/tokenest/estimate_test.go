@@ -2,8 +2,10 @@ package tokenest
 
 import (
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/inferplane/inferplane/internal/tokenest/tokenesttest"
 )
@@ -88,14 +90,92 @@ func TestEstimateTextRules(t *testing.T) {
 		{"cjk", "日本語", 3},
 		{"accented letters stay in the word", "Größe", 1},
 		{"symbol", "→", 1},
-		{"unicode escape decodes", `été`, 1},
-		{"surrogate pair decodes to one symbol", `🙂`, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := (decodedCost([]byte(tc.text)) + 99) / 100; got != tc.want {
 				t.Fatalf("decodedCost(%q) = %d tokens, want %d", tc.text, got, tc.want)
 			}
 		})
+	}
+}
+
+// bs is a backslash built at run time so the escapes below stay escapes in
+// this source file.
+var bs = string(rune(92))
+
+func TestEstimateDecodesJSONEscapes(t *testing.T) {
+	for _, tc := range []struct{ escaped, literal string }{
+		{bs + "u00e9t" + bs + "u00e9", "été"},
+		{bs + "ud83d" + bs + "ude42", "🙂"},
+		{bs + "uD83D" + bs + "uDE42", "🙂"},
+		{bs + "ud55c" + bs + "uad6d" + bs + "uc5b4", "한국어"},
+	} {
+		if !strings.Contains(tc.escaped, bs+"u") {
+			t.Fatal("escape lost from test source")
+		}
+		if got, want := decodedCost([]byte(tc.escaped)), decodedCost([]byte(tc.literal)); got != want {
+			t.Fatalf("decodedCost(%q) = %d, want %d (the literal %q)", tc.escaped, got, want, tc.literal)
+		}
+	}
+	for _, lone := range []string{bs + "ud83d", bs + "ude42", bs + "ud83d" + bs + "u0041", bs + "u12", bs + "uzzzz"} {
+		if got := (decodedCost([]byte(lone)) + 99) / 100; got > 3 {
+			t.Fatalf("decodedCost(%q) = %d tokens", lone, got)
+		}
+	}
+	for _, lone := range []string{bs + "ud83d", bs + "ude42", bs + "ud83d" + bs + "u0041"} {
+		if got := (decodedCost([]byte(lone)) + 99) / 100; got > 1 {
+			t.Fatalf("lone surrogate %q = %d tokens, want at most 1", lone, got)
+		}
+	}
+}
+
+// asciiEscape writes every non-ASCII rune as JSON \uXXXX escapes, the way an
+// ASCII-only encoder (Python json.dumps default) would.
+func asciiEscape(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r < 0x80:
+			b.WriteRune(r)
+		case r > 0xFFFF:
+			hi, lo := utf16.EncodeRune(r)
+			fmt.Fprintf(&b, "%su%04x%su%04x", bs, hi, bs, lo)
+		default:
+			fmt.Fprintf(&b, "%su%04x", bs, r)
+		}
+	}
+	return b.String()
+}
+
+func TestEstimateEscapedBodyMatchesLiteralBody(t *testing.T) {
+	text := tokenesttest.ClassNamed("korean").Text(1, 50_000) + " 🙂 été"
+	lit := tokenesttest.AnthropicBody("m", text)
+	esc := []byte(asciiEscape(string(lit)))
+	if !strings.Contains(string(esc), bs+"u") || len(esc) <= len(lit) {
+		t.Fatal("escape lost from test source")
+	}
+	if a, b := Estimate("anthropic", lit), Estimate("anthropic", esc); a != b {
+		t.Fatalf("escaped body = %d, literal body = %d", b, a)
+	}
+}
+
+// Signatures, encrypted_content and documents are long base64-alphabet
+// strings but never inline images, so they must not start the structural
+// image pass (a full encoding/json decode of the body).
+func TestEstimateSkipsImagePassWithoutImageKeys(t *testing.T) {
+	sig := strings.Repeat("aGVsbG8gd29ybGQh", 40) // 640 base64-alphabet bytes
+	var b strings.Builder
+	b.WriteString(`{"model":"m","messages":[`)
+	for i := 0; i < 100; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"role":"assistant","content":[{"type":"thinking","thinking":"x","signature":"%s"},{"type":"reasoning","encrypted_content":"%s"},{"type":"document","source":{"type":"text","media_type":"text/plain","content":"%s"}}]}`, sig, sig, sig)
+	}
+	b.WriteString(`]}`)
+	body := []byte(b.String())
+	if allocs := testing.AllocsPerRun(5, func() { Estimate("anthropic", body) }); allocs > 20 {
+		t.Fatalf("%v allocations: the image pass ran without an image key", allocs)
 	}
 }
 
@@ -121,7 +201,7 @@ func image(data string) string {
 	return `{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + data + `"}}`
 }
 
-func TestEstimateChargesInlineImagesAtTheirCeiling(t *testing.T) {
+func TestEstimateChargesInlineImagesAtTheirNominalCost(t *testing.T) {
 	data := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("image-payload", 4000)))
 	text := `{"type":"text","text":"describe it"}`
 	for _, tc := range []struct{ protocol, body string }{

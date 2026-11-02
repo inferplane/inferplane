@@ -13,8 +13,11 @@ import (
 	"unicode/utf8"
 )
 
-// imageTokens is the per-image ceiling: Claude resizes an image to at most
-// about 1.15 megapixels (≈1,600 tokens) and OpenAI high detail stays below it.
+// imageTokens is the nominal per-image cost: ≈1,600 tokens on Claude models
+// that resize to about 1.15 megapixels, and above what OpenAI high detail
+// charges. High-resolution Claude models accept up to 2576 px on the long edge
+// at up to ≈4,784 tokens per image, so large images are under-estimated
+// there; that costs at most one recoverable upstream rejection.
 const imageTokens = 1600
 
 // minOpaque is the shortest string that may be an opaque base64 payload.
@@ -39,15 +42,18 @@ func Estimate(protocol string, raw []byte) int64 {
 	return max(int64(1), (cost+99)/100)
 }
 
-// scan walks valid JSON once without building values. It reports whether any
-// string value looked like an opaque base64 payload, so the structural image
-// pass runs only when it can change the result.
+// scan walks valid JSON once without building values. It reports whether a
+// string value under an image-carrying key (data, bytes, url, image_url) looked
+// like an opaque base64 payload, so the structural image pass runs only when
+// it can change the result: signatures, encrypted_content and documents never
+// start it.
 func scan(raw []byte) (cost int64, opaque, ok bool) {
 	if !json.Valid(raw) {
 		return 0, false, false
 	}
 	var stack []byte // 'o' object, 'a' array
 	key := false
+	var lastKey []byte // raw bytes of the most recent object key
 	for i := 0; i < len(raw); {
 		switch c := raw[i]; c {
 		case '{':
@@ -72,11 +78,12 @@ func scan(raw []byte) (cost int64, opaque, ok bool) {
 		case '"':
 			end := stringEnd(raw, i)
 			if key {
-				cost += 100 + decodedCost(raw[i+1:end])
+				lastKey = raw[i+1 : end]
+				cost += 100 + decodedCost(lastKey)
 			} else {
 				charged, isOpaque := valueCost(raw[i : end+1])
 				cost += charged
-				opaque = opaque || isOpaque
+				opaque = opaque || (isOpaque && imageKey(lastKey))
 			}
 			i = end + 1
 		default:
@@ -89,6 +96,17 @@ func scan(raw []byte) (cost int64, opaque, ok bool) {
 		}
 	}
 	return cost, opaque, true
+}
+
+// imageKey reports whether key names a field that carries inline image data at
+// a recognized position: Anthropic and InvokeModel source.data, Converse
+// source.bytes, OpenAI image_url.url and Responses input_image.image_url.
+func imageKey(key []byte) bool {
+	switch string(key) {
+	case "data", "bytes", "url", "image_url":
+		return true
+	}
+	return false
 }
 
 func delimiter(c byte) bool {
