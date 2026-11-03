@@ -183,6 +183,13 @@ The rules, by stage:
   `safeguard_results`. All tool uses `not_flagged` is `allow`; any other status
   or outcome is `unknown`; no tool uses records nothing.
 
+**Governance denials.** A denial record names the refusing limit in
+`governance`: its scope, the kind of limit, where it was set and, for a policy,
+the policy name, generation and rule. It never holds the limit value, counters,
+key material or user identifiers. Policy and rule names are operator text,
+stored verbatim in the chain and bounded and cleaned in the analytics index (cut
+to 256 bytes, NUL dropped, invalid UTF-8 replaced), so keep secrets out of them.
+
 **Access.** The five `/admin/audit/*` routes are read-only and full-admin only.
 Responses carry digests, closed codes and the stored audit line, never the raw
 session ID, prompts or response text. Error bodies are closed codes and never

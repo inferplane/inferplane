@@ -2,6 +2,10 @@ package pgstore
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -44,7 +48,8 @@ func TestPgstoreNULModelDenialKeepsUsage(t *testing.T) {
 	}
 }
 
-// Any console insert failure rolls back to its savepoint; usage rows and the
+// A console row Postgres rejects as data (SQLSTATE class 22) fails the batch
+// savepoint; the row-by-row retry skips only that row, and usage rows and the
 // checkpoint still commit.
 func TestPgstoreAuditProjectionFailureKeepsUsage(t *testing.T) {
 	s := newTestStore(t)
@@ -54,7 +59,7 @@ func TestPgstoreAuditProjectionFailureKeepsUsage(t *testing.T) {
 	}
 	cleanup()
 	t.Cleanup(cleanup)
-	if _, err := s.db.Exec(ctx, `CREATE FUNCTION audit_probe_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'probe'; END $$;
+	if _, err := s.db.Exec(ctx, `CREATE FUNCTION audit_probe_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'probe' USING ERRCODE = '22023'; END $$;
 CREATE TRIGGER audit_probe_fail BEFORE INSERT ON audit_event_categories FOR EACH ROW EXECUTE FUNCTION audit_probe_fail()`); err != nil {
 		t.Fatal(err)
 	}
@@ -77,5 +82,77 @@ CREATE TRIGGER audit_probe_fail BEFORE INSERT ON audit_event_categories FOR EACH
 	}
 	if _, ok, err := s.AuditEvent(plain.ID); err != nil || !ok {
 		t.Fatalf("plain console row ok=%v err=%v", ok, err)
+	}
+}
+
+// stderrOf returns what fn writes to os.Stderr (the console skip log).
+func stderrOf(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+	out := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		out <- string(b)
+	}()
+	fn()
+	os.Stderr = old
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return <-out
+}
+
+// A console row over a Postgres program limit (SQLSTATE class 54, here a
+// record ID whose primary-key entry exceeds the 2704-byte btree maximum)
+// cannot succeed on retry either: it is skipped like a data error, and the
+// tick's other console rows, usage rows and checkpoint commit. The good row
+// before it shares the failed batch savepoint and is written again row by row.
+func TestPgstoreOversizedConsoleRowIsSkipped(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	epoch := acquire(t, s)
+	// Incompressible text, so the index entry cannot shrink under the limit.
+	var raw []byte
+	for i := 0; len(raw) < 3072; i++ {
+		sum := sha256.Sum256([]byte{byte(i), byte(i >> 8)})
+		raw = append(raw, sum[:]...)
+	}
+	huge := base64.RawStdEncoding.EncodeToString(raw)
+	denied := func(r *audit.Record) { r.Outcome.Error = auditStr("key_rate_limited") }
+	good := auditRec("01JC0000000000000000000061", "request_started", 429, denied)
+	oversized := auditRec(huge, "request_started", 429, denied)
+	usage := auditRec("01JC0000000000000000000062", "request_completed", 200, nil)
+	var err error
+	logged := stderrOf(t, func() {
+		err = s.ingestBatch(ctx, "holder", epoch, []audit.Record{good, oversized, usage}, map[string]int64{"seg": 40})
+	})
+	if err != nil {
+		t.Fatalf("ingestBatch: %v", err)
+	}
+	if n := auditCount(t, s, "events"); n != 1 {
+		t.Fatalf("events rows = %d, want 1", n)
+	}
+	if off := checkpointOf(t, s, "seg"); off != 40 {
+		t.Fatalf("checkpoint = %d, want 40", off)
+	}
+	if n := auditCount(t, s, "audit_events"); n != 2 {
+		t.Fatalf("console rows = %d, want 2", n)
+	}
+	if _, ok, err := s.AuditEvent(huge); err != nil || ok {
+		t.Fatalf("oversized console row ok=%v err=%v", ok, err)
+	}
+	for _, id := range []string{good.ID, usage.ID} {
+		if _, ok, err := s.AuditEvent(id); err != nil || !ok {
+			t.Fatalf("console row %s ok=%v err=%v", id, ok, err)
+		}
+	}
+	if !strings.Contains(logged, "(SQLSTATE 54000)") {
+		t.Fatalf("skip log = %q", logged)
 	}
 }

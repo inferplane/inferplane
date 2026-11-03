@@ -45,7 +45,8 @@ EVENTS = [
     {'id': ID_DENIED, 'ts': '2026-10-29T10:36:22Z', 'event': 'request_started', 'kind': 'policy_denied', 'team': 'engineering',
      'key_id': KEY_A, 'ingress': 'anthropic', 'stream': False, 'status': 429, 'deny_code': 'key_rate_limited',
      'request_class': 'subagent', 'session_ref': SESSION, 'model_requested': 'private-coder', 'attempt_count': 0,
-     'input_tokens': 0, 'output_tokens': 0, 'cost_micros': 0, 'total_ms': 6},
+     'input_tokens': 0, 'output_tokens': 0, 'cost_micros': 0, 'total_ms': 6,
+     'gov_scope': 'key', 'gov_limit': 'rpm', 'gov_source': 'key'},
     {'id': ID_LEGACY, 'ts': '2026-10-29T10:31:40Z', 'event': 'request_completed', 'kind': 'privacy_masked', 'team': 'platform',
      'key_id': KEY_B, 'ingress': 'anthropic', 'stream': False, 'status': 200, 'masked': True, 'pii': True, 'categories': ['email'],
      'policy_ref': 'org-pii-mask#4·0', 'planned_boundary': 'external', 'actual_boundary': 'external', 'model_requested': 'economy-coder',
@@ -68,9 +69,19 @@ DETAIL = {'event': EVENTS[0], 'hash': HASH, 'record': {'prev_hash': 'sha256-prev
 DENIED = {'event': EVENTS[1], 'hash': 'sha256-denied-fixture', 'record': {}, 'waterfall': {'total_ms': 6, 'rows': []}}
 # Legacy record: no latency at all, so the waterfall says no timing was recorded.
 LEGACY = {'event': EVENTS[2], 'record': {}, 'waterfall': {'total_ms': 0, 'rows': []}}
-SUMMARY = {'since_ms': 0, 'until_ms': 0, 'by_kind': {'ok': 1, 'policy_denied': 1, 'privacy_masked': 1},
+# by_kind.policy_denied is the sum of the denial row counts, so the Denials card matches the table.
+SUMMARY = {'since_ms': 0, 'until_ms': 0, 'by_kind': {'ok': 1, 'policy_denied': 8, 'privacy_masked': 1},
            'categories': [{'name': 'email', 'count': 1}], 'pii': {'masked': 1, 'internal': 0, 'blocked': 0, 'shadow': 0},
-           'denials': [{'code': 'key_rate_limited', 'team': 'engineering', 'key_id': KEY_A, 'count': 1, 'last_ts': '2026-10-29T10:36:22Z'}],
+           # A policy-rule denial, a key-setting reservation refusal, a limit denial recorded before governance
+           # evidence, and two fresh denials that name no limit by design (a blocked region, an
+           # unavailable budget authority).
+           'denials': [{'code': 'team_rate_limited', 'policy': 'team-rate#2·rpm', 'scope': 'team', 'limit': 'rpm', 'source': 'policy',
+                        'team': 'engineering', 'key_id': KEY_A, 'count': 3, 'last_ts': '2026-10-29T10:38:00Z'},
+                       {'code': 'budget_authority_unavailable', 'scope': 'key', 'limit': 'budget_day', 'source': 'key',
+                        'team': 'engineering', 'key_id': KEY_A, 'count': 2, 'last_ts': '2026-10-29T10:37:00Z'},
+                       {'code': 'key_rate_limited', 'team': 'engineering', 'key_id': KEY_A, 'count': 1, 'last_ts': '2026-10-29T10:36:22Z'},
+                       {'code': 'region_blocked', 'team': 'engineering', 'key_id': KEY_A, 'count': 1, 'last_ts': '2026-10-29T10:35:00Z'},
+                       {'code': 'budget_authority_unavailable', 'team': 'engineering', 'key_id': KEY_B, 'count': 1, 'last_ts': '2026-10-29T10:34:00Z'}],
            'auto_mode': {'block': 1, 'allow': 5, 'unknown': 1, 'signatures': []},
            'buckets': [{'start_ms': i, 'requests': i % 3, 'denials': i % 2, 'pii': 0, 'auto_blocked': 0} for i in range(12)],
            'coverage_start_ms': 1793235600000}
@@ -131,6 +142,16 @@ TRACE_LAYOUT_JS = """() => {
   return { timeLines: lines(row.cells[0]), modelLines: lines(row.cells[4].firstChild.firstChild),
            latencyLines: lines(row.cells[7]), latInside: l.left >= w.left - 1 && l.right <= w.right + 1,
            latClipped: lat.scrollWidth > lat.clientWidth, header: lat.textContent };
+}"""
+DENY_ROWS_JS = """() => [...document.querySelectorAll('#audit-deny-table tbody tr')].map(tr => [...tr.cells].map(c => c.textContent))"""
+# Every Denials header and cell lies inside its card, and the table needs no horizontal scrolling.
+DENY_LAYOUT_JS = """() => {
+  const table = document.querySelector('#audit-deny-table'), card = table.closest('.card'), wrap = table.closest('.table-scroll');
+  const c = card.getBoundingClientRect(), inside = el => { const r = el.getBoundingClientRect(); return r.left >= c.left - 1 && r.right <= c.right + 1; };
+  const count = [...table.querySelectorAll('thead th')].find(th => th.classList.contains('num'));
+  return { count: count.textContent, countInside: inside(count), headersInside: [...table.querySelectorAll('thead th')].every(inside),
+           cellsInside: [...table.querySelectorAll('tbody td')].every(inside), scrolls: wrap.scrollWidth > wrap.clientWidth + 1,
+           card: Math.round(c.width), table: Math.round(table.getBoundingClientRect().width) };
 }"""
 CHIPS_JS = """() => [...document.querySelectorAll('#audit-kinds .audit-chip')].map(b => ({
   label: b.textContent, pressed: b.getAttribute('aria-pressed') === 'true', bg: getComputedStyle(b).backgroundColor }))"""
@@ -222,6 +243,8 @@ def run_scenario(page, base, width, scheme, screenshots):
     detail = text('#audit-detail')
     assert en('audit.noTiming') not in detail
     assert page.locator('#audit-detail .audit-wf-row').count() == 1
+    # The denial section names the refusing limit (ADR-057).
+    assert en('audit.source.key') + ' · ' + en('audit.limit.rpm') in detail, detail
 
     # Legacy record (total_ms 0): "no timing was recorded", no NaN anywhere.
     page.locator('#audit-trace-table tbody tr').nth(2).click()
@@ -285,7 +308,25 @@ def run_scenario(page, base, width, scheme, screenshots):
     # Denials tab: denial row, auto-table lists block + unknown verdicts, unparsed warning visible.
     page.locator('#audit-tab-denials').click()
     wait("() => document.querySelectorAll('#audit-auto-table tbody tr').length === 2")
-    assert 'key_rate_limited' in text('#audit-deny-table')
+    deny_table = text('#audit-deny-table')
+    assert 'key_rate_limited' in deny_table
+    assert 'team-rate#2·rpm' in deny_table, deny_table
+    assert en('audit.source.key') + ' · ' + en('audit.limit.budget_day') in deny_table, deny_table
+    assert en('audit.policyNotRecorded') in deny_table, deny_table
+    # The older-record label is for limit codes only; fresh denials that name no limit say so (or show "—").
+    rows = {(r[0], r[2]): r[1] for r in page.evaluate(DENY_ROWS_JS)}
+    assert len(rows) == 5, rows
+    assert rows[('key_rate_limited', en('audit.scope.key') + ' ' + KEY_A)] == en('audit.policyNotRecorded'), rows
+    assert rows[('region_blocked', en('audit.scope.route') + ' ' + KEY_A)] == '—', rows
+    assert rows[('budget_authority_unavailable', en('audit.scope.route') + ' ci')] == en('audit.noLimitNamed'), rows
+    # The Denials card counts the same denials the table lists.
+    deny_card = page.locator('#audit-cards .audit-stat').nth(1).locator('.audit-stat-v').inner_text()
+    assert deny_card == str(sum(d['count'] for d in SUMMARY['denials'])), deny_card
+    # From 1280 px every column, count and last time included, is visible without scrolling.
+    if width >= 1280:
+        layout = page.evaluate(DENY_LAYOUT_JS)
+        assert layout['count'] == en('audit.count') and layout['countInside'], layout
+        assert layout['headersInside'] and layout['cellsInside'] and not layout['scrolls'], layout
     auto_rows = text('#audit-auto-table')
     assert 'block' in auto_rows and 'unknown' in auto_rows
     assert page.locator('#audit-auto-warning').is_visible()

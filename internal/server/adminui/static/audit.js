@@ -61,6 +61,23 @@ function auditScope(code) {
   if (/^user_/.test(code)) return "user";
   return "route";
 }
+// A governance denial names its own scope (ADR-057); older rows fall back to the code.
+function auditDenyScope(code, scope) { return scope || auditScope(code); }
+// Deny codes of a refusing limit: written today, each names its limit in
+// `governance` (ADR-057), so one without a source predates that evidence.
+const AUDIT_LIMIT_CODES = new Set(["team_rate_limited", "team_token_rate_limited", "team_quota_exceeded", "key_rate_limited",
+  "key_token_rate_limited", "team_budget_exceeded", "key_budget_exceeded", "user_budget_exceeded", "pricing_missing"]);
+// Where the refusing limit was set: the policy rule (routing or governance),
+// else the governance source and limit kind. Without either, a limit code is
+// an older record; an unavailable authority or store names no limit by
+// design; any other code (RBAC, request checks, upstream errors) has none.
+function auditDenySource(code, policy, source, limit) {
+  if (policy) return policy;
+  if (source) return msg("audit.source." + source) + (limit ? " · " + msg("audit.limit." + limit) : "");
+  if (AUDIT_LIMIT_CODES.has(code)) return msg("audit.policyNotRecorded");
+  if (code === "budget_authority_unavailable") return msg("audit.noLimitNamed");
+  return "—";
+}
 function auditSparkPoints(series, w, h) {
   const top = Math.max(1, ...series), step = series.length > 1 ? w / (series.length - 1) : 0;
   return series.map((v, i) => [Math.round(i * step * 10) / 10, Math.round((h - 2 - v / top * (h - 6)) * 10) / 10]);
@@ -73,6 +90,18 @@ function auditEl(tag, cls, text) {
   return e;
 }
 function auditPill(text, cls) { return auditEl("span", "audit-pill " + cls, text); }
+// A closed code that may break after each "_" (text nodes and <wbr> elements,
+// nothing parsed), so a long code never makes its table wider than the card.
+function auditCode(code) {
+  const span = auditEl("span");
+  const parts = String(code || "").split("_");
+  parts.forEach((part, i) => {
+    const last = i === parts.length - 1;
+    span.appendChild(document.createTextNode(last ? part : part + "_"));
+    if (!last) span.appendChild(document.createElement("wbr"));
+  });
+  return span;
+}
 function auditKindPill(kind) { return auditPill(msg("audit.kind." + kind), auditKindClass(kind)); }
 function auditCell(tr, content, cls) {
   const td = auditEl("td", cls || "");
@@ -357,7 +386,7 @@ function renderAuditDetail(detail) {
   if (e.deny_code) {
     const p = auditEl("dl", "audit-kv");
     auditKV(p, "audit.code", e.deny_code + " · HTTP " + e.status);
-    auditKV(p, "audit.policy", e.policy_ref || msg("audit.policyNotRecorded"));
+    auditKV(p, "audit.policy", auditDenySource(e.deny_code, e.policy_ref, e.gov_source, e.gov_limit));
     if (e.event === "request_started" && !e.attempt_count) auditKV(p, "audit.billing", msg("audit.noBilling"));
     d.appendChild(auditSection(msg("audit.denial"), p));
   }
@@ -587,10 +616,11 @@ async function auditLoadDenials() {
   }
   for (const x of s.denials) {
     const tr = auditEl("tr", "static");
-    auditCell(tr, x.code, "mono");
-    auditCell(tr, x.policy || msg("audit.policyNotRecorded"));
-    const scope = auditScope(x.code);
-    auditCell(tr, msg("audit.scope." + scope) + " " + (scope === "team" ? x.team : auditKeyLabel(x.key_id)));
+    auditCell(tr, auditCode(x.code), "mono");
+    auditCell(tr, auditDenySource(x.code, x.policy, x.source, x.limit));
+    const scope = auditDenyScope(x.code, x.scope);
+    const subject = scope === "team" ? x.team : scope === "gateway" ? "" : auditKeyLabel(x.key_id);
+    auditCell(tr, msg("audit.scope." + scope) + (subject ? " " + subject : ""));
     auditCell(tr, x.count, "num");
     auditCell(tr, auditTime(x.last_ts), "mono nowrap");
     tbody.appendChild(tr);

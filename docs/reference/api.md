@@ -221,11 +221,11 @@ GET /admin/audit/summary
 
 | Route | Returns |
 |---|---|
-| `/admin/audit/events` | `{"events":[...],"next":"<id>"}`, newest first; pass `next` as `before` for the following page. |
+| `/admin/audit/events` | `{"events":[...],"next":"<id>"}`, newest first; pass `next` as `before` for the following page. A governance denial row also carries `gov_scope`, `gov_limit` and `gov_source`, the names in its record's `governance`; other rows and denials recorded before that field omit them. |
 | `/admin/audit/events/{id}` | `{"event":{...},"record":{...},"hash":"sha256:...","waterfall":{...}}`. `record` is the stored audit line. `hash` is the SHA-256 of that line, shown as the record's chain position; it is not a chain verification (use `/admin/audit/verify`). `waterfall` is the timing timeline derived from `latency` and `attempts` (rows of kind `gateway`, `attempt`, `settle` or `denied`; no rows when the record has no latency). |
 | `/admin/audit/sessions` | `{"sessions":[...],"next":"<id>"}`, one row per `session_ref` (records without one are not sessions) with request, denial, PII, auto-mode-block and subagent counts, cost and first/last time. |
 | `/admin/audit/sessions/{ref}` | `{"events":[...],"next":"<id>"}`, oldest first, for one `s1:` session digest; only `after` and `limit` are applied. |
-| `/admin/audit/summary` | Counts by kind, top 10 categories, PII counts (`masked`, `internal`, `blocked`, `shadow`), top 50 denials, auto mode counts (`block`, `allow`, `unknown`, `signatures`), 12 equal time buckets and `coverage_start_ms`, the earliest time in the index. |
+| `/admin/audit/summary` | Counts by kind, top 10 categories, PII counts (`masked`, `internal`, `blocked`, `shadow`), top 50 denials (each with `code`, `policy`, `scope`, `limit`, `source`, `team`, `key_id`, `count` and `last_ts`; `scope`, `limit` and `source` are set only when the record names its governance limit), auto mode counts (`block`, `allow`, `unknown`, `signatures`), 12 equal time buckets and `coverage_start_ms`, the earliest time in the index. |
 
 Query parameters, shared by the list routes and the summary. Every value is
 validated; a bad value gives the closed 400 code in the last column.

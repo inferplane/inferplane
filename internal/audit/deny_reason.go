@@ -30,6 +30,11 @@ const (
 	// DenyInvalidTokenEstimate identifies a caller precondition failure,
 	// independently of whether any configured rate limit was exhausted.
 	DenyInvalidTokenEstimate DenyReason = "invalid_token_estimate"
+	// DenyBudgetAuthorityUnavailable: the per-attempt money reservation
+	// (local liability, ADR-045 authority or ADR-046 shared admission)
+	// refused before dispatch. The record's governance field names the limit
+	// when the refusing store reports one (ADR-057).
+	DenyBudgetAuthorityUnavailable DenyReason = "budget_authority_unavailable"
 )
 
 // Ptr returns d as a plain string pointer.
@@ -38,13 +43,22 @@ func (d DenyReason) Ptr() *string {
 	return &s
 }
 
+var knownDenyReasons = []string{
+	string(DenyModelNotAllowed), string(DenyTeamRateLimited), string(DenyTeamTokenRateLimited), string(DenyTeamQuotaExceeded),
+	string(DenyKeyRateLimited), string(DenyKeyTokenRateLimited), string(DenyTeamBudgetExceeded), string(DenyKeyBudgetExceeded),
+	string(DenyUserBudgetExceeded), string(DenyRegionBlocked), string(DenyPricingMissing), string(DenyInvalidTokenEstimate),
+	string(DenyBudgetAuthorityUnavailable),
+}
+
+// KnownDenyReasons returns a copy of the closed deny codes above.
+func KnownDenyReasons() []string { return append([]string(nil), knownDenyReasons...) }
+
 // KnownDenyReason reports whether code is one of the closed deny codes above.
 func KnownDenyReason(code string) bool {
-	switch DenyReason(code) {
-	case DenyModelNotAllowed, DenyTeamRateLimited, DenyTeamTokenRateLimited, DenyTeamQuotaExceeded,
-		DenyKeyRateLimited, DenyKeyTokenRateLimited, DenyTeamBudgetExceeded, DenyKeyBudgetExceeded,
-		DenyUserBudgetExceeded, DenyRegionBlocked, DenyPricingMissing, DenyInvalidTokenEstimate:
-		return true
+	for _, c := range knownDenyReasons {
+		if c == code {
+			return true
+		}
 	}
 	return false
 }

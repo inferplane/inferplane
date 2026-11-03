@@ -182,6 +182,11 @@ type AuditEvent struct {
 	TTFTMs          int64    `json:"ttft_ms,omitempty"`
 	HasBody         bool     `json:"has_body,omitempty"`
 	Categories      []string `json:"categories,omitempty"`
+	// GovScope, GovLimit and GovSource name the limit behind a governance
+	// denial (ADR-057 record field governance); empty when not recorded.
+	GovScope  string `json:"gov_scope,omitempty"`
+	GovLimit  string `json:"gov_limit,omitempty"`
+	GovSource string `json:"gov_source,omitempty"`
 }
 
 // AuditEventRow adds the storage-only columns.
@@ -224,7 +229,10 @@ func ProjectAuditEvent(r audit.Record, line []byte) (AuditEventRow, bool) {
 		row.RoutingReason, row.Privacy = boundedCode(rt.Reason), boundedCode(rt.Privacy)
 		row.Masked = row.Masked || rt.Masked
 		row.PlannedBoundary, row.ActualBoundary = auditText(rt.PlannedBoundary), auditText(rt.ActualBoundary)
-		if len(rt.Policies) > 0 {
+		// A routing policy names a routing decision. A denial with a
+		// governance or RBAC code was refused by something else, even when the
+		// request also matched a routing rule (ADR-057).
+		if len(rt.Policies) > 0 && r.Governance == nil && !(row.Status >= 400 && audit.KnownDenyReason(row.DenyCode)) {
 			p := rt.Policies[0]
 			row.PolicyRef = auditText(fmt.Sprintf("%s#%d·%s", p.Name, p.Generation, p.Rule))
 		}
@@ -235,6 +243,14 @@ func ProjectAuditEvent(r audit.Record, line []byte) (AuditEventRow, bool) {
 			if closedCode.MatchString(c) && !slices.Contains(cats, c) {
 				cats = append(cats, c)
 			}
+		}
+	}
+	// A governance denial names its own limit; a routing policy the request
+	// also matched did not refuse it.
+	if g := r.Governance; g != nil {
+		row.GovScope, row.GovLimit, row.GovSource = boundedCode(g.Scope), boundedCode(g.Limit), boundedCode(g.Source)
+		if p := g.Policy; p != nil {
+			row.PolicyRef = auditText(governancePolicyRef(*p))
 		}
 	}
 	slices.Sort(cats)
@@ -278,6 +294,16 @@ func ProjectAuditEvent(r audit.Record, line []byte) (AuditEventRow, bool) {
 		row.RecordJSON = string(b)
 	}
 	return row, true
+}
+
+// governancePolicyRef renders a governance rule like a routing one
+// (name#generation·rule), without "#0" when the authority reports no
+// generation (ADR-045 grants).
+func governancePolicyRef(p audit.PolicyRuleRef) string {
+	if p.Generation > 0 {
+		return fmt.Sprintf("%s#%d·%s", p.Name, p.Generation, p.Rule)
+	}
+	return p.Name + "·" + p.Rule
 }
 
 // WaterfallRow is one bar of the trace timeline.

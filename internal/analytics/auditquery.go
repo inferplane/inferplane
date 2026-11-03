@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS audit_events (
   attempt_count INTEGER NOT NULL DEFAULT 0, auto_verdict TEXT NOT NULL DEFAULT '', auto_stage TEXT NOT NULL DEFAULT '',
   auto_signature TEXT NOT NULL DEFAULT '', input_tokens BIGINT NOT NULL DEFAULT 0, output_tokens BIGINT NOT NULL DEFAULT 0,
   cost_micros BIGINT NOT NULL DEFAULT 0, total_ms BIGINT NOT NULL DEFAULT 0, ttft_ms BIGINT NOT NULL DEFAULT 0,
-  has_body INTEGER NOT NULL DEFAULT 0, record_json TEXT NOT NULL DEFAULT ''
+  has_body INTEGER NOT NULL DEFAULT 0, record_json TEXT NOT NULL DEFAULT '',
+  gov_scope TEXT NOT NULL DEFAULT '', gov_limit TEXT NOT NULL DEFAULT '', gov_source TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS audit_events_ts ON audit_events(ts_ms);
 CREATE INDEX IF NOT EXISTS audit_events_kind ON audit_events(kind, ts_ms);
@@ -42,16 +43,26 @@ CREATE INDEX IF NOT EXISTS audit_events_key ON audit_events(key_id, ts_ms);
 CREATE INDEX IF NOT EXISTS audit_events_session ON audit_events(session_ref, ts_ms);
 CREATE TABLE IF NOT EXISTS audit_event_categories (id TEXT NOT NULL, category TEXT NOT NULL, PRIMARY KEY (id, category));`
 
+// AuditEventsMigrationColumns are console columns added after the table
+// shipped. A database created before them gains each with its empty default,
+// so existing rows (records written before ADR-057 governance evidence) keep
+// their values and read as "not recorded".
+var AuditEventsMigrationColumns = []string{
+	`gov_scope TEXT NOT NULL DEFAULT ''`,
+	`gov_limit TEXT NOT NULL DEFAULT ''`,
+	`gov_source TEXT NOT NULL DEFAULT ''`,
+}
+
 const auditColumns = `id, ts, ts_ms, event, kind, team, key_id, ingress, stream, status, deny_code, routing_reason, privacy, masked,
  would_restrict, pii, policy_ref, planned_boundary, actual_boundary, request_class, session_ref, trace_id, model_requested,
  model_actual, provider, fallback, attempt_count, auto_verdict, auto_stage, auto_signature, input_tokens, output_tokens,
- cost_micros, total_ms, ttft_ms, has_body, record_json`
+ cost_micros, total_ms, ttft_ms, has_body, gov_scope, gov_limit, gov_source, record_json`
 
 const auditSelect = `SELECT e.id, e.ts, e.event, e.kind, e.team, e.key_id, e.ingress, e.stream, e.status, e.deny_code,
  e.routing_reason, e.privacy, e.masked, e.would_restrict, e.pii, e.policy_ref, e.planned_boundary, e.actual_boundary,
  e.request_class, e.session_ref, e.trace_id, e.model_requested, e.model_actual, e.provider, e.fallback, e.attempt_count,
  e.auto_verdict, e.auto_stage, e.auto_signature, e.input_tokens, e.output_tokens, e.cost_micros, e.total_ms, e.ttft_ms,
- e.has_body FROM audit_events e`
+ e.has_body, e.gov_scope, e.gov_limit, e.gov_source FROM audit_events e`
 
 const defaultAuditLimit = 50
 
@@ -110,9 +121,16 @@ type AuditPIICounts struct {
 	Blocked  int64 `json:"blocked"`
 	Shadow   int64 `json:"shadow"`
 }
+
+// AuditDenial is one Denials row. Scope, Limit and Source name the refusing
+// governance limit (ADR-057); they are empty for routing denials and for
+// governance denials recorded before that evidence existed.
 type AuditDenial struct {
 	Code   string `json:"code"`
 	Policy string `json:"policy,omitempty"`
+	Scope  string `json:"scope,omitempty"`
+	Limit  string `json:"limit,omitempty"`
+	Source string `json:"source,omitempty"`
 	Team   string `json:"team"`
 	KeyID  string `json:"key_id"`
 	Count  int64  `json:"count"`
@@ -222,7 +240,7 @@ func InsertAuditEvent(d Dialect, exec ExecFunc, row AuditEventRow) error {
 		e.RoutingReason, e.Privacy, b2i(e.Masked), b2i(e.WouldRestrict), b2i(e.PII), e.PolicyRef, e.PlannedBoundary,
 		e.ActualBoundary, e.RequestClass, e.SessionRef, e.TraceID, e.ModelRequested, e.ModelActual, e.Provider,
 		b2i(e.Fallback), e.AttemptCount, e.AutoVerdict, e.AutoStage, e.AutoSignature, e.InputTokens, e.OutputTokens,
-		e.CostMicros, e.TotalMs, e.TTFTMs, b2i(e.HasBody), row.RecordJSON}
+		e.CostMicros, e.TotalMs, e.TTFTMs, b2i(e.HasBody), e.GovScope, e.GovLimit, e.GovSource, row.RecordJSON}
 	ph := make([]string, len(vals))
 	for i := range vals {
 		ph[i] = d.Placeholder(i + 1)
@@ -245,7 +263,7 @@ func scanAuditEvent(s RowScanner) (AuditEvent, error) {
 		&e.RoutingReason, &e.Privacy, &masked, &would, &pii, &e.PolicyRef, &e.PlannedBoundary, &e.ActualBoundary,
 		&e.RequestClass, &e.SessionRef, &e.TraceID, &e.ModelRequested, &e.ModelActual, &e.Provider, &fallback,
 		&e.AttemptCount, &e.AutoVerdict, &e.AutoStage, &e.AutoSignature, &e.InputTokens, &e.OutputTokens, &e.CostMicros,
-		&e.TotalMs, &e.TTFTMs, &hasBody)
+		&e.TotalMs, &e.TTFTMs, &hasBody, &e.GovScope, &e.GovLimit, &e.GovSource)
 	e.Stream, e.Masked, e.WouldRestrict, e.PII, e.Fallback, e.HasBody = stream == 1, masked == 1, would == 1, pii == 1, fallback == 1, hasBody == 1
 	return e, err
 }
@@ -327,7 +345,7 @@ func RunAuditEvent(d Dialect, run QueryFunc, id string) (AuditEventDetail, bool,
 			&e.RoutingReason, &e.Privacy, &masked, &would, &pii, &e.PolicyRef, &e.PlannedBoundary, &e.ActualBoundary,
 			&e.RequestClass, &e.SessionRef, &e.TraceID, &e.ModelRequested, &e.ModelActual, &e.Provider, &fallback,
 			&e.AttemptCount, &e.AutoVerdict, &e.AutoStage, &e.AutoSignature, &e.InputTokens, &e.OutputTokens, &e.CostMicros,
-			&e.TotalMs, &e.TTFTMs, &hasBody, &raw); err != nil {
+			&e.TotalMs, &e.TTFTMs, &hasBody, &e.GovScope, &e.GovLimit, &e.GovSource, &raw); err != nil {
 			return err
 		}
 		e.Stream, e.Masked, e.WouldRestrict, e.PII, e.Fallback, e.HasBody = stream == 1, masked == 1, would == 1, pii == 1, fallback == 1, hasBody == 1
@@ -418,10 +436,11 @@ func RunAuditSummary(d Dialect, run QueryFunc, f AuditFilter) (AuditSummary, err
 	}
 	b = where()
 	b.conds = append(b.conds, "e.kind IN "+deniedKinds)
-	if err := run("SELECT e.deny_code, e.policy_ref, e.team, e.key_id, COUNT(*), MAX(e.ts) FROM audit_events e"+b.clause()+
-		" GROUP BY e.deny_code, e.policy_ref, e.team, e.key_id ORDER BY COUNT(*) DESC, MAX(e.ts) DESC, e.deny_code, e.policy_ref, e.team, e.key_id LIMIT 50", b.args, func(s RowScanner) error {
+	if err := run("SELECT e.deny_code, e.policy_ref, e.gov_scope, e.gov_limit, e.gov_source, e.team, e.key_id, COUNT(*), MAX(e.ts) FROM audit_events e"+b.clause()+
+		" GROUP BY e.deny_code, e.policy_ref, e.gov_scope, e.gov_limit, e.gov_source, e.team, e.key_id"+
+		" ORDER BY COUNT(*) DESC, MAX(e.ts) DESC, e.deny_code, e.policy_ref, e.gov_scope, e.gov_limit, e.gov_source, e.team, e.key_id LIMIT 50", b.args, func(s RowScanner) error {
 		var x AuditDenial
-		err := s.Scan(&x.Code, &x.Policy, &x.Team, &x.KeyID, &x.Count, &x.LastTS)
+		err := s.Scan(&x.Code, &x.Policy, &x.Scope, &x.Limit, &x.Source, &x.Team, &x.KeyID, &x.Count, &x.LastTS)
 		sum.Denials = append(sum.Denials, x)
 		return err
 	}); err != nil {

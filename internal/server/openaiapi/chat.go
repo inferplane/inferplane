@@ -257,6 +257,8 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		var maskErr error
 		canonical, maskErr = openai.RequestToCanonical(result.SanitizedBody)
 		if len(result.SanitizedBody) == 0 || maskErr != nil {
+			failed := "masking_failed"
+			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: 400, Error: &failed}, traceID)
 			writeErr(w, 400, "invalid_request_error", "request could not be PII-masked")
 			return
 		}
@@ -270,7 +272,11 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if h.mask.Enabled(p.Team) && !result.Decision.Masked {
 		// Audit the security-critical rejection (a masking-bypass attempt) — a
 		// silent reject would be a blind spot in the tamper-evident chain (P4 gate).
-		h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: 400}, traceID)
+		// Observe already ran after RouteRequest; nil metrics adds the
+		// refusal's evidence without a second routing-decision count.
+		result.Decision.Reason = "mask_failed"
+		req = requestpolicy.Observe(w, req, result, nil)
+		h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: 400, Error: &result.Decision.Reason}, traceID)
 		h.metrics.ObserveRequest(ingressName, rejectedModelLabel, "", p.Team, 400, time.Since(start).Seconds(), 0)
 		tracing.SetStatus(span, false, "pii mask bypass blocked")
 		writeErr(w, 400, "invalid_request_error", "PII masking is enabled for your team but not supported on the OpenAI-compatible endpoint yet; use /v1/messages")
@@ -300,6 +306,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// NOT gated on h.gov: on_missing "block" is a pricing setting, and a
 	// deployment with governance off would otherwise serve unpriced traffic free.
 	if dec := requestpolicy.PricingGuard(table, pricedTargets(chain), raw); !dec.Allowed {
+		audit.SetGovernance(req.Context(), dec.Governance)
 		h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, traceID)
 		h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
 		tracing.SetStatus(span, false, "pricing missing")
@@ -309,6 +316,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if h.gov != nil {
 		dec := h.gov.PreCheck(subjectOf(p), keyPolicyOf(p), est)
 		if !dec.Allowed {
+			audit.SetGovernance(req.Context(), dec.Governance)
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "governance deny")
@@ -351,7 +359,8 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if reserveErr != nil {
 			status := requestpolicy.BudgetStatus(reserveErr)
 			requestpolicy.BudgetErrorHeaders(w, reserveErr)
-			h.audit(req.Context(), p, model, ct.Upstream, &audit.OutcomeRef{Status: status}, traceID)
+			audit.SetGovernance(req.Context(), governance.DenialGovernance(reserveErr))
+			h.audit(req.Context(), p, model, ct.Upstream, &audit.OutcomeRef{Status: status, Error: audit.DenyBudgetAuthorityUnavailable.Ptr()}, traceID)
 			writeErr(w, status, "insufficient_quota", "budget authority unavailable")
 			return
 		}

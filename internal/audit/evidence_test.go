@@ -185,3 +185,24 @@ func TestEndOpenAttemptFreezesDuration(t *testing.T) {
 		t.Fatalf("attempt end %d not before total %d", a.StartMs+a.DurMs, rec.Latency.TotalMs)
 	}
 }
+
+func TestKnownDenyReasonsMatchesPredicate(t *testing.T) {
+	codes := KnownDenyReasons()
+	if len(codes) < 13 {
+		t.Fatalf("codes = %v", codes)
+	}
+	seen := map[string]bool{}
+	for _, c := range codes {
+		if !KnownDenyReason(c) || seen[c] {
+			t.Fatalf("code %q unknown or duplicated", c)
+		}
+		seen[c] = true
+	}
+	if !seen[string(DenyBudgetAuthorityUnavailable)] || KnownDenyReason("sensitive_blocked") {
+		t.Fatal("closed set drifted")
+	}
+	codes[0] = "mutated"
+	if KnownDenyReasons()[0] == "mutated" {
+		t.Fatal("accessor must return a copy")
+	}
+}

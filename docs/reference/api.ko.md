@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: a4a82baa4136036f562b45c727fdf237f44bc7f9b8515a5d937087acbfe4434f
+translation_source_sha256: 49d2537ced03b75586c2f7cc34baba0a2a01372960651081df2ef601a8c564c1
 ---
 
 # API 구현 {#api}
@@ -195,11 +195,11 @@ GET /admin/audit/summary
 
 | 경로 | 반환 |
 |---|---|
-| `/admin/audit/events` | `{"events":[...],"next":"<id>"}`, 최신순. 다음 페이지는 `next`를 `before`로 전달합니다. |
+| `/admin/audit/events` | `{"events":[...],"next":"<id>"}`, 최신순. 다음 페이지는 `next`를 `before`로 전달합니다. 거버넌스 거부 행은 기록의 `governance` 이름인 `gov_scope`, `gov_limit`, `gov_source`도 가지며, 다른 행과 그 필드 이전에 기록된 거부에는 없습니다. |
 | `/admin/audit/events/{id}` | `{"event":{...},"record":{...},"hash":"sha256:...","waterfall":{...}}`. `record`는 저장된 감사 행입니다. `hash`는 그 행의 SHA-256으로 기록의 체인 위치를 보여 줄 뿐 체인 검증이 아닙니다(검증은 `/admin/audit/verify`). `waterfall`은 `latency`와 `attempts`에서 만든 타임라인입니다(행 종류 `gateway`, `attempt`, `settle`, `denied`. 기록에 지연 시간이 없으면 행이 없습니다). |
 | `/admin/audit/sessions` | `{"sessions":[...],"next":"<id>"}`. `session_ref`별 한 행(없는 기록은 세션이 아님)과 요청·거부·PII·자동 모드 차단·서브에이전트 수, 비용, 처음·마지막 시각. |
 | `/admin/audit/sessions/{ref}` | `{"events":[...],"next":"<id>"}`, 오래된 순. `s1:` 세션 다이제스트 하나의 이벤트이며 `after`와 `limit`만 적용합니다. |
-| `/admin/audit/summary` | 종류별 건수, 상위 10개 카테고리, PII 건수(`masked`, `internal`, `blocked`, `shadow`), 상위 50개 거부, 자동 모드 건수(`block`, `allow`, `unknown`, `signatures`), 12개 균등 시간 구간, 인덱스가 가진 가장 이른 시각 `coverage_start_ms`. |
+| `/admin/audit/summary` | 종류별 건수, 상위 10개 카테고리, PII 건수(`masked`, `internal`, `blocked`, `shadow`), 상위 50개 거부(`code`, `policy`, `scope`, `limit`, `source`, `team`, `key_id`, `count`, `last_ts`. `scope`·`limit`·`source`는 기록이 거버넌스 한도를 알릴 때만 값이 있음), 자동 모드 건수(`block`, `allow`, `unknown`, `signatures`), 12개 균등 시간 구간, 인덱스가 가진 가장 이른 시각 `coverage_start_ms`. |
 
 목록 경로와 요약이 공유하는 쿼리 파라미터입니다. 모든 값을 검증하며 잘못된 값은 마지막
 열의 닫힌 400 코드를 반환합니다.

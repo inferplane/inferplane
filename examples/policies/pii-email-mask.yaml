@@ -1,0 +1,22 @@
+# Email masking example for the audit console's PII view (ADR-043, ADR-057).
+# Requests from keys of team pii-demo are inspected before routing; detected
+# values such as an email address are replaced with [REDACTED_PII] before any
+# provider call, and the audit record carries routing.categories ["email"]
+# with routing.masked true. A request that cannot be inspected is blocked.
+# Other teams are unaffected when this directory is loaded
+# ("policies": ["examples/policies/"]); load this file alone to try masking
+# with your own routes, because demo.yaml names quick-start models.
+apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata:
+  name: pii-email-mask
+  generation: 1
+spec:
+  subject:
+    team: pii-demo
+  rules:
+  - name: mask-detected
+    failurePolicy: FailClosed
+    sensitiveData:
+      onDetected: Mask
+      onUninspectable: Block

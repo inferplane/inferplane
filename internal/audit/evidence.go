@@ -56,6 +56,7 @@ type evidence struct {
 	attempts []AttemptRef
 	open     int
 	auto     *AutoModeRef
+	gov      *GovernanceRef
 }
 
 type evidenceKey struct{}
@@ -230,6 +231,9 @@ func Finish(ctx context.Context, rec *Record) {
 	if rec.Event == "request_completed" && e.auto != nil {
 		a := *e.auto
 		rec.AutoMode = &a
+	}
+	if rec.Event == "request_started" && e.gov != nil {
+		rec.Governance = cloneGovernance(e.gov)
 	}
 }
 
