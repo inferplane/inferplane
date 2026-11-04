@@ -66,8 +66,8 @@ type limitsResult struct {
 // limits — a dry run reports the change, an apply persists, installs and
 // audits it.
 func (c *Console) putLimits(w http.ResponseWriter, r *http.Request) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	// Read-only check and body decode touch no shared state, so they run
+	// before the lock: a stalled client must not block other edits.
 	if state := c.limitsState(); !state.Editable {
 		writeError(w, http.StatusConflict, apiError{Error: "runtime limits are read-only on this gateway", Code: "read_only", Reason: state.Reason})
 		return
@@ -76,11 +76,17 @@ func (c *Console) putLimits(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, maxLimitsBody, &req) {
 		return
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	set := c.opts.Set
 	before := set.Limits()
 	beforeBytes := otelexport.EncodeLimits(before)
 	current := otelexport.Revision(beforeBytes)
-	if !checkRevision(w, req.DryRun, req.ExpectedRevision, current) || !c.stateFileMatches(w, beforeBytes) {
+	if !checkRevision(w, req.DryRun, req.ExpectedRevision, current) {
+		return
+	}
+	prior, existed, ok := c.stateFileMatches(w, beforeBytes)
+	if !ok {
 		return
 	}
 	after, err := set.Normalize(req.Exporters)
@@ -98,10 +104,10 @@ func (c *Console) putLimits(w http.ResponseWriter, r *http.Request) {
 	if !c.auditReady(w) {
 		return
 	}
-	// stateFileMatches established that the file (or its absence) equals the
-	// installed limits; keep those bytes so a failed install can restore them.
-	prior, readErr := os.ReadFile(c.opts.StateFile)
-	existed := readErr == nil
+	org, ok := c.organization(w, r)
+	if !ok {
+		return
+	}
 	if err := writeFileAtomic(c.opts.StateFile, afterBytes); err != nil {
 		fmt.Fprintln(os.Stderr, "inferplane: observability console: persist limits:", err)
 		writeError(w, http.StatusInternalServerError, apiError{Error: "the limits could not be saved; nothing changed", Code: "persist_failed"})
@@ -109,7 +115,7 @@ func (c *Console) putLimits(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := installLimits(set, after); err != nil {
 		fmt.Fprintln(os.Stderr, "inferplane: observability console: install limits:", err)
-		var rerr error
+		var rerr error // prior and existed come from stateFileMatches
 		if existed {
 			rerr = writeFileAtomic(c.opts.StateFile, prior)
 		} else {
@@ -117,18 +123,20 @@ func (c *Console) putLimits(w http.ResponseWriter, r *http.Request) {
 		}
 		if rerr != nil {
 			fmt.Fprintln(os.Stderr, "inferplane: observability console: restore state file:", rerr)
+			writeError(w, http.StatusInternalServerError, apiError{Error: "the limits were not installed, and the state file may hold the unapplied limits (a restart would install them)", Code: "persist_failed"})
+			return
 		}
 		writeError(w, http.StatusInternalServerError, apiError{Error: "the limits could not be installed; nothing changed", Code: "persist_failed"})
 		return
 	}
-	c.emitChange(r, "observability_limits", current, res.ResultRevision, changedExporters(res.Changes))
+	c.emitChange(r, org, "observability_limits", current, res.ResultRevision, changedExporters(res.Changes))
 	writeJSON(w, http.StatusOK, res)
 }
 
 // stateFileMatches refuses an edit when the state file no longer holds the
 // installed limits (edited by hand while mayu runs): overwriting it would
 // discard that edit silently. A restart loads the file.
-func (c *Console) stateFileMatches(w http.ResponseWriter, installed []byte) bool {
+func (c *Console) stateFileMatches(w http.ResponseWriter, installed []byte) (prior []byte, existed, ok bool) {
 	b, err := os.ReadFile(c.opts.StateFile)
 	var disk []byte
 	switch {
@@ -136,8 +144,9 @@ func (c *Console) stateFileMatches(w http.ResponseWriter, installed []byte) bool
 		disk = otelexport.EncodeLimits(nil)
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, apiError{Error: "the state file could not be read", Code: "read_failed"})
-		return false
+		return nil, false, false
 	default:
+		existed, prior = true, b
 		if l, derr := otelexport.DecodeLimits(b); derr == nil {
 			clamped, _ := c.opts.Set.Clamp(l)
 			if n, nerr := c.opts.Set.Normalize(clamped); nerr == nil {
@@ -147,9 +156,9 @@ func (c *Console) stateFileMatches(w http.ResponseWriter, installed []byte) bool
 	}
 	if !bytes.Equal(disk, installed) {
 		writeError(w, http.StatusConflict, apiError{Error: "the state file changed on disk after mayu loaded it; restart mayu to load it, or restore it", Code: "limits_file_changed"})
-		return false
+		return nil, false, false
 	}
-	return true
+	return prior, existed, true
 }
 
 // limitChanges lists every effective field that differs, per declared

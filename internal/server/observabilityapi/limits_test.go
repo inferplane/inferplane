@@ -2,6 +2,7 @@ package observabilityapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
@@ -22,20 +23,10 @@ func put(t *testing.T, c *Console, pattern string, body any) (int, map[string]an
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, ok := c.Routes()[pattern]
-	if !ok {
-		t.Fatalf("no route %s", pattern)
+	if pattern != limitsRoute {
+		t.Fatalf("put only drives %s", limitsRoute)
 	}
-	method, path, _ := strings.Cut(pattern, " ")
-	req := httptest.NewRequest(method, path, bytes.NewReader(b))
-	req = req.WithContext(principal.WithAdmin(req.Context(), principal.AdminIdentity{Subject: "admin-sub", IsAdmin: true, AuthMethod: "oidc"}))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	var out map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("%s: status %d, body %q", pattern, rec.Code, rec.Body)
-	}
-	return rec.Code, out
+	return rawPut(t, c, string(b))
 }
 
 type limitsHarness struct {
@@ -239,8 +230,13 @@ func TestLoadLimitsRefusesADamagedFile(t *testing.T) {
 
 func rawPut(t *testing.T, c *Console, body string) (int, map[string]any) {
 	t.Helper()
+	return rawPutAs(t, c, body, principal.AdminIdentity{Subject: "admin-sub", IsAdmin: true, AuthMethod: "oidc"})
+}
+
+func rawPutAs(t *testing.T, c *Console, body string, admin principal.AdminIdentity) (int, map[string]any) {
+	t.Helper()
 	req := httptest.NewRequest("PUT", "/admin/observability/limits", strings.NewReader(body))
-	req = req.WithContext(principal.WithAdmin(req.Context(), principal.AdminIdentity{Subject: "admin-sub", IsAdmin: true, AuthMethod: "oidc"}))
+	req = req.WithContext(principal.WithAdmin(req.Context(), admin))
 	rec := httptest.NewRecorder()
 	c.Routes()[limitsRoute].ServeHTTP(rec, req)
 	var out map[string]any
@@ -302,4 +298,61 @@ func TestLimitsInstallFailureRemovesANewStateFile(t *testing.T) {
 	if len(h.set.Limits()) != 0 || len(*h.records) != 0 {
 		t.Fatal("a failed install changed limits or audited")
 	}
+}
+
+func TestLimitsRefuseAnOversizedBody(t *testing.T) {
+	h := newLimitsHarness(t, nil)
+	body := `{"dry_run":true}` + strings.Repeat(" ", maxLimitsBody+1)
+	if code, res := rawPut(t, h.console, body); code != 413 || res["code"] != "invalid_request" {
+		t.Fatalf("oversized body = %d %v", code, res)
+	}
+}
+
+func TestLimitsChangeRecordActor(t *testing.T) {
+	legacy := func(t *testing.T) {
+		h := newLimitsHarness(t, nil)
+		if code, res := put(t, h.console, limitsRoute, pauseCorp(false, h.revision(t))); code != 200 {
+			t.Fatalf("apply = %d %v", code, res)
+		}
+		p := (*h.records)[0].Principal
+		if p.User == nil || *p.User != "admin-sub" || p.AuthMethod == nil || *p.AuthMethod != "oidc" || p.Identity != nil {
+			t.Fatalf("principal = %+v", p)
+		}
+	}
+	t.Run("unconfigured keeps the legacy actor", legacy)
+	t.Run("managed identity records digest evidence only", func(t *testing.T) {
+		h := newLimitsHarness(t, func(o *Options) {
+			o.Organization = func(context.Context) (string, error) { return "org", nil }
+		})
+		admin := principal.AdminIdentity{Issuer: "https://issuer.example", Subject: "opaque-person", IsAdmin: true, AuthMethod: "oidc"}
+		if code, res := rawPutAs(t, h.console, mustJSON(t, pauseCorp(false, h.revision(t))), admin); code != 200 {
+			t.Fatalf("apply = %d %v", code, res)
+		}
+		p := (*h.records)[0].Principal
+		raw, _ := json.Marshal((*h.records)[0])
+		if p.Identity == nil || p.User != nil || strings.Contains(string(raw), "opaque-person") {
+			t.Fatalf("principal = %+v, record %s", p, raw)
+		}
+	})
+	t.Run("an identity lookup error refuses the apply", func(t *testing.T) {
+		h := newLimitsHarness(t, func(o *Options) {
+			o.Organization = func(context.Context) (string, error) { return "", errors.New("down") }
+		})
+		code, res := put(t, h.console, limitsRoute, pauseCorp(false, h.revision(t)))
+		if code != 503 || res["code"] != "audit_unavailable" {
+			t.Fatalf("apply = %d %v", code, res)
+		}
+		if _, err := os.Stat(h.state); !os.IsNotExist(err) || len(h.set.Limits()) != 0 || len(*h.records) != 0 {
+			t.Fatal("an unrecordable change was made")
+		}
+	})
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }

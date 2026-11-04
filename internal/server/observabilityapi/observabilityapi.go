@@ -13,6 +13,7 @@
 package observabilityapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sync"
@@ -63,6 +64,10 @@ type Options struct {
 	Legacy       *LegacyExporter
 	Emit         func(audit.Record)
 	AuditReady   func() (bool, string) // nil = ready
+	// Organization returns the verified-identity organization, "" when
+	// identity is unconfigured; nil means unconfigured. An error refuses an
+	// apply with audit_unavailable.
+	Organization func(context.Context) (string, error)
 }
 
 // Console serves the observability console routes. Edits are serialized.

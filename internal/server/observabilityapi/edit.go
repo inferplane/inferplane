@@ -30,25 +30,22 @@ func writeError(w http.ResponseWriter, status int, e apiError) { writeJSON(w, st
 func decode(w http.ResponseWriter, r *http.Request, max int64, v any) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, max))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, apiError{Error: "request body too large", Code: "invalid_request"})
-			return false
-		}
-		writeError(w, http.StatusBadRequest, apiError{Error: "the body must be one JSON object with known fields: " + err.Error(), Code: "invalid_request"})
+	msg := ""
+	err := dec.Decode(v)
+	if err != nil {
+		msg = "the body must be one JSON object with known fields: " + err.Error()
+	} else if err = dec.Decode(&json.RawMessage{}); err != io.EOF {
+		msg = "the body has data after the JSON object"
+	} else {
+		return true
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, apiError{Error: "request body too large", Code: "invalid_request"})
 		return false
 	}
-	if err := dec.Decode(&json.RawMessage{}); err != io.EOF {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, apiError{Error: "request body too large", Code: "invalid_request"})
-			return false
-		}
-		writeError(w, http.StatusBadRequest, apiError{Error: "the body has data after the JSON object", Code: "invalid_request"})
-		return false
-	}
-	return true
+	writeError(w, http.StatusBadRequest, apiError{Error: msg, Code: "invalid_request"})
+	return false
 }
 
 // checkRevision enforces the optimistic precondition: an apply must name the
@@ -63,6 +60,22 @@ func checkRevision(w http.ResponseWriter, dryRun bool, expected, current string)
 		return false
 	}
 	return true
+}
+
+// organization resolves the verified-identity organization for the change
+// record. An unconfigured (nil) resolver yields "", the legacy actor encoding;
+// a resolver error refuses the apply, since the change could not be recorded
+// without a managed actor reference.
+func (c *Console) organization(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if c.opts.Organization == nil {
+		return "", true
+	}
+	org, err := c.opts.Organization(r.Context())
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, apiError{Error: "the audit identity configuration is unavailable, so nothing was changed", Code: "audit_unavailable"})
+		return "", false
+	}
+	return org, true
 }
 
 // auditReady refuses an apply while the audit chain is not accepting records:
@@ -81,7 +94,7 @@ func (c *Console) auditReady(w http.ResponseWriter) bool {
 // emitChange appends the admin_observability_changed record of one applied
 // edit: the administrator from the request context and the revisions before
 // and after. No state content enters the chain.
-func (c *Console) emitChange(r *http.Request, target, before, after string, names []string) {
+func (c *Console) emitChange(r *http.Request, org, target, before, after string, names []string) {
 	if c.opts.Emit == nil {
 		return
 	}
@@ -93,8 +106,7 @@ func (c *Console) emitChange(r *http.Request, target, before, after string, name
 		Request:       audit.RequestRef{Ingress: "admin", Change: &audit.ChangeRef{Target: target, Before: before, After: after, Names: names}},
 	}
 	if id, ok := principal.AdminFrom(r.Context()); ok {
-		sub, method := id.Subject, id.AuthMethod
-		rec.Principal = audit.PrincipalRef{User: &sub, AuthMethod: &method}
+		rec.Principal = principal.AdminAuditRef(id, org)
 	}
 	c.opts.Emit(rec)
 }
