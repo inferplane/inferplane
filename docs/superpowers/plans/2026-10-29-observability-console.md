@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.26.10 (`CGO_ENABLED=0`), `go.opentelemetry.io/otel` SDK v1.45 (already present), `sigs.k8s.io/yaml` v1.6.0 (already present), Prometheus client, dependency-free browser JS, Node standard library and Python Playwright for console checks.
 
-**Spec:** No separate spec, by user instruction. This plan argues from: `/home/atomoh/.tmp/inferplane-remediation-20261029/inputs/program.md` (Plan 4 and the common constraints); the base branch's `docs/operations/observability.md#governed-otlp-export`, `docs/superpowers/plans/2026-10-27-governed-observability-export.md` (Decisions 1–8: local ceiling, central choice, FailOpen, per-document rejection, merge rules); `docs/superpowers/specs/2026-10-29-audit-console-design.md` on `feat/audit-console` (Status: sub-project B is "OTel export dashboard and exporter/rule editing"; Console conventions; Out of scope); ADR-001 (data-free console), ADR-004 (admin auth), ADR-008 (validate-then-swap UI writes), ADR-033 (local policy file channel and its 2 s Watch), ADR-034 (control plane, `policies` and `control_plane` mutually exclusive), and the control-plane import (`internal/controlplane/import.go`: dry-run-first with `expected_generation`, #125).
+**Spec:** No separate spec, by user instruction. This plan argues from: `/home/atomoh/.tmp/inferplane-remediation-20261029/inputs/program.md` (Plan 4 and the common constraints); the base branch's `docs/operations/observability.md#governed-otlp-export`, `docs/superpowers/plans/2026-10-27-governed-observability-export.md` (Decisions 1–8: local ceiling, central choice, FailOpen, per-document rejection, merge rules); the audit console design, which is on the base since the merge of main: `docs/superpowers/specs/2026-10-29-audit-console-design.md` (Status: sub-project B is "OTel export dashboard and exporter/rule editing"; Console: "sub-project B adds its own item"; Out of scope) and ADR-057 (`docs/decisions/ADR-057-audit-console-evidence.md`); ADR-001 (data-free console), ADR-004 (admin auth), ADR-008 (validate-then-swap UI writes), ADR-033 (local policy file channel and its 2 s Watch), ADR-034 (control plane, `policies` and `control_plane` mutually exclusive), and the control-plane import (`internal/controlplane/import.go`: dry-run-first with `expected_generation`, #125).
 
 ## Design decisions
 
@@ -24,18 +24,18 @@
 10. Decision: A console rule may add or change a content selection only when `observability.console.content_rules: true`; an unchanged content selection may be kept and any may be removed; content exporters still need `data_boundary: internal` and TLS (unless loopback) in bootstrap — why: copying prompts stays a bootstrap decision and the console cannot redirect them — cost if wrong: operators who want console-managed content must opt in explicitly.
 11. Decision: Edit flow = PUT with `dry_run: true` (changes, effects or per-subject decisions, result revision; nothing written) → PUT with `dry_run: false` and `expected_revision` equal to the current revision (else 409 `revision_conflict`) → revalidate → persist → install (limits: `SetLimits`; rules: `Store.Reload`, restoring the previous bytes if it fails) → append `admin_observability_changed`; an apply that changes nothing writes and records nothing — why: the control-plane import (#125) established dry-run-first with an expected generation — cost if wrong: two admins editing at once get 409 and re-preview.
 12. Decision: Revisions are SHA-256 of persisted bytes: limits = canonical bytes mayu writes (`otelexport.EncodeLimits` of normalized limits), rules = console file bytes — why: an auditor can hash the file and match the audit record, and a hand edit changes the revision so a stale apply is refused; a running mayu also refuses a limits apply when the on-disk file no longer matches the installed limits (409 `limits_file_changed`) — cost if wrong: formatting-only hand edits to the console file force a re-preview.
-13. Decision: Change evidence is `audit.RequestRef.Change *ChangeRef` (`target`, `before`, `after`, `names`), appended at the end of `request` with `omitempty`; actor in `principal.user`/`auth_method` — why: admin events already describe their action in `RequestRef` (`configapi.emitEvent`), and appending at the end of `Record` would conflict textually with the audit console's `Attempts`/`Client`/`AutoMode` fields — cost if wrong: tools looking for change evidence at the top level must look under `request`.
+13. Decision: Change evidence is `audit.RequestRef.Change *ChangeRef` (`target`, `before`, `after`, `names`), appended at the end of `request` with `omitempty`; actor in `principal.user`/`auth_method` — why: admin events already describe their action in `RequestRef` (`configapi.emitEvent`, `internal/server/configapi/write.go:304`), while the end of `Record` holds ADR-057 evidence of terminal request records (`Attempts`, `Client`, `AutoMode`, `Governance`); the audit console indexes only terminal request records (`analytics.AuditObservable`, `internal/analytics/auditevents.go:37`; the analytics sink drops everything else, `internal/analytics/sink.go:59`), so an `admin_observability_changed` record never appears there and needs no console label or renderer (pinned in Task 6) — cost if wrong: tools looking for change evidence at the top level must look under `request`.
 14. Decision: Edits are refused with 503 `audit_unavailable` while `aud.Ready()` is false — why: a change that cannot be recorded should not be made — cost if wrong: during an audit outage the console cannot flip the kill switch (stop mayu and edit the state file still works).
-15. Decision: Every `/admin/observability*` route, reads included, is `AdminAuth` + `requireAdmin` (full admin; team-mapped admins get 403 and `admin_denied`), mounted by a new generic `server.WithFullAdminRoutes(admin, routes, …)` layered after `WithEvaluations`, so `AdminMux`'s 35-caller positional signature is unchanged; `/admin/capabilities` gains a plain `observability_export` bool (readable by any authenticated admin, like every other capability) — why: the status names collector endpoints and policy subjects; existing capability rules expose only booleans — cost if wrong: team-mapped admins cannot see export health.
+15. Decision: Every `/admin/observability*` route, reads included, is `AdminAuth` + `requireAdmin` (full admin; team-mapped admins get 403 and `admin_denied`), mounted by a new generic `server.WithFullAdminRoutes(admin, routes, …)` layered after `WithEvaluations`, so `AdminMux`'s positional signature (36 call sites at `caf55fe`) is unchanged; each route gets the same `AdminAuth` + `requireAdmin` pair the audit console's `/admin/audit/*` routes use inside `AdminMux`; `/admin/capabilities` gains a plain `observability_export` bool (readable by any authenticated admin, like every other capability) — why: the status names collector endpoints and policy subjects; existing capability rules expose only booleans; the audit console could mount inside `AdminMux` because it needs only the analytics querier `AdminMux` already takes, while the console needs the export set, the policy store and its files — cost if wrong: team-mapped admins cannot see export health.
 16. Decision: `policy.Store.Reload` becomes serialized and records file mtimes *before* reading — why: the console now reloads while the 2 s Watch may be mid-read; without both, an older read could install last, or a write landing during a read could be recorded as loaded and never picked up — cost if wrong: none for existing callers; one mutex on a cold path.
 17. Decision: The API is mounted even without an `observability` block and reports `configured: false` — why: the view can say what is missing (affordance card plus legacy `otel` line) instead of failing with 404 — cost if wrong: one extra full-admin route on gateways without export.
-18. Decision: Console code goes into a new `static/observability.js` that registers itself in a new `viewRefreshers` map in `app.js`; the nav button sits after **Compare models** (the audit console mockup shows it between Audit and Compare models), and every other insertion point (VIEWS tail, `showView`'s dispatch line, `index.html` section after Governance, script tag after `evaluation.js`, `i18n.js` before the nav block, `style.css` after the evaluation block, `adminui.go` after `favicon.svg`, `Capabilities` after `Guardrails`, `RequestRef` tail, docs anchors) is chosen so `git merge-tree` against `feat/audit-console` adds no conflicted file beyond the base branch's own, except the `translation_source_sha256` header line of `.ko.md` companions whose English source both branches edit — why: the program asks for a clean later merge, and inserting at the audit console's own anchors always conflicts — cost if wrong: moving the button above Compare models after both merge is a one-line follow-up.
-19. Decision: Error bodies are `{"error": "<message>", "code": "<stable code>"}` (+ `reason`, `current_revision` when relevant) — why: the console's existing `api()` helper shows `error`, and `observability.js` maps `code` to translated text — cost if wrong: none; clients reading only `error` still get a readable message.
+18. Decision: Console code goes into a new `static/observability.js` wired the way `audit.js` and `evaluation.js` are: `app.js` gains `observability: "nav.observability"` in `VIEWS` (after `audit`) and `observability: refreshObservabilityView` in `showView`'s refreshers literal. The nav button sits between **Audit** and **Compare models**, where the audit console mockup shows it. Every other insertion point follows the same reading order: the `index.html` section after `view-audit`, the script tag after `audit.js`, the `i18n.js` block (with `nav.observability`, like `nav.audit` opens the audit block) after the audit keys at the end of `MSG`, the `style.css` block after the audit block at the end of the file, `adminui.go`'s entry after `audit.js` (gofmt realigns that map), `Capabilities.ObservabilityExport` after the ADR-057 fields, `RequestRef.Change` at the end of `request`, and each docs section next to the related one (data and security after their ADR-057 sections, the API reference after its audit console section, the API layer reference after the observability rule schema). The three harnesses that load the shipped scripts and switch views — `testdata/routing_forms.cjs`, `testdata/analytics_evidence.cjs` and `testdata/browser_qa.py` — load or serve `observability.js` too — why: the audit console is in the base, so there is no later merge to optimize for; one convention for views in their own file and one reading order is what a reader of the current files expects — cost if wrong: a harness that loads `app.js` without `observability.js` and switches views throws `ReferenceError: refreshObservabilityView is not defined`; Task 11 updates the three that exist, and a new one must load the file like it loads `audit.js`.
+19. Decision: Error bodies are `{"error": "<message>", "code": "<stable code>"}` (+ `reason`, `current_revision` when relevant) — why: the console's existing `api()` helper shows `error`, and `observability.js` maps `code` to translated text; the audit console's read-only routes answer `{"error": "<closed code>"}` only, but a refused edit needs its reason (which exporter, which field) — cost if wrong: the two consoles' error bodies differ (the stable code is `error` there, `code` here); clients reading only `error` still get a readable message.
 20. Decision: No new module dependency — why: `sigs.k8s.io/yaml`, the OTel SDK and the Prometheus client are already in `go.sum`; everything else is the standard library — cost if wrong: n/a.
 
 ## Global Constraints
 
-- Worktree `/home/atomoh/.tmp/inferplane-observability-console-20261029/worktree`, branch `feat/observability-console` (from `feat/governed-observability-export` 0e602a9). No push, no merge.
+- Worktree `/home/atomoh/.tmp/inferplane-observability-console-20261029/worktree`, branch `feat/observability-console`. Base: `feat/governed-observability-export` at `caf55fe`, which merges origin/main `a8a71f6` (ADR-057 audit console, #132 and #133). Every line anchor below was re-verified at `caf55fe`; when an earlier task in this plan has edited the same file, anchor on the quoted code, not the number. No push, no merge.
 - Every Bash call starts with this preamble (the shell does not persist between calls):
 
   ```bash
@@ -53,7 +53,7 @@
 - Audit record fields are append-only and `omitempty`; old audit files must still pass `mayu audit verify`.
 - Authenticated `count_tokens` results stay HTTP 200; shared auth still 401s first (untouched by this plan).
 - Cache invariant and provider isolation untouched (no provider or ingress change).
-- A task that changes a layer updates `docs/reference/<layer>.md` (+ `.ko.md`) and the module `CLAUDE.md` in the same commit. `AGENTS.md` is generated: never edit it (this plan does not change the root `CLAUDE.md`).
+- A task that changes a layer updates `docs/reference/<layer>.md` (+ `.ko.md`) and the module `CLAUDE.md` in the same commit. The root `CLAUDE.md` changes once, in Task 13 Step 1 (two Project Structure lines). `AGENTS.md` is generated from it: never edit `AGENTS.md`; the controller regenerates it after this plan lands.
 - Korean companions: Korean text in Korean, literal UTF-8; fenced code blocks identical to the English file. After editing an English doc, refresh its companion's source hash with:
 
   ```bash
@@ -79,6 +79,7 @@
 | `internal/policy/observability.go` | `ObservabilityDecision.ContentConflict`; `MergeObservability` (explicit set) | 1 |
 | `internal/policy/store.go` | `Store.CheckLocal`; serialized `Reload` recording mtimes before reading; `afterPolicyRead` test seam | 1 |
 | `internal/policy/observability_console_test.go` (new) | Tests for the above | 1 |
+| `internal/otelexport/export_test.go` | `TestAuditSinkNeverBlocksWriter` made structural (no wall-clock ratio) + `TestNonBlockingCheckCatchesABlockingSink` | 2 |
 | `internal/metrics/metrics.go`, `otelexport_test.go`, `cardinality_test.go` | `inferplane_otel_export_decisions_total`; outcome help text | 2 |
 | `internal/otelexport/stats.go` (new), `stats_test.go` (new) | Console counters, last success/error, decisions, `SignalStats`, `ObserveTrace` | 2 |
 | `internal/otelexport/set.go`, `pipeline.go`, `records.go` | Route every count through stats; limits recheck in `emit`; lowered content cap | 2, 3 |
@@ -88,6 +89,7 @@
 | `internal/tracing/route.go`, `tracing.go`, `observer_test.go` (new) | `Observer`, counting exporter, `drawSample` seam, `InitExporters(..., observe)` | 4 |
 | `internal/config/observability.go`, `config.go`, `observability_console_test.go` (new) | `observability.console` block and validation | 5 |
 | `internal/audit/record.go`, `change.go` (new), `change_test.go` (new) | `RequestRef.Change`, `ChangeRef` | 6 |
+| `internal/analytics/observability_change_test.go` (new) | Pins that change records stay out of the audit console projection | 6 |
 | `internal/server/fulladmin.go` (new), `fulladmin_test.go` (new) | `WithFullAdminRoutes` | 7 |
 | `internal/server/observabilityapi/{observabilityapi,console,status}.go` (new) + `status_test.go` | Console options, rule model, `GET /admin/observability` | 7 |
 | `internal/server/observabilityapi/{edit,limits}.go` (new) + `limits_test.go` | Shared edit helpers, `PUT …/limits`, `LoadLimits` | 8 |
@@ -96,8 +98,10 @@
 | `cmd/mayu/observability_console_test.go` (new) | Gateway acceptance | 10 |
 | `internal/server/adminui/static/{index.html,app.js,i18n.js,style.css}`, `observability.js` (new), `adminui.go` | Observability view | 11 |
 | `internal/server/adminui/observability_console_test.go` (new), `testdata/observability_console.cjs` (new) | Go wiring/i18n checks, Node helper checks | 11 |
+| `internal/server/adminui/testdata/{routing_forms.cjs,analytics_evidence.cjs,browser_qa.py}` | Load or serve `observability.js` like `audit.js` | 11 |
 | `internal/server/adminui/testdata/observability_qa.py` (new) | Playwright QA, screenshots 1280/390 | 12 |
 | Docs: `docs/reference/{data,api,security,agent-llm}.md` (+ko), `docs/api-reference.md` (+ko), `docs/operations/observability.md` (+ko), `internal/CLAUDE.md`, `cmd/CLAUDE.md` | Folded into Tasks 1–11 | 1–11 |
+| `CHANGELOG.md`, root `CLAUDE.md` | `Unreleased` entry; Project Structure lines (`AGENTS.md` regenerated by the controller) | 13 |
 
 ---
 
@@ -105,10 +109,9 @@
 
 **Files:**
 - Modify: `internal/policy/observability.go:39-46` (`ObservabilityDecision`), `:115-167` (`Store.Observability`)
-- Modify: `internal/policy/store.go:3-14` (imports), `:82-98` (`Store` struct), `:273-311` (`Reload`); add `CheckLocal` after `Reload`
+- Modify: `internal/policy/store.go:3-14` (imports), `:97-113` (`Store` struct), `:288-325` (`Reload`); add `CheckLocal` after `Reload`
 - Create: `internal/policy/observability_console_test.go`
-- Modify: `internal/CLAUDE.md` (append a new section at the end, after line 186)
-- Main delta: `internal/CLAUDE.md` also changed on main in 26ad568 (audit console, ADR-057). Stay on the base branch (no rebase, no merge of main); the later merge into main resolves conflicts here. Full list: `/home/atomoh/.tmp/inferplane-remediation-20261029/main-delta-files.txt`.
+- Modify: `internal/CLAUDE.md` (append a new section at the end, after line 192, the last line of `## Local monetary admission (ADR-054)`)
 
 **Interfaces:**
 - Consumes: existing `Subject.matches`, `checkEnforceable`, `validateIdentitySubject`, `enumerate`, `LoadPaths`, `Store.changed`.
@@ -356,7 +359,7 @@ func MergeObservability(policies []*Policy, team, user string) ObservabilityDeci
 }
 ```
 
-In `internal/policy/store.go` add `"sync"` to the import block (between `"os"` and `"sync/atomic"`). In the `Store` struct, after the `observabilityCeiling` field (line 97), add:
+In `internal/policy/store.go` add `"sync"` to the import block (between `"os"` and `"sync/atomic"`). In the `Store` struct, after the `observabilityCeiling` field (line 112), add:
 
 ```go
 	// reloadMu serializes Reload: the Watch and the observability console
@@ -364,7 +367,7 @@ In `internal/policy/store.go` add `"sync"` to the import block (between `"os"` a
 	reloadMu sync.Mutex
 ```
 
-Replace `Reload` (lines 273–311, doc comment included) with:
+Replace `Reload` (lines 288–325, doc comment included) with:
 
 ```go
 // Reload re-reads every configured path and atomically swaps the snapshot.
@@ -473,16 +476,17 @@ git -C $W commit -s -m "feat(policy): observability merge over a set, dry-run ch
 ### Task 2: Export stats and the decision counter
 
 **Files:**
-- Modify: `internal/metrics/metrics.go:44` (field), `:118-122` (otelExport help), `:124-126` (`MustRegister`), after `:214` (new method)
-- Modify: `internal/metrics/otelexport_test.go` (append), `internal/metrics/cardinality_test.go:47` (two lines after `ObservePIIClassifier`)
+- Modify: `internal/otelexport/export_test.go:365-398` (replace `TestAuditSinkNeverBlocksWriter`; Steps 1–3, own commit)
+- Modify: `internal/metrics/metrics.go:45` (field), `:123-127` (otelExport help), `:129-132` (`MustRegister`), after `:220` (new method)
+- Modify: `internal/metrics/otelexport_test.go` (append), `internal/metrics/cardinality_test.go:48` (two lines after `ObservePIIClassifier`)
 - Create: `internal/otelexport/stats.go`, `internal/otelexport/stats_test.go`
 - Modify: `internal/otelexport/set.go:63-73` (`Set`), `:83` and `:106` (`New`), `:186` (`emit`); `internal/otelexport/pipeline.go:16-17,54-80,95-111,197-199`; `internal/otelexport/records.go:100`
 - Modify: `internal/CLAUDE.md` (append one bullet to the section from Task 1)
-- Main delta: `internal/metrics/metrics.go`, `internal/metrics/cardinality_test.go`, `internal/CLAUDE.md` also changed on main in 26ad568 (audit console, ADR-057). Stay on the base branch (no rebase, no merge of main); the later merge into main resolves conflicts here. Full list: `/home/atomoh/.tmp/inferplane-remediation-20261029/main-delta-files.txt`.
 
 **Interfaces:**
-- Consumes: `metrics.Metrics.ObserveOTelExport`.
+- Consumes: `metrics.Metrics.ObserveOTelExport`; `audit.NewWriter`, `audit.Sink`.
 - Produces:
+  - test-only (package `otelexport`): `const nonBlockingDeadline`, `func writeAll(t *testing.T, sink audit.Sink, n int) <-chan error`, `type blockingSink`
   - `func (m *Metrics) ObserveOTelDecision(signal, decision string)`
   - `const otelexport.DecisionSelected = "selected"`, `DecisionNoRule = "no_rule"`, `DecisionConflict = "content_conflict"`, `DecisionWithheld = "withheld_limit"`
   - `type otelexport.SignalStats struct { Signal string; Outcomes map[string]uint64; LastSuccessAt, LastErrorAt, LastError string }` (JSON `signal`, `outcomes`, `last_success_at`, `last_error_at`, `last_error`)
@@ -491,7 +495,124 @@ git -C $W commit -s -m "feat(policy): observability merge over a set, dry-run ch
   - `func (s *Set) ObserveTrace(exporter, outcome string, n int)` (nil-safe; accepts `sent`, `dropped_export_error`, `sampled_out`)
   - package-private: `stats`, `newStats`, `(*stats).count`, `.decision`, `.delivered`, `.failed`, `.signalStats`, `.decisions`; outcomes `outcomeWithheld = "withheld_limit"`, `outcomeSampledOut = "sampled_out"`
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Make the non-blocking audit test structural**
+
+`TestAuditSinkNeverBlocksWriter` compared the writer's time against a discard-sink baseline (`blocked > 2*baseline+time.Second`) and failed once under host load (`blocked 4.81s vs baseline 1.80s`). The audit writer calls every sink synchronously on its one goroutine (`internal/audit/writer.go:142-210`), so "never blocks" can be shown without timing: hold the collector blocked, prove the writer drains and closes all N records while it is still blocked, then release it. The deadline only detects a hang.
+
+In `internal/otelexport/export_test.go`, replace `TestAuditSinkNeverBlocksWriter` (lines 365–398, up to the blank line before `TestAllows`) with:
+
+```go
+// nonBlockingDeadline only detects a hang. The check below never compares
+// timings, so a slow or loaded host cannot fail it; only a sink that waits for
+// its collector can.
+const nonBlockingDeadline = 30 * time.Second
+
+// writeAll appends n records through an audit writer whose only sink is sink,
+// then closes it. Close returns only after the writer goroutine has handed
+// every record to the sink, so a value on the returned channel proves that all
+// n writes completed. The channel yields Close's error.
+func writeAll(t *testing.T, sink audit.Sink, n int) <-chan error {
+	t.Helper()
+	w, err := audit.NewWriter("node-1", t.TempDir()+"/wal", []audit.Sink{sink})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		for i := 0; i < n; i++ {
+			w.Append(audit.Record{SchemaVersion: 1, Event: "request_completed", ID: fmt.Sprint(i), Principal: audit.PrincipalRef{Team: "eng"}})
+		}
+		done <- w.Close()
+	}()
+	return done
+}
+
+// The audit writer hands each record to every sink on its single goroutine, so
+// an OTLP copy that waited for its collector would stall the whole chain. The
+// collector stays blocked until the writer has written and closed all n
+// records; only then is it released.
+func TestAuditSinkNeverBlocksWriter(t *testing.T) {
+	const n = 400
+	col := newCollector(t)
+	col.block = make(chan struct{})
+	m := metrics.New()
+	s := newTestSet(t, m, Exporter{Name: "corp", Endpoint: col.endpoint(), Insecure: true, Signals: []string{"audit"}, QueueBytes: 64 << 10})
+	done := writeAll(t, s.AuditSink(func(string, string) []string { return []string{"corp"} }), n)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(nonBlockingDeadline):
+		t.Fatalf("the audit writer was still writing after %v with the collector blocked: the OTLP sink waits for its collector", nonBlockingDeadline)
+	}
+	if got := len(col.records()); got != 0 {
+		t.Fatalf("the collector accepted %d records before it was released; the test did not hold it blocked", got)
+	}
+	if counter(m, "corp", "audit", "dropped_queue_full") == 0 {
+		t.Fatal("the byte budget must drop once the blocked collector backs up")
+	}
+	close(col.block)
+	shutdown(t, s)
+}
+
+// blockingSink waits on release for every record: the kind of sink
+// TestAuditSinkNeverBlocksWriter exists to catch.
+type blockingSink struct{ release chan struct{} }
+
+func (b blockingSink) Write([]byte) error { <-b.release; return nil }
+func (b blockingSink) Name() string       { return "blocking" }
+func (b blockingSink) Required() bool     { return false }
+func (b blockingSink) Close() error       { return nil }
+
+// RED evidence for the check above, kept in the suite: the same drain check
+// does not complete while a sink waits on something the test holds.
+func TestNonBlockingCheckCatchesABlockingSink(t *testing.T) {
+	sink := blockingSink{release: make(chan struct{})}
+	done := writeAll(t, sink, 5)
+	select {
+	case <-done:
+		t.Fatal("a blocking sink drained while it was held: the drain check would pass a sink that waits")
+	case <-time.After(250 * time.Millisecond):
+	}
+	close(sink.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+```
+
+The file's imports are unchanged (`io` is still used by the collector, `fmt` by `writeAll`).
+
+- [ ] **Step 2: RED against a blocking sink, then GREEN**
+
+RED, test-local sink: `TestNonBlockingCheckCatchesABlockingSink` drives the same `writeAll` check through `blockingSink` and must see it not complete. RED, real sink: an `-overlay` copy of `pipeline.go` whose `enqueue` waits until its queue has drained (what a sink that waits for its collector would do) must make `TestAuditSinkNeverBlocksWriter` fail at the deadline. No repository file changes.
+
+```bash
+mkdir -p $S/red-nonblocking
+python3 - internal/otelexport/pipeline.go $S/red-nonblocking/pipeline.go <<'EOF'
+import sys
+src = open(sys.argv[1], encoding="utf-8").read()
+old = "\tcase p.ch <- it:\n"
+assert src.count(old) == 1, "anchor is not unique"
+probe = "\t\tfor p.queued.Load() > 0 { // RED probe: wait for the collector, as a blocking sink would\n\t\t\ttime.Sleep(time.Millisecond)\n\t\t}\n"
+open(sys.argv[2], "w", encoding="utf-8").write(src.replace(old, old + probe))
+EOF
+printf '{"Replace":{"%s":"%s"}}\n' "$W/internal/otelexport/pipeline.go" "$S/red-nonblocking/pipeline.go" > $S/red-nonblocking/overlay.json
+go test -buildvcs=false -overlay $S/red-nonblocking/overlay.json ./internal/otelexport/ -run 'TestAuditSinkNeverBlocksWriter$' -count=1 -timeout 180s > $S/t2-red.log 2>&1; echo "red=$?"; grep -E '^(ok|FAIL|---)|still writing' $S/t2-red.log
+go test -buildvcs=false ./internal/otelexport/ -run 'TestAuditSinkNeverBlocksWriter$|TestNonBlockingCheckCatchesABlockingSink$' -race -count=1 -v > $S/t2-green.log 2>&1; echo "green=$?"; grep -E '^(ok|FAIL|--- )' $S/t2-green.log
+gofmt -l internal/otelexport
+```
+Expected: `red=1` with `--- FAIL: TestAuditSinkNeverBlocksWriter (30.00s)` and the `still writing after 30s` message; `green=0` with both tests `PASS` (the first takes a few seconds: 400 WAL fsyncs); no gofmt output. (Re-verification run at `caf55fe`: RED failed at 30.00 s, GREEN passed in 3.78 s and 0.28 s.)
+
+- [ ] **Step 3: Commit**
+
+```bash
+git -C $W add internal/otelexport/export_test.go
+git -C $W commit -s -m "test(otelexport): prove the audit sink never blocks without a timing ratio" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+- [ ] **Step 4: Write the failing tests**
 
 Append to `internal/metrics/otelexport_test.go`:
 
@@ -512,7 +633,7 @@ func TestObserveOTelDecision(t *testing.T) {
 }
 ```
 
-In `internal/metrics/cardinality_test.go`, after line 47 (`m.ObservePIIClassifier("laya-ko", ...)`), add:
+In `internal/metrics/cardinality_test.go`, after line 48 (`m.ObservePIIClassifier("laya-ko", ...)`), add:
 
 ```go
 	m.ObserveOTelExport("corp", "audit", "sent", 1)
@@ -633,22 +754,22 @@ func TestDecisionCountsMirrorPrometheus(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run — expect compile failure**
+- [ ] **Step 5: Run — expect compile failure**
 
 ```bash
 go test -buildvcs=false ./internal/metrics/ ./internal/otelexport/ -race -count=1 > $S/t2.log 2>&1; echo "exit=$?"; grep -E '^(ok|FAIL|---|panic)|undefined' $S/t2.log
 ```
 Expected: `exit=1`, `undefined: …otelDecisions`, `ObserveOTelDecision`, `SignalStats`, `ObserveTrace`, `s.st`.
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 6: Implement**
 
-`internal/metrics/metrics.go`: after line 44 (`otelExport …`) add the field
+`internal/metrics/metrics.go`: after line 45 (`otelExport …`) add the field
 
 ```go
 	otelDecisions      *prometheus.CounterVec // inferplane_otel_export_decisions_total
 ```
 
-Replace the `otelExport` constructor (lines 118–122) with both counters:
+Replace the `otelExport` constructor (lines 123–127) with both counters:
 
 ```go
 		otelExport: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -663,7 +784,7 @@ Replace the `otelExport` constructor (lines 118–122) with both counters:
 		}, []string{"signal", "decision"}),
 ```
 
-In `reg.MustRegister(...)` (line 126) change the tail `m.routingDecisions, m.otelExport)` to `m.routingDecisions, m.otelExport, m.otelDecisions)`. After `ObserveOTelExport` (ends line 214) add:
+In `reg.MustRegister(...)` (lines 129–132) change the last line `m.otelExport, m.autoModeUnparsed)` to `m.otelExport, m.autoModeUnparsed, m.otelDecisions)`. After `ObserveOTelExport` (ends line 220, before ADR-057's `ObserveAutoModeUnparsed`) add:
 
 ```go
 // ObserveOTelDecision counts one governed export decision. Both labels are
@@ -919,7 +1040,7 @@ Append to the `internal/CLAUDE.md` section from Task 1:
 - `otelexport/` stats: every outcome count also lands in a per-process map behind `Set.SignalStats` with the last success/error time and the fixed error text (status code only, never collector content); `inferplane_otel_export_decisions_total{signal,decision}` counts governed decisions, and `withheld_limit`/`sampled_out` join the records outcomes. `ObserveTrace` takes span counts from `internal/tracing` (the legacy `otel` name included). Keys are config-bounded.
 ```
 
-- [ ] **Step 4: Run**
+- [ ] **Step 7: Run**
 
 ```bash
 go test -buildvcs=false ./internal/metrics/ ./internal/otelexport/ ./cmd/mayu/ -run 'OTel|Stats|ObserveTrace|Decision|Cardinality|NoMetricCarries|Observability' -race -count=1 > $S/t2.log 2>&1; echo "exit=$?"; grep -E '^(ok|FAIL|---|panic)' $S/t2.log
@@ -928,7 +1049,7 @@ gofmt -l internal/metrics internal/otelexport
 ```
 Expected: both `exit=0`; `ok` for `internal/metrics`, `internal/otelexport`, `cmd/mayu`; no gofmt output.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git -C $W add internal/metrics/metrics.go internal/metrics/otelexport_test.go internal/metrics/cardinality_test.go internal/otelexport/stats.go internal/otelexport/stats_test.go internal/otelexport/set.go internal/otelexport/pipeline.go internal/otelexport/records.go internal/CLAUDE.md
@@ -942,9 +1063,8 @@ git -C $W commit -s -m "feat(otelexport): per-process export stats and a governe
 - Modify: `internal/otelexport/set.go:14-24` (imports), `:33-45` (`Exporter`), `:63-68` (`Set`), `:83` (`New`), `:180-191` (`emit`)
 - Modify: `internal/otelexport/records.go:93-102` (`EmitContent` size check)
 - Modify: `cmd/mayu/observability.go:49-52` (exporter literal), `:57-91` (`auditTargets`, `contentExport`, `traceDecider`), `:114` (`initTracing` call)
-- Modify: `cmd/mayu/gateway.go:248` (`auditTargets` call)
+- Modify: `cmd/mayu/gateway.go:249` (`auditTargets` call)
 - Modify: `internal/CLAUDE.md` (append one bullet)
-- Main delta: `cmd/mayu/gateway.go`, `internal/CLAUDE.md` also changed on main in 26ad568 (audit console, ADR-057). Stay on the base branch (no rebase, no merge of main); the later merge into main resolves conflicts here. Full list: `/home/atomoh/.tmp/inferplane-remediation-20261029/main-delta-files.txt`.
 
 **Interfaces:**
 - Consumes: `stats` from Task 2; `policy.ObservabilityDecision.ContentConflict` from Task 1.
@@ -1827,7 +1947,7 @@ func traceDecider(set *otelexport.Set, pol *policy.Store, legacy *tracing.Target
 
 and in `initTracing` change the return line (114) to `return tracing.InitExporters(ctx, service, exporters, traceDecider(set, pol, legacy))`.
 
-`cmd/mayu/gateway.go` line 248: `sinks = append(sinks, obsSet.AuditSink(auditTargets(obsSet, polStore)))`.
+`cmd/mayu/gateway.go` line 249: `sinks = append(sinks, obsSet.AuditSink(auditTargets(obsSet, polStore)))`.
 
 Append to the `internal/CLAUDE.md` section:
 
@@ -1859,7 +1979,6 @@ git -C $W commit -s -m "feat(otelexport): narrowing-only runtime limits applied 
 - Create: `internal/tracing/observer_test.go`
 - Modify: `cmd/mayu/observability.go:93-115` (`initTracing` passes `set.ObserveTrace`)
 - Modify: `docs/reference/agent-llm.md:24-25` and `docs/reference/agent-llm.ko.md:29-30` (Tracing and Governed export rows), `internal/CLAUDE.md` (one bullet)
-- Main delta: `internal/CLAUDE.md` also changed on main in 26ad568 (audit console, ADR-057). Stay on the base branch (no rebase, no merge of main); the later merge into main resolves conflicts here. Full list: `/home/atomoh/.tmp/inferplane-remediation-20261029/main-delta-files.txt`.
 
 **Interfaces:**
 - Consumes: `otelexport.Set.ObserveTrace` (Task 2).
@@ -2156,10 +2275,9 @@ git -C $W commit -s -m "feat(tracing): per-exporter span counts for the observab
 
 **Files:**
 - Modify: `internal/config/observability.go:3-12` (imports), `:32-39` (`ObservabilityConfig`); add `ObservabilityConsoleConfig` and `validateObservabilityConsole` at the end
-- Modify: `internal/config/config.go:852-854` (call after `validateControlPlane`)
+- Modify: `internal/config/config.go:865-867` (call after `validateControlPlane`)
 - Create: `internal/config/observability_console_test.go`
 - Modify: `internal/CLAUDE.md` (one bullet)
-- Main delta: `internal/config/config.go`, `internal/CLAUDE.md` also changed on main in 26ad568 (audit console, ADR-057). Stay on the base branch (no rebase, no merge of main); the later merge into main resolves conflicts here. Full list: `/home/atomoh/.tmp/inferplane-remediation-20261029/main-delta-files.txt`.
 
 **Interfaces:**
 - Produces:
@@ -2293,7 +2411,7 @@ func validateObservabilityConsole(cfg *Config) error {
 }
 ```
 
-`internal/config/config.go`: after the `validateControlPlane` call (lines 852–854) insert:
+`internal/config/config.go`: after the `validateControlPlane` call (lines 865–867) insert:
 
 ```go
 	if err := validateObservabilityConsole(&cfg); err != nil {
@@ -2327,9 +2445,10 @@ git -C $W commit -s -m "feat(config): observability.console block for runtime ed
 
 **Files:**
 - Modify: `internal/audit/record.go:51-53` (append `Change` after `Routing` in `RequestRef`)
-- Create: `internal/audit/change.go`, `internal/audit/change_test.go`
-- Modify: `docs/reference/data.md` (new section before line 136 `### 5. Cross-references`), `docs/reference/data.ko.md` (before line 93 `### 5. 관련 문서`), `internal/CLAUDE.md` (one bullet)
-- Main delta: `internal/audit/record.go`, `docs/reference/data.md`, `docs/reference/data.ko.md`, `internal/CLAUDE.md` also changed on main in 26ad568 (audit console, ADR-057). Stay on the base branch (no rebase, no merge of main); the later merge into main resolves conflicts here. Full list: `/home/atomoh/.tmp/inferplane-remediation-20261029/main-delta-files.txt`.
+- Create: `internal/audit/change.go`, `internal/audit/change_test.go`, `internal/analytics/observability_change_test.go`
+- Modify: `docs/reference/data.md` (new `##` section at the end of the file, after the `## Audit console evidence (ADR-057)` section's last line 310), `docs/reference/data.ko.md` (at the end, after line 237), `internal/CLAUDE.md` (one bullet)
+
+**Audit console interplay (checked at `caf55fe`):** the audit console lists only terminal request records. `analytics.AuditObservable` (`internal/analytics/auditevents.go:37`) accepts `request_completed` and `request_started` with an outcome, the analytics sink drops every other event before indexing (`internal/analytics/sink.go:59`), and `TestAuditObservable` already pins `admin_key_created` as excluded. So `admin_observability_changed` and `request.change` never reach `/admin/audit/*`, the kind chips, the detail panel or `audit.js`, and no `.cjs` check enumerates event types or request fields; no console label or renderer is needed. Step 1 adds one pin so a later change that projects admin events has to label this one first.
 
 **Interfaces:**
 - Produces: `type ChangeRef struct { Target, Before, After string; Names []string }` (JSON `target`, `before`, `after`, `names,omitempty`); `RequestRef.Change *ChangeRef` (JSON `change,omitempty`).
@@ -2405,12 +2524,36 @@ func TestMixedVersionChainVerifies_Change(t *testing.T) {
 }
 ```
 
+`internal/analytics/observability_change_test.go`:
+
+```go
+package analytics
+
+import (
+	"testing"
+
+	"github.com/inferplane/inferplane/internal/audit"
+)
+
+// The audit console (ADR-057) and GET /admin/logs index terminal request
+// records only. admin_observability_changed, and the request.change evidence it
+// carries, stays out of both projections, so the console needs no label or
+// renderer for it. If an admin event is ever projected, label this one first.
+func TestObservabilityChangeRecordsStayOutOfTheConsole(t *testing.T) {
+	rec := audit.Record{SchemaVersion: 1, Event: "admin_observability_changed", ID: "01JC0000000000000000000001", TS: "2026-10-29T10:00:00Z",
+		Request: audit.RequestRef{Ingress: "admin", Change: &audit.ChangeRef{Target: "observability_limits", Before: "sha256:aa", After: "sha256:bb", Names: []string{"corp"}}}}
+	if AuditObservable(rec) || Observable(rec) {
+		t.Fatal("an admin change record reached the audit console or the analytics projection")
+	}
+}
+```
+
 - [ ] **Step 2: Run — expect compile failure**
 
 ```bash
-go test -buildvcs=false ./internal/audit/ -run 'RequestChange|Change' -race -count=1 > $S/t6.log 2>&1; echo "exit=$?"; grep -E '^(ok|FAIL|---|panic)|undefined|unknown field' $S/t6.log
+go test -buildvcs=false ./internal/audit/ ./internal/analytics/ -run 'RequestChange|Change' -race -count=1 > $S/t6.log 2>&1; echo "exit=$?"; grep -E '^(ok|FAIL|---|panic)|undefined|unknown field' $S/t6.log
 ```
-Expected: `exit=1`, `undefined: ChangeRef`.
+Expected: `exit=1`, `undefined: ChangeRef` in both packages.
 
 - [ ] **Step 3: Implement**
 
@@ -2442,10 +2585,11 @@ type ChangeRef struct {
 	Change *ChangeRef `json:"change,omitempty"`
 ```
 
-`docs/reference/data.md`: insert before `### 5. Cross-references` (line 136):
+`docs/reference/data.md`: append at the end of the file, after the `### Configuration` table that closes `## Audit console evidence (ADR-057)` (line 310), so the two audit-record sections sit together:
 
 ~~~~markdown
-### Admin change evidence (observability console)
+
+## Admin change evidence (observability console)
 
 `request.change` is appended at the end of the audit `request` object with
 `omitempty`, so records without it keep their exact bytes. The observability
@@ -2453,17 +2597,17 @@ console sets it on `admin_observability_changed`: `target` is
 `observability_limits` or `observability_rules`, `before` and `after` are
 `sha256:` revisions of the persisted state file bytes, and `names` lists the
 changed exporters or console rules. `principal.user` and `principal.auth_method`
-name the administrator. The state itself never enters the chain.
-
+name the administrator. The state itself never enters the chain. Admin records
+are not projected into the audit console tables above.
 ~~~~
 
-`docs/reference/data.ko.md`: insert before `### 5. 관련 문서 {#5-cross-references}` (line 93):
+`docs/reference/data.ko.md`: append at the end of the file, after the `### 설정` table of `## 감사 콘솔 근거 (ADR-057)` (line 237):
 
 ~~~~markdown
-### 관리 변경 증거 · 관측성 콘솔 {#admin-change-evidence-observability-console}
 
-`request.change`는 감사 `request` 객체 끝에 `omitempty`로 덧붙입니다. 이 필드가 없는 기록은 바이트가 그대로입니다. 관측성 콘솔은 `admin_observability_changed` 기록에 이 필드를 씁니다. `target`은 `observability_limits` 또는 `observability_rules`이고, `before`와 `after`는 저장된 상태 파일 바이트의 `sha256:` 리비전이며, `names`는 바뀐 exporter나 콘솔 규칙 이름입니다. `principal.user`와 `principal.auth_method`가 관리자를 나타냅니다. 상태 내용 자체는 체인에 들어가지 않습니다.
+## 관리 변경 증거 · 관측성 콘솔 {#admin-change-evidence-observability-console}
 
+`request.change`는 감사 `request` 객체 끝에 `omitempty`로 덧붙입니다. 이 필드가 없는 기록은 바이트가 그대로입니다. 관측성 콘솔은 `admin_observability_changed` 기록에 이 필드를 씁니다. `target`은 `observability_limits` 또는 `observability_rules`이고, `before`와 `after`는 저장된 상태 파일 바이트의 `sha256:` 리비전이며, `names`는 바뀐 exporter나 콘솔 규칙 이름입니다. `principal.user`와 `principal.auth_method`가 관리자를 나타냅니다. 상태 내용 자체는 체인에 들어가지 않습니다. 관리 기록은 위의 감사 콘솔 테이블에 투영되지 않습니다.
 ~~~~
 
 Refresh the companion hash for `docs/reference/data.md` (Global Constraints command). Append to the `internal/CLAUDE.md` section:
@@ -2476,15 +2620,16 @@ Refresh the companion hash for `docs/reference/data.md` (Global Constraints comm
 
 ```bash
 go test -buildvcs=false ./internal/audit/ -race -count=1 > $S/t6.log 2>&1; echo "exit=$?"; grep -E '^(ok|FAIL|---|panic)' $S/t6.log
+go test -buildvcs=false ./internal/analytics/ -run 'AuditObservable|ObservabilityChangeRecords' -race -count=1 > $S/t6b.log 2>&1; echo "analytics=$?"; grep -E '^(ok|FAIL|---|panic)' $S/t6b.log
 python3 scripts/check_docs_translations.py > $S/t6-docs.log 2>&1; echo "docs=$?"
-gofmt -l internal/audit
+gofmt -l internal/audit internal/analytics
 ```
-Expected: `exit=0`, `docs=0`, no gofmt output.
+Expected: `exit=0`, `analytics=0`, `docs=0`, no gofmt output.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git -C $W add internal/audit/record.go internal/audit/change.go internal/audit/change_test.go docs/reference/data.md docs/reference/data.ko.md internal/CLAUDE.md
+git -C $W add internal/audit/record.go internal/audit/change.go internal/audit/change_test.go internal/analytics/observability_change_test.go docs/reference/data.md docs/reference/data.ko.md internal/CLAUDE.md
 git -C $W commit -s -m "feat(audit): append-only admin change evidence on request" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -2494,7 +2639,6 @@ git -C $W commit -s -m "feat(audit): append-only admin change evidence on reques
 - Create: `internal/server/fulladmin.go`, `internal/server/fulladmin_test.go`
 - Create: `internal/server/observabilityapi/observabilityapi.go`, `console.go`, `status.go`, `status_test.go`
 - Modify: `internal/CLAUDE.md` (one bullet)
-- Main delta: `internal/CLAUDE.md` also changed on main in 26ad568 (audit console, ADR-057). Stay on the base branch (no rebase, no merge of main); the later merge into main resolves conflicts here. Full list: `/home/atomoh/.tmp/inferplane-remediation-20261029/main-delta-files.txt`.
 
 **Interfaces:**
 - Consumes: `otelexport.Set.Status`, `.Limits`, `.SignalStats`, `.Exporting`, `.SamplePercent`, `otelexport.EncodeLimits`, `Revision` (Tasks 2–3); `policy.ParseWireDocs`, `policy.Store` methods (Task 1); server-internal `AdminAuth`, `requireAdmin`, `adminDenialEmitter`.
@@ -3280,7 +3424,6 @@ git -C $W commit -s -m "feat(server): observability console status API behind fu
 - Create: `internal/server/observabilityapi/edit.go`, `internal/server/observabilityapi/limits.go`, `internal/server/observabilityapi/limits_test.go`
 - Modify: `internal/server/observabilityapi/observabilityapi.go` (`Routes` gains the limits route)
 - Modify: `docs/reference/data.md` / `docs/reference/data.ko.md` (append a paragraph to the Task 6 section), `internal/CLAUDE.md` (one bullet)
-- Main delta: `docs/reference/data.md`, `docs/reference/data.ko.md`, `internal/CLAUDE.md` also changed on main in 26ad568 (audit console, ADR-057). Stay on the base branch (no rebase, no merge of main); the later merge into main resolves conflicts here. Full list: `/home/atomoh/.tmp/inferplane-remediation-20261029/main-delta-files.txt`.
 
 **Interfaces:**
 - Consumes: `otelexport.Set.Normalize`, `SetLimits`, `Limits`, `Clamp`, `Status`, `Exporting`, `SamplePercent`; `EncodeLimits`, `DecodeLimits`, `Revision` (Task 3); `audit.ChangeRef` (Task 6); `principal.AdminFrom`; `ulid.New`.
@@ -3958,7 +4101,7 @@ func (c *Console) Routes() map[string]http.Handler {
 }
 ```
 
-`docs/reference/data.md`: after the paragraph that ends `The state itself never enters the chain.` (Task 6 section) add:
+`docs/reference/data.md`: after the paragraph that ends `Admin records are not projected into the audit console tables above.` (the Task 6 section, at the end of the file) add:
 
 ~~~~markdown
 
@@ -3970,7 +4113,7 @@ canonical bytes mayu writes, so for a file mayu wrote it equals the digest in th
 audit record. A file that does not parse refuses boot.
 ~~~~
 
-`docs/reference/data.ko.md`: after the paragraph that ends `상태 내용 자체는 체인에 들어가지 않습니다.` add:
+`docs/reference/data.ko.md`: after the paragraph that ends `관리 기록은 위의 감사 콘솔 테이블에 투영되지 않습니다.` (the Task 6 section, at the end of the file) add:
 
 ~~~~markdown
 
@@ -4005,10 +4148,9 @@ git -C $W commit -s -m "feat(observabilityapi): dry-run-first runtime limits wit
 - Create: `internal/server/observabilityapi/rules.go`, `internal/server/observabilityapi/rules_test.go`
 - Modify: `internal/server/observabilityapi/observabilityapi.go` (`Routes` gains the rules route)
 - Modify: `docs/reference/api.md` (after the "Observability rule schema" section, before line 76 `### Policy-routing schema and evidence (ADR-043)`), `docs/reference/api.ko.md` (before line 91 `### 정책 라우팅 스키마와 증거 · ADR-043`)
-- Modify: `docs/api-reference.md` (before line 236 ``### Governed model comparison (`mayu` only, ADR-052)``), `docs/api-reference.ko.md` (before line 215 `### 정책이 적용되는 모델 비교 · mayu 전용 ADR-052`)
-- Modify: `docs/reference/security.md` (before line 43 `### Sensitive-data destination restrictions (ADR-043)`), `docs/reference/security.ko.md` (before line 51 `### 민감 정보 목적지 제한 · ADR-043`)
+- Modify: `docs/api-reference.md` (after the `### Audit console (ADR-057)` section, before line 286 `## Error Codes`), `docs/api-reference.ko.md` (after `### 감사 콘솔 (ADR-057)`, before line 248 `## 오류 코드 {#error-codes}`)
+- Modify: `docs/reference/security.md` (new `##` section at the end, after `## Audit console (ADR-057)`, last line 196), `docs/reference/security.ko.md` (at the end, after `## 감사 콘솔 (ADR-057)`, last line 175)
 - Modify: `docs/reference/data.md` / `data.ko.md` (one more paragraph in the Task 6 section), `internal/CLAUDE.md` (one bullet)
-- Main delta: `docs/reference/api.md`, `docs/reference/api.ko.md`, `docs/api-reference.md`, `docs/api-reference.ko.md`, `docs/reference/security.md`, `docs/reference/security.ko.md`, `docs/reference/data.md`, `docs/reference/data.ko.md`, `internal/CLAUDE.md` also changed on main in 26ad568 (audit console, ADR-057). Stay on the base branch (no rebase, no merge of main); the later merge into main resolves conflicts here. Full list: `/home/atomoh/.tmp/inferplane-remediation-20261029/main-delta-files.txt`.
 
 **Interfaces:**
 - Consumes: `readConsole`, `ruleFromDoc`, `consoleNameRE`, `errForeign` (Task 7); `decode`, `checkRevision`, `auditReady`, `emitChange`, `writeFileAtomic`, `apiError` (Task 8); `policy.FromV1Alpha1`, `policy.MergeObservability`, `policy.ValidExporterName`, `PolicyStore.CheckLocal`/`Reload` (Task 1); `sigs.k8s.io/yaml.Marshal`.
@@ -4739,7 +4881,7 @@ Errors are `{"error": message, "code": code}`. `/admin/capabilities` adds
 
 ~~~~
 
-`docs/api-reference.md`: insert before ``### Governed model comparison (`mayu` only, ADR-052)`` (line 236):
+`docs/api-reference.md`: insert after the `### Audit console (ADR-057)` section, before `## Error Codes` (line 286), so the two console APIs sit together:
 
 ~~~~markdown
 ### Observability console (`mayu` only)
@@ -4830,7 +4972,7 @@ Send the same body with `"dry_run": false` to apply. Errors:
 
 ~~~~
 
-`docs/api-reference.ko.md`: insert before `### 정책이 적용되는 모델 비교 · mayu 전용 ADR-052 {#governed-model-comparison-mayu-only-adr-052}` (line 215) the same section translated; every fenced JSON block is byte-identical to the English one above:
+`docs/api-reference.ko.md`: insert after `### 감사 콘솔 (ADR-057) {#audit-console-adr-057}`, before `## 오류 코드 {#error-codes}` (line 248), the same section translated; every fenced JSON block is byte-identical to the English one above:
 
 ~~~~markdown
 ### 관측성 콘솔 · mayu 전용 {#observability-console-mayu-only}
@@ -4917,10 +5059,11 @@ Send the same body with `"dry_run": false` to apply. Errors:
 
 ~~~~
 
-`docs/reference/security.md`: insert before `### Sensitive-data destination restrictions (ADR-043)` (line 43):
+`docs/reference/security.md`: append at the end of the file, after `## Audit console (ADR-057)` (its last line, 196, ends `not verification.`), so the two console sections sit together:
 
 ~~~~markdown
-### Observability console edits
+
+## Observability console edits
 
 - Every `/admin/observability*` route is full-admin only, reads included. The
   status shows header names, never header values, and errors carry status codes or
@@ -4935,20 +5078,19 @@ Send the same body with `"dry_run": false` to apply. Errors:
   applied edit records the actor and the before/after revisions.
 - Whoever administers mayu's host can still edit the config and both files; export
   that users cannot turn off still needs a host they do not administer.
-
 ~~~~
 
-`docs/reference/security.ko.md`: insert before `### 민감 정보 목적지 제한 · ADR-043 {#sensitive-data-destination-restrictions-adr-043}` (line 51):
+`docs/reference/security.ko.md`: append at the end of the file, after `## 감사 콘솔 (ADR-057) {#audit-console-adr-057}` (last line 175):
 
 ~~~~markdown
-### 관측성 콘솔 편집 {#observability-console-edits}
+
+## 관측성 콘솔 편집 {#observability-console-edits}
 
 - `/admin/observability*`의 모든 경로는 읽기를 포함해 전체 관리자 전용입니다. 상태에는 헤더 이름만 나오고 값은 나오지 않습니다. 오류는 상태 코드나 고정 문구만 담고 수집기 응답은 담지 않습니다.
 - 실행 중 한도는 부트스트랩 exporter 상한을 좁히기만 합니다. 콘솔이나 제어 영역 입력으로 엔드포인트·프로토콜·TLS 설정·자격 증명을 지정할 수 없으므로 어떤 편집도 프롬프트를 다른 곳으로 보내지 못합니다. 콘솔 규칙으로 본문을 고르려면 `observability.console.content_rules: true`가 필요합니다.
 - 콘솔 규칙은 로컬 정책 파일 채널과 그 상한 검사를 거쳐 읽힙니다. 제어 영역이 있으면 콘솔이 두 번째 정책 출처가 될 수 없습니다.
 - 감사 체인이 기록을 받지 않는 동안에는 편집을 거부하고, 적용한 편집마다 수행자와 전후 리비전을 기록합니다.
 - mayu 호스트를 관리하는 사람은 여전히 설정과 두 파일을 고칠 수 있습니다. 사용자가 끌 수 없는 내보내기가 필요하면 사용자가 관리하지 않는 호스트가 필요합니다.
-
 ~~~~
 
 `docs/reference/data.md`: after the paragraph added in Task 8 (ending `A file that does not parse refuses boot.`) add:
@@ -4995,11 +5137,10 @@ git -C $W commit -s -m "feat(observabilityapi): console-owned observability rule
 
 **Files:**
 - Modify: `cmd/mayu/observability.go:3-16` (imports), `:26-55` (`buildObservability` loads the state file); add `ensureConsolePolicyFile` and `observabilityConsole`
-- Modify: `cmd/mayu/gateway.go:106` (after the `LoadRaw` error check), `:966-967` (capabilities literal), `:1017` (after the `WithEvaluations` line)
-- Modify: `internal/server/configapi/capabilities.go:26` (field after `Guardrails`)
+- Modify: `cmd/mayu/gateway.go:107` (after the `LoadRaw` error check), `:1005` (capabilities literal, after `ProviderAutoHealth`), `:1055` (after the `WithEvaluations` line)
+- Modify: `internal/server/configapi/capabilities.go:32` (commented field at the end of `Capabilities`, after the ADR-057 fields)
 - Create: `internal/server/configapi/observability_caps_test.go`, `cmd/mayu/observability_console_test.go`
-- Modify: `docs/operations/observability.md` and `docs/operations/observability.ko.md` (append a section at the end), `cmd/CLAUDE.md` (append to "Governed observability assembly")
-- Main delta: `cmd/mayu/gateway.go`, `internal/server/configapi/capabilities.go`, `docs/operations/observability.md`, `docs/operations/observability.ko.md` also changed on main in 26ad568 (audit console, ADR-057). Stay on the base branch (no rebase, no merge of main); the later merge into main resolves conflicts here. Full list: `/home/atomoh/.tmp/inferplane-remediation-20261029/main-delta-files.txt`.
+- Modify: `docs/operations/observability.md` and `docs/operations/observability.ko.md` (one paragraph after the signal table, EN line 223 / KO line 209, and a section at the end), `cmd/CLAUDE.md` (append to "Governed observability assembly")
 
 **Interfaces:**
 - Consumes: `observabilityapi.New`, `Options`, `LoadLimits`, `Console.Routes`, `SourceFiles`/`SourceControlPlane`/`SourceNone` (Tasks 7–9); `server.WithFullAdminRoutes` (Task 7); `tracing.LegacyTarget`; `audit.Writer.Append`/`Ready`; config `ObservabilityConsoleConfig` (Task 5).
@@ -5292,13 +5433,15 @@ Expected: `exit=1` (`unknown field ObservabilityExport`; the console routes retu
 
 - [ ] **Step 3: Implement**
 
-`internal/server/configapi/capabilities.go`: after the `Guardrails          bool   \`json:"guardrails"\`` line (26) add
+`internal/server/configapi/capabilities.go`: at the end of `Capabilities`, after the ADR-057 `TraceLinkTemplate` field (line 32), add a commented field in the same style as `AuditConsole`:
 
 ```go
-	ObservabilityExport bool   `json:"observability_export"`
+	// ObservabilityExport: governed OTLP export is configured
+	// (observability.exporters); the console shows the Observability view.
+	ObservabilityExport bool `json:"observability_export"`
 ```
 
-(The name has the same width as `KeyGovernanceFields`, so gofmt leaves the other lines alone.)
+(The comment line separates it from the aligned block above, so gofmt changes no other line.)
 
 `cmd/mayu/observability.go`: replace the import block with
 
@@ -5404,7 +5547,7 @@ func observabilityConsole(cfg *config.Config, set *otelexport.Set, pol *policy.S
 }
 ```
 
-`cmd/mayu/gateway.go`: after the `LoadRaw` error check (line 106) insert
+`cmd/mayu/gateway.go`: after the `LoadRaw` error check (lines 104–107) insert
 
 ```go
 
@@ -5415,19 +5558,36 @@ func observabilityConsole(cfg *config.Config, set *otelexport.Set, pol *policy.S
 	}
 ```
 
-in the capabilities literal, after `ProviderAutoHealth:  healthStore != nil,` (line 967) add
+in the capabilities literal, after its last entry `ProviderAutoHealth:  healthStore != nil,` (line 1005) add
 
 ```go
 			ObservabilityExport: obsSet != nil,
 ```
 
-and after the `g.adminSrv.Handler = server.WithEvaluations(...)` line (1017) add
+and after the `g.adminSrv.Handler = server.WithEvaluations(...)` line (1055) add
 
 ```go
 	// Observability console (sub-project B): full-admin routes, reads included.
 	g.adminSrv.Handler = server.WithFullAdminRoutes(g.adminSrv.Handler, observabilityConsole(cfg, obsSet, polStore, aud).Routes(),
 		cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), aud)
 ```
+
+In `docs/operations/observability.md`, `## Governed OTLP export`, insert this paragraph between the signal table (its last row, the `content` row, line 223) and `Rules a data plane enforces:` (line 225), with one blank line on each side. It states what the base branch's `audit` row leaves implicit now that ADR-057 is in the base:
+
+~~~~markdown
+An exported audit record is the same canonical line every audit sink receives,
+so it also carries the ADR-057 evidence fields a record has: `attempts`,
+`client` (including the key-scoped `client.session_ref` digest), `auto_mode` and
+`governance`. A collector that receives audit copies can therefore group one
+key's requests by session, as the audit file can. Export adds no metric label:
+`inferplane_otel_export_records_total` keeps `exporter`, `signal` and `outcome`.
+~~~~
+
+In `docs/operations/observability.ko.md`, insert the Korean paragraph between the signal table (line 209) and `데이터 영역이 지키는 규칙:` (line 211), with one blank line on each side:
+
+~~~~markdown
+내보낸 감사 기록은 모든 감사 저장 대상이 받는 것과 같은 정규 줄이므로, 기록에 있는 ADR-057 근거 필드인 `attempts`, `client`(키 범위 `client.session_ref` 다이제스트 포함), `auto_mode`, `governance`도 함께 담습니다. 따라서 감사 사본을 받는 수집기도 감사 파일처럼 한 키의 요청을 세션별로 묶을 수 있습니다. 내보내기로 메트릭 레이블이 늘지 않습니다. `inferplane_otel_export_records_total`의 레이블은 그대로 `exporter`, `signal`, `outcome`입니다.
+~~~~
 
 Append to `docs/operations/observability.md` (after the last paragraph, `Limits: metrics stay Prometheus exposition; …`):
 
@@ -5560,17 +5720,19 @@ git -C $W commit -s -m "feat(mayu): assemble the observability console API" -m "
 
 **Files:**
 - Create: `internal/server/adminui/static/observability.js`, `internal/server/adminui/testdata/observability_console.cjs`, `internal/server/adminui/observability_console_test.go`
-- Modify: `internal/server/adminui/static/index.html:43` (nav button after Compare models), `:473` (section after the governance `</section>`), `:550` (script tag after `evaluation.js`)
-- Modify: `internal/server/adminui/static/app.js:97` (VIEWS entry after `settings`), `:98` (`viewRefreshers` after the VIEWS literal), `:127` (`showView` dispatch line)
-- Modify: `internal/server/adminui/static/i18n.js:126` (keys before the `// nav (sidebar …)` comment)
-- Modify: `internal/server/adminui/static/style.css:12` (rules after the evaluation block)
-- Modify: `internal/server/adminui/adminui.go:25` (content type after `favicon.svg`)
+- Modify: `internal/server/adminui/static/index.html:43` (nav button after **Audit**, before **Compare models**), `:272` (section after the audit `</section>`), `:630` (script tag after `audit.js`)
+- Modify: `internal/server/adminui/static/app.js:91` (`VIEWS` entry after `audit`), `:127` (`showView`'s refreshers literal gains `observability: refreshObservabilityView`)
+- Modify: `internal/server/adminui/static/i18n.js:557` (block after the last audit key, before the `};` that closes `MSG` at 558)
+- Modify: `internal/server/adminui/static/style.css:159` (rules after the audit block, at the end of the file)
+- Modify: `internal/server/adminui/adminui.go:23` (content type after `audit.js`)
+- Modify: `internal/server/adminui/testdata/routing_forms.cjs:103`, `testdata/analytics_evidence.cjs:48`, `testdata/browser_qa.py:54,58` (load or serve `observability.js` next to `audit.js`)
 - Modify: `internal/CLAUDE.md` (one bullet)
-- Main delta: `internal/server/adminui/adminui.go`, `static/app.js`, `static/i18n.js`, `static/index.html`, `static/style.css`, `internal/CLAUDE.md` (the tests also lean on `adminui_test.go`'s `get` and on `testdata/routing_forms.cjs`, both changed there) also changed on main in 26ad568 (audit console, ADR-057). Stay on the base branch (no rebase, no merge of main); the later merge into main resolves conflicts here. Full list: `/home/atomoh/.tmp/inferplane-remediation-20261029/main-delta-files.txt`.
+
+**Audit console interplay (checked at `caf55fe`):** `audit.js` is wired by name: `VIEWS.audit` and `audit: refreshAuditView` in `showView`'s refreshers literal (`app.js:91`, `:126`), pinned by `TestAuditViewWired`. This task follows that pattern instead of a registry. Because the literal is built on every `showView` call, every harness that loads `app.js` and switches views must also load `observability.js`, or it throws `ReferenceError: refreshObservabilityView is not defined`: `routing_forms.cjs` (`--views` calls `showView("teams")` and `showView("logs")`), `analytics_evidence.cjs` (`showView("logs")`) and `browser_qa.py` (serves only the files it lists; `audit_qa.py` subclasses its `Handler`). Step 2 updates all three. No audit console renderer, kind list or i18n key is affected: admin records never reach the console (Task 6).
 
 **Interfaces:**
 - Consumes: the status, limits and rules JSON of Tasks 7–9; `caps.observability_export` (Task 10); app.js globals `$`, `api`, `msg`, `MSG`, `td`, `emptyRow`, `exactJSON`, `parseExactJSON`, `adminToken`, `whoamiIsAdmin`, `showWorkspaceError`.
-- Produces: app.js `const viewRefreshers = {}` (views in their own file register a refresher there); observability.js globals `refreshObservabilityView()` and pure helpers `obsTime`, `obsShortRev`, `obsBytes`, `obsDropped`, `obsSubjectText`, `obsTargetText`, `obsValue`, `obsChangeText`, `obsStateText`, `obsEffectText`, `obsRuleChangeText`, `obsDecisionSummary`, `obsDecisionText`, `obsErrorText`, `obsInt`, `obsLimitsBody`, `obsRuleError`, `obsRulesBody`.
+- Produces: observability.js globals `refreshObservabilityView()` (named in app.js's refreshers literal, like `refreshAuditView`) and pure helpers `obsTime`, `obsShortRev`, `obsBytes`, `obsDropped`, `obsSubjectText`, `obsTargetText`, `obsValue`, `obsChangeText`, `obsStateText`, `obsEffectText`, `obsRuleChangeText`, `obsDecisionSummary`, `obsDecisionText`, `obsErrorText`, `obsInt`, `obsLimitsBody`, `obsRuleError`, `obsRulesBody`.
 
 - [ ] **Step 1: Write the failing checks**
 
@@ -5600,16 +5762,15 @@ func TestObservabilityViewWired(t *testing.T) {
 			t.Errorf("index.html missing %s", want)
 		}
 	}
-	if strings.Index(html, `<script src="observability.js">`) < strings.Index(html, `<script src="app.js">`) {
-		t.Error("observability.js must load after app.js: it registers in viewRefreshers")
+	// The audit console mockup places Observability between Audit and Compare models.
+	if a, o, e := strings.Index(html, `data-view="audit"`), strings.Index(html, `data-view="observability"`), strings.Index(html, `data-view="evaluation"`); !(a < o && o < e) {
+		t.Error("the Observability nav button must sit between Audit and Compare models")
 	}
-	for _, want := range []string{`observability: "nav.observability"`, "const viewRefreshers = {};", "refreshers[name] || viewRefreshers[name]"} {
-		if !strings.Contains(app, want) {
-			t.Errorf("app.js missing %s", want)
-		}
+	if !strings.Contains(app, `observability: "nav.observability"`) || !strings.Contains(app, "observability: refreshObservabilityView") {
+		t.Error("app.js VIEWS/refreshers missing observability")
 	}
-	if !strings.Contains(js, "viewRefreshers.observability = refreshObservabilityView") {
-		t.Error("observability.js does not register its refresher")
+	if !strings.Contains(js, "async function refreshObservabilityView(") {
+		t.Error("observability.js does not define refreshObservabilityView")
 	}
 	for _, banned := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "localStorage", "sessionStorage", "document.cookie", "eval(", "ik_"} {
 		if strings.Contains(js, banned) {
@@ -5680,12 +5841,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const ctx = vm.createContext({ navigator: { language: "en" }, document: { getElementById: () => null, documentElement: {} }, viewRefreshers: {}, console });
+const ctx = vm.createContext({ navigator: { language: "en" }, document: { getElementById: () => null, documentElement: {} }, console });
 for (const f of ["i18n.js", "observability.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "static", f), "utf8"), ctx, { filename: f });
 const run = src => vm.runInContext(src, ctx);
 const json = src => JSON.parse(run("JSON.stringify(" + src + ")"));
 
-assert.equal(run("typeof viewRefreshers.observability"), "function");
+assert.equal(run("typeof refreshObservabilityView"), "function");
 assert.equal(run('obsBytes(2097152)'), "2 MiB");
 assert.equal(run('obsBytes(1536)'), "1.5 KiB");
 assert.equal(run('obsBytes(0)'), "0 B");
@@ -5740,38 +5901,50 @@ Expected: `exit=1` (`/observability.js` 404, markup and keys missing).
 
 - [ ] **Step 2: Serve the asset and add the hooks**
 
-`internal/server/adminui/adminui.go`: after the `"favicon.svg":   "image/svg+xml",` entry (line 25) add a blank line and the new entry, so gofmt keeps the existing block's alignment:
+`internal/server/adminui/adminui.go`: in `contentTypes`, after the `"audit.js":` entry (line 23) add the new entry; run `gofmt -w internal/server/adminui/adminui.go`, which realigns the map because the new key is the longest:
 
 ```go
-	"favicon.svg":   "image/svg+xml",
-
+var contentTypes = map[string]string{
+	"index.html":       "text/html; charset=utf-8",
+	"app.js":           "text/javascript; charset=utf-8",
+	"evaluation.js":    "text/javascript; charset=utf-8",
+	"audit.js":         "text/javascript; charset=utf-8",
 	"observability.js": "text/javascript; charset=utf-8",
+	"i18n.js":          "text/javascript; charset=utf-8",
+	"style.css":        "text/css; charset=utf-8",
+	"favicon.svg":      "image/svg+xml",
 }
 ```
 
-`internal/server/adminui/static/app.js`: in `VIEWS`, after `  settings: "nav.settings",` (line 97) add `  observability: "nav.observability",`; after the closing `};` of `VIEWS` (line 98) add
+`internal/server/adminui/static/app.js`: in `VIEWS`, after `  audit: "nav.audit",` (line 91) add `  observability: "nav.observability",`; in `showView`, replace the second line of the refreshers literal (line 127)
 
 ```js
-
-// Views that live in their own file (observability.js) register their refresh
-// function here, so showView needs no per-view edit.
-const viewRefreshers = {};
+    teams: refreshTeamsView, providers: refreshProviders, governance: refreshGovernance, evaluation: refreshEvaluation };
 ```
 
-and in `showView` replace the line `  if (refreshers[name]) refreshers[name]().catch(err => {` with
+with
 
 ```js
-  const refresh = refreshers[name] || viewRefreshers[name];
-  if (refresh) refresh().catch(err => {
+    teams: refreshTeamsView, providers: refreshProviders, governance: refreshGovernance, evaluation: refreshEvaluation,
+    observability: refreshObservabilityView };
 ```
 
-`internal/server/adminui/static/index.html`: after the Compare models nav button (line 43) add
+The `if (refreshers[name]) …` dispatch line stays as it is.
+
+Load or serve `observability.js` wherever `audit.js` is loaded with `app.js`:
+
+- `internal/server/adminui/testdata/routing_forms.cjs`: after the `audit.js` line (103) add
+  `vm.runInContext(fs.readFileSync(path.join(__dirname, "../static/observability.js"), "utf8"), context);`
+- `internal/server/adminui/testdata/analytics_evidence.cjs` line 48: change the list `["i18n.js", "app.js", "evaluation.js", "audit.js"]` to `["i18n.js", "app.js", "evaluation.js", "audit.js", "observability.js"]`.
+- `internal/server/adminui/testdata/browser_qa.py` lines 54 and 58: add `'observability.js'` after `'audit.js'` to the served-name tuple, and `'observability.js': 'text/javascript'` after the `'audit.js'` entry of the content-type dict.
+
+`internal/server/adminui/static/index.html`: after the Audit nav button (line 43), before Compare models, add
 
 ```html
         <button class="nav" data-view="observability">◎&ensp;<span data-i18n="nav.observability">Observability</span></button>
 ```
 
-after `<script src="evaluation.js"></script>` (line 550) add `  <script src="observability.js"></script>`, and after the governance section's closing `</section>` (line 473) insert:
+after `<script src="audit.js"></script>` (line 630) add `  <script src="observability.js"></script>`, and after the audit section's closing `</section>` (line 272, before the `<!-- ===== keys ===== -->` comment) insert:
 
 ```html
 
@@ -5848,7 +6021,7 @@ after `<script src="evaluation.js"></script>` (line 550) add `  <script src="obs
       </section>
 ```
 
-`internal/server/adminui/static/style.css`: after line 12 (`@media(max-width:800px) { .eval-pair … }`) insert:
+`internal/server/adminui/static/style.css`: append at the end of the file, after the audit block (last line 159, its `@media(max-width:480px)` rule), in the same style as `/* Audit view (ADR-057): … */`:
 
 ```css
 /* Observability console (sub-project B). */
@@ -5868,9 +6041,10 @@ after `<script src="evaluation.js"></script>` (line 550) add `  <script src="obs
 @media(max-width:1600px) { .obs-two { grid-template-columns:1fr; } }
 ```
 
-`internal/server/adminui/static/i18n.js`: before the line `  // nav (sidebar + view-title h1 reuse the same word, no glyph)` (line 126) insert:
+`internal/server/adminui/static/i18n.js`: after the last audit key, `"audit.showingFirst": …` (line 557), and before the `};` that closes `MSG` (line 558), insert this block (`nav.observability` opens it, as `nav.audit` opens the audit block):
 
 ```js
+
   // observability console (sub-project B)
   "nav.observability": { en: "Observability", ko: "관측성", zh: "可观测性", ja: "オブザーバビリティ" },
   "obs.enableTitle": { en: "governed OTLP export", ko: "정책 기반 OTLP 내보내기", zh: "受治理的 OTLP 导出", ja: "ポリシー制御の OTLP エクスポート" },
@@ -5982,7 +6156,6 @@ after `<script src="evaluation.js"></script>` (line 550) add `  <script src="obs
   "obs.err.ruleSubject": { en: "Each rule needs a team, a user, or both.", ko: "규칙마다 팀이나 사용자, 또는 둘 다 필요합니다.", zh: "每条规则需要团队、用户或两者。", ja: "各ルールにはチーム、ユーザー、またはその両方が必要です。" },
   "obs.err.ruleSignal": { en: "Select at least one exporter for traces, audit or content.", ko: "트레이스·감사·본문 중 하나 이상에 exporter를 고르세요.", zh: "请至少为追踪、审计或内容选择一个导出器。", ja: "トレース・監査・本文のいずれか1つ以上にエクスポーターを選んでください。" },
   "obs.err.percent": { en: "Trace sample % must be a whole number from 1 to 100.", ko: "트레이스 샘플링 %는 1~100의 정수여야 합니다.", zh: "追踪采样 % 必须是 1 到 100 之间的整数。", ja: "トレースのサンプリング % は 1〜100 の整数で指定してください。" },
-
 ```
 
 - [ ] **Step 3: Write the view**
@@ -6006,8 +6179,8 @@ const OBS_DROPPED = ["dropped_queue_full", "dropped_oversize", "dropped_export_e
 const OBS_DECISIONS = ["selected", "no_rule", "content_conflict", "withheld_limit"];
 const OBS_RULE_NAME = /^console-[a-z0-9]([-a-z0-9]{0,53}[a-z0-9])?$/;
 
-viewRefreshers.observability = refreshObservabilityView;
-
+// app.js's showView names this function in its refreshers literal, as it
+// names refreshAuditView (audit.js).
 async function refreshObservabilityView() {
   obsBind();
   $("obs-admin-only").hidden = whoamiIsAdmin;
@@ -6407,7 +6580,7 @@ function obsBind() {
 Append to the `internal/CLAUDE.md` section:
 
 ```markdown
-- `server/adminui/static/observability.js`: the Observability view; registers itself in app.js `viewRefreshers` (no edit to `showView`'s refreshers literal), renders with textContent only, stores nothing in the browser, and Apply sends exactly the last previewed body with its revision. Nav button sits after Compare models so the file merges cleanly with the audit console.
+- `server/adminui/static/observability.js`: the Observability view, wired like `audit.js` (`VIEWS.observability` plus `observability: refreshObservabilityView` in `showView`'s refreshers literal; nav button between Audit and Compare models). Any harness that loads `app.js` and switches views must load `observability.js` too (`routing_forms.cjs`, `analytics_evidence.cjs`, `browser_qa.py` do). Renders with textContent only, stores nothing in the browser, and Apply sends exactly the last previewed body with its revision.
 ```
 
 - [ ] **Step 4: Run**
@@ -6416,15 +6589,16 @@ Append to the `internal/CLAUDE.md` section:
 go test -buildvcs=false ./internal/server/adminui/ -race -count=1 > $S/t11.log 2>&1; echo "exit=$?"; grep -E '^(ok|FAIL|---|    )' $S/t11.log
 node internal/server/adminui/testdata/observability_console.cjs > $S/t11-node.log 2>&1; echo "node=$?"; cat $S/t11-node.log
 node internal/server/adminui/testdata/routing_forms.cjs --views > $S/t11-views.log 2>&1; echo "views=$?"
+node internal/server/adminui/testdata/analytics_evidence.cjs > $S/t11-evidence.log 2>&1; echo "evidence=$?"
 gofmt -l internal/server/adminui
-git -C $W diff -U0 internal/server/adminui/adminui.go | grep -c '^-[^-]'
+git -C $W diff -w -U0 internal/server/adminui/adminui.go | grep -c '^+[^+]'
 ```
-Expected: `exit=0`, `node=0` with `observability_console.cjs: ok`, `views=0`, no gofmt output, `0` removed lines in `adminui.go`.
+Expected: `exit=0` (it also runs `TestAuditViewWired`, the three `routing_forms.cjs` modes and `analytics_evidence.cjs` through their Go tests), `node=0` with `observability_console.cjs: ok`, `views=0`, `evidence=0`, no gofmt output, and `1` added line in `adminui.go` once whitespace is ignored (gofmt realigned the other entries). If `views` or `evidence` fails with `refreshObservabilityView is not defined`, the harness edit from Step 2 is missing.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git -C $W add internal/server/adminui/static/observability.js internal/server/adminui/static/index.html internal/server/adminui/static/app.js internal/server/adminui/static/i18n.js internal/server/adminui/static/style.css internal/server/adminui/adminui.go internal/server/adminui/observability_console_test.go internal/server/adminui/testdata/observability_console.cjs internal/CLAUDE.md
+git -C $W add internal/server/adminui/static/observability.js internal/server/adminui/static/index.html internal/server/adminui/static/app.js internal/server/adminui/static/i18n.js internal/server/adminui/static/style.css internal/server/adminui/adminui.go internal/server/adminui/observability_console_test.go internal/server/adminui/testdata/observability_console.cjs internal/server/adminui/testdata/routing_forms.cjs internal/server/adminui/testdata/analytics_evidence.cjs internal/server/adminui/testdata/browser_qa.py internal/CLAUDE.md
 git -C $W commit -s -m "feat(console): Observability view for governed export (sub-project B)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -6433,10 +6607,9 @@ git -C $W commit -s -m "feat(console): Observability view for governed export (s
 **Files:**
 - Create: `internal/server/adminui/testdata/observability_qa.py`
 - Modify (only if QA finds layout overflow): `internal/server/adminui/static/style.css` (the Task 11 block)
-- Main delta: `internal/server/adminui/static/style.css` (and `observability_qa.py` subclasses `testdata/browser_qa.py`'s `Handler`, which changed there) also changed on main in 26ad568 (audit console, ADR-057). Stay on the base branch (no rebase, no merge of main); the later merge into main resolves conflicts here. Full list: `/home/atomoh/.tmp/inferplane-remediation-20261029/main-delta-files.txt`.
 
 **Interfaces:**
-- Consumes: `testdata/browser_qa.py` (`Handler`, `STATIC`, `STATE`, `respond`), the Task 11 markup and ids.
+- Consumes: `testdata/browser_qa.py` (`Handler`, `STATIC`, `STATE`, `respond`; since Task 11 its `Handler` also serves `observability.js`, which `audit_qa.py` and this script inherit), the Task 11 markup and ids.
 - Produces: screenshots `observability-1280-light.png`, `observability-1280-light-applied.png`, `observability-390-dark.png`, `observability-390-dark-applied.png` under the `--screenshots` directory.
 
 - [ ] **Step 1: Write the QA script**
@@ -6517,16 +6690,9 @@ def status():
 
 
 class Handler(browser_qa.Handler):
+    # The base handler serves observability.js with the other static files (Task 11).
     def do_GET(self):
         path = urlparse(self.path).path
-        if path == '/admin/ui/observability.js':
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/javascript')
-            self.send_header('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'")
-            self.send_header('X-Content-Type-Options', 'nosniff')
-            self.end_headers()
-            self.wfile.write((browser_qa.STATIC / 'observability.js').read_bytes())
-            return
         if path.startswith('/admin/') and self.headers.get('Authorization') == 'Bearer fixture-admin':
             if path == '/admin/capabilities':
                 return self.respond(200, {'analytics_index': 'A', 'teams_records': True, 'observability_export': True})
@@ -6724,9 +6890,10 @@ if __name__ == '__main__':
 ```bash
 python3 internal/server/adminui/testdata/observability_qa.py --screenshots $S/obs-qa > $S/t12.log 2>&1; echo "exit=$?"; grep -E 'ok|Error|assert' $S/t12.log
 python3 internal/server/adminui/testdata/browser_qa.py > $S/t12b.log 2>&1; echo "browser_qa=$?"
+python3 internal/server/adminui/testdata/audit_qa.py > $S/t12c.log 2>&1; echo "audit_qa=$?"
 ls $S/obs-qa
 ```
-Expected: `exit=0` with `observability_qa.py: ok`, `browser_qa=0`, and the four PNG files. If an overflow assertion fails at 390 px, fix the CSS block from Task 11 (not the assertion), rerun, and record the fix in the ledger. Open the four screenshots and confirm: tables scroll inside their cards, the limits fieldsets wrap, the diff lists are readable, dark mode keeps contrast.
+Expected: `exit=0` with `observability_qa.py: ok`, `browser_qa=0`, `audit_qa=0` (the audit view still works with the Observability button between Audit and Compare models), and the four PNG files. If an overflow assertion fails at 390 px, fix the CSS block from Task 11 (not the assertion), rerun, and record the fix in the ledger. Open the four screenshots and confirm: tables scroll inside their cards, the limits fieldsets wrap, the diff lists are readable, dark mode keeps contrast.
 
 - [ ] **Step 3: Commit**
 
@@ -6735,12 +6902,35 @@ git -C $W add internal/server/adminui/testdata/observability_qa.py internal/serv
 git -C $W commit -s -m "test(console): Playwright QA for the Observability view at 1280 and 390 px" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-### Task 13: Repository gates, merge check and live end-to-end
+### Task 13: Changelog, repository gates, merge check and live end-to-end
 
 **Files:**
-- No product files. Scratch only: `/home/atomoh/.tmp/inferplane-observability-console-20261029/verify/` (`$V`), logs under `$S/`.
+- Modify: `CHANGELOG.md` (one `Unreleased` → `### Added` entry), root `CLAUDE.md` (two Project Structure lines). Never edit `AGENTS.md`: it is generated from `CLAUDE.md`, and the controller regenerates it after this plan lands.
+- Scratch only otherwise: `/home/atomoh/.tmp/inferplane-observability-console-20261029/verify/` (`$V`), logs under `$S/`.
 
-- [ ] **Step 1: Repository gates**
+- [ ] **Step 1: Changelog entry and Project Structure lines**
+
+The base branch adds governed OTLP export without a CHANGELOG entry; one entry covers it and the Observability console. In `CHANGELOG.md`, under `## [Unreleased]` → `### Added` (line 13), insert this as the first bullet, before the `Native Bedrock Converse and local evaluation (ADR-052)` entry (line 14), in the file's bilingual style:
+
+```markdown
+- **Governed OTLP export and the Observability console.** `observability.exporters` declares the only OTLP collectors mayu may send to (endpoint, protocol, TLS, `env`/`file` header refs, allowed signals); a FailOpen GovernancePolicy `observability` rule selects, per team or user, which declared exporter receives traces, audit-record copies or egress content, with a gateway-side sampling draw and bounded per-exporter queues that never block the audit writer (`inferplane_otel_export_records_total`). Full administrators get an **Observability** console view backed by `GET /admin/observability` (per-exporter records, drops, last error, and governed decisions in `inferplane_otel_export_decisions_total`), can narrow export at runtime (pause, signal subset, lower content cap or trace sampling) and can edit console-owned rules, configured under `observability.console`: dry run first, persisted, audited as `admin_observability_changed`, and never able to add a destination or credential. / **정책 기반 OTLP 내보내기·관측성 콘솔:** 선언된 수집기로만 트레이스·감사 사본·송신 본문을 정책별로 내보내고, 전체 관리자가 콘솔에서 상태를 보며 dry run 뒤 내보내기를 좁히거나 콘솔 규칙을 편집(저장·감사 기록)할 수 있음.
+```
+
+In the root `CLAUDE.md` `## Project Structure` block (line 184), keep the column style of the `internal/` entries:
+
+- after `  server/          - HTTP data plane + admin plane, ingress handlers` add
+  `  server/observabilityapi/ - Observability console API (full-admin): export status, dry-run-first runtime limits (state file) and console-owned observability rules`
+- after `  tracing/         - Opt-in OpenTelemetry seam, no-op default (ADR-011)` add
+  `  otelexport/      - Governed OTLP log export: local exporter ceiling, bounded audit-copy/content pipelines, runtime limits and console status`
+
+```bash
+git -C $W diff --stat -- CHANGELOG.md CLAUDE.md AGENTS.md
+git -C $W add CHANGELOG.md CLAUDE.md
+git -C $W commit -s -m "docs: changelog and project structure for governed export and the observability console" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+Expected: the stat lists `CHANGELOG.md` (1 insertion) and `CLAUDE.md` (2 insertions) only, never `AGENTS.md`. Tell the controller that `AGENTS.md` needs regenerating.
+
+- [ ] **Step 2: Repository gates**
 
 ```bash
 go test -buildvcs=false ./... -race > $S/gate-test.log 2>&1; echo "test=$?"; grep -E '^(FAIL|--- FAIL|panic)' $S/gate-test.log
@@ -6753,7 +6943,7 @@ CGO_ENABLED=0 go build -buildvcs=false -trimpath -o $S/bin/inferplaned ./cmd/inf
 ```
 Expected: `test=0` with no FAIL lines, `vet=0`, `fmt-files=0`, `harness=0`, `translations=0`, `mayu=0`, `inferplaned=0`.
 
-- [ ] **Step 2: Docs build with the shared docs venv**
+- [ ] **Step 3: Docs build with the shared docs venv**
 
 ```bash
 D=/home/atomoh/.tmp/inferplane-audit-console-20261029/docs-venv/bin/python
@@ -6766,36 +6956,19 @@ $D scripts/check_docs_site.py $S/site > $S/gate-site.log 2>&1; echo "site=$?"
 ```
 Expected: every exit `0`; no `WARNING`/`ERROR` lines (the anchors `#observability-console-mayu-only`, `#observability-console-api-mayu-only`, `#observability-console`, `#observability-console-edits` and `#admin-change-evidence-observability-console` resolve in both languages).
 
-- [ ] **Step 3: Merge check against the audit console branch**
+- [ ] **Step 4: Merge check against main**
 
-The base branch already conflicts with `feat/audit-console` in nine files; this branch must add none except the `translation_source_sha256` line of `.ko.md` companions whose English source both branches edit.
+The audit console is in the base (`caf55fe` merges origin/main `a8a71f6`), so the branch must merge into the current `origin/main` with no conflict.
 
 ```bash
-git -C $W merge-tree --write-tree --name-only --no-messages dd3bfbf feat/governed-observability-export > $S/merge-base.txt; echo "base=$?"
-git -C $W merge-tree --write-tree --name-only --no-messages dd3bfbf HEAD > $S/merge-head.txt; echo "head=$?"
-python3 - $S/merge-base.txt $S/merge-head.txt <<'EOF'
-import sys
-base = set(open(sys.argv[1]).read().split()[1:])
-head = set(open(sys.argv[2]).read().split()[1:])
-allowed = {'docs/reference/data.ko.md', 'docs/reference/security.ko.md', 'docs/api-reference.ko.md'}
-print('new conflicted files:', sorted(head - base - allowed))
-print('allowed .ko.md header conflicts:', sorted((head - base) & allowed))
-EOF
-TREE=$(head -n1 $S/merge-head.txt)
-for f in docs/reference/data.ko.md docs/reference/security.ko.md docs/api-reference.ko.md; do
-  git -C $W show "$TREE:$f" > $S/merge-$(basename $f).txt 2>/dev/null
-  python3 - "$S/merge-$(basename $f).txt" "$f" <<'EOF'
-import re, sys
-t = open(sys.argv[1], encoding='utf-8').read()
-blocks = re.findall(r'<<<<<<<.*?>>>>>>>[^\n]*', t, re.S)
-print(sys.argv[2], 'conflicts', len(blocks), 'header-only', all('translation_source_sha256' in b and b.count('\n') <= 5 for b in blocks))
-EOF
-done
-git -C $W merge-tree --write-tree --name-only --no-messages feat/audit-console HEAD > $S/merge-tip.txt; echo "tip=$?"
+git -C $W fetch origin main > $S/merge-fetch.log 2>&1; echo "fetch=$?"
+git -C $W merge-tree --write-tree --name-only --no-messages origin/main HEAD > $S/merge-main.txt; echo "merge=$?"
+wc -l < $S/merge-main.txt
+git -C $W diff --name-only caf55fe HEAD -- AGENTS.md
 ```
-Expected: `base=1`, `head=1`, `new conflicted files: []`; each listed `.ko.md` shows `conflicts 0` or `conflicts 1 header-only True`. `dd3bfbf` is the audit console tip this plan was written against; the last command compares with the branch's current tip for information only — record any additional file there in the ledger as a merge note for the controller (it comes from commits added to `feat/audit-console` after this plan), do not change product code for it.
+Expected: `fetch=0`, `merge=0`, `1` line in `$S/merge-main.txt` (the merged tree id, no conflicted file), and no `AGENTS.md` in the diff. If `merge=1`, origin/main moved after `caf55fe`: record the files listed after the first line in the ledger as a merge note for the controller; do not resolve them in this branch. (Re-verification at `caf55fe` with the plan commit as `HEAD`: `merge=0`.)
 
-- [ ] **Step 4: Write the live check driver**
+- [ ] **Step 5: Write the live check driver**
 
 ```bash
 V=$S/verify; mkdir -p $V
@@ -7062,7 +7235,7 @@ if __name__ == '__main__':
     main()
 ```
 
-- [ ] **Step 5: Validate the config, then run the live check**
+- [ ] **Step 6: Validate the config, then run the live check**
 
 ```bash
 V=$S/verify
@@ -7103,23 +7276,23 @@ Expected: `config=0`, `validate=0`, `live=0`, and the summary
   "secrets_in_log": false
 }
 ```
-If `mayu config validate` rejects the stub provider shape (field names of the `anthropic` provider), adjust `write_config` to the schema `config validate` accepts and record the ruling. If any value differs, keep the logs (`$V/mayu.log`, `$V/live.err`), find the cause, fix the product code in the owning task's files with a new commit, and rerun Steps 1 and 5. Open `$S/live-observability-1280-light.png` and `$S/live-observability-390-dark.png` and confirm the exporters table shows `corp` and `vault`, `vault` shows `paused`, and the selections list includes `console-live-content` from the console.
+If `mayu config validate` rejects the stub provider shape (field names of the `anthropic` provider), adjust `write_config` to the schema `config validate` accepts and record the ruling. If any value differs, keep the logs (`$V/mayu.log`, `$V/live.err`), find the cause, fix the product code in the owning task's files with a new commit, and rerun Steps 2 and 6. Open `$S/live-observability-1280-light.png` and `$S/live-observability-390-dark.png` and confirm the exporters table shows `corp` and `vault`, `vault` shows `paused`, and the selections list includes `console-live-content` from the console.
 
-- [ ] **Step 6: Clean up**
+- [ ] **Step 7: Clean up**
 
 ```bash
 pkill -f "$S/verify/mayu serve" ; ss -ltn > $V/ports-after.txt; grep -cE ':(18381|19391|18390|18399) ' $V/ports-after.txt
 ls $V
 ```
-Expected: `0` listeners left. The admin token, virtual key and collector secret existed only in the driver's memory; nothing to delete. Logs, configs, the key store (hashed keys only) and the audit file stay in `$V` for the report. Record Steps 1–5 results in the ledger. No commit: nothing in the repository changed in this task.
+Expected: `0` listeners left. The admin token, virtual key and collector secret existed only in the driver's memory; nothing to delete. Logs, configs, the key store (hashed keys only) and the audit file stay in `$V` for the report. Record Steps 1–6 results in the ledger. Step 1 is this task's only commit; nothing else in the repository changes here.
 
 ---
 
 ## Self-review notes (plan author)
 
-- **Coverage of the program's Plan 4 items:** dashboard (Tasks 2–3 data, 7 API, 11 view), exporter status/queue/drops/last error (2–3), governed decisions incl. withheld and why (2–3: `no_rule`, `content_conflict`, `withheld_limit`, `sampled_out`), sampling (3–4, selections with effective percent), runtime editing of rules and ceilings with validation, dry-run diff, apply, persistence, audit (5–10), one-policy-source and control-plane read-only (5, 7, 9, 10), blast radius (Decisions 4, 5, 10; tests in 3, 8, 9), console conventions and nav entry (11), Node and Playwright checks with 1280/390 screenshots (11–12), gates, docs build and live check with a local OTLP stub (13).
+- **Coverage of the program's Plan 4 items:** dashboard (Tasks 2–3 data, 7 API, 11 view), exporter status/queue/drops/last error (2–3), governed decisions incl. withheld and why (2–3: `no_rule`, `content_conflict`, `withheld_limit`, `sampled_out`), sampling (3–4, selections with effective percent), runtime editing of rules and ceilings with validation, dry-run diff, apply, persistence, audit (5–10), one-policy-source and control-plane read-only (5, 7, 9, 10), blast radius (Decisions 4, 5, 10; tests in 3, 8, 9), console conventions and nav entry (11), Node and Playwright checks with 1280/390 screenshots (11–12), changelog, gates, docs build, merge check against main and live check with a local OTLP stub (13).
 - **Interfaces are consistent across tasks:** `Set.AuditTargets/ContentTarget/TraceTargets`, `Set.Normalize/SetLimits/Limits/Clamp/Exporting/SamplePercent/Status/SignalStats/ObserveTrace`, `EncodeLimits/DecodeLimits/Revision`, `policy.MergeObservability`, `Store.CheckLocal`, `tracing.InitExporters(..., observe)`, `server.WithFullAdminRoutes`, `observabilityapi.New/Options/Routes/LoadLimits`, `audit.ChangeRef` keep one name and signature everywhere they appear.
 - **Known judgment calls an executor may need (record as rulings):** exact line numbers drift after earlier tasks in the same file (anchor on the quoted code, not the number); whether Playwright needs the `--chromium` path on another host (reuse `browser_qa.py`'s convention if launch fails).
-- **Plan dry run (author, 2026-10-29):** every task's code, tests and doc edits were applied in order to a scratch export of the base branch. `go test ./... -race`, gofmt, `go vet ./...`, `tests/run-all.sh`, the docs gates (translations, unit, perf, compat, `mkdocs build --strict`, site check) pass. So do the Node checks, `routing_forms.cjs --views`, `browser_qa.py` and `observability_qa.py`. The Task 13 live driver also passed: `config validate` accepted its config and the summary matched the expected JSON exactly. Mutation probes confirmed the pinning tests fail without the reload mutex, with stat-after-read, without the boot state-file load, and with the old table CSS.
-- **Open risk, main moved:** PR #132 (audit console, ADR-057) was squash-merged to main as `26ad568`. This plan stays on `feat/governed-observability-export` `0e602a9`; merging the export branch and this branch into main later needs conflict resolution against 26ad568's admin-UI and docs changes (`internal/server/adminui/*`, `docs/reference/*`, `docs/api-reference*`, `docs/operations/observability*`, `cmd/mayu/gateway.go`, `internal/config/config.go`, `internal/audit/record.go`, `internal/metrics/metrics.go`, `internal/server/configapi/capabilities.go`, `internal/CLAUDE.md`). Each task's Files list names its overlap; the full list is `/home/atomoh/.tmp/inferplane-remediation-20261029/main-delta-files.txt`. Task 13's merge-tree check against `dd3bfbf` still measures the overlap, but a squash merge loses that ancestry, so expect the same files to conflict against main.
+- **Plan dry run (author, 2026-10-29, against the earlier base `0e602a9`):** every task's code, tests and doc edits were applied in order to a scratch export of the base branch. `go test ./... -race`, gofmt, `go vet ./...`, `tests/run-all.sh`, the docs gates (translations, unit, perf, compat, `mkdocs build --strict`, site check) pass. So do the Node checks, `routing_forms.cjs --views`, `browser_qa.py` and `observability_qa.py`. The Task 13 live driver also passed: `config validate` accepted its config and the summary matched the expected JSON exactly. Mutation probes confirmed the pinning tests fail without the reload mutex, with stat-after-read, without the boot state-file load, and with the old table CSS.
+- **Re-verification against `caf55fe` (2026-11-04):** `internal/otelexport`, `internal/tracing`, `cmd/mayu/observability.go`, `internal/config/observability.go`, `internal/policy/observability.go` and `api/` are byte-identical to `0e602a9`, so Tasks 2–4's code there stands. Every anchor in files the merge changed was re-read and renumbered. Checked by `-overlay` (no repository change): Task 1's code and tests (new tests plus the whole `internal/policy` package), Task 2's metrics changes and the structural non-blocking test (RED at 30 s against a blocking `pipeline.go`, GREEN in 3.8 s), Task 5's config block, Task 6's record change and the analytics pin, Task 10's capability field and test. The Task 11 wiring ran in a scratch copy of `internal/server/adminui`: `observability_console.cjs`, the three `routing_forms.cjs` modes, `analytics_evidence.cjs` and `audit_console.cjs` pass, and without the harness edits `routing_forms.cjs --views` and `analytics_evidence.cjs` fail with `refreshObservabilityView is not defined`. Not re-run at `caf55fe`: the full race suite, the Go adminui tests (embedded files), the Playwright scripts, the docs build and the live driver; Task 13 runs them.
 - **Out of scope (unchanged):** OTLP metrics export; editing endpoints, headers, TLS, `queue_bytes` or the legacy `otel` block at runtime; reporting local limits to the control plane; team-scoped observability views; persisting console counters across restarts.
