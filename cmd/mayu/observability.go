@@ -118,7 +118,11 @@ func initTracing(ctx context.Context, cfg *config.Config, set *otelexport.Set, p
 	if len(exporters) == 0 {
 		return nil, nil
 	}
-	return tracing.InitExporters(ctx, service, exporters, traceDecider(set, pol, legacy))
+	var observe tracing.Observer
+	if set != nil {
+		observe = set.ObserveTrace // span counts for the console's traces rows
+	}
+	return tracing.InitExporters(ctx, service, exporters, traceDecider(set, pol, legacy), observe)
 }
 
 // contentOption wires governed content export when an exporter allows it.

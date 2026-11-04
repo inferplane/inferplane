@@ -62,6 +62,25 @@ type Target struct {
 // authenticated principal) and must be cheap.
 type Decider func(ctx context.Context) []Target
 
+// Observer receives per-exporter span counts for the observability console:
+// OutcomeSent or OutcomeExportError per exported batch, OutcomeSampledOut per
+// span a target's draw skipped. It runs on the request path and on batch
+// export goroutines, so it must be cheap and must not block. Only counts cross
+// it: the SDK's error text can quote collector responses.
+type Observer func(exporter, outcome string, n int)
+
+// Outcome values passed to an Observer (the same strings as the outcome label
+// of inferplane_otel_export_records_total).
+const (
+	OutcomeSent        = "sent"
+	OutcomeExportError = "dropped_export_error"
+	OutcomeSampledOut  = "sampled_out"
+)
+
+// drawSample is the per-target sampling draw; a variable so tests can make it
+// deterministic.
+var drawSample = rand.Float64
+
 // InitRouted installs a TracerProvider whose spans are exported only to the
 // targets decide returns for their request. Start makes the per-target draw
 // once per span, so an incoming traceparent's sampled flag or a client-chosen
@@ -71,11 +90,20 @@ type Decider func(ctx context.Context) []Target
 // on the trace id. It returns the provider's Shutdown, which flushes every
 // exporter.
 func InitRouted(serviceName string, exporters map[string]sdktrace.SpanExporter, decide Decider) func(context.Context) error {
+	return initRouted(serviceName, exporters, decide, nil)
+}
+
+// initRouted is InitRouted with an optional Observer; with one, every
+// exporter is wrapped so its batch outcomes are counted.
+func initRouted(serviceName string, exporters map[string]sdktrace.SpanExporter, decide Decider, observe Observer) func(context.Context) error {
 	if serviceName == "" {
 		serviceName = "inferplane"
 	}
-	r := &routingProcessor{procs: make(map[string]sdktrace.SpanProcessor, len(exporters)), decide: decide}
+	r := &routingProcessor{procs: make(map[string]sdktrace.SpanProcessor, len(exporters)), decide: decide, observe: observe}
 	for name, exp := range exporters {
+		if observe != nil {
+			exp = countingExporter{SpanExporter: exp, name: name, observe: observe}
+		}
 		r.procs[name] = sdktrace.NewBatchSpanProcessor(exp)
 	}
 	tp := sdktrace.NewTracerProvider(
@@ -107,8 +135,9 @@ func (routeSampler) ShouldSample(p sdktrace.SamplingParameters) sdktrace.Samplin
 func (routeSampler) Description() string { return "InferplaneGovernedRoute" }
 
 // InitExporters builds one OTLP exporter per entry and installs InitRouted
-// over them, so callers outside this package never import the SDK.
-func InitExporters(ctx context.Context, serviceName string, exporters map[string]ExporterConfig, decide Decider) (func(context.Context) error, error) {
+// over them, so callers outside this package never import the SDK. observe,
+// when non-nil, receives per-exporter span counts (see Observer).
+func InitExporters(ctx context.Context, serviceName string, exporters map[string]ExporterConfig, decide Decider, observe Observer) (func(context.Context) error, error) {
 	built := make(map[string]sdktrace.SpanExporter, len(exporters))
 	for name, c := range exporters {
 		exp, err := NewExporter(ctx, c)
@@ -120,15 +149,23 @@ func InitExporters(ctx context.Context, serviceName string, exporters map[string
 		}
 		built[name] = exp
 	}
-	return InitRouted(serviceName, built, decide), nil
+	return initRouted(serviceName, built, decide, observe), nil
 }
 
 // routingProcessor forwards each ended span to the batch processors chosen
 // for it when it started.
 type routingProcessor struct {
-	procs  map[string]sdktrace.SpanProcessor
-	decide Decider
-	routes sync.Map // trace.SpanID → []string (exporter names)
+	procs   map[string]sdktrace.SpanProcessor
+	decide  Decider
+	observe Observer // nil = no span counts
+	routes  sync.Map // trace.SpanID → []string (exporter names)
+}
+
+// note forwards one count to the observer, if any.
+func (r *routingProcessor) note(exporter, outcome string, n int) {
+	if r.observe != nil {
+		r.observe(exporter, outcome, n)
+	}
 }
 
 func (r *routingProcessor) OnStart(parent context.Context, s sdktrace.ReadWriteSpan) {
@@ -147,7 +184,8 @@ func (r *routingProcessor) choose(ctx context.Context) []string {
 		if _, ok := r.procs[t.Exporter]; !ok || t.Ratio <= 0 {
 			continue
 		}
-		if t.Ratio < 1 && rand.Float64() >= t.Ratio {
+		if t.Ratio < 1 && drawSample() >= t.Ratio {
+			r.note(t.Exporter, OutcomeSampledOut, 1)
 			continue
 		}
 		dup := false
@@ -185,4 +223,22 @@ func (r *routingProcessor) ForceFlush(ctx context.Context) error {
 		errs = append(errs, p.ForceFlush(ctx))
 	}
 	return errors.Join(errs...)
+}
+
+// countingExporter reports each batch's outcome to the observer. Only the span
+// count leaves: the SDK error can carry collector response text.
+type countingExporter struct {
+	sdktrace.SpanExporter
+	name    string
+	observe Observer
+}
+
+func (e countingExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
+	err := e.SpanExporter.ExportSpans(ctx, spans)
+	outcome := OutcomeSent
+	if err != nil {
+		outcome = OutcomeExportError
+	}
+	e.observe(e.name, outcome, len(spans))
+	return err
 }

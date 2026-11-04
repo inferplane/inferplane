@@ -56,7 +56,7 @@ var (
 func Init(ctx context.Context, cfg Config) (func(context.Context) error, error) {
 	targets := []Target{LegacyTarget(cfg.SampleRatio)}
 	return InitExporters(ctx, cfg.ServiceName, map[string]ExporterConfig{LegacyExporter: {Endpoint: cfg.Endpoint, Protocol: cfg.Protocol, Insecure: cfg.Insecure}},
-		func(context.Context) []Target { return targets })
+		func(context.Context) []Target { return targets }, nil)
 }
 
 // LegacyExporter names the `otel` block's exporter among routed exporters.
