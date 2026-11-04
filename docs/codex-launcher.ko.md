@@ -1,6 +1,6 @@
 ---
 translation_source: codex-launcher.md
-translation_source_sha256: bcfc61b40c06485b7a140b5f4d4cce7cb85d24a3d896f91b7e32c2f07f7c752c
+translation_source_sha256: 0d5ddb7032b47a10cc5d2c774aa65d57cc8ae8bc7d34627a57bfc5f2e3951472
 ---
 
 # 모델별 Codex 실행 도구 {#model-aware-codex-launcher}
@@ -37,7 +37,7 @@ inferplane 공급자는 로컬 `/v1`, Responses wire API, `env_key="INFERPLANE_A
 
 적격 게이트웨이 ID가 `/model` 선택기에 표시됩니다. `context_window`·`max_context_window`는 선언된 context_window, 없으면 max_model_len, 둘 다 있으면 작은 값을 사용합니다. Codex 0.154.0은 다른 모델 해석 시에도 상속된 전역 model_context_window를 항목의 max_context_window로 제한합니다. 실행 도구는 전역 컨텍스트를 덮어쓰지 않습니다.
 
-명시적으로 선택한 이식 가능한 Responses 모델의 게이트웨이 승인은 `max(1, request_bytes / 4)`와 출력 예산을 사용합니다. 백엔드 토크나이저의 정확한 값이 아닙니다. 민감 정보 검사기의 더 큰 바이트 상한은 재귀 디코딩 JSON까지 고려하므로 실제 입력 토큰과 혼동하지 마세요. 자동 대안·엄격 예산·InternalOnly는 보수적 용량 검사를 유지하며 검사 범위·기능·가격·예산 예약도 적용합니다.
+명시적으로 선택한 이식 가능한 Responses 모델의 게이트웨이 승인은 수신 경로 추정치(`internal/tokenest`, 라우터도 명시적으로 요청한 모델에 같은 추정 방식을 적용)와 출력 예산을 사용합니다. 백엔드 토크나이저의 정확한 값이 아닙니다. 민감 정보 검사기의 더 큰 바이트 상한은 재귀 디코딩 JSON까지 고려하므로 실제 입력 토큰과 혼동하지 마세요. 자동 대안·엄격 예산·InternalOnly는 보수적 용량 검사를 유지하며 검사 범위·기능·가격·예산 예약도 적용합니다.
 
 격리된 Codex 0.154.0 앱 서버에 전역 `model_context_window=1048576`을 설정해 검증했습니다. config/read에는 전역 값이 남지만 런타임 thread/tokenUsage/updated의 **Grok 사용 가능 토큰은 419,430**입니다. 카탈로그 524,288과 이식 가능한 항목의 80%를 적용한 값입니다. 전역 값이 모델별 상한을 이기지 않습니다. `codex debug models`의 원시 메타데이터만으로 런타임 한도를 증명할 수 없습니다.
 
@@ -207,6 +207,11 @@ HUD가 없을 때도 직접 실행합니다.
 기록합니다. 오류 본문은 64 KiB까지만 해석하고 원문 메시지·param·알 수 없는
 코드는 노출하지 않습니다. 정책이나 이력을 바꾸거나 재시도·사용량을 만들지 않습니다.
 이미 전송이 시작된 SSE의 실패 처리는 변경하지 않습니다.
+
+무상태 브리지에서 모든 호환 대상의 선언된 컨텍스트 창보다 큰 요청은 HTTP 400과
+`error.code="context_length_exceeded"`를 반환하므로 Codex가 압축합니다. 이전에는
+403 `no policy-permitted compatible Responses target`을 받아 같은 요청을 다섯 번
+다시 보냈습니다(2026-10-27 측정).
 
 동일 모델·리전·이력·클라이언트 설정으로 비교해야 합니다. 누적 토큰은 현재
 컨텍스트 사용량이 아닙니다. 조기 압축은 임시 회피책일 수 있지만 실제 모델 한도를

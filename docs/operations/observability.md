@@ -31,6 +31,9 @@ Start with the [Grafana dashboard](../../deploy/grafana/inferplane.json). Config
 | `gen_ai_server_time_to_first_token_seconds` | Upstream or request-path latency |
 | `inferplane_fallback_total` / circuit state | Provider failure or incompatibility |
 | `inferplane_usage_windows_dropped_total` | Analytics delivery loss; distinguish from authority accounting |
+| `process_resident_memory_bytes`, `go_memstats_heap_inuse_bytes`, `go_goroutines` | Memory growth: the gateway holds several copies of every request body being processed (about 5.5× measured), so concurrent large bodies dominate |
+| `inferplane_model_fallback_total` | Clients requesting unrouted model IDs (a typo or a newer alias); the log line `router: model fallback` names the requested ID |
+| `inferplane_inflight_refusals_total`, `inferplane_inflight_request_bytes` | In-flight body budget (`server.max_inflight_request_bytes`) too small for the workload, a burst of large requests, or a slow or stalled request body holding its reservation until it finishes or the connection closes (size the budget at several times `server.max_request_bytes`; `route` is `generation` or `count`) |
 
 Choose thresholds from measured traffic and the selected profile. Prometheus spend is observational; integer accounting records and authority commitments determine available balance.
 
@@ -43,6 +46,7 @@ Choose thresholds from measured traffic and the selected profile. Prometheus spe
 | 402 in authority profiles | Money exhausted or conservative bound exceeds available balance |
 | 429 | Rate/token quota exhaustion; inspect the enforcing scope |
 | 503 before first request | Required sync, shared namespace/binding, initial grant, DB/journal availability |
+| 503 with `Retry-After: 2` during a burst of large requests | In-flight body budget (`server.max_inflight_request_bytes`); `inferplane_inflight_refusals_total` |
 | Retryable grant wait | Respect `Retry-After`; do not lower accounting bounds to force admission |
 | HTTP 200 stream ends early | Inspect terminal protocol error, observed usage and retained liability |
 | Count returns zero while generation refuses | Counts remain local/200; check readiness and key-store availability |

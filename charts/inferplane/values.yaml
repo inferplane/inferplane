@@ -122,6 +122,10 @@ config:
 # These figures do not cover the default 64 MiB body cap, concurrent large
 # requests, privacy inspection or audit replay. Size memory for your workload
 # and lower config.server.max_request_bytes when large bodies are unnecessary.
+# config.server.max_inflight_request_bytes (off by default) bounds the body
+# bytes all requests hold at once; each body costs about 5.5x in memory. A
+# slow or stalled body holds its reservation until it ends, so set it to
+# several times max_request_bytes.
 # No CPU limit: throttling would add latency to every in-flight stream.
 resources:
   requests: { cpu: 50m, memory: 64Mi }

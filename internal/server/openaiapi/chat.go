@@ -32,6 +32,7 @@ import (
 	"github.com/inferplane/inferplane/internal/router"
 	"github.com/inferplane/inferplane/internal/server/requestpolicy"
 	"github.com/inferplane/inferplane/internal/telemetry"
+	"github.com/inferplane/inferplane/internal/tokenest"
 	"github.com/inferplane/inferplane/internal/tracing"
 	"github.com/inferplane/inferplane/pkg/schema"
 	"github.com/inferplane/inferplane/pkg/ulid"
@@ -136,6 +137,13 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	raw, err := io.ReadAll(req.Body)
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			// An undeclared length over server.max_request_bytes gets the same
+			// 413 as a declared one (server.maxBytesMiddleware).
+			writeErr(w, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body too large")
+			return
+		}
 		writeErr(w, 400, "invalid_request_error", "could not read request body")
 		return
 	}
@@ -147,12 +155,14 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeErr(w, 400, "invalid_request_error", "malformed JSON")
 		return
 	}
-	model, modelSubstituted := h.r.ResolveModel(canonical.Model)
-	if modelSubstituted {
+	model, fallbackSource := h.r.ResolveModelSource(canonical.Model)
+	if fallbackSource != "" {
 		// Unconfigured/unrouted model substituted for a configured one
 		// (model_fallbacks or the same-family default, D5) BEFORE the
-		// allow-list check — advertise it to the client.
+		// allow-list check — advertise it to the client and audit it.
 		w.Header().Set("x-inferplane-model-fallback", model)
+		req = req.WithContext(audit.WithModelFallback(req.Context(), canonical.Model, model, fallbackSource))
+		h.r.ObserveModelFallback(canonical.Model, model, fallbackSource)
 	}
 	// Tracing (ADR-011): join the client trace, start ONE server span across the
 	// request, end once via defer; no-op when off.
@@ -281,14 +291,11 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	table := st.Pricing()
 	// Context-window fast-fail (same rule and rationale as anthropicapi's —
 	// estimate-only, before PreCheck, clear message; deliberate per-package
-	// duplication like subjectOf).
+	// duplication like subjectOf). The same estimate feeds PreCheck.
+	est := estimateTokens(raw)
 	if win := requestpolicy.ContextWindow(st, model); win > 0 {
-		est := estimateTokens(raw)
 		if est > win {
-			est = requestpolicy.ContextTextEstimate("openai", raw)
-		}
-		if est > win {
-			msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum (gateway text estimate excluding inline image payloads; model %s has a %d-token context window). Compact the conversation or reduce the input.", est, win, model, win)
+			msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum (gateway estimate; model %s has a %d-token context window). Compact the conversation or reduce the input.", est, win, model, win)
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "context window exceeded")
@@ -311,7 +318,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if h.gov != nil {
-		dec := h.gov.PreCheck(subjectOf(p), keyPolicyOf(p), estimateTokens(raw))
+		dec := h.gov.PreCheck(subjectOf(p), keyPolicyOf(p), est)
 		if !dec.Allowed {
 			audit.SetGovernance(req.Context(), dec.Governance)
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, traceID)
@@ -710,14 +717,10 @@ func (h *ChatHandler) observeTokens(model, provider, team string, u *schema.Usag
 	h.metrics.ObserveTokenUsage("cache_write_1h", model, provider, team, write1h)
 }
 
-// estimateTokens is the conservative input-token estimate fed to the governance
-// pre-check. ~4 bytes per token over the raw request body.
+// estimateTokens is the Chat Completions context gate and PreCheck estimate
+// (internal/tokenest).
 func estimateTokens(raw []byte) int64 {
-	n := int64(len(raw) / 4)
-	if n < 1 {
-		n = 1
-	}
-	return n
+	return tokenest.Estimate("openai", raw)
 }
 
 // recordSpanResponse sets response-side GenAI attributes + terminal status on the

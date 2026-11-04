@@ -5,7 +5,7 @@ import (
 	"errors"
 	"log"
 	"regexp"
-	"strconv"
+	"strings"
 
 	smithy "github.com/aws/smithy-go"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
@@ -123,9 +123,42 @@ func upstreamError(err error) *providers.UpstreamError {
 	return synthError(status, msg)
 }
 
-var promptOverflowPattern = regexp.MustCompile(`(?i)^prompt is too long: ([0-9]+) tokens > ([0-9]+) maximum$`)
+// Open-weight models on Converse relay their serving engine's error inside
+// this prefix, optionally after a Mantle streaming prefix (both observed
+// 2026-10-27 for openai.gpt-oss-120b-1:0, streaming and not).
+const relayedErrorPrefix = "The model returned the following errors: "
 
-// Only the SDK's typed validation exception with this complete numeric shape
+var (
+	mantleStreamingPrefix = regexp.MustCompile(`^Mantle streaming error for requestId [0-9A-Fa-f-]{36}: `)
+	relayedErrorEvent     = regexp.MustCompile(`^ErrorEvent \{ error: APIError \{ type: "BadRequestError", code: Some\(400\), message: "([^"\\]*)", param: None \} \}$`)
+)
+
+// promptOverflowMessage recognizes context-overflow evidence in a Bedrock
+// ValidationException message: Claude's own wording, a relayed serving-engine
+// ErrorEvent with a recognized overflow message, or a relayed OpenAI error
+// whose code is exactly context_length_exceeded (no counts). tokens is 0 when
+// the evidence carries no counts. Nothing else is evidence.
+func promptOverflowMessage(message string) (tokens, maximum int64, ok bool) {
+	if tokens, maximum, ok := providers.ContextOverflowCounts(message); ok {
+		return tokens, maximum, true
+	}
+	relayed, found := strings.CutPrefix(message, relayedErrorPrefix)
+	if !found {
+		return 0, 0, false
+	}
+	if prefix := mantleStreamingPrefix.FindString(relayed); prefix != "" {
+		relayed = relayed[len(prefix):]
+	}
+	if match := relayedErrorEvent.FindStringSubmatch(relayed); match != nil {
+		return providers.ContextOverflowCounts(match[1])
+	}
+	if len(relayed) <= 64<<10 && providers.ResponseErrorCode([]byte(relayed)) == "context_length_exceeded" {
+		return 0, 0, true
+	}
+	return 0, 0, false
+}
+
+// Only the SDK's typed validation exception with recognized overflow evidence
 // is recovery evidence. Extra text, unknown wording and generic errors retain
 // the normal scrubbed error; no provider string becomes a client message.
 func promptOverflow(err error) *providers.UpstreamError {
@@ -133,21 +166,14 @@ func promptOverflow(err error) *providers.UpstreamError {
 	if !errors.As(err, &validation) {
 		return nil
 	}
-	match := promptOverflowPattern.FindStringSubmatch(validation.ErrorMessage())
-	if match == nil {
+	tokens, maximum, ok := promptOverflowMessage(validation.ErrorMessage())
+	if !ok {
 		return nil
 	}
-	input, inputErr := strconv.ParseInt(match[1], 10, 64)
-	limit, limitErr := strconv.ParseInt(match[2], 10, 64)
-	if inputErr != nil || limitErr != nil || limit <= 0 || input <= limit {
-		return nil
-	}
-	body, _ := json.Marshal(map[string]any{
-		"type": "error",
-		"error": map[string]string{"type": "invalid_request_error", "code": "context_length_exceeded",
-			"message": "prompt is too long: " + strconv.FormatInt(input, 10) + " tokens > " + strconv.FormatInt(limit, 10) + " maximum"},
-	})
-	return &providers.UpstreamError{StatusCode: 400, Body: body}
+	// One server-log line, like upstreamError's, but with the validated counts
+	// only (0 when the evidence carried none): no provider text is logged here.
+	log.Printf("bedrock: upstream error status=400 code=ValidationException: prompt overflow tokens=%d maximum=%d", tokens, maximum)
+	return &providers.UpstreamError{StatusCode: 400, Body: providers.PromptTooLongBody(tokens, maximum)}
 }
 
 // synthError builds an UpstreamError with an Anthropic-shaped body, for the

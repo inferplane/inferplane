@@ -967,7 +967,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		maxAge := raw.ControlPlane.MaxPolicyAgeDuration
 		governanceGate = func() (bool, string) { return syncer.GovernanceReady(maxAge) }
 	}
-	g.dataSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol), server.WithMaxRequestBytes(cfg.Server.MaxRequestBytes), server.WithGovernanceGate(governanceGate), server.WithClientEvidence(clientEvidenceMode(cfg)), contentOption(obsSet, polStore))}
+	g.dataSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol), server.WithMaxRequestBytes(cfg.Server.MaxRequestBytes), server.WithMaxInflightRequestBytes(cfg.Server.MaxInflightRequestBytes), server.WithGovernanceGate(governanceGate), server.WithClientEvidence(clientEvidenceMode(cfg)), contentOption(obsSet, polStore))}
 	if authority != nil || shared != nil {
 		next := g.dataSrv.Handler
 		g.dataSrv.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

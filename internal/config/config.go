@@ -196,6 +196,15 @@ type ServerConfig struct {
 	// (BodyLogConfig.MaxBodyBytes), which caps a per-record CAPTURED body,
 	// not the ingress read.
 	MaxRequestBytes int64 `json:"max_request_bytes,omitempty"`
+	// MaxInflightRequestBytes bounds the request-body bytes all data-plane
+	// requests hold at once; a request that does not fit is refused with a
+	// protocol-shaped 503 (counts are answered locally, still HTTP 200).
+	// A request with a slow or stalled body keeps its reservation until the body
+	// ends or the connection closes (no read deadline), so set it to several
+	// times MaxRequestBytes; an equal value lets one stalled upload refuse all.
+	// 0 (unset) disables it; otherwise it must be >= MaxRequestBytes so any
+	// admissible request can run alone.
+	MaxInflightRequestBytes int64 `json:"max_inflight_request_bytes,omitempty"`
 }
 
 // defaultMaxRequestBytes is server.max_request_bytes' unset default. 64 MiB
@@ -213,6 +222,12 @@ func validateServer(s *ServerConfig) error {
 	}
 	if s.MaxRequestBytes == 0 {
 		s.MaxRequestBytes = defaultMaxRequestBytes
+	}
+	if s.MaxInflightRequestBytes < 0 {
+		return fmt.Errorf("config: server.max_inflight_request_bytes must be >= 0")
+	}
+	if s.MaxInflightRequestBytes > 0 && s.MaxInflightRequestBytes < s.MaxRequestBytes {
+		return fmt.Errorf("config: server.max_inflight_request_bytes must be 0 (off) or >= server.max_request_bytes (%d)", s.MaxRequestBytes)
 	}
 	return nil
 }

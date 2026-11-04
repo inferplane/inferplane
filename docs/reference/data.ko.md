@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 8f8092aaa1963460c156b3b2cd8826861766c07987be2f2ac6b55dc0143cea1d
+translation_source_sha256: 85c4477fa1238d108cfac2de6a96cd2a963e0673b107afb834a1304c578bcf00
 ---
 
 # 데이터 구현 {#data}
@@ -59,7 +59,9 @@ translation_source_sha256: 8f8092aaa1963460c156b3b2cd8826861766c07987be2f2ac6b55
 불확실한 사용량은 검증된 관측 토큰만 일일 quota에 차감하고, TPM은 승인 시 추정치를
 최솟값으로 유지합니다. 추정치로 일일 quota 차감을 만들지 않습니다. 음수 승인 추정치는
 어떤 한도도 소비하기 전에 별도의 감사 거부 코드 `invalid_token_estimate`로 거부합니다.
-ADR-039를 참고하세요.
+ADR-039를 참고하세요. 승인 추정치는 컨텍스트 사전 검사·로컬 count 응답과 같은
+`internal/tokenest`의 내용 기반 요청 추정치입니다(Bedrock count는 디코딩한 InvokeModel
+본문을 추정하고, 동시 처리 본문 예산에 들어가지 못한 count는 4바이트당 1토큰으로 응답).
 
 ### 4. 코드 위치 {#4-code-pointers}
 
@@ -100,7 +102,7 @@ providerstore의 providers.data_boundary는 TEXT이며 누락·unknown을 신뢰
 
 MatchingRoutingPolicies는 하나의 원자 스냅샷에서 호출자 소유 규칙을 반환합니다. 거부된 분산 민감 문서는 유효한 교체 전까지 주체를 차단하고, 로컬 재로드 실패는 마지막 유효 스냅샷을 유지합니다. 적용 시 현재 RoutedAndPriced를 사용하고 토폴로지 변경 후 요청 시에도 후보를 검사합니다. 정책·토폴로지는 별도 게시이며 새 규칙 전에 전체 참여자를 업그레이드하세요.
 
-감사 request.routing은 omitempty로 추가하고 혼합 버전 정확 바이트를 시험합니다. 요청·선택·제안 모델, 제한된 판단 필드, 정책·세대, 계획·실제 공급자와 경계를 기록해 같은 모델의 다른 공급자 재시도를 구분합니다. 탐지 원문·프롬프트·키 ID·클라이언트 세션 값을 `request.routing`에 추가하지 않으며, ADR-057 `client.session_ref` 다이제스트는 별도 필드입니다. 본문 기록은 별도이며 규칙이 없으면 필드를 생략합니다. [판단 의미](../policy-routing.md#read-decisions-and-evaluate-rollout)를 참고하세요.
+감사 request.routing은 omitempty로 추가하고 혼합 버전 정확 바이트를 시험합니다. 요청·선택·제안 모델, 제한된 판단 필드, 정책·세대, 계획·실제 공급자와 경계를 기록해 같은 모델의 다른 공급자 재시도를 구분합니다. 탐지 원문·프롬프트·키 ID·클라이언트 세션 값을 `request.routing`에 추가하지 않으며, ADR-057 `client.session_ref` 다이제스트는 별도 필드입니다. 본문 기록은 별도이며 규칙이 없으면 필드를 생략합니다. 단 ADR-029 모델 대체가 적용되면 `routing`에 `reason: model_fallback`, 클라이언트가 요청한 모델(`requested_model`과 `model_fallback_from`, 최대 256바이트), `model_fallback_source`(`model_fallbacks` 또는 `family`)를 기록합니다. 정책 판단이 있으면 그 사유를 유지하고 같은 두 필드를 추가합니다. [판단 의미](../policy-routing.md#read-decisions-and-evaluate-rollout)를 참고하세요.
 
 
 ### 가격 동기화의 보호 범위

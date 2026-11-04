@@ -161,6 +161,12 @@ func flattenText(blocks []schema.ContentBlock) string {
 // (text, tool_use, tool_result); thinking/image/document blocks are dropped
 // (out of scope — see the design doc). The SDK-specific mapping, including
 // tool_result flattening, happens in buildMessages (client.go).
+//
+// thinking and redacted_thinking stay dropped rather than becoming Converse
+// reasoningContent: this adapter never returns reasoning to the client, so a
+// history thinking block was produced by another model and carries that
+// model's signature, which a Converse model cannot verify, and Bedrock does
+// not document reasoningContent input for the non-Claude families routed here.
 func messageBlocks(m schema.Message) []schema.ContentBlock {
 	var out []schema.ContentBlock
 	for _, b := range m.Content {

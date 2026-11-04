@@ -35,6 +35,7 @@ type Router struct {
 	requestRedactor      RequestRedactor
 	budgetConstraintGate func(keystore.Principal) map[string]string
 	affinity             *affinityStore
+	fallbackLog          fallbackLog
 }
 
 func New(holder *live.Holder) *Router {
@@ -69,15 +70,24 @@ func (r *Router) ContextWindow(model string) int64 {
 // one. Call this in place of Canonical at ingress so RBAC/audit/metrics/
 // pricing downstream all key off the model actually served.
 func (r *Router) ResolveModel(requested string) (served string, substituted bool) {
+	served, source := r.ResolveModelSource(requested)
+	return served, source != ""
+}
+
+// ResolveModelSource is ResolveModel plus the substitution's source
+// ("model_fallbacks" or "family", see live.State.FallbackSource); source is
+// "" when the requested model is served as is. It has no side effects:
+// generation ingresses report an applied substitution via ObserveModelFallback.
+func (r *Router) ResolveModelSource(requested string) (served, source string) {
 	st := r.live.Load()
 	canonical := st.Canonical(requested)
 	if _, ok := st.Route(canonical); ok {
-		return canonical, false
+		return canonical, ""
 	}
-	if fb := st.FallbackFor(canonical); fb != "" {
-		return fb, true
+	if fb, source := st.FallbackSource(canonical); fb != "" {
+		return fb, source
 	}
-	return canonical, false
+	return canonical, ""
 }
 
 // Allows reports whether p's allow-list permits the (already-canonicalized)

@@ -10,6 +10,7 @@ import (
 	"github.com/inferplane/inferplane/internal/config"
 	"github.com/inferplane/inferplane/internal/sensitivity"
 	"github.com/inferplane/inferplane/internal/server/routingtest"
+	"github.com/inferplane/inferplane/internal/tokenest"
 	"github.com/inferplane/inferplane/pkg/schema"
 )
 
@@ -50,7 +51,7 @@ func TestResponsesRequestedModelAcceptsLongToolHistory(t *testing.T) {
 				inspection, err := sensitivity.NewInspector().Inspect(context.Background(), "responses", body)
 				limit := f.Config.Models["premium"].ContextWindow
 				if err != nil || !inspection.Complete || inspection.InputTokens <= limit ||
-					int64(len(body)/4)+inspection.OutputTokens >= limit {
+					tokenest.Estimate("responses", body)+inspection.OutputTokens >= limit {
 					t.Fatalf("fixture must separate context estimate from inspection ceiling: inspection=%+v bytes=%d err=%v", inspection, len(body), err)
 				}
 				rec := policyDo(policyMux(f, nil, nil, nil, nil), "/v1/responses", string(body), true)

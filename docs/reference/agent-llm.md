@@ -89,6 +89,15 @@ the system prompt (the pre-2026-08-28 behavior) mutated the prompt head on every
 turn a hook fired and invalidated the entire cached prefix (observed live:
 cache_creation ≈ full 475k-token input on every request).
 
+Converse flattens `tool_result` content to one text block. A `tool_reference`
+block (Claude Code's ToolSearch result) becomes a `Loaded tool: <name>` line per
+tool instead of empty text; the definitions arrive in the next request's tools.
+`thinking` and `redacted_thinking` blocks stay dropped rather than becoming
+Converse `reasoningContent`: this path never returns reasoning, so a history
+thinking block comes from another model and carries a signature the Converse
+model cannot verify, and reasoning input is not documented for the non-Claude
+families routed here.
+
 OpenAI-wire streams (openai_compatible, Mantle chat routes) are re-rendered by
 canonical consumers into the Anthropic frame vocabulary, and the OpenAI wire
 has no message_start/message_stop, opens text blocks implicitly, and has no

@@ -1,7 +1,7 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 582a4268e51f · generated-at: 2026-11-04 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 00135e64d572 · generated-at: 2026-11-04 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
-> from CLAUDE.md. This file is shared verbatim by Kiro, Codex, and Agy (not a
-> per-AI copy).
+> from CLAUDE.md. This file is shared verbatim by the external review panel
+> (not a per-AI copy).
 
 # inferplane — reviewer context
 
@@ -71,6 +71,9 @@ credentials, or a real IdP (httptest fakes only).
 - `internal/principal`, `internal/metrics`, `internal/governance`,
   `internal/adminauth` are import-cycle-free leaves — they must not grow
   dependencies on `internal/server` or `internal/config`.
+- `internal/tokenest` is a stdlib-only leaf: one content-aware input-token
+  estimate (not a tokenizer) shared by context gates, count fallbacks and TPM
+  admission. It must stay stdlib-only and import no other `internal/*` package.
 - Config-coupled packages get decoupled mirror types (e.g.
   `governance.ConfigTeam`, `adminauth.MappingConfig`) — never import
   `internal/config` from a leaf.

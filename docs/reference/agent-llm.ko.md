@@ -1,6 +1,6 @@
 ---
 translation_source: reference/agent-llm.md
-translation_source_sha256: a9b2e9f820771a46f339bf147a8ce8ca303accc888e04ba7106f55d15f078d6a
+translation_source_sha256: 18b1692a1513895b1d60785e44bb17e8d42680c0fd8e57145ecbc723b380e79e
 ---
 
 # 에이전트·LLM 구현 {#agent-llm}
@@ -64,6 +64,8 @@ OTLP는 트레이스와, `observability` 정책이 고른 경우의 정책 기�
 | 마스킹된 팀 | cache_control | 네임스페이스 변경. 기존 필터는 재직렬화하고 완전 정책 Mask는 결정적 바이트를 만들어 반복 마스킹 접두부도 캐시 가능. 실제 경로를 측정하며 고정 비용 배수 없음 |
 
 표식이 사라지는 경로도 업스트림 자동 캐시를 위해 대화 접두부를 턴 사이 안정적으로 유지해야 합니다. Converse는 user/assistant 이외 역할의 CLI 훅 출력을 다음 사용자 메시지에 합쳐 위치를 유지합니다. 이를 system에 합쳤던 이전 동작은 매 턴 머리를 바꿔 전체 약 475k 토큰을 캐시 쓰기하는 현상이 관측되었습니다.
+
+Converse는 `tool_result` 내용을 텍스트 블록 하나로 평탄화합니다. `tool_reference` 블록(Claude Code ToolSearch 결과)은 빈 텍스트 대신 도구마다 `Loaded tool: <이름>` 한 줄이 되며, 도구 정의는 다음 요청의 tools에 들어갑니다. `thinking`과 `redacted_thinking` 블록은 Converse `reasoningContent`로 바꾸지 않고 계속 제외합니다. 이 경로는 추론을 클라이언트에 돌려주지 않으므로 이력의 thinking 블록은 다른 모델이 만든 것이고, Converse 모델이 검증할 수 없는 서명을 담고 있으며, 여기서 라우팅하는 Claude 외 계열의 추론 입력은 문서화되어 있지 않습니다.
 
 OpenAI 스트림은 Anthropic의 시작·끝·블록 닫힘이 없어 ReadChatSSE가 정규 소비자용 수명주기를 합성합니다. 첫 파싱 청크 전에 공개 모델명의 message_start, 열리지 않은 인덱스의 텍스트 시작, message_delta 전 열린 블록 종료, DONE의 message_stop을 만듭니다. Chunk만 만들고 Raw는 nil이어서 OpenAI 수신에는 가짜 줄을 전달하지 않습니다. finish_reason과 usage-only 메시지가 모두 없이 끝나면 DONE에서 end_turn message_delta 하나를 합성합니다. 어떤 메시지 수준 프레임이라도 있으면 중복 종료로 해석되지 않도록 합성을 억제합니다.
 

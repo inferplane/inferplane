@@ -39,6 +39,29 @@ func TestValidateServerMaxRequestBytes(t *testing.T) {
 	}
 }
 
+// server.max_inflight_request_bytes: 0 is off, negative is an error, and a
+// positive budget must admit the largest single request on its own.
+func TestValidateServerMaxInflightRequestBytes(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		request, budget int64
+		wantErr         bool
+	}{
+		{"off by default", 0, 0, false},
+		{"negative rejected", 0, -1, true},
+		{"below the defaulted request cap", 0, 32 << 20, true},
+		{"equal to the request cap", 16 << 20, 16 << 20, false},
+		{"above the request cap", 16 << 20, 96 << 20, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := ServerConfig{MaxRequestBytes: tc.request, MaxInflightRequestBytes: tc.budget}
+			if err := validateServer(&s); (err != nil) != tc.wantErr {
+				t.Fatalf("validateServer error = %v, wantErr %t", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // models.<name>.context_window: negative rejected by the shared per-model
 // validation walk (ValidateModelAliases), zero/positive pass through.
 func TestValidateModelContextWindow(t *testing.T) {

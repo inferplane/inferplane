@@ -125,15 +125,23 @@ func (s *State) Canonical(name string) string {
 // Callers only consult this after Route has already failed, so `model` is
 // never itself a routed name here.
 func (s *State) FallbackFor(model string) string {
+	served, _ := s.FallbackSource(model)
+	return served
+}
+
+// FallbackSource is FallbackFor plus where the substitution comes from:
+// "model_fallbacks" for an operator-declared entry, "family" for the
+// same-family heuristic, "" when nothing applies.
+func (s *State) FallbackSource(model string) (served, source string) {
 	if served, ok := s.fallbacks[model]; ok {
-		return served
+		return served, "model_fallbacks"
 	}
 	if !s.fallbackFamily {
-		return ""
+		return "", ""
 	}
 	family, version, ok := familyOf(model)
 	if !ok {
-		return ""
+		return "", ""
 	}
 	best := ""
 	var bestVersion []int
@@ -146,7 +154,10 @@ func (s *State) FallbackFor(model string) string {
 			best, bestVersion = name, v
 		}
 	}
-	return best
+	if best == "" {
+		return "", ""
+	}
+	return best, "family"
 }
 
 // familyOf splits a model name into its family and numeric version, treating

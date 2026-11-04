@@ -24,6 +24,7 @@ import (
 	"github.com/inferplane/inferplane/internal/sensitivity"
 	"github.com/inferplane/inferplane/internal/server/requestpolicy"
 	"github.com/inferplane/inferplane/internal/telemetry"
+	"github.com/inferplane/inferplane/internal/tokenest"
 	"github.com/inferplane/inferplane/internal/tracing"
 	"github.com/inferplane/inferplane/providers"
 )
@@ -65,12 +66,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	req = req.WithContext(ctx)
 	raw, err := io.ReadAll(req.Body)
 	if err != nil {
-		status := http.StatusBadRequest
 		var oversized *http.MaxBytesError
 		if errors.As(err, &oversized) {
-			status = http.StatusRequestEntityTooLarge
+			writeError(w, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body too large")
+			return
 		}
-		writeError(w, status, "invalid_request_error", "could not read request body")
+		writeError(w, http.StatusBadRequest, "invalid_request_error", "could not read request body")
 		return
 	}
 	parsed, err := responses.RequestToCanonical(raw)
@@ -86,7 +87,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeError(w, 400, "invalid_request_error", "stored response, conversation and item references are not supported; resend the full input")
 		return
 	}
-	model, _ := h.r.ResolveModel(parsed.Model)
+	model, fallbackSource := h.r.ResolveModelSource(parsed.Model)
+	if fallbackSource != "" {
+		w.Header().Set("x-inferplane-model-fallback", model)
+		req = req.WithContext(audit.WithModelFallback(req.Context(), parsed.Model, model, fallbackSource))
+		h.r.ObserveModelFallback(parsed.Model, model, fallbackSource)
+	}
 	if !h.r.Allows(p, model) {
 		h.denied(req, p, "_rejected", 403, "model_forbidden", start)
 		writeError(w, 403, "permission_error", "model is not allowed")
@@ -124,6 +130,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	})
 	if routeErr != nil {
 		req = requestpolicy.Observe(w, req, result, h.metrics)
+		if result.Decision.Reason == "context_window_exceeded" {
+			// Every compatible target refused the request for its size alone:
+			// answer with the recoverable context error Codex compacts on, like
+			// the preflight below, never a 403 it retries unchanged.
+			h.denied(req, p, model, 400, "context_window_exceeded", start)
+			writeCodedError(w, 400, "request exceeds the configured context window", "context_length_exceeded")
+			return
+		}
 		status, reason := 403, result.Decision.Reason
 		if !requestpolicy.Active(result.Decision) && len(chain) > 0 && !slices.ContainsFunc(chain, compatible) {
 			status, reason = 400, "unsupported_conversion"
@@ -169,8 +183,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	tracing.SetGenAIRequest(span, model)
-	estimate := max(int64(1), int64(len(raw)/4))
-	if limit := requestpolicy.ContextWindow(st, model); limit > 0 && estimate > limit && requestpolicy.ContextTextEstimate("responses", raw) > limit {
+	// The router applies the same estimator to the explicitly requested model.
+	estimate := tokenest.Estimate("responses", raw)
+	if limit := requestpolicy.ContextWindow(st, model); limit > 0 && estimate > limit {
 		h.denied(req, p, model, 400, "context_window_exceeded", start)
 		writeCodedError(w, 400, "request exceeds the configured context window", "context_length_exceeded")
 		return

@@ -78,7 +78,10 @@ partial TTL counts remain recorded. Uncertain usage debits only validated observ
 tokens to daily quota, while TPM retains the admission estimate as a minimum;
 no estimated daily-quota debit is fabricated. Negative admission estimates use
 the distinct `invalid_token_estimate` audit deny code before consuming any
-limits. See ADR-039.
+limits. See ADR-039. The admission estimate is `internal/tokenest`'s
+content-aware request estimate, the same value as the context gate and the local
+count answer (a Bedrock count estimates its decoded InvokeModel body; a count
+that does not fit the in-flight byte budget is answered at four bytes per token).
 
 ### 4. Code Pointers
 
@@ -159,7 +162,11 @@ policy names/generations, and planned/actual provider and boundary. Actual attem
 fields distinguish same-model retries across providers. No detected text, prompt,
 key ID, or client session value is added to `request.routing`; the ADR-057
 `client.session_ref` digest is a separate field. Existing body logging stays independent.
-No-rule traffic omits the field. See [decision semantics](../policy-routing.md#read-decisions-and-evaluate-rollout).
+No-rule traffic omits the field unless an ADR-029 model fallback applied: then
+`routing` carries `reason: model_fallback`, the client's requested model in
+`requested_model` and `model_fallback_from` (at most 256 bytes), and
+`model_fallback_source` (`model_fallbacks` or `family`). A policy decision keeps
+its own reason and gains the same two fields. See [decision semantics](../policy-routing.md#read-decisions-and-evaluate-rollout).
 
 ## Audit console evidence (ADR-057)
 
