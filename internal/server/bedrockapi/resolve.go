@@ -17,14 +17,15 @@ func servesBedrockIngress(name string) bool {
 	return name == "bedrock" || name == "openai_compatible" || name == "mock"
 }
 
-// resolveModel returns the model to serve, whether that model SUBSTITUTES for
-// the requested one (D5 model-level fallback — the caller must then set
-// x-inferplane-model-fallback, same as the Anthropic/OpenAI ingresses do with
-// router.ResolveModel), and whether it resolved at all.
-func resolveModel(r *router.Router, holder *live.Holder, urlID string) (string, bool, bool) {
+// resolveModel returns the model to serve, the source when that model
+// SUBSTITUTES for the requested one (D5 model-level fallback, "" otherwise —
+// the caller must then set x-inferplane-model-fallback, same as the
+// Anthropic/OpenAI ingresses do with router.ResolveModelSource), and whether
+// it resolved at all.
+func resolveModel(r *router.Router, holder *live.Holder, urlID string) (string, string, bool) {
 	canonical := r.Canonical(urlID)
 	if _, _, err := r.ResolveChain(canonical); err == nil {
-		return canonical, false, true
+		return canonical, "", true
 	}
 
 	st := holder.Load()
@@ -32,9 +33,9 @@ func resolveModel(r *router.Router, holder *live.Holder, urlID string) (string, 
 	// client requesting a not-yet-configured "anthropic.claude-opus-5-v1:0")
 	// substitutes for its configured model_fallbacks/family-default target,
 	// same as the Anthropic/OpenAI ingresses (router.ResolveModel).
-	if fb := st.FallbackFor(canonical); fb != "" {
+	if fb, source := st.FallbackSource(canonical); fb != "" {
 		if _, ok := st.Route(fb); ok {
-			return fb, true, true
+			return fb, source, true
 		}
 	}
 
@@ -53,11 +54,11 @@ func resolveModel(r *router.Router, holder *live.Holder, urlID string) (string, 
 			prov, ok := st.Provider(target.Provider)
 			// Not a substitution: urlID is this model's own upstream id.
 			if ok && servesBedrockIngress(prov.Name()) {
-				return name, false, true
+				return name, "", true
 			}
 		}
 	}
-	return "", false, false
+	return "", "", false
 }
 
 // servableOnBedrockIngress reports whether model resolves to at least one

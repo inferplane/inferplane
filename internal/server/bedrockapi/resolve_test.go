@@ -29,7 +29,7 @@ func TestResolveModelCanonicalName(t *testing.T) {
 	h := holderFor(provs, models)
 	r := router.New(h)
 	got, sub, ok := resolveModel(r, h, "claude-x")
-	if sub {
+	if sub != "" {
 		t.Fatalf("canonical name is not a substitution")
 	}
 	if !ok || got != "claude-x" {
@@ -47,7 +47,7 @@ func TestResolveModelReverseScanByUpstreamID(t *testing.T) {
 	h := holderFor(provs, models)
 	r := router.New(h)
 	got, sub, ok := resolveModel(r, h, "global.anthropic.claude-x-v1:0")
-	if sub {
+	if sub != "" {
 		t.Fatalf("upstream-id match is not a substitution")
 	}
 	if !ok || got != "claude-x" {
@@ -96,8 +96,8 @@ func TestResolveModelFallsBackToConfiguredFallback(t *testing.T) {
 	h := holderForWithFallbacks(provs, models, map[string]string{"claude-opus-5": "claude-opus-4-8"})
 	r := router.New(h)
 	got, sub, ok := resolveModel(r, h, "claude-opus-5")
-	if !ok || got != "claude-opus-4-8" || !sub {
-		t.Fatalf("fallback resolution failed: %q ok=%v substituted=%v, want claude-opus-4-8 substituted", got, ok, sub)
+	if !ok || got != "claude-opus-4-8" || sub != "model_fallbacks" {
+		t.Fatalf("fallback resolution failed: %q ok=%v source=%q, want claude-opus-4-8 from model_fallbacks", got, ok, sub)
 	}
 }
 

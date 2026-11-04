@@ -405,8 +405,12 @@ func TestPolicyResolvedPreTierAndPostTier(t *testing.T) {
 					if !strings.Contains(buf.String(), `"requested_model":"premium"`) || !strings.Contains(buf.String(), `"selected_model":"economy"`) {
 						t.Fatalf("wrong routing model attribution: %s", buf)
 					}
-				} else if strings.Contains(buf.String(), `"routing":`) || rec.Header().Get("x-inferplane-routing-reason") != "" {
-					t.Fatal("legacy traffic acquired new evidence")
+				} else if !strings.Contains(buf.String(), `"reason":"model_fallback"`) ||
+					!strings.Contains(buf.String(), `"model_fallback_from":"unrouted","model_fallback_source":"model_fallbacks"`) ||
+					strings.Contains(buf.String(), `"policies":`) || rec.Header().Get("x-inferplane-routing-reason") != "" {
+					// Legacy traffic gains only the ADR-029 fallback evidence,
+					// never policy-routing evidence or headers.
+					t.Fatalf("legacy fallback evidence wrong: %s", buf)
 				}
 			})
 		}

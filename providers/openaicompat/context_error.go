@@ -4,17 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
-	"strconv"
 
 	"github.com/inferplane/inferplane/providers"
 )
-
-// These exact Chat Completions messages come from vLLM v0.8.5's
-// serving_engine.py context validation. Anchor the whole message: only validated
-// numeric counts may cross protocols, never arbitrary provider text or suffixes.
-var vllmMessagesOverflow = regexp.MustCompile(`^This model's maximum context length is ([0-9]+) tokens\. However, you requested ([0-9]+) tokens in the messages, Please reduce the length of the messages\.$`)
-var vllmCompletionOverflow = regexp.MustCompile(`^This model's maximum context length is ([0-9]+) tokens\. However, you requested ([0-9]+) tokens \(([0-9]+) in the messages, ([0-9]+) in the completion\)\. Please reduce the length of the messages or completion\.$`)
 
 func anthropicRequestError(req *providers.ProxyRequest, status int, body []byte, header http.Header) ([]byte, http.Header) {
 	if req.IngressProtocol != "anthropic" || status != http.StatusBadRequest {
@@ -51,7 +43,10 @@ func anthropicRequestError(req *providers.ProxyRequest, status int, body []byte,
 					upstreamMessage = envelope.Message
 				}
 			}
-			if tokens, maximum, ok := vllmOverflowCounts(upstreamMessage); ok {
+			// Exact vLLM v0.8.5 wording (and the other anchored shapes
+			// providers.ContextOverflowCounts knows): only validated numeric
+			// counts cross protocols, never provider text or suffixes.
+			if tokens, maximum, ok := providers.ContextOverflowCounts(upstreamMessage); ok {
 				code = "context_length_exceeded"
 				message = fmt.Sprintf("prompt is too long: %d tokens > %d maximum", tokens, maximum)
 			}
@@ -80,31 +75,4 @@ func anthropicRequestError(req *providers.ProxyRequest, status int, body []byte,
 	header.Del("Content-Length")
 	header.Del("Content-Encoding")
 	return converted, header
-}
-
-func vllmOverflowCounts(message string) (tokens, maximum int64, ok bool) {
-	match := vllmMessagesOverflow.FindStringSubmatch(message)
-	if match == nil {
-		match = vllmCompletionOverflow.FindStringSubmatch(message)
-	}
-	if match == nil {
-		return 0, 0, false
-	}
-	values := make([]int64, len(match)-1)
-	for i, raw := range match[1:] {
-		value, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || value <= 0 {
-			return 0, 0, false
-		}
-		values[i] = value
-	}
-	maximum, tokens = values[0], values[1]
-	if tokens <= maximum {
-		return 0, 0, false
-	}
-	// Validate the provider's split without overflowing addition.
-	if len(values) == 4 && (values[2] >= tokens || tokens-values[2] != values[3]) {
-		return 0, 0, false
-	}
-	return tokens, maximum, true
 }

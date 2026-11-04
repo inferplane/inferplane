@@ -28,7 +28,7 @@ var AuditKinds = []string{KindOK, KindPolicyDenied, KindPrivacyBlocked, KindPriv
 
 var (
 	privacyBlockCodes = map[string]bool{"sensitive_blocked": true, "mask_failed": true, "masking_failed": true}
-	policyDenyCodes   = map[string]bool{"model_forbidden": true, "no_safe_route": true, "budget_target_changed": true, "budget_authority_unavailable": true}
+	policyDenyCodes   = map[string]bool{"model_forbidden": true, "no_safe_route": true, "budget_target_changed": true, "budget_authority_unavailable": true, "context_window_exceeded": true}
 	closedCode        = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
 )
 
@@ -54,7 +54,8 @@ func denyCodeOf(r audit.Record) string {
 	if r.Outcome.Error != nil {
 		return *r.Outcome.Error
 	}
-	if r.Event == "request_started" && r.Outcome.Status >= 400 && r.Request.Routing != nil {
+	if r.Event == "request_started" && r.Outcome.Status >= 400 && r.Request.Routing != nil &&
+		r.Request.Routing.Reason != "model_fallback" { // fallback is evidence, not a denial
 		return r.Request.Routing.Reason
 	}
 	return ""

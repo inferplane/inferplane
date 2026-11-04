@@ -73,10 +73,9 @@ func (v *Verifier) getVerifier() (*oidc.IDTokenVerifier, error) {
 	}
 	v.lastTry = time.Now()
 	v.discoveryAttempts.Add(1)
-	// Background context, NOT the request context: go-oidc's remote key set
-	// keeps this context for every future JWKS fetch — a canceled request
-	// context would poison later refreshes. The client timeout bounds each
-	// individual fetch instead.
+	// Background context, NOT the request context: a canceled request must not
+	// fail discovery for later callers. The client timeout bounds the fetch;
+	// jwksKeySet (jwks.go) owns key fetches with its own client.
 	bg := oidc.ClientContext(context.Background(), &http.Client{Timeout: 5 * time.Second})
 	provider, err := oidc.NewProvider(bg, v.cfg.Issuer)
 	if err != nil {
@@ -90,10 +89,7 @@ func (v *Verifier) getVerifier() (*oidc.IDTokenVerifier, error) {
 		v.lastErr = fmt.Errorf("oidc discovery: no jwks_uri: %v", err)
 		return nil, v.lastErr
 	}
-	keys := &missLimitedKeySet{
-		inner:  oidc.NewRemoteKeySet(bg, meta.JWKSURL),
-		window: v.backoff,
-	}
+	keys := newJWKSKeySet(meta.JWKSURL, &http.Client{Timeout: 5 * time.Second}, v.backoff)
 	v.lastErr = nil
 	v.ver = oidc.NewVerifier(v.cfg.Issuer, keys, &oidc.Config{
 		ClientID:             v.cfg.ClientID,
@@ -183,49 +179,4 @@ func extractGroups(idt *oidc.IDToken, claim string) ([]string, error) {
 	default:
 		return nil, fmt.Errorf("oidc verify: groups claim %q is not a string array", claim)
 	}
-}
-
-// missLimitedKeySet rate-limits signature-verification failures: after a
-// failed VerifySignature (which is when go-oidc refetches the JWKS for an
-// unknown kid), further attempts inside the window fail fast WITHOUT touching
-// the network — a forged-kid flood cannot hammer the IdP (P2 gate r1/r3).
-// Successful verifications never arm the limiter, so legitimate key rotation
-// (miss → refetch → success) is unaffected.
-type missLimitedKeySet struct {
-	inner  oidc.KeySet
-	window time.Duration
-
-	mu       sync.Mutex
-	lastMiss time.Time
-	inFlight bool
-}
-
-func (l *missLimitedKeySet) VerifySignature(ctx context.Context, jwt string) ([]byte, error) {
-	// Single-flight gate (P4 gate): without it, a concurrent forged-kid burst
-	// all passes the empty lastMiss check before the first failure arms the
-	// window — N parallel verifications reach the network-backed key set.
-	l.mu.Lock()
-	if !l.lastMiss.IsZero() && time.Since(l.lastMiss) < l.window {
-		l.mu.Unlock()
-		return nil, errors.New("jwks: verification rate-limited after recent failure")
-	}
-	if l.inFlight {
-		l.mu.Unlock()
-		return nil, errors.New("jwks: verification already in flight, retry shortly")
-	}
-	l.inFlight = true
-	l.mu.Unlock()
-
-	payload, err := l.inner.VerifySignature(ctx, jwt)
-
-	l.mu.Lock()
-	l.inFlight = false
-	if err != nil {
-		l.lastMiss = time.Now()
-	}
-	l.mu.Unlock()
-	if err != nil {
-		return nil, err
-	}
-	return payload, nil
 }

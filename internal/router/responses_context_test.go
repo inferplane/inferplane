@@ -11,6 +11,7 @@ import (
 	"github.com/inferplane/inferplane/internal/config"
 	"github.com/inferplane/inferplane/internal/responses"
 	"github.com/inferplane/inferplane/internal/sensitivity"
+	"github.com/inferplane/inferplane/internal/tokenest"
 )
 
 func responsesContextConfig() *config.Config {
@@ -30,8 +31,9 @@ func responsesContextConfig() *config.Config {
 func responsesContextSetup(t *testing.T, cfg *config.Config, tools bool) (*Router, RequestRoutingInput) {
 	t.Helper()
 	r, in := routingSetup(t, cfg)
-	// Entirely synthetic, exactly 8192 wire bytes: the existing ingress
-	// estimate is 2048 input tokens, plus the explicit 64-token output bound.
+	// Entirely synthetic, exactly 8192 wire bytes: the ingress estimate stays
+	// far below the 4096-token window while the inspector's conservative byte
+	// ceiling exceeds it; the explicit output bound is 64 tokens.
 	prefix := `{"model":"premium","input":"Contact person@example.test. `
 	suffix := `","max_output_tokens":64`
 	if tools {
@@ -75,21 +77,27 @@ func TestResponsesRequestedContextUsesIngressEstimate(t *testing.T) {
 	}
 }
 
+// requestedTokens is the ingress estimate the router applies to the explicitly
+// requested Responses model (handler preflight uses the same value).
+func requestedTokens(raw []byte) int64 { return tokenest.Estimate("responses", raw) }
+
 func TestResponsesRequestedContextRetainsAdmissionGuards(t *testing.T) {
+	_, probe := responsesContextSetup(t, responsesContextConfig(), true)
+	est := requestedTokens(probe.RawBody)
 	for _, tt := range []struct {
 		name   string
 		window int64
-		deny   bool
+		reason string // empty: admitted
 	}{
-		{"exact input plus output", 2112, false},
-		{"output exceeds remaining context", 2111, true},
-		{"input exceeds context", 2047, true},
-		{"unknown context", 0, true},
-		{"missing tools capability", 4096, true},
-		{"missing price", 4096, true},
-		{"region denied", 4096, true},
-		{"negative input estimate", 4096, true},
-		{"negative output estimate", 4096, true},
+		{"exact input plus output", est + 64, ""},
+		{"output exceeds remaining context", est + 63, "context_window_exceeded"},
+		{"input exceeds context", est - 1, "context_window_exceeded"},
+		{"unknown context", 0, "no_safe_route"},
+		{"missing tools capability", 4096, "no_safe_route"},
+		{"missing price", 4096, "no_safe_route"},
+		{"region denied", 4096, "no_safe_route"},
+		{"negative input estimate", 4096, "no_safe_route"},
+		{"negative output estimate", 4096, "no_safe_route"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := responsesContextConfig()
@@ -118,8 +126,8 @@ func TestResponsesRequestedContextRetainsAdmissionGuards(t *testing.T) {
 				}))
 			}
 			got, err := r.RouteRequest(context.Background(), in)
-			if tt.deny {
-				requireDenied(t, got, err, "no_safe_route")
+			if tt.reason != "" {
+				requireDenied(t, got, err, tt.reason)
 			} else if err != nil || len(got.Chain) != 1 {
 				t.Fatalf("exact context fit was refused: %+v, %v", got, err)
 			}
@@ -148,10 +156,11 @@ func TestResponsesRequestedContextDoesNotRelaxModelFallback(t *testing.T) {
 	if err != nil || len(got.Chain) != 1 || got.Chain[0].Model != "premium" {
 		t.Fatalf("undersized alternate survived beside explicit model: %+v, %v", got, err)
 	}
-	// An ingress-promoted fallback must not inherit the requested-model estimate.
+	// An ingress-promoted fallback must not inherit the requested-model estimate;
+	// refused for its size alone, it reports the recoverable context reason.
 	in.Chain = in.Chain[1:]
 	got, err = r.RouteRequest(context.Background(), in)
-	requireDenied(t, got, err, "no_safe_route")
+	requireDenied(t, got, err, "context_window_exceeded")
 }
 
 func TestResponsesAutomaticContextKeepsConservativeCapacity(t *testing.T) {
@@ -194,6 +203,8 @@ func TestResponsesRestrictedTargetsKeepConservativeCapacity(t *testing.T) {
 			case "legacy substitute", "strict substitute":
 				in.Model = "private"
 				in.Chain, in.State, _ = r.ResolveChain(in.Model)
+				// Too large for the substitute's conservative capacity alone.
+				reason = "context_window_exceeded"
 				if name == "strict substitute" {
 					setBudgetConstraint(t, r, map[string]string{"premium": "private"})
 					reason = "budget_target_unavailable"

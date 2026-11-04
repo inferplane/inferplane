@@ -12,6 +12,7 @@ import (
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
 	"github.com/inferplane/inferplane/internal/server/requestpolicy"
+	"github.com/inferplane/inferplane/internal/tokenest"
 	"github.com/inferplane/inferplane/pkg/schema"
 	"github.com/inferplane/inferplane/providers"
 )
@@ -155,14 +156,9 @@ func (h *CountTokensHandler) count(w http.ResponseWriter, req *http.Request, raw
 	return estimateTokens(raw)
 }
 
-// estimateTokens is the conservative fallback for providers without a
-// TokenCounter (M2: none; M4/M5 may bundle a tokenizer per §10 #1). ~4 bytes
-// per token is a coarse upper-ish bound; valid output matters more than
-// precision here.
+// estimateTokens is the local estimate for providers without a TokenCounter
+// and for every refused or unreadable count, and the same value the Messages
+// context gate and TPM PreCheck use (internal/tokenest).
 func estimateTokens(raw []byte) int64 {
-	n := int64(len(raw) / 4)
-	if n < 1 {
-		n = 1
-	}
-	return n
+	return tokenest.Estimate("anthropic", raw)
 }

@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
 type Metrics struct {
@@ -40,6 +41,9 @@ type Metrics struct {
 	budgetRejectedSeen int64                  // last value passed to SetBudgetStoreRejections; atomic
 	substitution       *prometheus.CounterVec // inferplane_model_substitution_total (ADR-041)
 	routingDecisions   *prometheus.CounterVec // inferplane_routing_decisions_total
+	modelFallback      *prometheus.CounterVec // inferplane_model_fallback_total (ADR-029)
+	inflightBytes      prometheus.Gauge       // inferplane_inflight_request_bytes
+	inflightRefusals   *prometheus.CounterVec // inferplane_inflight_refusals_total
 	autoModeUnparsed   prometheus.Counter     // inferplane_audit_auto_mode_unparsed_total (ADR-057)
 	classifiers        *classifierMetrics     // PII classifier collectors (classifier.go)
 }
@@ -119,11 +123,29 @@ func New() *Metrics {
 			// config-declared values (team, from/to model names) — never
 			// raw, unvalidated client input.
 		}, []string{"team", "from_model", "to_model"}),
+		modelFallback: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "inferplane_model_fallback_total",
+			Help: "Requests for an unrouted model resolved to a configured one (ADR-029), by source and resolved model.",
+			// The requested name is client input and never a label: source is
+			// a closed set and model is the configured served model.
+		}, []string{"source", "model"}),
+		inflightBytes: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "inferplane_inflight_request_bytes", Help: "Request-body bytes reserved against server.max_inflight_request_bytes.",
+		}),
+		inflightRefusals: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "inferplane_inflight_refusals_total",
+			Help: "Requests that did not fit server.max_inflight_request_bytes: generation refused with 503, count answered locally.",
+		}, []string{"route"}),
 	}
 	reg.MustRegister(m.tokenUsage, m.requestDuration, m.ttft, m.requestsTotal,
 		m.fallbackTotal, m.circuitState, m.quotaUtil, m.budgetUtil, m.budgetSpend, m.pricingMiss,
 		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected, m.substitution, m.routingDecisions,
-		m.autoModeUnparsed)
+		m.autoModeUnparsed, m.modelFallback, m.inflightBytes, m.inflightRefusals)
+	// Go runtime (heap, GC, goroutines) and process (RSS, CPU, file
+	// descriptors) collectors: their families carry no request data and only
+	// fixed labels. Without them a large-body memory burst was visible only
+	// through /proc (measured 2026-10-27).
+	reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	m.classifiers = newClassifierMetrics(reg)
 	// Prometheus only emits a labeled metric family once it has at least one
 	// observed child series. Pre-initialize the token-usage family to zero so
@@ -150,11 +172,32 @@ func (m *Metrics) ObserveRoutingDecision(team, mode, reason string) {
 		"context_shadow", "context_ineligible", "context_unchanged", "context_unavailable",
 		"context_selected", "policy_lookup_failed", "model_forbidden", "inspection_failed",
 		"sensitive_blocked", "no_safe_route", "context_affinity", "mask_failed",
-		"budget_target", "budget_target_unavailable", "legacy_mask":
+		"budget_target", "budget_target_unavailable", "legacy_mask", "context_window_exceeded":
 	default:
 		reason = "unknown"
 	}
 	m.routingDecisions.WithLabelValues(team, mode, reason).Inc()
+}
+
+// AddInflightRequestBytes adjusts the in-flight gauge by delta; deltas commute,
+// so concurrent updates cannot leave a stale value at idle.
+func (m *Metrics) AddInflightRequestBytes(delta int64) {
+	if m == nil {
+		return
+	}
+	m.inflightBytes.Add(float64(delta))
+}
+
+// IncInflightRefusal counts one request that did not fit the in-flight budget;
+// route is "generation" or "count".
+func (m *Metrics) IncInflightRefusal(route string) {
+	if m == nil {
+		return
+	}
+	if route != "count" {
+		route = "generation"
+	}
+	m.inflightRefusals.WithLabelValues(route).Inc()
 }
 
 // Registry exposes the registry for the /metrics handler.
@@ -233,6 +276,19 @@ func (m *Metrics) ObserveModelSubstitution(team, from, to string) {
 	}
 	m.substitution.WithLabelValues(team, from, to).Inc()
 }
+
+// ObserveModelFallback counts one applied model fallback. source is
+// "model_fallbacks" or "family"; model is the configured served model.
+func (m *Metrics) ObserveModelFallback(source, model string) {
+	if m == nil {
+		return
+	}
+	if source != "model_fallbacks" && source != "family" {
+		source = "unknown"
+	}
+	m.modelFallback.WithLabelValues(source, model).Inc()
+}
+
 func (m *Metrics) SetCircuitState(provider string, state int) {
 	if m == nil {
 		return

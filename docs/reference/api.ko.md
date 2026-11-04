@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: c76ab0f480c89c7bd95a851315ab4286bd76663cc10e0c443a2fc65cf6782c62
+translation_source_sha256: 49d2537ced03b75586c2f7cc34baba0a2a01372960651081df2ef601a8c564c1
 ---
 
 # API 구현 {#api}
@@ -48,27 +48,36 @@ Messages·Chat Completions·Responses·Bedrock 수신과 상태·메트릭·키 
 
 ### 3. 주요 결정 {#3-key-decisions}
 
-Messages·Chat Completions·Bedrock Invoke의 컨텍스트 사전 검사 실패는 각 수신
+Messages·Chat Completions·Bedrock Invoke/Converse의 컨텍스트 사전 검사 실패는 각 수신
 프로토콜의 오류 형식 안에 `prompt is too long: N tokens > M maximum` 문구를
 넣어 HTTP 400으로 반환합니다. Claude Code는 이 문구를 일반 모델 폴백 대신
 압축 복구 대상으로 인식하고 초과량을 추출합니다. `N`은 업스트림 토크나이저의
-실측값이 아닌 거친 텍스트 추정치입니다. 원문 바이트/4가 선언 한도를 넘으면,
-Responses를 포함한 생성 사전 검사에서 알려진 콘텐츠 위치의 유효한 인라인 이미지
-base64를 제외하고 다시 검사합니다. 이미지 토큰과 전체 컨텍스트의 검증은
-업스트림이 담당하며, 제외했다고 이미지가 한도 안에 들어간다는 뜻은 아닙니다.
-텍스트·도구 스키마와 인자·알 수 없는 미디어·불투명 상태는 계속 계산합니다.
-count 엔드포인트, TPM·쿼터 추정, 금전 예약, 개인정보 검사, 자동·엄격 타깃의
-보수적인 용량 검사는 바꾸지 않습니다. 클라이언트 표시 윈도우와 게이트웨이 선언은
-독립적입니다. 남은 입력이 한도에 들어가지 않으면 압축은 계속 실패할 수 있으며,
-모델 한도를 더 크게 가정하면 안 됩니다.
+실측값이 아닌 게이트웨이의 내용 기반 추정치(`internal/tokenest`)입니다. 디코딩한 JSON
+텍스트를 문자 종류별 구간으로 나눠 보정된 비율을 적용하며(영문 산문·코드·숫자 위주
+텍스트는 o200k_base 대비 3% 이내, 자연스러운 한국어는 o200k_base보다 약 9% 많게,
+무작위에 가까운 음절과 hex는 적게 추정), 알려진 콘텐츠 위치의 인라인 이미지는 하나당
+1,600토큰, 그 밖의 base64(문서·서명·불투명 상태)는 4바이트당 1토큰으로 셉니다.
+Claude 토크나이저는 자연스러운 한국어를 이 추정치의 약 1.7배로 셌습니다(2026-11-02
+측정). 과소 추정된 요청은 업스트림으로 가며, 업스트림의 초과 오류는 복구 가능한
+prompt-too-long 오류로 반환됩니다. 바이트/4는 영문 산문을 약 60% 과대 추정해 창의 약
+62%를 넘는 산문을 거절했고(약 97k토큰으로 측정된 요청을 128k 창에서 거절) 숫자·hex·
+무작위에 가까운 음절은 과소 추정했습니다. 같은 추정치를 로컬 `count_tokens` 응답에
+사용하며(Bedrock count는 디코딩한 `input.invokeModel.body`를 추정), 동시 처리 본문 예산에
+들어가지 못한 count 요청만 아래처럼 4바이트당 1토큰으로 응답합니다. 거버넌스 PreCheck 승인
+추정치(TPM 예약·토큰 quota 사전 검사)와 명시적으로 선택한 Responses 모델의 라우팅 용량에도
+같은 추정치를 사용합니다. 금전 예약, 개인정보 검사, 자동·엄격
+타깃의 보수적인 용량 검사는 바꾸지 않습니다. 경계에 가까운 요청은 업스트림으로 가며,
+인식된 업스트림 초과 오류는 같은 복구 가능 오류로 바뀝니다. 클라이언트 표시 윈도우와
+게이트웨이 선언은 독립적입니다. 남은 입력이 한도에 들어가지 않으면 압축은 계속 실패할
+수 있으며, 모델 한도를 더 크게 가정하면 안 됩니다.
 
-키 인증이 성공하면 count_tokens는 별칭을 정규화하고 라우팅·준비 상태 거부에도 200을 반환합니다. 없거나 잘못된 키는 핸들러 실행 전 401을 받습니다. 같은 프로토콜이면 원문 전달, 다르면 정규 변환을 적용합니다. 별칭은 RBAC·라우팅·감사·메트릭 전에 정규 이름으로 바꿉니다. Anthropic 원문 경로는 최상위 model만 바꾸고 중첩 cache_control과 HTML 이스케이프 상태를 보존합니다. 오류는 수신 형식이며 허용된 가용 모델 목록을 표시합니다.
+키 인증이 성공하면 count_tokens는 별칭을 정규화하고 라우팅·준비 상태 거부에도 200을 반환합니다. 없거나 잘못된 키는 핸들러 실행 전 401을 받습니다. 같은 프로토콜이면 원문 전달, 다르면 정규 변환을 적용합니다. 별칭은 RBAC·라우팅·감사·메트릭 전에 정규 이름으로 바꿉니다. Anthropic 원문 경로는 최상위 model만 바꾸고 중첩 cache_control과 HTML 이스케이프 상태를 보존합니다. 오류는 수신 형식이며 허용된 가용 모델 목록을 표시합니다. `server.max_request_bytes`를 넘는 본문은 Content-Length 선언 여부와 관계없이 수신 형식의 HTTP 413을 받습니다. Anthropic은 `request_too_large`, Chat Completions·Responses는 `invalid_request_error`, Bedrock은 `ValidationException`입니다(이전에는 `{"error":"request body too large"}`였고 길이를 선언하지 않으면 400이었습니다). count 엔드포인트는 계속 로컬 추정치로 200을 반환합니다. `server.max_inflight_request_bytes`를 설정하면 동시 처리 본문 예산에 들어가지 못한 생성 요청은 같은 형식의 503과 `Retry-After: 2`를 받습니다(Anthropic `overloaded_error`, Chat Completions·Responses는 코드 `gateway_overloaded`의 `server_error`, Bedrock `ServiceUnavailableException`). 들어가지 못한 count 요청은 본문을 버퍼링하지 않고 로컬에서 답합니다(HTTP 200, 4바이트당 1토큰).
 
-**모델 폴백:** 한 단계 model_fallbacks와 기본 동일 계열 휴리스틱을 허용 검사 전에 적용합니다. 미설정 이름만 허용된 키는 다른 모델을 대신 받지 않고 거부됩니다. 이미 설정된 모델도 업스트림 404이면 기존 폴백 루프에서 교차 모델을 시도하되, 나중 추가한 타깃을 FilterModelAllowed로 다시 검사합니다. 응답 x-inferplane-model-fallback은 공급자 폴백 헤더와 독립적입니다.
+**모델 폴백:** 한 단계 model_fallbacks와 기본 동일 계열 휴리스틱을 허용 검사 전에 적용합니다. 미설정 이름만 허용된 키는 다른 모델을 대신 받지 않고 거부됩니다. 이미 설정된 모델도 업스트림 404이면 기존 폴백 루프에서 교차 모델을 시도하되, 나중 추가한 타깃을 FilterModelAllowed로 다시 검사합니다. 응답 x-inferplane-model-fallback은 공급자 폴백 헤더와 독립적입니다. 미설정 이름 대체(업스트림 404 교차 모델 재시도는 헤더만 설정)는 Responses를 포함한 모든 생성 수신 경로가 이를 프로세스당 서로 다른 쌍마다 한 번 `router: model fallback source=… requested=… served=…`로 기록하고, `inferplane_model_fallback_total{source,model}`을 세며, 감사에 `routing.reason: model_fallback`과 `model_fallback_from`·`model_fallback_source`를 남깁니다. 응답하는 모델은 바뀌지 않습니다.
 
-Messages는 출력 전 전송 오류·5xx/429·교차 모델 404만 재시도합니다. 타입이 있는 검증 오류와 다른 4xx는 종료하며 일반적인 Bedrock ValidationException은 모델 부재 근거가 아닙니다. 각 재시도 타깃은 전송 전에 자체 컨텍스트 선언을 다시 검사하며 최초 사전 검사 계약은 유지합니다. 엄격한 숫자 형식의 프롬프트 초과 SDK 검증 오류만 안전한 context_length_exceeded 코드와 인식 가능한 초과 문구를 보존하고 나머지 Bedrock 원문은 숨깁니다.
+Messages는 출력 전 전송 오류·5xx/429·교차 모델 404만 재시도합니다. 타입이 있는 검증 오류와 다른 4xx는 종료하며 일반적인 Bedrock ValidationException은 모델 부재 근거가 아닙니다. 각 재시도 타깃은 전송 전에 자체 컨텍스트 선언을 다시 검사하며 최초 사전 검사 계약은 유지합니다. 엄격한 숫자 형식의 프롬프트 초과 SDK 검증 오류만 안전한 context_length_exceeded 코드와 인식 가능한 초과 문구를 보존하고 나머지 Bedrock 원문은 숨깁니다. Bedrock Converse(Claude 외 모델, SDK 경로와 네이티브 `/converse` 수신)는 서빙 엔진이 전달한 `Input length (N) exceeds model's maximum context length (M).` 문구(2026-10-27 `openai.gpt-oss-120b-1:0`에서 관측, Mantle 스트리밍 접두어 유무와 무관)와 코드가 정확히 `context_length_exceeded`인 OpenAI 오류(숫자 없음)도 인식합니다. 그러면 Messages·Chat Completions·Bedrock Invoke/Converse는 `bedrock upstream error (ValidationException)` 대신 각자의 오류 형식으로 복구 가능한 `prompt is too long: N tokens > M maximum` 오류(숫자는 업스트림이 알려 준 경우에만)를 반환하고, Responses는 고정 문구와 함께 `error.code: context_length_exceeded`(type `invalid_request_error`)를 반환합니다.
 
-Messages에서 OpenAI 호환 업스트림의 HTTP 400 오류는 Anthropic `invalid_request_error` 형식으로 변환합니다. 중첩된 `error.code=context_length_exceeded`는 고정 문구 `prompt is too long`으로 바꾸며, v0.8.5 소스로 확인한 기존 vLLM Chat Completions 초과 문구가 정확히 일치하면 검증된 양수 토큰 합계와 한도도 보존합니다. 이 합계에는 요청한 출력 토큰이 포함될 수 있습니다. 알 수 없거나 잘못되었거나 너무 큰 오류 형식은 공급자 원문을 노출하거나 컨텍스트 오류로 추측하지 않고 `upstream request rejected`로 반환합니다. 파싱 한도는 64 KiB입니다. 비스트리밍 응답과 스트리밍 시작 오류에 적용하며 OpenAI 수신 오류 바이트는 그대로 유지합니다.
+Messages에서 OpenAI 호환 업스트림의 HTTP 400 오류는 Anthropic `invalid_request_error` 형식으로 변환합니다. 중첩된 `error.code=context_length_exceeded`는 고정 문구 `prompt is too long`으로 바꾸며, openaicompat은 정확히 일치하는 세 가지 문구, 즉 Anthropic 문구(`prompt is too long: N tokens > M maximum`), Converse 문구(`Input length (N) exceeds model's maximum context length (M).`), v0.8.5 소스로 확인한 기존 vLLM Chat Completions 초과 문구에 대해 검증된 양수 토큰 수와 한도를 보존합니다. 이 합계에는 요청한 출력 토큰이 포함될 수 있습니다. 알 수 없거나 잘못되었거나 너무 큰 오류 형식은 공급자 원문을 노출하거나 컨텍스트 오류로 추측하지 않고 `upstream request rejected`로 반환합니다. 파싱 한도는 64 KiB입니다. 비스트리밍 응답과 스트리밍 시작 오류에 적용하며 OpenAI 수신 오류 바이트는 그대로 유지합니다.
 
 **기존 선택적 예산 티어:** routing의 budgetTiers는 affinity·context와 별개이고 budgetRef는 같은 문서의 숫자 한도를 가진 예산입니다. 기존 ADR-034는 CP 리스 원장으로 전역 사용률을 판단하고 윈도 안에서 단조롭게 티어를 유지합니다. 이미 라우팅된 모델에 SubstituteTier를 적용하며 원래 모델과 목적지 RBAC·경로가 모두 유효할 때만 치환합니다. 대안을 못 쓰면 원래 모델을 유지합니다. x-inferplane-substituted-model과 감사 model_substituted_from을 남깁니다. 정책 적용 단계에서도 SetRoutedAndPriced로 목적지 경로·가격을 요구하며 없으면 문서 전체를 거부합니다. 엄격 티어의 별도 거부 의미는 ADR-044를 따릅니다.
 
@@ -143,7 +152,7 @@ key_store.type과 governance_store.type을 postgres로 설정하면 키 공유·
 취급하지 않으면서 새 코드로 더 구체적인 원인을 표시할 수 있습니다.
 실패 코드만을 이유로 요청을 다시 실행하지 않습니다.
 
-Responses의 컨텍스트 사전 검사 거부도 HTTP 400과 `error.code="context_length_exceeded"`를 반환합니다. 기존 검사 기준과 인증 순서는 유지합니다.
+Responses의 컨텍스트 사전 검사 거부도 HTTP 400과 `error.code="context_length_exceeded"`를 반환합니다. 기존 검사 기준과 인증 순서는 유지합니다. 무상태 브리지에서 모든 호환 대상이 선언된 컨텍스트 창 때문에만 요청을 거부하면(라우터 사유 `context_window_exceeded`) 같은 400을 반환합니다. 이전에는 403 `no policy-permitted compatible Responses target`을 반환해 Codex가 같은 요청을 다시 보냈습니다. 그 밖의 경로 없음 사유는 403을 유지합니다.
 
 ## 분석 근거 (ADR-053) {#analytics-evidence-adr-053}
 
