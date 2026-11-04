@@ -303,7 +303,13 @@ Edits are opt-in in the bootstrap config:
   subset of its declared signals, lower `max_content_bytes`, or cap trace sampling
   with `max_sample_percent`. A limit only narrows: it cannot add a signal, raise a
   size, or change an endpoint, protocol, TLS setting or header. Limits withhold
-  export when the decision is made; they never reject a policy document, so a
+  export when the decision is made and again when a queued audit or content
+  batch is sent: records queued before a pause are dropped then and counted as
+  `withheld_limit`, while a batch already being sent, retries included,
+  completes. Spans already handed to the trace SDK's batch processor are not
+  rechecked: a pause stops new spans at the routing decision, and spans already
+  batched may still be sent within the batch delay (about 5 seconds by
+  default). Limits never reject a policy document, so a
   control-plane document keeps its budget rules. They stay editable with a control
   plane because they narrow the local ceiling. mayu writes the file (0600,
   atomically) and loads it at boot; a file that does not parse refuses boot

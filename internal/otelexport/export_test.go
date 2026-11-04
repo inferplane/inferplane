@@ -32,12 +32,19 @@ type collector struct {
 	headers  []http.Header
 	statuses []int // served in order; 200 once exhausted
 	block    chan struct{}
+	arrived  chan struct{} // when set, signalled (without waiting) as each request arrives
 }
 
 func newCollector(t *testing.T, statuses ...int) *collector {
 	t.Helper()
 	c := &collector{statuses: statuses}
 	c.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c.arrived != nil {
+			select {
+			case c.arrived <- struct{}{}:
+			default:
+			}
+		}
 		if c.block != nil {
 			select {
 			case <-c.block:

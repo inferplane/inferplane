@@ -172,7 +172,7 @@ func (s *Set) Clamp(l Limits) (Limits, []string) {
 				if d.cfg.allows(sig) {
 					kept = append(kept, sig)
 				} else {
-					notes = append(notes, fmt.Sprintf("exporter %q no longer declares %s; it stays off", name, sig))
+					notes = append(notes, fmt.Sprintf("exporter %q no longer declares %q; it stays off", name, sig))
 				}
 			}
 			if len(kept) == 0 {
@@ -212,17 +212,20 @@ func (s *Set) Exporting(l Limits, exporter, signal string) bool {
 
 func (s *Set) allowed(l Limits, exporter, signal string) bool {
 	d := s.exporters[exporter]
-	if d == nil || !d.cfg.allows(signal) {
+	return d != nil && d.cfg.allows(signal) && l[exporter].carries(signal)
+}
+
+// carries reports whether this limit lets signal through: not paused, and
+// signal kept (a nil list keeps every signal). The bootstrap ceiling is
+// checked separately.
+func (l Limit) carries(signal string) bool {
+	if l.Paused {
 		return false
 	}
-	lim := l[exporter]
-	if lim.Paused {
-		return false
-	}
-	if lim.Signals == nil {
+	if l.Signals == nil {
 		return true
 	}
-	for _, sg := range lim.Signals {
+	for _, sg := range l.Signals {
 		if sg == signal {
 			return true
 		}

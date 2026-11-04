@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/internal/metrics"
@@ -170,6 +171,73 @@ func TestEmitRechecksLimits(t *testing.T) {
 	}
 }
 
+// A limit installed while records wait in an exporter's queue still stops
+// them: the pipeline re-reads the limits once per batch before sending, so a
+// pause does not let up to queue_bytes of already-queued copies through.
+func TestQueuedRecordsAreRecheckedWhenTheBatchIsSent(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		limit             Limit
+		wantRecords       int // at the collector, the held first record included
+		wantContentSent   float64
+		wantContentHeld   float64
+		wantAuditWithheld float64
+	}{
+		{name: "paused", limit: Limit{Paused: true}, wantRecords: 1, wantContentHeld: 1, wantAuditWithheld: 3},
+		{name: "audit dropped", limit: Limit{Signals: []string{"content"}}, wantRecords: 2, wantContentSent: 1, wantAuditWithheld: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			col := newCollector(t)
+			col.block = make(chan struct{})
+			col.arrived = make(chan struct{}, 1)
+			m := metrics.New()
+			s := newTestSet(t, m, Exporter{Name: "corp", Endpoint: col.endpoint(), Insecure: true, Signals: []string{"audit", "content"}})
+			sink := s.AuditSink(func(string, string) []string { return []string{"corp"} }).(audit.RecordSink)
+			rec, canon := auditRecord()
+			// The first record's batch reaches the collector and is held there,
+			// so the worker is busy while the next records queue behind it.
+			if err := sink.WriteRecord(rec, canon); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-col.arrived:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the first batch never reached the collector")
+			}
+			for i := 0; i < 3; i++ {
+				if err := sink.WriteRecord(rec, canon); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s.EmitContent("corp", Content{RecordID: "queued", Request: []byte(`{}`)})
+			if _, err := s.SetLimits(Limits{"corp": tc.limit}); err != nil {
+				t.Fatal(err)
+			}
+			close(col.block)
+			shutdown(t, s)
+
+			if n := len(col.records()); n != tc.wantRecords {
+				t.Fatalf("collector got %d records, want %d: queued records passed a limit installed before their batch was sent", n, tc.wantRecords)
+			}
+			if got := counter(m, "corp", "audit", "withheld_limit"); got != tc.wantAuditWithheld {
+				t.Fatalf("audit withheld_limit = %v, want %v", got, tc.wantAuditWithheld)
+			}
+			if got := s.SignalStats("corp", "audit").Outcomes["withheld_limit"]; float64(got) != tc.wantAuditWithheld {
+				t.Fatalf("audit stats withheld_limit = %d, want %v", got, tc.wantAuditWithheld)
+			}
+			if got := counter(m, "corp", "audit", "sent"); got != 1 {
+				t.Fatalf("audit sent = %v, want only the record already at the collector", got)
+			}
+			if sent, held := counter(m, "corp", "content", "sent"), counter(m, "corp", "content", "withheld_limit"); sent != tc.wantContentSent || held != tc.wantContentHeld {
+				t.Fatalf("content sent = %v, withheld = %v; want %v, %v", sent, held, tc.wantContentSent, tc.wantContentHeld)
+			}
+			if q := s.Status().Exporters[0].QueuedBytes; q != 0 {
+				t.Fatalf("queued bytes = %d after shutdown: withheld records must release their budget", q)
+			}
+		})
+	}
+}
+
 func TestLimitsEncodingIsCanonicalAndStrict(t *testing.T) {
 	s := limitSet(t, metrics.New())
 	l, err := s.Normalize(Limits{"corp": {Paused: true}, "vault": {MaxContentBytes: 4096}})
@@ -223,6 +291,10 @@ func TestClampNeverWidens(t *testing.T) {
 	}
 	if len(notes) != 6 {
 		t.Fatalf("notes = %q", notes)
+	}
+	// A persisted signal name is quoted in the boot log, like exporter names.
+	if !strings.Contains(strings.Join(notes, "\n"), `exporter "vault" no longer declares "traces"; it stays off`) {
+		t.Fatalf("notes = %q, want the dropped signal quoted", notes)
 	}
 	if _, err := s.Normalize(got); err != nil {
 		t.Fatalf("clamped limits must normalize: %v", err)

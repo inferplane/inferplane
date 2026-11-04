@@ -54,6 +54,9 @@ type pipeline struct {
 	client   logClient
 	resource *resourcepb.Resource
 	st       *stats
+	// limits is the owning Set's installed runtime limits, re-read once per
+	// batch before it is sent (recheck).
+	limits *atomic.Pointer[Limits]
 
 	ch      chan item
 	queued  atomic.Int64 // bytes enqueued and not yet exported or dropped
@@ -68,9 +71,9 @@ type pipeline struct {
 	lastLog atomic.Int64 // unix seconds of the last failure log line
 }
 
-func newPipeline(name string, client logClient, resource *resourcepb.Resource, limit int64, st *stats) *pipeline {
+func newPipeline(name string, client logClient, resource *resourcepb.Resource, limit int64, st *stats, limits *atomic.Pointer[Limits]) *pipeline {
 	ctx, cancel := context.WithCancel(context.Background())
-	p := &pipeline{name: name, client: client, resource: resource, st: st, limit: limit,
+	p := &pipeline{name: name, client: client, resource: resource, st: st, limits: limits, limit: limit,
 		ch: make(chan item, queueCapacity(limit)), ctx: ctx, cancel: cancel,
 		stop: make(chan struct{}), done: make(chan struct{})}
 	go p.run()
@@ -156,12 +159,17 @@ func (p *pipeline) run() {
 // budget and counters for every record in it.
 func (p *pipeline) export(batch []item) {
 	var size int64
-	recs := make([]*logspb.LogRecord, len(batch))
-	for i, it := range batch {
-		recs[i] = it.rec
+	for _, it := range batch {
 		size += it.size
 	}
 	defer p.queued.Add(-size)
+	if batch = p.recheck(batch); len(batch) == 0 {
+		return
+	}
+	recs := make([]*logspb.LogRecord, len(batch))
+	for i, it := range batch {
+		recs[i] = it.rec
+	}
 	req := &collogspb.ExportLogsServiceRequest{ResourceLogs: []*logspb.ResourceLogs{{
 		Resource:  p.resource,
 		ScopeLogs: []*logspb.ScopeLogs{{Scope: &commonpb.InstrumentationScope{Name: scopeName}, LogRecords: recs}},
@@ -201,6 +209,36 @@ func (p *pipeline) export(batch []item) {
 			p.st.delivered(p.name, signal)
 		}
 	}
+}
+
+// recheck drops the records the installed runtime limits no longer allow and
+// counts them as withheld_limit. The decision and emit checks ran when each
+// record was queued; a pause or signal narrowing installed since then must
+// still stop it. The limits are read once per batch, lock-free. A batch
+// already handed to the client, retries included, is not recalled.
+func (p *pipeline) recheck(batch []item) []item {
+	var lim Limit
+	if p.limits != nil {
+		if l := p.limits.Load(); l != nil {
+			lim = (*l)[p.name]
+		}
+	}
+	if !lim.Paused && lim.Signals == nil {
+		return batch
+	}
+	kept := make([]item, 0, len(batch))
+	withheld := map[string]int{}
+	for _, it := range batch {
+		if lim.carries(it.signal) {
+			kept = append(kept, it)
+		} else {
+			withheld[it.signal]++
+		}
+	}
+	for signal, n := range withheld {
+		p.st.count(p.name, signal, outcomeWithheld, n)
+	}
+	return kept
 }
 
 // logFailure prints at most one line a minute per exporter. err carries only a

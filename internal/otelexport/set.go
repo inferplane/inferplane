@@ -108,7 +108,7 @@ func New(serviceName string, exporters []Exporter, m *metrics.Metrics) (*Set, er
 				s.closeAll()
 				return nil, fmt.Errorf("otelexport: exporter %q: %w", e.Name, err)
 			}
-			d.logs = newPipeline(e.Name, client, resource, e.QueueBytes, s.st)
+			d.logs = newPipeline(e.Name, client, resource, e.QueueBytes, s.st, &s.limits)
 		}
 		s.exporters[e.Name] = d
 	}
