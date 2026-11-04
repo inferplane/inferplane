@@ -55,6 +55,10 @@ assert.equal(run('obsDecisionText({ subject: { team: "fin" }, before: { traces: 
   "team fin: none → traces corp 20%, audit corp, content off: rules disagree");
 assert.equal(run('obsErrorText({ code: "revision_conflict", error: "x" }, 409)'), "Someone changed this state since it was loaded. Refresh and preview again. — x");
 assert.equal(run('obsErrorText(null, 502)'), "Request failed (HTTP 502).");
+// restore_failed: each editor says the change is not running but its file may hold it.
+assert.match(run('obsErrorText({ code: "restore_failed", error: "x" }, 500, "limits")'), /^The limits were not installed.*may still hold them.*a restart would install them\. — x$/);
+assert.match(run('obsErrorText({ code: "restore_failed", error: "x" }, 500, "rules")'), /^The rules were not installed.*may still hold them.*without a change record\. — x$/);
+assert.doesNotMatch(run('obsErrorText({ code: "restore_failed" }, 500, "rules")'), /nothing changed|was restored/);
 // D11: a legacy exporter without counters (no observability block) keeps its row and says so.
 const noStats = { configured: false, exporters: [], legacy_otel: { endpoint: "otel:4318", protocol: "http", tls: false, sample_ratio: 0.5 } };
 const legacyRows = json(`obsSignalRows(${JSON.stringify(noStats)})`);

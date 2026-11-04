@@ -302,25 +302,19 @@ func TestRulesApplyRemovesANewFileWhenReloadFails(t *testing.T) {
 	}
 }
 
-// When the restore write itself fails, the answer says the file still holds
-// the unapplied rules, and no change is recorded.
+// When the restore write itself fails, the answer is restore_failed, not
+// policy_reload_failed (whose text says the file was restored): the file may
+// still hold the unapplied rules and the policy watcher may install them
+// later without a change record. No change is recorded.
 func TestRulesRestoreFailureIsReportedHonestly(t *testing.T) {
 	h := newRulesHarness(t, consoleDoc, nil)
 	rev := h.revision(t)
 	writeFile(t, h.operatorPath, "spec: [")
-	calls := 0
-	orig := writeAtomic
-	writeAtomic = func(path string, data []byte) error {
-		calls++
-		if calls == 2 {
-			return errors.New("disk gone")
-		}
-		return orig(path, data)
-	}
-	t.Cleanup(func() { writeAtomic = orig })
+	failWrite(t, 2)
 	code, res := put(t, h.console, rulesRoute, rulesBody(false, rev, financeRule()))
 	msg, _ := res["error"].(string)
-	if code != 409 || res["code"] != "policy_reload_failed" || !strings.Contains(msg, "still holds the unapplied rules") || strings.Contains(msg, "was restored") {
+	if code != 500 || res["code"] != "restore_failed" || !strings.Contains(msg, "may still hold the unapplied rules") ||
+		!strings.Contains(msg, "without a change record") || strings.Contains(msg, "was restored") || !strings.Contains(msg, "operator.yaml") {
 		t.Fatalf("apply = %d %v", code, res)
 	}
 	if b, _ := os.ReadFile(h.consolePath); !strings.Contains(string(b), "console-finance") {

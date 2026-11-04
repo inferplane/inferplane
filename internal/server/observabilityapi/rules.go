@@ -161,12 +161,13 @@ func (c *Console) putRules(w http.ResponseWriter, r *http.Request) {
 	}
 	if reloadErr != nil {
 		fmt.Fprintln(os.Stderr, "inferplane: observability console: reload rules:", reloadErr)
-		msg := "the policy set did not reload, so the console file was restored: " + reloadErr.Error()
 		if restoreErr != nil {
+			// Not policy_reload_failed: that code says the file was restored.
 			fmt.Fprintln(os.Stderr, "inferplane: observability console: restore rules:", restoreErr)
-			msg = "the policy set did not reload and the console file could not be restored: it still holds the unapplied rules, and the policy watcher will install them once the other policy files are fixed (no change record is written): " + reloadErr.Error()
+			writeError(w, http.StatusInternalServerError, apiError{Error: "the policy set did not reload and the console file could not be restored: it may still hold the unapplied rules, and the policy watcher may install them later without a change record: " + reloadErr.Error(), Code: "restore_failed"})
+			return
 		}
-		writeError(w, http.StatusConflict, apiError{Error: msg, Code: "policy_reload_failed"})
+		writeError(w, http.StatusConflict, apiError{Error: "the policy set did not reload, so the console file was restored: " + reloadErr.Error(), Code: "policy_reload_failed"})
 		return
 	}
 	c.emitChange(r, org, "observability_rules", currentRev, res.ResultRevision, changedRules(changes))

@@ -1,6 +1,6 @@
 ---
 translation_source: api-reference.md
-translation_source_sha256: 58941e898643a8b919533d75a4bf8edd44397e07d4f583800d1ce9cea5c0333d
+translation_source_sha256: 2f5a4fcfd748476d86e3d10890fed3087320153ceea8e30f22baab33eccf8c62
 ---
 
 # API 레퍼런스 {#api-reference}
@@ -327,9 +327,10 @@ GET /admin/audit/summary
 | 409 | `revision_conflict` | 읽은 뒤 상태가 바뀜(`current_revision`을 함께 반환) |
 | 409 | `limits_file_changed` | 디스크의 상태 파일을 직접 고침. mayu를 재시작해 불러오세요 |
 | 409 | `console_file_foreign` | 콘솔 정책 파일에 콘솔이 관리하지 않는 문서가 있음 |
-| 409 | `policy_reload_failed` | 정책 세트를 다시 읽지 못해 콘솔 파일을 되돌림. 되돌리지 못했다고 메시지에 있으면 파일에 적용되지 않은 규칙이 남아 있고, 다른 정책 파일을 고치면 정책 감시기가 설치함(변경 기록 없음) |
+| 409 | `policy_reload_failed` | 정책 세트를 다시 읽지 못해 콘솔 파일을 되돌렸으므로 아무것도 바꾸지 않음 |
 | 503 | `audit_unavailable` | 감사 체인이 기록을 받지 않거나 감사 신원 설정을 확인할 수 없어 아무것도 바꾸지 않음 |
-| 500 | `persist_failed` / `read_failed` | 상태 파일을 쓰거나 읽지 못해 아무것도 바꾸지 않음 |
+| 500 | `persist_failed` / `read_failed` | 상태 파일을 쓰거나 읽지 못했거나, 한도를 설치하지 못해 상태 파일을 되돌렸으므로 아무것도 바꾸지 않음 |
+| 500 | `restore_failed` | 변경을 설치하지 못했고 파일도 되돌리지 못해 파일에 그 변경이 남아 있을 수 있음. 적용되지 않은 한도는 재시작하면 설치되고, 적용되지 않은 규칙은 정책 감시기가 나중에 변경 기록 없이 설치할 수 있음 |
 
 ## 오류 코드 {#error-codes}
 

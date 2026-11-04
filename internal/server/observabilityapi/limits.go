@@ -117,8 +117,10 @@ func (c *Console) putLimits(w http.ResponseWriter, r *http.Request) {
 	if installErr != nil {
 		fmt.Fprintln(os.Stderr, "inferplane: observability console: install limits:", installErr)
 		if restoreErr != nil {
+			// Not persist_failed: that code says nothing changed, and the
+			// file may now hold limits that are not running.
 			fmt.Fprintln(os.Stderr, "inferplane: observability console: restore state file:", restoreErr)
-			writeError(w, http.StatusInternalServerError, apiError{Error: "the limits were not installed, and the state file may hold the unapplied limits (a restart would install them)", Code: "persist_failed"})
+			writeError(w, http.StatusInternalServerError, apiError{Error: "the limits were not installed, and the state file could not be restored: it may still hold them, so a restart would install them", Code: "restore_failed"})
 			return
 		}
 		writeError(w, http.StatusInternalServerError, apiError{Error: "the limits could not be installed; nothing changed", Code: "persist_failed"})
@@ -265,8 +267,13 @@ func changedExporters(changes []limitChange) []string {
 // Entries the current bootstrap no longer supports are narrowed (Set.Clamp)
 // and returned as notes for the boot log.
 func LoadLimits(path string, set *otelexport.Set) ([]string, error) {
-	if info, err := os.Stat(filepath.Dir(path)); err != nil || !info.IsDir() {
-		return nil, fmt.Errorf("observability.console.state_file: directory %s must exist", filepath.Dir(path))
+	dir := filepath.Dir(path)
+	info, err := os.Stat(dir)
+	switch {
+	case err != nil:
+		return nil, fmt.Errorf("observability.console.state_file: directory %s must exist: %w", dir, err)
+	case !info.IsDir():
+		return nil, fmt.Errorf("observability.console.state_file: directory %s must exist: it is not a directory", dir)
 	}
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {

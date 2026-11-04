@@ -81,17 +81,22 @@ func ruleFromDoc(d v1alpha1.GovernancePolicy) (Rule, error) {
 
 // readConsole parses the console policy file into rules sorted by name and
 // returns its bytes, the rules revision input, and whether the file existed.
-// A missing file is no rules.
+// A missing file is no rules. A read or parse failure is logged once per call
+// (one per request) with the path, never the file's content.
 func (c *Console) readConsole() ([]Rule, []byte, bool, error) {
 	b, err := os.ReadFile(c.opts.PolicyFile)
 	if errors.Is(err, fs.ErrNotExist) {
 		return []Rule{}, nil, false, nil
 	}
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "inferplane: observability console: read console policy file:", err) // a path error: path and errno only
 		return nil, nil, false, err
 	}
 	docs, err := policy.ParseWireDocs(b)
 	if err != nil {
+		// The parser's text can quote file content, so the log names the
+		// path only; the admin's PUT answer carries the parse error.
+		fmt.Fprintf(os.Stderr, "inferplane: observability console: console policy file %s does not parse; the console keeps it read-only\n", c.opts.PolicyFile)
 		return nil, nil, false, fmt.Errorf("%w: %v", errForeign, err)
 	}
 	rules := make([]Rule, 0, len(docs))

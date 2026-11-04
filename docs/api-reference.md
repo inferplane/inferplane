@@ -369,9 +369,10 @@ Send the same body with `"dry_run": false` to apply. Errors:
 | 409 | `revision_conflict` | The state changed since it was read (`current_revision` is returned) |
 | 409 | `limits_file_changed` | The state file was edited on disk; restart mayu to load it |
 | 409 | `console_file_foreign` | The console policy file holds documents the console does not manage |
-| 409 | `policy_reload_failed` | The policy set did not reload; the console file was restored, or, when the message says it could not be, still holds the unapplied rules and is installed by the policy watcher once the other policy files are fixed (no change record) |
+| 409 | `policy_reload_failed` | The policy set did not reload; the console file was restored, so nothing changed |
 | 503 | `audit_unavailable` | The audit chain is not accepting records, or the audit identity configuration cannot be resolved; nothing changed |
-| 500 | `persist_failed` / `read_failed` | A state file could not be written or read; nothing changed |
+| 500 | `persist_failed` / `read_failed` | A state file could not be written or read, or the limits could not be installed and the state file was restored; nothing changed |
+| 500 | `restore_failed` | The change was not installed and its file could not be put back, so the file may still hold it: a restart would install unapplied limits, and the policy watcher may install unapplied rules later without a change record |
 
 ## Error Codes
 

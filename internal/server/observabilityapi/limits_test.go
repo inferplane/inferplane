@@ -220,8 +220,13 @@ func TestLoadLimitsRefusesADamagedFile(t *testing.T) {
 	if err != nil || len(notes) != 1 || !strings.Contains(notes[0], "gone") || !set.Limits()["corp"].Paused {
 		t.Fatalf("clamped load = %v, %v, limits %+v", notes, err, set.Limits())
 	}
-	if _, err := LoadLimits(filepath.Join(dir, "missing-dir", "limits.json"), set); err == nil || !strings.Contains(err.Error(), "directory") {
-		t.Fatalf("missing directory = %v", err)
+	// The directory check names why it failed.
+	if _, err := LoadLimits(filepath.Join(dir, "missing-dir", "limits.json"), set); err == nil || !strings.Contains(err.Error(), "directory") ||
+		!strings.Contains(err.Error(), "no such file or directory") {
+		t.Fatalf("missing directory = %v, want the stat error text", err)
+	}
+	if _, err := LoadLimits(filepath.Join(path, "limits.json"), set); err == nil || !strings.Contains(err.Error(), "is not a directory") {
+		t.Fatalf("a file as the directory = %v", err)
 	}
 }
 
@@ -266,6 +271,46 @@ func failInstall(t *testing.T) {
 	orig := installLimits
 	installLimits = func(*otelexport.Set, otelexport.Limits) error { return errors.New("boom") }
 	t.Cleanup(func() { installLimits = orig })
+}
+
+// failWrite makes the nth writeAtomic call fail (1 is the persist, 2 the
+// restore), so a test reaches the double-fault branch of commitFile.
+func failWrite(t *testing.T, n int) {
+	t.Helper()
+	calls := 0
+	orig := writeAtomic
+	writeAtomic = func(path string, data []byte) error {
+		calls++
+		if calls == n {
+			return errors.New("disk gone")
+		}
+		return orig(path, data)
+	}
+	t.Cleanup(func() { writeAtomic = orig })
+}
+
+// Install and restore both fail: the limits were not installed, but the state
+// file may still hold them (a restart would install them), so the answer is
+// restore_failed, not a "nothing changed" code. Nothing is recorded.
+func TestLimitsRestoreFailureIsReportedHonestly(t *testing.T) {
+	h := newLimitsHarness(t, nil)
+	prior := otelexport.EncodeLimits(nil)
+	if err := os.WriteFile(h.state, prior, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	failInstall(t)
+	failWrite(t, 2)
+	code, res := put(t, h.console, limitsRoute, pauseCorp(false, h.revision(t)))
+	msg, _ := res["error"].(string)
+	if code != 500 || res["code"] != "restore_failed" || !strings.Contains(msg, "a restart would install them") || strings.Contains(msg, "nothing changed") {
+		t.Fatalf("apply = %d %v", code, res)
+	}
+	if got, _ := os.ReadFile(h.state); bytes.Equal(got, prior) {
+		t.Fatal("expected the unrestored state file to hold the unapplied limits")
+	}
+	if len(h.set.Limits()) != 0 || len(*h.records) != 0 {
+		t.Fatal("a failed install changed limits or audited")
+	}
 }
 
 func TestLimitsInstallFailureRestoresTheStateFile(t *testing.T) {

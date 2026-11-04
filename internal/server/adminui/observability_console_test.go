@@ -55,7 +55,8 @@ func TestObservabilityI18nKeysHaveFourLanguages(t *testing.T) {
 		"obs.action.":   {"added", "changed", "removed"},
 		"obs.decision.": {"selected", "no_rule", "content_conflict", "withheld_limit"},
 		"obs.err.": {"revision_conflict", "limits_file_changed", "read_only", "policy_reload_failed", "console_file_foreign",
-			"content_not_allowed", "audit_unavailable", "invalid_limits", "invalid_rules", "invalid_request", "persist_failed", "read_failed"},
+			"content_not_allowed", "audit_unavailable", "invalid_limits", "invalid_rules", "invalid_request", "persist_failed", "read_failed",
+			"restore_failed.limits", "restore_failed.rules"},
 	} {
 		for _, n := range names {
 			keys[prefix+n] = true

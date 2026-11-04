@@ -81,11 +81,14 @@ function obsDecisionSummary(d) {
   return parts.join(", ") || msg("obs.none");
 }
 function obsDecisionText(d) { return obsSubjectText(d.subject) + ": " + obsDecisionSummary(d.before) + " → " + obsDecisionSummary(d.after); }
-function obsErrorText(data, status) {
+// kind ("limits" | "rules") selects an editor's own text for a code when it
+// has one (restore_failed means different things for the two files).
+function obsErrorText(data, status, kind) {
   // 403 comes from the shared admin middleware, whose body is not our error shape.
   if (status === 403) return msg("obs.adminOnly");
-  const key = "obs.err." + ((data && data.code) || "");
-  const base = Object.hasOwn(MSG, key) ? msg(key) : msg("obs.err.generic").replace("{status}", String(status));
+  const code = (data && data.code) || "";
+  const key = [kind ? "obs.err." + code + "." + kind : "", "obs.err." + code].find(k => k && Object.hasOwn(MSG, k));
+  const base = key ? msg(key) : msg("obs.err.generic").replace("{status}", String(status));
   return data && data.error ? base + " — " + data.error : base;
 }
 function obsInt(text, exporter) {
@@ -392,7 +395,7 @@ async function obsSubmit(kind, dryRun, build, path, describe) {
   const gen = obsGen[kind];
   const { status: code, data } = await obsRequest("PUT", path, body);
   if (code !== 200 || !data) {
-    status.textContent = obsErrorText(data, code);
+    status.textContent = obsErrorText(data, code, kind);
     obsInvalidate(kind);
     return;
   }

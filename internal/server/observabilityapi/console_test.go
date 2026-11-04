@@ -2,7 +2,10 @@ package observabilityapi
 
 import (
 	"errors"
+	"io"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	v1alpha1 "github.com/inferplane/inferplane/api/v1alpha1"
@@ -72,5 +75,71 @@ func TestReadConsoleMalformedIsForeign(t *testing.T) {
 	c := New(Options{PolicyFile: path})
 	if _, _, _, err := c.readConsole(); !errors.Is(err, errForeign) {
 		t.Fatalf("err = %v, want errForeign", err)
+	}
+}
+
+// captureStderr returns what fn wrote to os.Stderr.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stderr
+	func() {
+		os.Stderr = w
+		defer func() { os.Stderr = orig }()
+		fn()
+	}()
+	w.Close()
+	b, err := io.ReadAll(r)
+	r.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// A console file that cannot be read or does not parse is logged once per
+// request that hit it, naming the path and never the file's content.
+func TestReadConsoleFailuresAreLoggedOncePerRequest(t *testing.T) {
+	set := newSet(t)
+	store, _, consolePath := consoleStore(t, set, operatorDoc, consoleDoc)
+	c := New(Options{Set: set, Policies: store, PolicySource: SourceFiles, PolicyFile: consolePath})
+	writeFile(t, consolePath, "apiVersion: [unterminated marker-7f3c\n  kind: : :\n")
+	for name, call := range map[string]func(){
+		"status": func() { getStatus(t, c) },
+		"apply": func() {
+			if code, res := put(t, c, rulesRoute, rulesBody(true, "", financeRule())); code != 409 || res["code"] != "console_file_foreign" {
+				t.Errorf("put = %d %v", code, res)
+			}
+		},
+	} {
+		out := captureStderr(t, call)
+		if strings.Count(out, "\n") != 1 || !strings.Contains(out, consolePath) || strings.Contains(out, "marker-7f3c") {
+			t.Fatalf("%s: stderr = %q, want one line naming the path without file content", name, out)
+		}
+	}
+	// A read error (here the path is a directory) is logged the same way.
+	if err := os.Remove(consolePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(consolePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStderr(t, func() {
+		if st, _ := getStatus(t, c); st["rules"].(map[string]any)["reason"] != "read_failed" {
+			t.Errorf("rules = %v", st["rules"])
+		}
+	})
+	if strings.Count(out, "\n") != 1 || !strings.Contains(out, consolePath) {
+		t.Fatalf("read error: stderr = %q", out)
+	}
+	// A missing file is no rules, not a failure: nothing is logged.
+	if err := os.Remove(consolePath); err != nil {
+		t.Fatal(err)
+	}
+	if out := captureStderr(t, func() { getStatus(t, c) }); out != "" {
+		t.Fatalf("missing file logged %q", out)
 	}
 }
