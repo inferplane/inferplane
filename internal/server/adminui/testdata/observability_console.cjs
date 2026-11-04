@@ -60,7 +60,6 @@ const noStats = { configured: false, exporters: [], legacy_otel: { endpoint: "ot
 const legacyRows = json(`obsSignalRows(${JSON.stringify(noStats)})`);
 assert.equal(legacyRows.length, 1);
 assert.deepEqual([legacyRows[0].name, legacyRows[0].signal, legacyRows[0].notCounted], ["otel", "traces", true]);
-assert.equal(run('obsNotCountedText()'), "not counted (no observability block)");
 const withStats = { exporters: [], legacy_otel: { endpoint: "e", protocol: "grpc", tls: true, sample_ratio: 1, stats: { signal: "traces", outcomes: { sent: 3 } } } };
 const countedRows = json(`obsSignalRows(${JSON.stringify(withStats)})`);
 assert.deepEqual([countedRows[0].name, countedRows[0].notCounted, countedRows[0].stats.outcomes.sent], ["otel", false, 3]);
@@ -71,4 +70,102 @@ assert.equal(run('obsEndpointText("c:1", "http", false, [], "")'), "c:1 · http 
 // Ruling 4: 403 is translated, never the body's code or text.
 assert.equal(run('obsErrorText({ error: "admin only" }, 403)'), "Only full administrators can view or change observability export.");
 assert.equal(run('obsErrorText(null, 403)'), "Only full administrators can view or change observability export.");
-console.log("observability_console.cjs: ok");
+
+// Rendering checks run the shipped app.js + observability.js against a minimal Element stub.
+class Element {
+  constructor(tag = "div") { this.tag = tag; this.children = []; this.listeners = {}; this.dataset = {}; this.value = ""; this.className = ""; this.hidden = false; this.classList = { toggle() {}, add() {}, remove() {} }; }
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+  append(...nodes) { nodes.forEach(n => this.appendChild(n)); }
+  appendChild(n) { this.children.push(n); }
+  replaceChildren(...nodes) { this.children = []; this.text = ""; this.append(...nodes); }
+  set textContent(v) { this.children = []; this.text = String(v); }
+  get textContent() { return (this.text || "") + this.children.map(n => n.textContent).join(" "); }
+  setAttribute() {}
+  querySelector(sel) { if (sel === "tbody") { let b = this.children.find(c => c.tag === "tbody"); if (!b) { b = new Element("tbody"); this.appendChild(b); } return b; } return null; }
+  querySelectorAll() { return []; }
+}
+function appContext(fetchImpl) {
+  const els = new Map();
+  const byId = id => { if (!els.has(id)) els.set(id, new Element()); return els.get(id); };
+  const c = vm.createContext({
+    document: { getElementById: byId, querySelectorAll: () => [], createElement: t => new Element(t), addEventListener() {}, documentElement: new Element(), body: new Element() },
+    navigator: { language: "en" }, location: { search: "" }, window: { location: { origin: "http://localhost" } }, URLSearchParams, structuredClone, console, fetch: fetchImpl,
+  });
+  for (const f of ["i18n.js", "app.js", "observability.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "static", f), "utf8"), c, { filename: f });
+  return { c, byId, run: src => vm.runInContext(src, c) };
+}
+const cells = tr => tr.children.map(td => td.textContent);
+
+// D11 + C3: the rendered cells, not just the helpers.
+{
+  const { byId, run } = appContext(async () => { throw Error("no network"); });
+  run(`renderObsSignals(${JSON.stringify(noStats)})`);
+  const row = byId("obs-signals").querySelector("tbody").children;
+  assert.equal(row.length, 1);
+  assert.deepEqual(cells(row[0]), ["otel", "traces", ...Array(4).fill("not counted (no observability block)"), "—", "—"]);
+  run(`renderObsSignals(${JSON.stringify(withStats)})`);
+  assert.deepEqual(cells(byId("obs-signals").querySelector("tbody").children[0]).slice(0, 4), ["otel", "traces", "3", "0"]);
+  const exp = { name: "corp", endpoint: "collector:4317", protocol: "grpc", tls: true, header_names: ["authorization"], data_boundary: "internal",
+    signals: ["audit"], effective_signals: ["audit"], limit: {}, queued_bytes: 0 };
+  run(`renderObsExporters(${JSON.stringify({ exporters: [exp] })})`);
+  const ex = byId("obs-exporters").querySelector("tbody").children[0];
+  assert.equal(ex.children.length, 5);
+  assert.ok(cells(ex)[1].endsWith("data boundary: internal"), cells(ex)[1]);
+  assert.ok(!cells(ex).join("|").includes("secret"));
+}
+
+// Apply succeeds, the follow-up status GET fails: the apply result and the error stay visible.
+const statusFixture = { configured: true, policy_source: "files", limits: { editable: true, revision: "sha256:r1" },
+  rules: { editable: true, revision: "sha256:q1", content_rules: false, console: [] }, exporters: [], decisions: [], selections: [] };
+async function applyScenario(getAfterApply, delayPreview) {
+  let phase = "load", gate = null;
+  const fetchImpl = async (url, opts) => {
+    if (opts.method === "GET") {
+      if (phase === "load") return { status: 200, text: async () => JSON.stringify(statusFixture) };
+      return getAfterApply();
+    }
+    const body = JSON.parse(opts.body);
+    if (body.dry_run && delayPreview) await new Promise(r => { gate = r; });
+    const change = [{ exporter: "corp", field: "paused", before: false, after: true }];
+    return { status: 200, text: async () => JSON.stringify(body.dry_run ? { changes: change } : { changes: change, result_revision: "sha256:0123456789abcdef" }) };
+  };
+  const app = appContext(fetchImpl);
+  app.run("whoamiIsAdmin = true");
+  await app.run("refreshObservabilityView()");
+  return { ...app, release: () => gate && gate(), setPhase: p => { phase = p; } };
+}
+(async () => {
+  {
+    const a = await applyScenario(async () => { throw Error("network blip"); });
+    await a.run("obsSubmitLimits(true)");
+    assert.equal(a.byId("obs-limits-apply").disabled, false);
+    a.setPhase("after");
+    await a.run("obsSubmitLimits(false)");
+    assert.match(a.byId("obs-limits-status").textContent, /^Applied\. Revision 0123456789ab\.$/);
+    assert.match(a.byId("workspace-error").textContent, /network blip/);
+    assert.equal(a.byId("workspace-error").hidden, false);
+    assert.equal(a.byId("obs-content").hidden, false, "content (and its Refresh control) stays reachable");
+    assert.equal(a.byId("obs-limits-apply").disabled, true);
+    // A 403 on the follow-up GET shows the translated text, not the body.
+    const b = await applyScenario(async () => ({ status: 403, text: async () => '{"error":"admin only"}' }));
+    await b.run("obsSubmitLimits(true)"); b.setPhase("after"); await b.run("obsSubmitLimits(false)");
+    assert.match(b.byId("workspace-error").textContent, /Only full administrators can view or change observability export\./);
+    assert.match(b.byId("obs-limits-status").textContent, /^Applied\./);
+    // A 200 whose body does not parse is a translated error, not a TypeError.
+    const c = await applyScenario(async () => ({ status: 200, text: async () => "not json" }));
+    await c.run("obsSubmitLimits(true)"); c.setPhase("after"); await c.run("obsSubmitLimits(false)");
+    assert.match(c.byId("workspace-error").textContent, /Request failed \(HTTP 200\)\./);
+  }
+  {
+    // An edit made while the dry run is pending must not arm Apply.
+    const a = await applyScenario(async () => ({ status: 200, text: async () => JSON.stringify(statusFixture) }), true);
+    const pending = a.run("obsSubmitLimits(true)");
+    await new Promise(r => setImmediate(r));
+    a.run('obsInvalidate("limits")');
+    a.release();
+    await pending;
+    assert.equal(a.byId("obs-limits-apply").disabled, true);
+    assert.equal(a.byId("obs-limits-status").textContent, "The form changed after the preview. Preview again.");
+  }
+  console.log("observability_console.cjs: ok");
+})().catch(err => { console.error(err); process.exit(1); });

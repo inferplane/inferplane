@@ -560,7 +560,7 @@ const MSG = {
   "nav.observability": { en: "Observability", ko: "관측성", zh: "可观测性", ja: "オブザーバビリティ" },
   "obs.enableTitle": { en: "governed OTLP export", ko: "정책 기반 OTLP 내보내기", zh: "受治理的 OTLP 导出", ja: "ポリシー制御の OTLP エクスポート" },
   "obs.enableHint": { en: "Declare collectors under observability.exporters in mayu's config to export traces, audit copies and egress content per policy. This view then shows exporter health and lets full administrators narrow export at runtime.", ko: "mayu 설정의 observability.exporters에 수집기를 선언하면 정책에 따라 트레이스·감사 사본·송신 본문을 내보냅니다. 그러면 이 화면에서 exporter 상태를 보고, 전체 관리자가 실행 중에 내보내기를 좁힐 수 있습니다.", zh: "在 mayu 配置的 observability.exporters 中声明收集器后，即可按策略导出追踪、审计副本和出站内容。此页面随后显示导出器状态，完整管理员可在运行时收窄导出。", ja: "mayu の設定の observability.exporters にコレクターを宣言すると、ポリシーに従ってトレース・監査コピー・送信内容をエクスポートします。この画面でエクスポーターの状態を確認でき、全体管理者は実行中にエクスポートを絞り込めます。" },
-  "obs.adminOnly": { en: "Only full administrators can open the observability console.", ko: "관측성 콘솔은 전체 관리자만 열 수 있습니다.", zh: "只有完整管理员可以打开可观测性控制台。", ja: "オブザーバビリティコンソールは全体管理者のみ開けます。" },
+  "obs.adminOnly": { en: "Only full administrators can view or change observability export.", ko: "전체 관리자만 observability 내보내기를 보거나 바꿀 수 있습니다.", zh: "只有完整管理员可以查看或更改 observability 导出。", ja: "全体管理者のみ observability エクスポートを表示・変更できます。" },
   "obs.refresh": { en: "Refresh", ko: "새로고침", zh: "刷新", ja: "更新" },
   "obs.exportersTitle": { en: "Exporters", ko: "Exporter", zh: "导出器", ja: "エクスポーター" },
   "obs.exportersHint": { en: "Destinations come only from mayu's config. Header values are never shown.", ko: "목적지는 mayu 설정에서만 정해집니다. 헤더 값은 표시하지 않습니다.", zh: "目的地只来自 mayu 配置。不会显示请求头的值。", ja: "送信先は mayu の設定でのみ決まります。ヘッダーの値は表示しません。" },
@@ -669,7 +669,6 @@ const MSG = {
   "obs.err.percent": { en: "Trace sample % must be a whole number from 1 to 100.", ko: "트레이스 샘플링 %는 1~100의 정수여야 합니다.", zh: "追踪采样 % 必须是 1 到 100 之间的整数。", ja: "トレースのサンプリング % は 1〜100 の整数で指定してください。" },
   "obs.notCounted": { en: "not counted (no observability block)", ko: "집계 안 함 (observability 블록 없음)", zh: "未计数（无 observability 配置块）", ja: "集計なし（observability ブロックなし）" },
   "obs.boundary": { en: "data boundary: {b}", ko: "데이터 경계: {b}", zh: "数据边界：{b}", ja: "データ境界: {b}" },
-  "obs.fullAdminOnly": { en: "Only full administrators can view or change observability export.", ko: "전체 관리자만 observability 내보내기를 보거나 바꿀 수 있습니다.", zh: "只有完整管理员可以查看或更改 observability 导出。", ja: "全体管理者のみ observability エクスポートを表示・変更できます。" },
 };
 
 // LANG: navigator.language prefix match against ko/zh/ja, else en. Never

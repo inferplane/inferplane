@@ -61,8 +61,8 @@ func TestObservabilityI18nKeysHaveFourLanguages(t *testing.T) {
 			keys[prefix+n] = true
 		}
 	}
-	// Copy added by controller rulings: not-counted legacy row, data boundary, 403 text.
-	for _, k := range []string{"obs.notCounted", "obs.boundary", "obs.fullAdminOnly"} {
+	// Copy added by controller rulings: not-counted legacy row and data boundary.
+	for _, k := range []string{"obs.notCounted", "obs.boundary"} {
 		keys[k] = true
 	}
 	assertKeysHaveFourLanguages(t, keys)

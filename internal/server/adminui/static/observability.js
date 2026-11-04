@@ -9,6 +9,9 @@
 let obsState = null;
 let obsPreviews = { limits: null, rules: null };
 let obsBound = false;
+// obsGen bumps whenever an editor changes or is invalidated, so a dry run that
+// finishes after an edit never arms Apply for a body it did not validate.
+const obsGen = { limits: 0, rules: 0 };
 
 const OBS_DROPPED = ["dropped_queue_full", "dropped_oversize", "dropped_export_error"];
 const OBS_DECISIONS = ["selected", "no_rule", "content_conflict", "withheld_limit"];
@@ -16,13 +19,16 @@ const OBS_RULE_NAME = /^console-[a-z0-9]([-a-z0-9]{0,53}[a-z0-9])?$/;
 
 // app.js's showView names this function in its refreshers literal, as it
 // names refreshAuditView (audit.js).
-async function refreshObservabilityView() {
+// keepVisible leaves the loaded view on screen while the status is re-fetched
+// (Refresh, and the re-fetch after Apply), so a failed fetch never strands the
+// admin on an empty page without the Refresh control or the apply result.
+async function refreshObservabilityView(keepVisible) {
   obsBind();
   $("obs-admin-only").hidden = whoamiIsAdmin;
-  $("obs-content").hidden = true;
+  if (keepVisible !== true || !whoamiIsAdmin) $("obs-content").hidden = true;
   if (!whoamiIsAdmin) return;
   const { status, data } = await obsRequest("GET", "/admin/observability");
-  if (status !== 200) throw new Error(obsErrorText(data, status));
+  if (status !== 200 || !data) throw new Error(obsErrorText(data, status));
   obsState = data;
   obsPreviews = { limits: null, rules: null };
   renderObservability();
@@ -77,7 +83,7 @@ function obsDecisionSummary(d) {
 function obsDecisionText(d) { return obsSubjectText(d.subject) + ": " + obsDecisionSummary(d.before) + " → " + obsDecisionSummary(d.after); }
 function obsErrorText(data, status) {
   // 403 comes from the shared admin middleware, whose body is not our error shape.
-  if (status === 403) return msg("obs.fullAdminOnly");
+  if (status === 403) return msg("obs.adminOnly");
   const key = "obs.err." + ((data && data.code) || "");
   const base = Object.hasOwn(MSG, key) ? msg(key) : msg("obs.err.generic").replace("{status}", String(status));
   return data && data.error ? base + " — " + data.error : base;
@@ -144,8 +150,6 @@ function obsEndpointText(endpoint, protocol, tls, headers, boundary) {
   return text;
 }
 
-function obsNotCountedText() { return msg("obs.notCounted"); }
-
 // obsSignalRows lists the records-by-signal rows. A legacy exporter without
 // counters (no observability block) keeps one traces row flagged notCounted:
 // a zero would misreport live traffic and omitting it would hide the exporter.
@@ -197,7 +201,7 @@ function renderObsSignals(s) {
   for (const row of rows) {
     const tr = document.createElement("tr");
     if (row.notCounted) {
-      tr.append(td(row.name), td(row.signal), ...[0, 1, 2, 3].map(() => td(obsNotCountedText())), td("—"), td("—"));
+      tr.append(td(row.name), td(row.signal), ...[0, 1, 2, 3].map(() => td(msg("obs.notCounted"))), td("—"), td("—"));
     } else {
       const st = row.stats, o = st.outcomes || {};
       tr.append(td(row.name), td(row.signal), obsNum(o.sent), obsNum(obsDropped(o)), obsNum(o.withheld_limit), obsNum(o.sampled_out),
@@ -359,6 +363,7 @@ async function obsRequest(method, path, body) {
 }
 
 function obsInvalidate(kind) {
+  obsGen[kind]++;
   obsPreviews[kind] = null;
   $("obs-" + kind + "-apply").disabled = true;
 }
@@ -384,21 +389,34 @@ async function obsSubmit(kind, dryRun, build, path, describe) {
     status.textContent = msg(preview ? "obs.formChanged" : "obs.previewFirst");
     return;
   }
+  const gen = obsGen[kind];
   const { status: code, data } = await obsRequest("PUT", path, body);
-  if (code !== 200) {
+  if (code !== 200 || !data) {
     status.textContent = obsErrorText(data, code);
     obsInvalidate(kind);
     return;
   }
   const lines = describe(data);
   if (dryRun) {
+    if (gen !== obsGen[kind]) { status.textContent = msg("obs.formChanged"); return; } // edited while the dry run was pending
     obsPreviews[kind] = { body: exactJSON(body) };
     obsShowResult(kind, data.changes.length ? msg("obs.previewed").replace("{n}", String(data.changes.length)) : msg("obs.noChanges"), lines);
     $("obs-" + kind + "-apply").disabled = !data.changes.length;
     return;
   }
-  await refreshObservabilityView();
-  obsShowResult(kind, msg("obs.applied").replace("{r}", obsShortRev(data.result_revision)), lines);
+  const applied = msg("obs.applied").replace("{r}", obsShortRev(data.result_revision));
+  try {
+    await refreshObservabilityView(true);
+  } catch (err) {
+    // The change is saved; the view still shows the old state. Keep the apply
+    // result and the editors, drop both previews (the revision moved) and show
+    // the failure where it is visible.
+    obsInvalidate("limits"); obsInvalidate("rules");
+    obsShowResult(kind, applied, lines);
+    showWorkspaceError(err);
+    return;
+  }
+  obsShowResult(kind, applied, lines);
 }
 
 function obsSubmitLimits(dryRun) {
@@ -415,7 +433,7 @@ function obsBind() {
   if (obsBound) return;
   obsBound = true;
   const report = kind => err => { $("obs-" + kind + "-status").textContent = String(err.message || err); };
-  $("obs-refresh").addEventListener("click", () => refreshObservabilityView().catch(showWorkspaceError));
+  $("obs-refresh").addEventListener("click", () => refreshObservabilityView(true).catch(showWorkspaceError));
   $("obs-limits-preview").addEventListener("click", () => obsSubmitLimits(true).catch(report("limits")));
   $("obs-limits-apply").addEventListener("click", () => obsSubmitLimits(false).catch(report("limits")));
   $("obs-rules-preview").addEventListener("click", () => obsSubmitRules(true).catch(report("rules")));
