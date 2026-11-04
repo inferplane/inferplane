@@ -246,7 +246,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 	// Governed audit copies: a best-effort, non-required sink whose targets
 	// come from observability rules; the WAL chain stays the record.
 	if obsSet.Has(otelexport.SignalAudit) {
-		sinks = append(sinks, obsSet.AuditSink(auditTargets(polStore)))
+		sinks = append(sinks, obsSet.AuditSink(auditTargets(obsSet, polStore)))
 	}
 	// Analytics index (Mode A, spec §4): a DERIVED read-model fed as a best-effort
 	// audit Sink, so it must join `sinks` BEFORE NewWriter fans out to them. At

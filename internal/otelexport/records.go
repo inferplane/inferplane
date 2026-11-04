@@ -88,15 +88,16 @@ type Content struct {
 	Response []byte
 }
 
-// EmitContent enqueues c for exporter. Records over the exporter's
-// MaxContentBytes are dropped and counted, never truncated.
+// EmitContent enqueues c for exporter. Records over the exporter's content cap
+// (MaxContentBytes, or a lower runtime limit) are dropped and counted, never
+// truncated.
 func (s *Set) EmitContent(exporter string, c Content) {
 	if s == nil {
 		return
 	}
 	d := s.exporters[exporter]
 	size := int64(len(c.Request) + len(c.Response))
-	if d != nil && size > d.cfg.MaxContentBytes {
+	if d != nil && size > s.contentLimit(s.current(), exporter) {
 		s.st.count(exporter, SignalContent, outcomeOversize, 1)
 		return
 	}

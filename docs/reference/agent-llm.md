@@ -22,7 +22,7 @@ client and upstream protocols without losing thinking blocks or `cache_control`.
 | PII mask filter | `plugins/piimask/` | opt-in regex+Luhn PII masking → typed placeholders; one-way (no vault); masks messages text only |
 | PII classifier (systemone) | `internal/classifier/`, `plugins/systemone/` | opt-in learned PII signal over `/v1/systemone` and `/v1/systemone/batch` (`noul`); restricts routing only; sends the `model`/`criteria` settings the checkpoint was trained with; Korean sample in `examples/pii-classifier-ko/` |
 | Tracing | `internal/tracing/` | opt-in OTel: OTLP **trace** exporters + GenAI-semconv spans (+ `inferplane.*` cache-tier / cost / partial attributes) + W3C propagation + trace_id in audit; a routing processor sends each span only to the exporters its request's policy selects, with a gateway-side sampling draw; no-op default (ADR-011) |
-| Governed export | `internal/otelexport/` | local exporter ceiling (`Allows`) and bounded OTLP log pipelines for audit-record copies and egress content, selected per subject by `observability` policy rules |
+| Governed export | `internal/otelexport/` | local exporter ceiling (`Allows`) and bounded OTLP log pipelines for audit-record copies and egress content, selected per subject by `observability` policy rules; runtime limits (`Normalize`/`SetLimits`) narrow it at decision time, counted as `withheld_limit` |
 
 Settled spans also expose `inferplane.cost.pricing_version` and bounded
 `inferplane.cost.context_tier`. Each settlement appends an

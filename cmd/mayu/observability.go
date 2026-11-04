@@ -48,21 +48,24 @@ func buildObservability(cfg *config.Config, m *metrics.Metrics) (*otelexport.Set
 		}
 		exporters = append(exporters, otelexport.Exporter{
 			Name: name, Endpoint: e.Endpoint, Protocol: e.Protocol, Insecure: e.Insecure, Headers: headers,
-			Signals: e.Signals, MaxContentBytes: e.ContentLimit(), QueueBytes: e.QueueLimit(),
+			Signals: e.Signals, DataBoundary: e.DataBoundary, MaxContentBytes: e.ContentLimit(), QueueBytes: e.QueueLimit(),
 		})
 	}
 	return otelexport.New(o.ServiceName, exporters, m)
 }
 
-// auditTargets selects audit-copy exporters for a record's subject.
-func auditTargets(pol *policy.Store) func(team, user string) []string {
-	return func(team, user string) []string { return pol.Observability(team, user).Audit }
+// auditTargets selects audit-copy exporters for a record's subject: the
+// policy selection after the runtime limits (Set.AuditTargets counts it).
+func auditTargets(set *otelexport.Set, pol *policy.Store) func(team, user string) []string {
+	return func(team, user string) []string { return set.AuditTargets(pol.Observability(team, user).Audit) }
 }
 
-// contentExport copies egress content to the subject's content exporter.
+// contentExport copies egress content to the subject's content exporter,
+// unless matching rules disagree or a runtime limit withholds it.
 func contentExport(set *otelexport.Set, pol *policy.Store) requestpolicy.ContentExport {
 	return func(_ context.Context, c requestpolicy.ContentRecord) {
-		exporter := pol.Observability(c.Team, c.Account).Content
+		d := pol.Observability(c.Team, c.Account)
+		exporter := set.ContentTarget(d.Content, d.ContentConflict)
 		if exporter == "" {
 			return
 		}
@@ -72,8 +75,8 @@ func contentExport(set *otelexport.Set, pol *policy.Store) requestpolicy.Content
 }
 
 // traceDecider unions the legacy `otel` baseline (when configured) with the
-// governed trace targets of the request's principal.
-func traceDecider(pol *policy.Store, legacy *tracing.Target) tracing.Decider {
+// governed trace targets of the request's principal, after the runtime limits.
+func traceDecider(set *otelexport.Set, pol *policy.Store, legacy *tracing.Target) tracing.Decider {
 	return func(ctx context.Context) []tracing.Target {
 		var out []tracing.Target
 		if legacy != nil {
@@ -83,7 +86,11 @@ func traceDecider(pol *policy.Store, legacy *tracing.Target) tracing.Decider {
 		if !ok {
 			return out
 		}
+		var selected []otelexport.TraceSelection
 		for _, t := range pol.Observability(p.Team, p.AccountSubject()).Traces {
+			selected = append(selected, otelexport.TraceSelection{Exporter: t.Exporter, SamplePercent: t.SamplePercent})
+		}
+		for _, t := range set.TraceTargets(selected) {
 			out = append(out, tracing.Target{Exporter: t.Exporter, Ratio: float64(t.SamplePercent) / 100})
 		}
 		return out
@@ -111,7 +118,7 @@ func initTracing(ctx context.Context, cfg *config.Config, set *otelexport.Set, p
 	if len(exporters) == 0 {
 		return nil, nil
 	}
-	return tracing.InitExporters(ctx, service, exporters, traceDecider(pol, legacy))
+	return tracing.InitExporters(ctx, service, exporters, traceDecider(set, pol, legacy))
 }
 
 // contentOption wires governed content export when an exporter allows it.

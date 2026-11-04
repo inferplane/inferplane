@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync/atomic"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
@@ -38,6 +39,8 @@ type Exporter struct {
 	Insecure bool
 	Headers  map[string]string
 	Signals  []string
+	// DataBoundary is the declared data boundary, shown by the console.
+	DataBoundary string
 	// MaxContentBytes caps one content record; QueueBytes caps the bytes this
 	// exporter may hold. Zero values use the package defaults.
 	MaxContentBytes int64
@@ -61,10 +64,12 @@ func (e Exporter) allows(signal string) bool {
 }
 
 // Set is the declared exporter ceiling plus one log pipeline per exporter that
-// allows audit or content.
+// allows audit or content, and the runtime limits that narrow it.
 type Set struct {
-	exporters map[string]*declared
-	st        *stats
+	exporters   map[string]*declared
+	serviceName string
+	st          *stats
+	limits      atomic.Pointer[Limits] // runtime narrowing (limits.go); nil until SetLimits
 }
 
 type declared struct {
@@ -80,7 +85,7 @@ func New(serviceName string, exporters []Exporter, m *metrics.Metrics) (*Set, er
 		serviceName = "inferplane"
 	}
 	resource := &resourcepb.Resource{Attributes: []*commonpb.KeyValue{stringAttr("service.name", serviceName)}}
-	s := &Set{exporters: make(map[string]*declared, len(exporters)), st: newStats(m)}
+	s := &Set{exporters: make(map[string]*declared, len(exporters)), serviceName: serviceName, st: newStats(m)}
 	for _, e := range exporters {
 		if e.Name == "" || e.Endpoint == "" {
 			s.closeAll()
@@ -190,6 +195,11 @@ func (s *Set) emit(exporter, signal string, it item) {
 			return
 		}
 		s.st.count(exporter, signal, outcomeExportError, 1)
+		return
+	}
+	if !s.allowed(s.current(), exporter, signal) {
+		// A limit installed after the decision: still never export.
+		s.st.count(exporter, signal, outcomeWithheld, 1)
 		return
 	}
 	it.signal = signal
