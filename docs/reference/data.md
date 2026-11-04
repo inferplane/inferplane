@@ -316,8 +316,10 @@ ingest path repopulates them. A record no longer in any source is not in the con
 console sets it on `admin_observability_changed` records: `target` is
 `observability_limits` or `observability_rules`, `before` and `after` are
 `sha256:` revisions of the persisted state file bytes, and `names` lists the
-changed exporters or console rules. `principal.user` and `principal.auth_method`
-name the administrator. The state itself never enters the chain. Admin records
+changed exporters or console rules. A break-glass or
+unconfigured-identity administrator is recorded as `principal.user` plus
+`principal.auth_method`; an OIDC administrator under verified identity
+(`key_store.identity`) as `principal.identity` (a digest), never the raw subject. The state itself never enters the chain. Admin records
 are not projected into the audit console tables above.
 
 `observability.console.state_file` holds the runtime limits as

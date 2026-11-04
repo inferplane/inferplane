@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -11,8 +12,13 @@ import (
 	"testing"
 
 	"github.com/inferplane/inferplane/api/v1alpha1"
+	"github.com/inferplane/inferplane/internal/adminauth"
 	"github.com/inferplane/inferplane/internal/audit"
+	"github.com/inferplane/inferplane/internal/config"
+	"github.com/inferplane/inferplane/internal/identity"
+	"github.com/inferplane/inferplane/internal/otelexport"
 	"github.com/inferplane/inferplane/internal/principal"
+	"github.com/inferplane/inferplane/internal/server"
 )
 
 const consoleAdmin = "console-admin-token"
@@ -244,7 +250,11 @@ func TestGatewayConsoleReadOnlyUnderControlPlane(t *testing.T) {
 	if _, ok := g.polStore.TeamLimits("engineering"); !ok {
 		t.Fatal("the budget rule in the same document did not apply")
 	}
-	if got := g.otelSet.AuditTargets(g.polStore.Observability("engineering", "").Audit); got != nil {
+	selected := g.polStore.Observability("engineering", "").Audit
+	if len(selected) != 1 || selected[0] != "corp" {
+		t.Fatalf("the policy no longer selects corp, so the pause check below would pass vacuously: %v", selected)
+	}
+	if got := g.otelSet.AuditTargets(selected); got != nil {
 		t.Fatalf("a paused exporter was selected: %v", got)
 	}
 }
@@ -270,5 +280,135 @@ func TestGatewayConsoleWithoutPolicyStore(t *testing.T) {
 	code, caps := consoleCall(t, g, "GET", "/admin/capabilities", nil)
 	if code != 200 || caps["observability_export"] != true {
 		t.Fatalf("capabilities %d %v", code, caps)
+	}
+}
+
+// No observability block: the console is still mounted and says so.
+func TestGatewayConsoleWithoutObservabilityBlock(t *testing.T) {
+	t.Setenv("OBS_CONSOLE_ADMIN", consoleAdmin)
+	path := routingAcceptanceConfig(t, nil, func(cfg map[string]any, _ string) { withConsoleAdmin(cfg) })
+	g, _ := bootObservability(t, path)
+	t.Cleanup(func() { flushObservability(t, g) })
+	code, st := consoleCall(t, g, "GET", "/admin/observability", nil)
+	if code != 200 || st["configured"] != false {
+		t.Fatalf("status %d %v", code, st)
+	}
+	code, caps := consoleCall(t, g, "GET", "/admin/capabilities", nil)
+	if code != 200 || caps["observability_export"] != false {
+		t.Fatalf("capabilities %d %v", code, caps)
+	}
+}
+
+// ensureConsolePolicyFile only creates: an existing file keeps its bytes.
+func TestGatewayConsolePolicyFileSurvivesRestart(t *testing.T) {
+	t.Setenv("OBS_ACCEPTANCE_TOKEN", "Bearer acceptance-collector")
+	corp, vault := newFakeOTLP(t), newFakeOTLP(t)
+	var consoleFile string
+	var keep []byte
+	path := routingAcceptanceConfig(t, nil, func(cfg map[string]any, d string) {
+		delete(cfg, "control_plane")
+		withExporters(corp, vault)(cfg, d)
+		consoleFile = filepath.Join(d, "console-observability.yaml")
+		doc := observabilityDoc(&v1alpha1.ObservabilityRule{Audit: &v1alpha1.SignalExport{Exporter: "corp"}})
+		doc.Metadata.Name = "console-keep"
+		writeRoutingPolicy(t, consoleFile, doc)
+		var err error
+		if keep, err = os.ReadFile(consoleFile); err != nil || len(keep) == 0 {
+			t.Fatalf("fixture: %v", err)
+		}
+		cfg["policies"] = []string{consoleFile}
+		cfg["observability"].(map[string]any)["console"] = map[string]any{"policy_file": consoleFile}
+	})
+	g, _ := bootObservability(t, path)
+	flushObservability(t, g)
+	if b, err := os.ReadFile(consoleFile); err != nil || !bytes.Equal(b, keep) {
+		t.Fatalf("console policy file after boot = %q, %v", b, err)
+	}
+}
+
+type consoleOIDC struct{}
+
+func (consoleOIDC) Verify(context.Context, string) (adminauth.Claims, error) {
+	return adminauth.Claims{Issuer: "https://idp.example", Subject: "raw-admin-subject", Groups: []string{"admins"}}, nil
+}
+
+// With verified identity configured, an OIDC administrator's change record
+// carries a digest identity, never the raw issuer or subject. Removing the
+// Organization wiring in observabilityConsole makes this fail.
+func TestObservabilityConsoleOIDCAdminRecordedAsDigest(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.json")
+	raw, _ := json.Marshal(map[string]any{"key_store": map[string]any{
+		"type": "sqlite", "path": filepath.Join(dir, "keys.db"),
+		"identity": identity.Config{Organization: "org"},
+	}})
+	if err := os.WriteFile(cfgPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openKeysCLI("", cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	var sink bytes.Buffer
+	aud, err := audit.NewWriter("inst-1", filepath.Join(dir, "a.wal"), []audit.Sink{audit.NewWriterSink("buf", &sink, true)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := otelexport.New("svc", []otelexport.Exporter{{Name: "corp", Endpoint: "127.0.0.1:1", Insecure: true, Signals: []string{"audit"}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_ = set.Shutdown(ctx)
+	})
+	cfg := &config.Config{Observability: &config.ObservabilityConfig{Console: &config.ObservabilityConsoleConfig{StateFile: filepath.Join(dir, "limits.json")}}}
+	h := server.WithFullAdminRoutes(http.NotFoundHandler(), observabilityConsole(cfg, set, nil, aud, store).Routes(), nil,
+		consoleOIDC{}, adminauth.MappingConfig{AdminGroups: []string{"admins"}}, aud)
+	do := func(method, path string, body any) (int, map[string]any) {
+		var payload []byte
+		if body != nil {
+			payload, _ = json.Marshal(body)
+		}
+		req := httptest.NewRequest(method, path, bytes.NewReader(payload))
+		req.Header.Set("Authorization", "Bearer verified.oidc.token")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		var out map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("%s %s: %d %q", method, path, rec.Code, rec.Body)
+		}
+		return rec.Code, out
+	}
+	code, st := do("GET", "/admin/observability", nil)
+	if code != 200 {
+		t.Fatalf("status %d %v", code, st)
+	}
+	rev := st["limits"].(map[string]any)["revision"]
+	if code, res := do("PUT", "/admin/observability/limits", map[string]any{"dry_run": false, "expected_revision": rev,
+		"exporters": map[string]any{"corp": map[string]any{"paused": true}}}); code != 200 {
+		t.Fatalf("apply %d %v", code, res)
+	}
+	if err := aud.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out := sink.String()
+	var changed *audit.Record
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var rec audit.Record
+		if json.Unmarshal([]byte(line), &rec) == nil && rec.Event == "admin_observability_changed" {
+			changed = &rec
+		}
+	}
+	if changed == nil {
+		t.Fatalf("no admin_observability_changed record in %q", out)
+	}
+	if changed.Principal.Identity == nil || changed.Principal.User != nil {
+		t.Fatalf("principal = %+v, want a digest identity and no raw user", changed.Principal)
+	}
+	if strings.Contains(out, "raw-admin-subject") || strings.Contains(out, "idp.example") {
+		t.Fatalf("the canonical record carries the raw subject or issuer: %s", out)
 	}
 }
