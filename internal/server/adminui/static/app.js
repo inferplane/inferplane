@@ -89,6 +89,7 @@ const VIEWS = {
   usage: "nav.usage",
   logs: "nav.logs",
   audit: "nav.audit",
+  observability: "nav.observability",
   evaluation: "nav.evaluation",
   keys: "nav.keys",
   teams: "nav.teamsUsers",
@@ -124,7 +125,8 @@ function showView(name) {
   $("view-title").textContent = msg(VIEWS[name]);
   clearWorkspaceError();
   const refreshers = { overview: refreshOverview, usage: refreshUsageView, logs: refreshLogsView, audit: refreshAuditView,
-    teams: refreshTeamsView, providers: refreshProviders, governance: refreshGovernance, evaluation: refreshEvaluation };
+    teams: refreshTeamsView, providers: refreshProviders, governance: refreshGovernance, evaluation: refreshEvaluation,
+    observability: refreshObservabilityView };
   if (refreshers[name]) refreshers[name]().catch(err => {
     if (generation !== viewGeneration) return;
     showWorkspaceError(err);

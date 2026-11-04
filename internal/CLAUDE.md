@@ -184,6 +184,8 @@ record only, never the client response.
 
 `server/evaluation.go` wraps mayu AdminMux only: full admin plus a separate virtual key, fresh headers, and the normal DataMux handler. It never chooses an arbitrary URL or runs on inferplaned. Request-scoped observers in `server/requestpolicy/settlement_observer.go` expose integer settlement evidence; more than one attempt cannot be displayed as a known full cost from the last settlement. `server/adminui/static/evaluation.js` runs sequential A/B then B/A non-streaming comparisons; E2E output tokens/s is not decode throughput and TTFT stays null. Result exports exclude keys, prompts and answer text.
 
+- `server/adminui/static/observability.js`: the Observability view, wired like `audit.js` (`VIEWS.observability` plus `observability: refreshObservabilityView` in `showView`'s refreshers literal; nav button between Audit and Compare models). Any harness that loads `app.js` and switches views must load `observability.js` too (`routing_forms.cjs`, `analytics_evidence.cjs`, `browser_qa.py` do). Renders with textContent only, stores nothing in the browser, and Apply sends exactly the last previewed body with its revision.
+
 ## Local monetary admission (ADR-054)
 
 Default/local money reserves per provider attempt across applicable hard team,

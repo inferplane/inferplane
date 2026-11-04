@@ -20,16 +20,8 @@ func TestAuditViewWired(t *testing.T) {
 	if !strings.Contains(app, `audit: "nav.audit"`) || !strings.Contains(app, "audit: refreshAuditView") {
 		t.Error("app.js VIEWS/refreshers missing audit")
 	}
-	for _, banned := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "localStorage", "sessionStorage", "eval("} {
-		if strings.Contains(js, banned) {
-			t.Errorf("audit.js must not use %s", banned)
-		}
-	}
-	for _, want := range []string{"/admin/audit/events", "/admin/audit/sessions", "/admin/audit/summary", "/admin/audit/verify", "/admin/bodies/"} {
-		if !strings.Contains(js, want) {
-			t.Errorf("audit.js does not call %s", want)
-		}
-	}
+	assertNoBannedSinks(t, "audit.js", js)
+	assertEndpointsListed(t, "audit.js", js, "/admin/audit/events", "/admin/audit/sessions", "/admin/audit/summary", "/admin/audit/verify", "/admin/bodies/")
 }
 
 func TestAuditI18nKeysHaveFourLanguages(t *testing.T) {
@@ -69,14 +61,7 @@ func TestAuditI18nKeysHaveFourLanguages(t *testing.T) {
 	if !strings.Contains(string(dict), `ko: "게이트웨이 거부"`) {
 		t.Error("ko audit.wf.denied must use 게이트웨이")
 	}
-	for k := range keys {
-		line := regexp.MustCompile(`(?m)^\s*"` + regexp.QuoteMeta(k) + `": \{.*\},?$`).FindString(string(dict))
-		for _, lang := range []string{"en:", "ko:", "zh:", "ja:"} {
-			if line == "" || !strings.Contains(line, lang) {
-				t.Errorf("i18n key %s missing %s", k, lang)
-			}
-		}
-	}
+	assertKeysHaveFourLanguages(t, keys)
 }
 
 func TestAuditConsoleNodeChecks(t *testing.T) {

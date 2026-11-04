@@ -157,3 +157,18 @@ td .sub, .card td .sub { display:block; margin-top:2px; color:var(--dim); font-s
 @media(max-width:1100px) { .audit-cards { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:800px) { .audit-two { grid-template-columns:1fr; } }
 @media(max-width:480px) { .audit-wf-row { grid-template-columns:96px minmax(0,1fr) 48px; } .audit-tl-item { grid-template-columns:52px minmax(0,1fr) auto; } .audit-tl-item .audit-pill.cls { display:none; } }
+/* Observability console (sub-project B). */
+.obs-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; margin-bottom:16px; }
+.obs-head .hint { margin:0; overflow-wrap:anywhere; }
+.obs-two { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
+.obs-limit { min-width:0; border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin:0 0 14px; display:flex; flex-wrap:wrap; gap:10px 20px; align-items:end; }
+.obs-limit legend { font-weight:600; padding:0 6px; }
+.obs-limit .form-field { flex:0 1 200px; }
+.obs-check { display:inline-flex; align-items:center; gap:8px; font-size:12px; }
+.obs-check input { width:15px; margin:0; accent-color:#6753d8; }
+.obs-inline { display:flex; gap:8px; } .obs-inline select { flex:1 1 110px; } .obs-inline input { flex:0 0 72px; margin:0; }
+#obs-rules-table input,#obs-rules-table select { margin:0; min-width:96px; }
+.obs-diff { margin:8px 0 0; padding-left:18px; font-size:12px; } .obs-diff li { margin:4px 0; overflow-wrap:anywhere; }
+#view-observability table.data td { overflow-wrap:break-word; } /* words stay whole; the .table-scroll wrapper scrolls */
+#obs-rules-table button { white-space:nowrap; }
+@media(max-width:1600px) { .obs-two { grid-template-columns:1fr; } }
