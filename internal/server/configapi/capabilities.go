@@ -30,6 +30,9 @@ type Capabilities struct {
 	AuditConsole bool `json:"audit_console"`
 	// TraceLinkTemplate: optional otel.trace_link_template for console links.
 	TraceLinkTemplate string `json:"trace_link_template,omitempty"`
+	// ObservabilityExport: governed OTLP export is configured
+	// (observability.exporters); the console shows the Observability view.
+	ObservabilityExport bool `json:"observability_export"`
 }
 
 // CapabilitiesHandler serves the capability map (GET only, JSON). It is mounted

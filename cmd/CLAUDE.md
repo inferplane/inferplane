@@ -69,3 +69,14 @@ resolve once at boot; config changes need a restart. Shutdown registers the set'
 bounded flush before `aud.Close` so the writer's last records drain first.
 `observability_acceptance_test.go` drives the real gateway against fake OTLP
 collectors.
+
+Console (sub-project B): `ensureConsolePolicyFile` creates an empty
+`observability.console.policy_file` before `policy.NewStore`; `buildObservability`
+loads `state_file` through `observabilityapi.LoadLimits` (boot fails on a file that
+does not parse); the request-path closures go through `Set.AuditTargets`,
+`ContentTarget` and `TraceTargets` so limits apply; `observabilityConsole` wires the
+API (a nil `*policy.Store` stays a nil interface; the key store supplies the verified-identity
+organization for change records) and `gateway.go` mounts its routes
+with `server.WithFullAdminRoutes` after `WithEvaluations`.
+`observability_console_test.go` covers restart persistence, a damaged state file,
+the file channel, control-plane read-only and the no-store case.

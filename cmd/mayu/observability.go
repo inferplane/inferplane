@@ -2,15 +2,21 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"sort"
 
+	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/internal/config"
+	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/metrics"
 	"github.com/inferplane/inferplane/internal/otelexport"
 	"github.com/inferplane/inferplane/internal/policy"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/server"
+	"github.com/inferplane/inferplane/internal/server/observabilityapi"
 	"github.com/inferplane/inferplane/internal/server/requestpolicy"
 	"github.com/inferplane/inferplane/internal/tracing"
 )
@@ -23,8 +29,10 @@ import (
 // is absent: a nil Set allows nothing, so a distributed rule is refused and
 // reported upstream instead of being accepted and silently exporting nothing.
 
-// buildObservability resolves header refs and starts the log pipelines. A nil
-// Set (no observability block) is valid.
+// buildObservability resolves header refs, starts the log pipelines and
+// installs the runtime limits persisted in observability.console.state_file.
+// A nil Set (no observability block) is valid. A state file that does not
+// parse fails boot: a pause must not silently lapse on restart.
 func buildObservability(cfg *config.Config, m *metrics.Metrics) (*otelexport.Set, error) {
 	o := cfg.Observability
 	if o == nil {
@@ -51,7 +59,23 @@ func buildObservability(cfg *config.Config, m *metrics.Metrics) (*otelexport.Set
 			Signals: e.Signals, DataBoundary: e.DataBoundary, MaxContentBytes: e.ContentLimit(), QueueBytes: e.QueueLimit(),
 		})
 	}
-	return otelexport.New(o.ServiceName, exporters, m)
+	set, err := otelexport.New(o.ServiceName, exporters, m)
+	if err != nil {
+		return nil, err
+	}
+	if c := o.Console; c != nil && c.StateFile != "" {
+		notes, err := observabilityapi.LoadLimits(c.StateFile, set)
+		if err != nil {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel() // nothing is queued yet: stop the pipelines without waiting
+			_ = set.Shutdown(ctx)
+			return nil, err
+		}
+		for _, n := range notes {
+			fmt.Fprintln(os.Stderr, "inferplane: observability state file:", n)
+		}
+	}
+	return set, nil
 }
 
 // auditTargets selects audit-copy exporters for a record's subject: the
@@ -131,4 +155,54 @@ func contentOption(set *otelexport.Set, pol *policy.Store) server.DataMuxOption 
 		return server.WithContentExport(nil)
 	}
 	return server.WithContentExport(contentExport(set, pol))
+}
+
+// ensureConsolePolicyFile creates observability.console.policy_file empty
+// (0600) when it does not exist yet, so the local file channel, which lists it
+// in `policies`, can load it on first boot. An existing file is untouched.
+func ensureConsolePolicyFile(cfg *config.Config) error {
+	if cfg.Observability == nil || cfg.Observability.Console == nil || cfg.Observability.Console.PolicyFile == "" {
+		return nil
+	}
+	f, err := os.OpenFile(cfg.Observability.Console.PolicyFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("create console policy file: %w", err)
+	}
+	return f.Close()
+}
+
+// observabilityConsole builds the full-admin observability console API. It is
+// mounted even without an observability block, so the view can say what is
+// missing instead of failing with 404. keys supplies the verified-identity
+// organization so change records carry digest identity when it is configured.
+func observabilityConsole(cfg *config.Config, set *otelexport.Set, pol *policy.Store, aud *audit.Writer, keys keystore.Store) *observabilityapi.Console {
+	opts := observabilityapi.Options{Set: set, PolicySource: observabilityapi.SourceNone, Emit: aud.Append, AuditReady: aud.Ready}
+	opts.Organization = func(ctx context.Context) (string, error) {
+		c, err := principal.IdentityConfig(ctx, keys)
+		return c.Organization, err
+	}
+	switch {
+	case cfg.ControlPlane != nil:
+		opts.PolicySource = observabilityapi.SourceControlPlane
+	case len(cfg.Policies) > 0:
+		opts.PolicySource = observabilityapi.SourceFiles
+	}
+	if pol != nil {
+		opts.Policies = pol // a nil *policy.Store must stay a nil interface
+	}
+	if o := cfg.Observability; o != nil && o.Console != nil {
+		opts.StateFile, opts.PolicyFile, opts.ContentRules = o.Console.StateFile, o.Console.PolicyFile, o.Console.ContentRules
+	}
+	if o := cfg.OTel; o != nil {
+		protocol := o.Protocol
+		if protocol == "" {
+			protocol = "http"
+		}
+		opts.Legacy = &observabilityapi.LegacyExporter{Endpoint: o.Endpoint, Protocol: protocol, TLS: !o.Insecure,
+			SampleRatio: tracing.LegacyTarget(o.SampleRatio).Ratio}
+	}
+	return observabilityapi.New(opts)
 }

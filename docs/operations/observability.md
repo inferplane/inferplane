@@ -222,6 +222,13 @@ spec:
 | `audit` | Each audit record as an OTLP log (`event_name` `inferplane.audit`) | Body is the canonical chain line; `inferplane.audit.hash` equals the next record's `prev_hash` |
 | `content` | Egress request body and, when buffered, the response (`inferplane.content`) | Same bytes as body capture: after routing and masking, only for requests that reached a provider; streams carry no response |
 
+An exported audit record is the same canonical line every audit sink receives,
+so it also carries the ADR-057 evidence fields a record has: `attempts`,
+`client` (including the key-scoped `client.session_ref` digest), `auto_mode` and
+`governance`. A collector that receives audit copies can therefore group one
+key's requests by session, as the audit file can. Export adds no metric label:
+`inferplane_otel_export_records_total` keeps `exporter`, `signal` and `outcome`.
+
 Rules a data plane enforces:
 
 - An observability rule must be `FailOpen`. Export is best-effort; the WAL and
@@ -264,3 +271,61 @@ Limits: metrics stay Prometheus exposition; there is no OTLP metric export. An
 operator who controls mayu's host can edit the local ceiling, so export that users
 cannot turn off requires mayu to run on a host they do not administer.
 
+### Observability console
+
+Full administrators can open **Observability** in the gateway console
+(`/admin/ui/`). It shows each declared exporter (endpoint, protocol, TLS, data
+boundary, header names, declared and current signals, queue bytes), records per signal since the
+process started (sent, dropped, withheld by a limit, sampled out, last success,
+last error as a status code), governed decisions per signal (exported, no rule,
+rules disagree on content, withheld by a limit) and every observability rule with
+its sampling after limits. Counters reset when mayu restarts; use
+`inferplane_otel_export_records_total` and `inferplane_otel_export_decisions_total`
+for history. The legacy `otel` exporter is listed read-only.
+
+Edits are opt-in in the bootstrap config:
+
+```json
+"policies": ["/etc/inferplane/policies", "/var/lib/inferplane/console-observability.yaml"],
+"observability": {
+  "exporters": {
+    "corp": { "endpoint": "otel-collector.internal:4318", "signals": ["traces", "audit"] }
+  },
+  "console": {
+    "state_file": "/var/lib/inferplane/observability-limits.json",
+    "policy_file": "/var/lib/inferplane/console-observability.yaml",
+    "content_rules": false
+  }
+}
+```
+
+- **Runtime limits** (`state_file`): per declared exporter, pause it, keep a
+  subset of its declared signals, lower `max_content_bytes`, or cap trace sampling
+  with `max_sample_percent`. A limit only narrows: it cannot add a signal, raise a
+  size, or change an endpoint, protocol, TLS setting or header. Limits withhold
+  export when the decision is made; they never reject a policy document, so a
+  control-plane document keeps its budget rules. They stay editable with a control
+  plane because they narrow the local ceiling. mayu writes the file (0600,
+  atomically) and loads it at boot; a file that does not parse refuses boot
+  instead of resuming paused export. Entries the bootstrap no longer supports are
+  narrowed and logged. Edit the file by hand only while mayu is stopped.
+- **Console rules** (`policy_file`): GovernancePolicy documents named
+  `console-…`, one FailOpen observability rule each, written by the console and
+  loaded by the local policy file channel like every other policy file. The file
+  must also be listed in `policies`, so it cannot be combined with
+  `control_plane`; with a control plane the console shows rules read-only. Rules
+  in other policy files are read-only too. Selecting content needs
+  `content_rules: true`; without it the console can keep or remove a content
+  selection, never add or redirect one. mayu creates an empty file on first boot.
+- **Edit flow**: every edit is previewed first (`dry_run`), showing the changed
+  fields, the rules whose export changes, or the decisions per subject. Apply sends
+  the same body with the revision the preview saw (409 if anything changed in
+  between), persists, applies (rules through a policy reload; a failed reload
+  restores the file) and appends `admin_observability_changed` with the
+  administrator and the SHA-256 of the persisted state before and after. Edits are
+  refused while the audit chain is not accepting records.
+
+Runtime limits and console rules apply without a restart; changes to
+`observability.exporters` and `observability.console` still need one. The
+[API reference](../api-reference.md#observability-console-mayu-only) lists the
+request and response shapes.

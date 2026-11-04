@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: b842e0e93d649a6641043c63afee9b99b30cd564ef91ff501303eb3ae7c24575
+translation_source_sha256: fa10cec0002958a8997c5f122d2dc1caf10aac5665292d719009dd137f45fae0
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -208,6 +208,8 @@ spec:
 | `audit` | 감사 기록마다 OTLP 로그 하나(`event_name` `inferplane.audit`) | 본문은 체인의 정규 줄 그대로입니다. `inferplane.audit.hash`는 다음 기록의 `prev_hash`와 같습니다 |
 | `content` | 송신 요청 본문과, 버퍼링된 경우 응답(`inferplane.content`) | 본문 캡처와 같은 바이트입니다. 라우팅·마스킹 뒤의 본문이며 공급자에 도달한 요청만 대상입니다. 스트림에는 응답이 없습니다 |
 
+내보낸 감사 기록은 모든 감사 저장 대상이 받는 것과 같은 정규 줄이므로, 기록에 있는 ADR-057 근거 필드인 `attempts`, `client`(키 범위 `client.session_ref` 다이제스트 포함), `auto_mode`, `governance`도 함께 담습니다. 따라서 감사 사본을 받는 수집기도 감사 파일처럼 한 키의 요청을 세션별로 묶을 수 있습니다. 내보내기로 메트릭 레이블이 늘지 않습니다. `inferplane_otel_export_records_total`의 레이블은 그대로 `exporter`, `signal`, `outcome`입니다.
+
 데이터 영역이 지키는 규칙:
 
 - observability 규칙은 `FailOpen`이어야 합니다. 내보내기는 최선 노력이고, 증거의 원본은 WAL과 필수 감사 저장 대상입니다.
@@ -221,3 +223,28 @@ spec:
 
 한계: 메트릭은 계속 Prometheus 노출 방식이며 OTLP 메트릭 내보내기는 없습니다. mayu 호스트를 관리하는 사람은 로컬 상한을 고칠 수 있습니다. 사용자가 끌 수 없는 내보내기가 필요하면 사용자가 관리하지 않는 호스트에서 mayu를 운영해야 합니다.
 
+### 관측성 콘솔 {#observability-console}
+
+전체 관리자는 게이트웨이 콘솔(`/admin/ui/`)의 **관측성**에서 다음을 볼 수 있습니다. 선언된 exporter마다 엔드포인트·프로토콜·TLS·데이터 경계·헤더 이름·선언 신호와 현재 신호·큐 바이트, 프로세스 시작 이후 신호별 기록(전송·버림·한도로 보류·샘플링 제외·마지막 성공·상태 코드로 표시한 마지막 오류), 신호별 정책 결정(내보냄·규칙 없음·본문 규칙 불일치·한도로 보류), 한도 적용 뒤의 샘플링을 포함한 모든 observability 규칙입니다. 카운터는 mayu를 재시작하면 초기화되므로 이력은 `inferplane_otel_export_records_total`과 `inferplane_otel_export_decisions_total`로 보세요. 기존 `otel` exporter는 읽기 전용으로 표시합니다.
+
+편집은 부트스트랩 설정에서 켜야 합니다.
+
+```json
+"policies": ["/etc/inferplane/policies", "/var/lib/inferplane/console-observability.yaml"],
+"observability": {
+  "exporters": {
+    "corp": { "endpoint": "otel-collector.internal:4318", "signals": ["traces", "audit"] }
+  },
+  "console": {
+    "state_file": "/var/lib/inferplane/observability-limits.json",
+    "policy_file": "/var/lib/inferplane/console-observability.yaml",
+    "content_rules": false
+  }
+}
+```
+
+- **실행 중 한도**(`state_file`): 선언된 exporter마다 일시 중지하거나, 선언 신호 중 일부만 남기거나, `max_content_bytes`를 낮추거나, `max_sample_percent`로 트레이스 샘플링 상한을 둘 수 있습니다. 한도는 좁히기만 합니다. 신호를 추가하거나 크기를 키우거나 엔드포인트·프로토콜·TLS 설정·헤더를 바꿀 수 없습니다. 한도는 결정 시점에 내보내기를 보류할 뿐 정책 문서를 거부하지 않으므로, 제어 영역 문서의 예산 규칙은 그대로 적용됩니다. 로컬 상한을 좁히는 것이므로 제어 영역이 있어도 편집할 수 있습니다. mayu가 파일을 0600 권한으로 원자적으로 쓰고 부팅 때 읽습니다. 읽을 수 없는 파일이면 일시 중지된 내보내기를 다시 켜는 대신 부팅을 거부합니다. 부트스트랩이 더는 지원하지 않는 항목은 더 좁은 쪽으로 맞추고 로그에 남깁니다. 파일은 mayu가 멈춰 있을 때만 직접 고치세요.
+- **콘솔 규칙**(`policy_file`): `console-…` 이름의 GovernancePolicy 문서이며, 문서마다 FailOpen observability 규칙이 하나 있습니다. 콘솔이 쓰고 로컬 정책 파일 채널이 다른 정책 파일과 똑같이 읽습니다. 이 파일은 `policies`에도 넣어야 하므로 `control_plane`과 함께 쓸 수 없습니다. 제어 영역이 있으면 콘솔은 규칙을 읽기 전용으로 보여 줍니다. 다른 정책 파일의 규칙도 읽기 전용입니다. 본문을 고르려면 `content_rules: true`가 필요하며, 없으면 기존 본문 선택을 유지하거나 지울 수만 있고 새로 추가하거나 다른 곳으로 옮길 수는 없습니다. 첫 부팅 때 mayu가 빈 파일을 만듭니다.
+- **편집 흐름**: 모든 편집은 먼저 미리보기(`dry_run`)로 바뀌는 필드, 내보내기가 달라지는 규칙, 주체별 결정을 보여 줍니다. 적용은 미리보기가 본 리비전과 함께 같은 본문을 보내며(그 사이 바뀌었으면 409), 저장하고 반영한 뒤(규칙은 정책 리로드로 반영하고, 리로드에 실패하면 파일을 되돌림) 관리자와 저장된 상태의 전후 SHA-256을 담은 `admin_observability_changed`를 기록합니다. 감사 체인이 기록을 받지 않는 동안에는 편집을 거부합니다.
+
+실행 중 한도와 콘솔 규칙은 재시작 없이 반영됩니다. `observability.exporters`와 `observability.console` 변경은 여전히 재시작해야 합니다. 요청·응답 형식은 [API 레퍼런스](../api-reference.md#observability-console-mayu-only)에 있습니다.

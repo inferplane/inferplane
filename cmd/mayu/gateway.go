@@ -106,6 +106,12 @@ func newGateway(cfgPath string) (*gateway, error) {
 		return nil, err
 	}
 
+	// The console-owned observability policy file (sub-project B) is listed in
+	// `policies`; create it empty on first boot so the file channel can load it.
+	if err := ensureConsolePolicyFile(raw); err != nil {
+		return nil, fmt.Errorf("observability: %w", err)
+	}
+
 	// Local GovernancePolicy documents (ADR-033): loaded FIRST — before any
 	// resource opens — so an invalid or not-yet-enforceable document fails
 	// boot with nothing to unwind, rather than serving while silently not
@@ -1003,6 +1009,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 			LogsBodies:          bodyRec != nil,
 			BudgetAlerts:        notifier != nil,
 			ProviderAutoHealth:  healthStore != nil,
+			ObservabilityExport: obsSet != nil,
 		}
 	}
 	var alertFires func() []alert.Fire
@@ -1053,6 +1060,9 @@ func newGateway(cfgPath string) (*gateway, error) {
 	}
 	g.adminSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore != nil), auditFileSinks, aud, anchorReader, readiness, m, writer, liveExport(holder), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), cfg.Probe.AllowedHosts...)}
 	g.adminSrv.Handler = server.WithEvaluations(g.adminSrv.Handler, g.dataSrv.Handler, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), aud)
+	// Observability console (sub-project B): full-admin routes, reads included.
+	g.adminSrv.Handler = server.WithFullAdminRoutes(g.adminSrv.Handler, observabilityConsole(cfg, obsSet, polStore, aud, store).Routes(),
+		cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), aud)
 	authorityTransferred = true
 	sharedTransferred = true
 	return g, nil
