@@ -362,39 +362,83 @@ func TestEmitAfterShutdownIsDropped(t *testing.T) {
 	}
 }
 
-func TestAuditSinkNeverBlocksWriter(t *testing.T) {
-	// Each WAL append fsyncs, so compare against the same writer with a
-	// discard sink rather than an absolute rate.
-	const n = 400
-	run := func(sink audit.Sink) time.Duration {
-		w, err := audit.NewWriter("node-1", t.TempDir()+"/wal", []audit.Sink{sink})
-		if err != nil {
-			t.Fatal(err)
-		}
-		start := time.Now()
+// nonBlockingDeadline only detects a hang. The check below never compares
+// timings, so a slow or loaded host cannot fail it; only a sink that waits for
+// its collector can.
+const nonBlockingDeadline = 30 * time.Second
+
+// writeAll appends n records through an audit writer whose only sink is sink,
+// then closes it. Close returns only after the writer goroutine has handed
+// every record to the sink, so a value on the returned channel proves that all
+// n writes completed. The channel yields Close's error.
+func writeAll(t *testing.T, sink audit.Sink, n int) <-chan error {
+	t.Helper()
+	w, err := audit.NewWriter("node-1", t.TempDir()+"/wal", []audit.Sink{sink})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
 		for i := 0; i < n; i++ {
 			w.Append(audit.Record{SchemaVersion: 1, Event: "request_completed", ID: fmt.Sprint(i), Principal: audit.PrincipalRef{Team: "eng"}})
 		}
-		if err := w.Close(); err != nil {
-			t.Fatal(err)
-		}
-		return time.Since(start)
-	}
-	baseline := run(audit.NewWriterSink("discard", io.Discard, false))
+		done <- w.Close()
+	}()
+	return done
+}
 
+// The audit writer hands each record to every sink on its single goroutine, so
+// an OTLP copy that waited for its collector would stall the whole chain. The
+// collector stays blocked until the writer has written and closed all n
+// records; only then is it released.
+func TestAuditSinkNeverBlocksWriter(t *testing.T) {
+	const n = 400
 	col := newCollector(t)
 	col.block = make(chan struct{})
 	m := metrics.New()
 	s := newTestSet(t, m, Exporter{Name: "corp", Endpoint: col.endpoint(), Insecure: true, Signals: []string{"audit"}, QueueBytes: 64 << 10})
-	blocked := run(s.AuditSink(func(string, string) []string { return []string{"corp"} }))
-	if blocked > 2*baseline+time.Second {
-		t.Fatalf("a blocked collector slowed the audit writer: %v vs baseline %v", blocked, baseline)
+	done := writeAll(t, s.AuditSink(func(string, string) []string { return []string{"corp"} }), n)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(nonBlockingDeadline):
+		t.Fatalf("the audit writer was still writing after %v with the collector blocked: the OTLP sink waits for its collector", nonBlockingDeadline)
+	}
+	if got := len(col.records()); got != 0 {
+		t.Fatalf("the collector accepted %d records before it was released; the test did not hold it blocked", got)
 	}
 	if counter(m, "corp", "audit", "dropped_queue_full") == 0 {
 		t.Fatal("the byte budget must drop once the blocked collector backs up")
 	}
 	close(col.block)
 	shutdown(t, s)
+}
+
+// blockingSink waits on release for every record: the kind of sink
+// TestAuditSinkNeverBlocksWriter exists to catch.
+type blockingSink struct{ release chan struct{} }
+
+func (b blockingSink) Write([]byte) error { <-b.release; return nil }
+func (b blockingSink) Name() string       { return "blocking" }
+func (b blockingSink) Required() bool     { return false }
+func (b blockingSink) Close() error       { return nil }
+
+// RED evidence for the check above, kept in the suite: the same drain check
+// does not complete while a sink waits on something the test holds.
+func TestNonBlockingCheckCatchesABlockingSink(t *testing.T) {
+	sink := blockingSink{release: make(chan struct{})}
+	done := writeAll(t, sink, 5)
+	select {
+	case <-done:
+		t.Fatal("a blocking sink drained while it was held: the drain check would pass a sink that waits")
+	case <-time.After(250 * time.Millisecond):
+	}
+	close(sink.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestAllows(t *testing.T) {
