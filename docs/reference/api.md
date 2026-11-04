@@ -79,8 +79,8 @@ does not allow, and refuses every such rule when it declares no ceiling. See
 `PUT /admin/observability/rules` (`internal/server/observabilityapi`) are mounted
 by `server.WithFullAdminRoutes`, so every route, reads included, needs a full
 administrator. Both PUTs take `dry_run` and `expected_revision`: a dry run changes
-nothing; an apply must name the revision its preview saw (409 `revision_conflict`
-otherwise), then persists, installs and appends `admin_observability_changed`.
+nothing; an apply must name the revision its preview saw (400 `invalid_request` when
+`expected_revision` is omitted, 409 `revision_conflict` when it is stale), then persists, installs and appends `admin_observability_changed`.
 Errors are `{"error": message, "code": code}`. `/admin/capabilities` adds
 `observability_export`. Request and response shapes are in the
 [API reference](../api-reference.md#observability-console-mayu-only).

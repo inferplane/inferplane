@@ -108,21 +108,16 @@ func (c *Console) putLimits(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := writeFileAtomic(c.opts.StateFile, afterBytes); err != nil {
-		fmt.Fprintln(os.Stderr, "inferplane: observability console: persist limits:", err)
+	persistErr, installErr, restoreErr := commitFile(c.opts.StateFile, prior, existed, afterBytes, func() error { return installLimits(set, after) })
+	if persistErr != nil {
+		fmt.Fprintln(os.Stderr, "inferplane: observability console: persist limits:", persistErr)
 		writeError(w, http.StatusInternalServerError, apiError{Error: "the limits could not be saved; nothing changed", Code: "persist_failed"})
 		return
 	}
-	if err := installLimits(set, after); err != nil {
-		fmt.Fprintln(os.Stderr, "inferplane: observability console: install limits:", err)
-		var rerr error // prior and existed come from stateFileMatches
-		if existed {
-			rerr = writeFileAtomic(c.opts.StateFile, prior)
-		} else {
-			rerr = os.Remove(c.opts.StateFile)
-		}
-		if rerr != nil {
-			fmt.Fprintln(os.Stderr, "inferplane: observability console: restore state file:", rerr)
+	if installErr != nil {
+		fmt.Fprintln(os.Stderr, "inferplane: observability console: install limits:", installErr)
+		if restoreErr != nil {
+			fmt.Fprintln(os.Stderr, "inferplane: observability console: restore state file:", restoreErr)
 			writeError(w, http.StatusInternalServerError, apiError{Error: "the limits were not installed, and the state file may hold the unapplied limits (a restart would install them)", Code: "persist_failed"})
 			return
 		}

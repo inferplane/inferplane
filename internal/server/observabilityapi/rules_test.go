@@ -283,3 +283,98 @@ func TestRulesIdentityLookupErrorRefusesTheApply(t *testing.T) {
 		t.Fatal("an unrecordable change was made")
 	}
 }
+
+// A console file that did not exist before the apply is removed again when the
+// reload fails, not rewritten as an empty file.
+func TestRulesApplyRemovesANewFileWhenReloadFails(t *testing.T) {
+	h := newRulesHarness(t, "", nil)
+	rev := h.revision(t)
+	if err := os.Remove(h.consolePath); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, h.operatorPath, "spec: [")
+	code, res := put(t, h.console, rulesRoute, rulesBody(false, rev, financeRule()))
+	if code != 409 || res["code"] != "policy_reload_failed" {
+		t.Fatalf("apply = %d %v", code, res)
+	}
+	if _, err := os.Stat(h.consolePath); !os.IsNotExist(err) {
+		t.Fatalf("the new console file was left behind (stat err %v)", err)
+	}
+}
+
+// When the restore write itself fails, the answer says the file still holds
+// the unapplied rules, and no change is recorded.
+func TestRulesRestoreFailureIsReportedHonestly(t *testing.T) {
+	h := newRulesHarness(t, consoleDoc, nil)
+	rev := h.revision(t)
+	writeFile(t, h.operatorPath, "spec: [")
+	calls := 0
+	orig := writeAtomic
+	writeAtomic = func(path string, data []byte) error {
+		calls++
+		if calls == 2 {
+			return errors.New("disk gone")
+		}
+		return orig(path, data)
+	}
+	t.Cleanup(func() { writeAtomic = orig })
+	code, res := put(t, h.console, rulesRoute, rulesBody(false, rev, financeRule()))
+	msg, _ := res["error"].(string)
+	if code != 409 || res["code"] != "policy_reload_failed" || !strings.Contains(msg, "still holds the unapplied rules") || strings.Contains(msg, "was restored") {
+		t.Fatalf("apply = %d %v", code, res)
+	}
+	if b, _ := os.ReadFile(h.consolePath); !strings.Contains(string(b), "console-finance") {
+		t.Fatal("expected the unrestored file to hold the new rules")
+	}
+	if len(*h.records) != 0 {
+		t.Fatal("a failed apply was audited as a change")
+	}
+}
+
+func TestRulesPersistFailure(t *testing.T) {
+	h := newRulesHarness(t, consoleDoc, nil)
+	before, _ := os.ReadFile(h.consolePath)
+	rev := h.revision(t)
+	orig := writeAtomic
+	writeAtomic = func(string, []byte) error { return errors.New("read-only filesystem") }
+	t.Cleanup(func() { writeAtomic = orig })
+	code, res := put(t, h.console, rulesRoute, rulesBody(false, rev, financeRule()))
+	if code != 500 || res["code"] != "persist_failed" {
+		t.Fatalf("apply = %d %v", code, res)
+	}
+	if after, _ := os.ReadFile(h.consolePath); string(after) != string(before) || len(*h.records) != 0 {
+		t.Fatal("a failed write changed state")
+	}
+}
+
+func TestRulesAuditNotReadyRefusesTheApply(t *testing.T) {
+	h := newRulesHarness(t, consoleDoc, func(o *Options) {
+		o.AuditReady = func() (bool, string) { return false, "wal" }
+	})
+	before, _ := os.ReadFile(h.consolePath)
+	code, res := put(t, h.console, rulesRoute, rulesBody(false, h.revision(t), financeRule()))
+	if code != 503 || res["code"] != "audit_unavailable" {
+		t.Fatalf("apply = %d %v", code, res)
+	}
+	if after, _ := os.ReadFile(h.consolePath); string(after) != string(before) || len(*h.records) != 0 {
+		t.Fatal("an unrecordable change was made")
+	}
+}
+
+// The same rules in another byte layout are a no-op: no write, no reload, no
+// record, and the result revision stays the current one.
+func TestRulesSemanticNoOp(t *testing.T) {
+	h := newRulesHarness(t, consoleDoc, nil)
+	before, _ := os.ReadFile(h.consolePath)
+	rev := h.revision(t)
+	same := map[string]any{"name": "console-platform", "subject": map[string]any{"team": "platform"}, "audit": map[string]any{"exporter": "corp"}}
+	for _, dry := range []bool{true, false} {
+		code, res := put(t, h.console, rulesRoute, rulesBody(dry, rev, same))
+		if code != 200 || res["result_revision"] != rev || len(res["changes"].([]any)) != 0 {
+			t.Fatalf("dry=%v: %d %v", dry, code, res)
+		}
+	}
+	if after, _ := os.ReadFile(h.consolePath); string(after) != string(before) || len(*h.records) != 0 {
+		t.Fatal("a no-op rewrote the file or was recorded")
+	}
+}

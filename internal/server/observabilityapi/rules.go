@@ -83,7 +83,7 @@ func (c *Console) putRules(w http.ResponseWriter, r *http.Request) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	current, currentBytes, err := c.readConsole()
+	current, currentBytes, existed, err := c.readConsole()
 	if errors.Is(err, errForeign) {
 		writeError(w, http.StatusConflict, apiError{Error: err.Error() + "; edit it by hand", Code: "console_file_foreign"})
 		return
@@ -137,6 +137,11 @@ func (c *Console) putRules(w http.ResponseWriter, r *http.Request) {
 	changes, summary := ruleChanges(current, next)
 	res := rulesResult{DryRun: req.DryRun, CurrentRevision: currentRev, ResultRevision: otelexport.Revision(nextBytes),
 		Changes: changes, Summary: summary, Decisions: decisionChanges(live, after)}
+	if len(changes) == 0 {
+		// A semantic no-op: the same rules in another byte layout change
+		// nothing, so nothing is rewritten, reloaded or recorded.
+		res.ResultRevision = currentRev
+	}
 	if req.DryRun || res.ResultRevision == currentRev {
 		writeJSON(w, http.StatusOK, res)
 		return
@@ -148,16 +153,18 @@ func (c *Console) putRules(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := writeFileAtomic(c.opts.PolicyFile, nextBytes); err != nil {
-		fmt.Fprintln(os.Stderr, "inferplane: observability console: persist rules:", err)
+	persistErr, reloadErr, restoreErr := commitFile(c.opts.PolicyFile, currentBytes, existed, nextBytes, c.opts.Policies.Reload)
+	if persistErr != nil {
+		fmt.Fprintln(os.Stderr, "inferplane: observability console: persist rules:", persistErr)
 		writeError(w, http.StatusInternalServerError, apiError{Error: "the console rules could not be saved; nothing changed", Code: "persist_failed"})
 		return
 	}
-	if err := c.opts.Policies.Reload(); err != nil {
-		msg := "the policy set did not reload, so the console file was restored: " + err.Error()
-		if rerr := writeFileAtomic(c.opts.PolicyFile, currentBytes); rerr != nil {
-			fmt.Fprintln(os.Stderr, "inferplane: observability console: restore rules:", rerr)
-			msg = "the policy set did not reload and the console file could not be restored; fix the policy files before the next reload: " + err.Error()
+	if reloadErr != nil {
+		fmt.Fprintln(os.Stderr, "inferplane: observability console: reload rules:", reloadErr)
+		msg := "the policy set did not reload, so the console file was restored: " + reloadErr.Error()
+		if restoreErr != nil {
+			fmt.Fprintln(os.Stderr, "inferplane: observability console: restore rules:", restoreErr)
+			msg = "the policy set did not reload and the console file could not be restored: it still holds the unapplied rules, and the policy watcher will install them once the other policy files are fixed (no change record is written): " + reloadErr.Error()
 		}
 		writeError(w, http.StatusConflict, apiError{Error: msg, Code: "policy_reload_failed"})
 		return

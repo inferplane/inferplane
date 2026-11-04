@@ -115,7 +115,7 @@ func (c *Console) rulesState() rulesState {
 		out.Reason = reason
 		return out
 	}
-	rules, b, err := c.readConsole()
+	rules, b, _, err := c.readConsole()
 	switch {
 	case errors.Is(err, errForeign):
 		out.Reason = "foreign_documents"

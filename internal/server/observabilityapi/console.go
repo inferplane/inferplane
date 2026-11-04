@@ -80,27 +80,28 @@ func ruleFromDoc(d v1alpha1.GovernancePolicy) (Rule, error) {
 }
 
 // readConsole parses the console policy file into rules sorted by name and
-// returns its bytes, the rules revision input. A missing file is no rules.
-func (c *Console) readConsole() ([]Rule, []byte, error) {
+// returns its bytes, the rules revision input, and whether the file existed.
+// A missing file is no rules.
+func (c *Console) readConsole() ([]Rule, []byte, bool, error) {
 	b, err := os.ReadFile(c.opts.PolicyFile)
 	if errors.Is(err, fs.ErrNotExist) {
-		return []Rule{}, nil, nil
+		return []Rule{}, nil, false, nil
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	docs, err := policy.ParseWireDocs(b)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %v", errForeign, err)
+		return nil, nil, false, fmt.Errorf("%w: %v", errForeign, err)
 	}
 	rules := make([]Rule, 0, len(docs))
 	for _, d := range docs {
 		r, err := ruleFromDoc(d)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 		rules = append(rules, r)
 	}
 	sort.Slice(rules, func(i, j int) bool { return rules[i].Name < rules[j].Name })
-	return rules, b, nil
+	return rules, b, true, nil
 }

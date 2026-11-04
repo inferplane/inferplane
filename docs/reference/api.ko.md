@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: b57320823f136311bfbdfe19a9d3026f0fd7b395b5281c9a5d4620857b80a1bd
+translation_source_sha256: 6a57da8a51b9439572f684c975084719cfe4fd836b69a1327254bf7513848d78
 ---
 
 # API 구현 {#api}
@@ -90,7 +90,7 @@ router·tier·governance·alert·bodystore·providers와 ADR-016/017/018/021/028
 
 ### 관측성 콘솔 API · mayu 전용 {#observability-console-api-mayu-only}
 
-`GET /admin/observability`, `PUT /admin/observability/limits`, `PUT /admin/observability/rules`(`internal/server/observabilityapi`)는 `server.WithFullAdminRoutes`로 붙으므로 읽기를 포함한 모든 경로에 전체 관리자 권한이 필요합니다. 두 PUT은 `dry_run`과 `expected_revision`을 받습니다. dry run은 아무것도 바꾸지 않고, 적용은 미리보기 때 본 리비전을 지정해야 하며(다르면 409 `revision_conflict`), 저장·설치한 뒤 `admin_observability_changed`를 기록합니다. 오류 본문은 `{"error": message, "code": code}`입니다. `/admin/capabilities`에 `observability_export`가 추가됩니다. 요청·응답 형식은 [API 레퍼런스](../api-reference.md#observability-console-mayu-only)에 있습니다.
+`GET /admin/observability`, `PUT /admin/observability/limits`, `PUT /admin/observability/rules`(`internal/server/observabilityapi`)는 `server.WithFullAdminRoutes`로 붙으므로 읽기를 포함한 모든 경로에 전체 관리자 권한이 필요합니다. 두 PUT은 `dry_run`과 `expected_revision`을 받습니다. dry run은 아무것도 바꾸지 않고, 적용은 미리보기 때 본 리비전을 지정해야 하며(`expected_revision`이 없으면 400 `invalid_request`, 오래된 값이면 409 `revision_conflict`), 저장·설치한 뒤 `admin_observability_changed`를 기록합니다. 오류 본문은 `{"error": message, "code": code}`입니다. `/admin/capabilities`에 `observability_export`가 추가됩니다. 요청·응답 형식은 [API 레퍼런스](../api-reference.md#observability-console-mayu-only)에 있습니다.
 
 ### 정책 라우팅 스키마와 증거 · ADR-043 {#policy-routing-schema-and-evidence-adr-043}
 

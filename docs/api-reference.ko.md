@@ -1,6 +1,6 @@
 ---
 translation_source: api-reference.md
-translation_source_sha256: 39990b9e9f8120c8a081b555fbbff707d50b85d412b2c2d1fa3bd45e307e030b
+translation_source_sha256: 58941e898643a8b919533d75a4bf8edd44397e07d4f583800d1ce9cea5c0333d
 ---
 
 # API 레퍼런스 {#api-reference}
@@ -258,7 +258,7 @@ GET /admin/audit/summary
   "service_name": "inferplane",
   "counters_since": "2026-10-29T10:00:00Z",
   "limits": {"editable": true, "revision": "sha256:4f8b…"},
-  "rules": {"editable": true, "revision": "sha256:e3b0…", "content_rules": false, "console": [
+  "rules": {"editable": true, "revision": "sha256:5f1c…", "content_rules": false, "console": [
     {"name": "console-eng", "subject": {"team": "engineering"}, "audit": {"exporter": "corp"}}
   ]},
   "exporters": [{
@@ -296,19 +296,20 @@ GET /admin/audit/summary
 `PUT /admin/observability/rules`는 콘솔이 관리하는 규칙, 곧 `observability.console.policy_file`의 `console-…` 문서 전체를 바꿉니다.
 
 ```json
-{"dry_run": true, "expected_revision": "sha256:e3b0…", "rules": [
-  {"name": "console-eng", "subject": {"team": "engineering"},
+{"dry_run": true, "expected_revision": "sha256:5f1c…", "rules": [
+  {"name": "console-eng", "subject": {"team": "engineering"}, "audit": {"exporter": "corp"}},
+  {"name": "console-finance", "subject": {"team": "finance"},
    "traces": {"exporter": "corp", "sample_percent": 20}, "audit": {"exporter": "corp"}}]}
 ```
 
 ```json
 {
   "dry_run": true,
-  "current_revision": "sha256:e3b0…",
+  "current_revision": "sha256:5f1c…",
   "result_revision": "sha256:7c2d…",
-  "changes": [{"name": "console-eng", "action": "added"}],
-  "summary": {"added": 1, "changed": 0, "removed": 0, "unchanged": 0},
-  "decisions": [{"subject": {"team": "engineering"},
+  "changes": [{"name": "console-finance", "action": "added"}],
+  "summary": {"added": 1, "changed": 0, "removed": 0, "unchanged": 1},
+  "decisions": [{"subject": {"team": "finance"},
     "before": {"traces": [], "audit": []},
     "after": {"traces": [{"exporter": "corp", "sample_percent": 20}], "audit": ["corp"]}}]
 }
@@ -319,14 +320,15 @@ GET /admin/audit/summary
 | 상태 | `code` | 의미 |
 | --- | --- | --- |
 | 400 | `invalid_request` | 본문이 알려진 필드만 가진 JSON 객체 하나가 아니거나, 적용 요청에 `expected_revision`이 없음 |
+| 413 | `invalid_request` | 본문이 한도보다 큼 |
 | 400 | `invalid_limits` / `invalid_rules` | 부트스트랩 상한을 벗어나거나 정책 로더가 거부하는 규칙 |
 | 400 | `content_not_allowed` | `observability.console.content_rules` 없이 콘솔 규칙이 본문 내보내기를 추가하거나 바꿈 |
 | 409 | `read_only` | 이 게이트웨이에서 편집할 수 없음(`reason`: `not_configured`, `no_state_file`, `no_policy_file`, `control_plane`) |
 | 409 | `revision_conflict` | 읽은 뒤 상태가 바뀜(`current_revision`을 함께 반환) |
 | 409 | `limits_file_changed` | 디스크의 상태 파일을 직접 고침. mayu를 재시작해 불러오세요 |
 | 409 | `console_file_foreign` | 콘솔 정책 파일에 콘솔이 관리하지 않는 문서가 있음 |
-| 409 | `policy_reload_failed` | 정책 세트를 다시 읽지 못해 콘솔 파일을 되돌림 |
-| 503 | `audit_unavailable` | 감사 체인이 기록을 받지 않아 아무것도 바꾸지 않음 |
+| 409 | `policy_reload_failed` | 정책 세트를 다시 읽지 못해 콘솔 파일을 되돌림. 되돌리지 못했다고 메시지에 있으면 파일에 적용되지 않은 규칙이 남아 있고, 다른 정책 파일을 고치면 정책 감시기가 설치함(변경 기록 없음) |
+| 503 | `audit_unavailable` | 감사 체인이 기록을 받지 않거나 감사 신원 설정을 확인할 수 없어 아무것도 바꾸지 않음 |
 | 500 | `persist_failed` / `read_failed` | 상태 파일을 쓰거나 읽지 못해 아무것도 바꾸지 않음 |
 
 ## 오류 코드 {#error-codes}

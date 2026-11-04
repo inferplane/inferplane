@@ -147,3 +147,29 @@ func writeFileAtomic(path string, data []byte) error {
 	}
 	return nil
 }
+
+// writeAtomic is the file writer commitFile uses; a seam so a test can fail a
+// write (the persist and the restore) without touching the filesystem.
+var writeAtomic = writeFileAtomic
+
+// commitFile is the one commit sequence both editors share: write next to path
+// atomically, then run install; when install fails, put the file back as it was
+// (prior bytes, or removed when it did not exist) so disk matches what is
+// running. persistErr is a failed first write (nothing changed); installErr is
+// the install failure; restoreErr is non-nil only when installErr is and the
+// file could not be put back, so it may still hold next. The caller maps each
+// to its own status and message and logs them.
+func commitFile(path string, prior []byte, existed bool, next []byte, install func() error) (persistErr, installErr, restoreErr error) {
+	if err := writeAtomic(path, next); err != nil {
+		return err, nil, nil
+	}
+	if err := install(); err != nil {
+		if existed {
+			restoreErr = writeAtomic(path, prior)
+		} else {
+			restoreErr = os.Remove(path)
+		}
+		return nil, err, restoreErr
+	}
+	return nil, nil, nil
+}

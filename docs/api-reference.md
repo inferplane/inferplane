@@ -297,7 +297,7 @@ Full administrators only, reads included (team-mapped identities get 403 and an
   "service_name": "inferplane",
   "counters_since": "2026-10-29T10:00:00Z",
   "limits": {"editable": true, "revision": "sha256:4f8b…"},
-  "rules": {"editable": true, "revision": "sha256:e3b0…", "content_rules": false, "console": [
+  "rules": {"editable": true, "revision": "sha256:5f1c…", "content_rules": false, "console": [
     {"name": "console-eng", "subject": {"team": "engineering"}, "audit": {"exporter": "corp"}}
   ]},
   "exporters": [{
@@ -338,19 +338,20 @@ and `max_sample_percent` only lower the bootstrap values.
 `console-…` documents in `observability.console.policy_file`:
 
 ```json
-{"dry_run": true, "expected_revision": "sha256:e3b0…", "rules": [
-  {"name": "console-eng", "subject": {"team": "engineering"},
+{"dry_run": true, "expected_revision": "sha256:5f1c…", "rules": [
+  {"name": "console-eng", "subject": {"team": "engineering"}, "audit": {"exporter": "corp"}},
+  {"name": "console-finance", "subject": {"team": "finance"},
    "traces": {"exporter": "corp", "sample_percent": 20}, "audit": {"exporter": "corp"}}]}
 ```
 
 ```json
 {
   "dry_run": true,
-  "current_revision": "sha256:e3b0…",
+  "current_revision": "sha256:5f1c…",
   "result_revision": "sha256:7c2d…",
-  "changes": [{"name": "console-eng", "action": "added"}],
-  "summary": {"added": 1, "changed": 0, "removed": 0, "unchanged": 0},
-  "decisions": [{"subject": {"team": "engineering"},
+  "changes": [{"name": "console-finance", "action": "added"}],
+  "summary": {"added": 1, "changed": 0, "removed": 0, "unchanged": 1},
+  "decisions": [{"subject": {"team": "finance"},
     "before": {"traces": [], "audit": []},
     "after": {"traces": [{"exporter": "corp", "sample_percent": 20}], "audit": ["corp"]}}]
 }
@@ -361,14 +362,15 @@ Send the same body with `"dry_run": false` to apply. Errors:
 | Status | `code` | Meaning |
 | --- | --- | --- |
 | 400 | `invalid_request` | The body is not one JSON object with known fields, or an apply has no `expected_revision` |
+| 413 | `invalid_request` | The body is larger than the limit |
 | 400 | `invalid_limits` / `invalid_rules` | Outside the bootstrap ceiling, or a rule the policy loader refuses |
 | 400 | `content_not_allowed` | A console rule adds or changes content export without `observability.console.content_rules` |
 | 409 | `read_only` | Not editable here (`reason`: `not_configured`, `no_state_file`, `no_policy_file`, `control_plane`) |
 | 409 | `revision_conflict` | The state changed since it was read (`current_revision` is returned) |
 | 409 | `limits_file_changed` | The state file was edited on disk; restart mayu to load it |
 | 409 | `console_file_foreign` | The console policy file holds documents the console does not manage |
-| 409 | `policy_reload_failed` | The policy set did not reload; the console file was restored |
-| 503 | `audit_unavailable` | The audit chain is not accepting records; nothing changed |
+| 409 | `policy_reload_failed` | The policy set did not reload; the console file was restored, or, when the message says it could not be, still holds the unapplied rules and is installed by the policy watcher once the other policy files are fixed (no change record) |
+| 503 | `audit_unavailable` | The audit chain is not accepting records, or the audit identity configuration cannot be resolved; nothing changed |
 | 500 | `persist_failed` / `read_failed` | A state file could not be written or read; nothing changed |
 
 ## Error Codes

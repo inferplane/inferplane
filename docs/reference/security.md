@@ -202,8 +202,9 @@ echo input. The `hash` on an event shows chain position, not verification.
   fixed text, never collector responses.
 - Runtime limits only narrow the bootstrap exporter ceiling. No console or
   control-plane input names an endpoint, protocol, TLS setting or credential, so no
-  edit can redirect prompts. Console rules may select content only with
-  `observability.console.content_rules: true`.
+  edit can redirect prompts. A console rule may add or change a content
+  selection only with `observability.console.content_rules: true`; keeping an
+  unchanged one or removing one is always allowed.
 - Console rules load through the local policy file channel and its ceiling check;
   with a control plane the console cannot become a second policy source.
 - An edit is refused while the audit chain is not accepting records, and each

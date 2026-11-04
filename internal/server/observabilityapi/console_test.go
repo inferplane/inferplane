@@ -70,7 +70,7 @@ func TestReadConsoleMalformedIsForeign(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "console-observability.yaml")
 	writeFile(t, path, "apiVersion: [unterminated\n  kind: : :\n")
 	c := New(Options{PolicyFile: path})
-	if _, _, err := c.readConsole(); !errors.Is(err, errForeign) {
+	if _, _, _, err := c.readConsole(); !errors.Is(err, errForeign) {
 		t.Fatalf("err = %v, want errForeign", err)
 	}
 }
