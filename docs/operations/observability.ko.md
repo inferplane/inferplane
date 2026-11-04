@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: 7083f18757019cbc2a6c0a6d0eb0419ee4cbabd0aec5ce0e754503ab4945a00e
+translation_source_sha256: f9e7e885412a9c835e8f9d07b8fe8a0675c02433f2c7c63dbab14f50c232ec4b
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -32,6 +32,7 @@ translation_source_sha256: 7083f18757019cbc2a6c0a6d0eb0419ee4cbabd0aec5ce0e75450
 | `inferplane_audit_write_failures_total` | 저장 권한·용량·하위 시스템 가용성 |
 | `inferplane_audit_buffer_utilization_ratio` | 보관 WAL 기록 수 / 1024. 1 이상이면 새 추론 차단. 1 미만에서도 WAL 실패가 고정될 수 있으므로 `/readyz` 확인 |
 | `inferplane_audit_anchor_failures_total` | 객체 저장소·IAM·보존 설정 |
+| `inferplane_audit_auto_mode_unparsed_total` | 콘솔이 읽지 못한 Claude Code 자동 모드 차단 호출·서버 안전장치(ADR-057). 증가하면 클라이언트 형식 변경을 의심 |
 | `gen_ai_server_time_to_first_token_seconds` | 업스트림·요청 경로 지연 |
 | `inferplane_fallback_total`·회로 차단기 상태 | 공급자 실패·비호환 |
 | `inferplane_usage_windows_dropped_total` | 분석 전달 손실. 권한 회계와 구분 |

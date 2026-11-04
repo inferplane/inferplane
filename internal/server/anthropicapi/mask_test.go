@@ -94,3 +94,25 @@ func TestMaskBodyNoMessagesNoOp(t *testing.T) {
 	}
 	_ = out
 }
+
+// Both legacy failures are one refusal. The handler parses its body strictly
+// before masking, so neither is reachable through it; the helper pins them.
+func TestLegacyMaskRefusesUnmaskableOrUnreadableBody(t *testing.T) {
+	for name, raw := range map[string]string{
+		"unmaskable": `{"model":"m","messages":"not-an-array"}`,
+		"unreadable": `{"model":"m","max_tokens":"16","messages":[{"role":"user","content":"PII"}]}`,
+	} {
+		if _, _, _, err := legacyMask([]byte(raw), stubMasker{}); err == nil {
+			t.Fatalf("%s body was accepted", name)
+		}
+	}
+	body, parsed, n, err := legacyMask([]byte(`{"model":"m","messages":[{"role":"user","content":"PII"}]}`), stubMasker{})
+	if err != nil || n != 1 || parsed == nil || strings.Contains(string(body), "PII") || *parsed.Messages[0].Content[0].Text != "X" {
+		t.Fatalf("masked body = %s parsed = %+v n = %d err = %v", body, parsed, n, err)
+	}
+	clean := `{"model":"m","messages":[{"role":"user","content":"hello"}]}`
+	body, parsed, n, err = legacyMask([]byte(clean), stubMasker{})
+	if err != nil || n != 0 || parsed != nil || string(body) != clean {
+		t.Fatalf("clean body = %s parsed = %+v n = %d err = %v", body, parsed, n, err)
+	}
+}

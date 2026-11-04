@@ -97,5 +97,6 @@ func CountRecord(w *audit.Writer, req *http.Request, protocol string, completed 
 		rec.Event = "request_completed"
 		rec.Outcome = &audit.OutcomeRef{Status: http.StatusOK}
 	}
+	audit.Finish(req.Context(), &rec)
 	w.Append(rec)
 }

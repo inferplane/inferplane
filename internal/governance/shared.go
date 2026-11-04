@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/inferplane/inferplane/internal/audit"
 )
 
 // SharedAuthority is an explicit deployment profile: one Postgres transaction
@@ -60,11 +62,13 @@ type SharedLimit struct {
 var ErrSharedUnavailable = errors.New("shared governance unavailable")
 
 // SharedDenial is safe to expose: callers must use fixed reasons, never DB
-// details, capabilities, hashes or key/user identifiers.
+// details, capabilities, hashes or key/user identifiers. Governance names the
+// binding limit for the audit record only (ADR-057); it is never a response.
 type SharedDenial struct {
 	Status     int
 	Reason     string
 	RetryAfter int
+	Governance *audit.GovernanceRef
 }
 
 func (e *SharedDenial) Error() string { return e.Reason }

@@ -14,20 +14,22 @@ func TestRestrictiveBudgetPreservesHardAdmission(t *testing.T) {
 		name                     string
 		base, overlay, want      int64
 		baseMode, mode, wantMode string
+		fromOverlay              bool
 	}{
 		{name: "omitted-base-block", base: 3_000, overlay: 1_000, want: 3_000, mode: "warn", wantMode: "block"},
 		{name: "explicit-base-block", base: 3_000, overlay: 1_000, want: 3_000, baseMode: "block", mode: "warn", wantMode: "block"},
-		{name: "hard-lease-wider-than-soft", base: 1_000, overlay: 3_000, want: 3_000, baseMode: "warn", mode: "block", wantMode: "block"},
-		{name: "hard-lease-equal-soft", base: 1_000, overlay: 1_000, want: 1_000, baseMode: "warn", mode: "block", wantMode: "block"},
-		{name: "hard-caps-narrow", base: 3_000, overlay: 2_000, want: 2_000, baseMode: "block", mode: "block", wantMode: "block"},
-		{name: "soft-meters-narrow", base: 3_000, overlay: 1_000, want: 1_000, baseMode: "warn", mode: "warn", wantMode: "warn"},
-		{name: "absent-base-default-does-not-harden-soft", overlay: 1_000, want: 1_000, mode: "warn", wantMode: "warn"},
+		{name: "hard-lease-wider-than-soft", base: 1_000, overlay: 3_000, want: 3_000, baseMode: "warn", mode: "block", wantMode: "block", fromOverlay: true},
+		{name: "hard-lease-equal-soft", base: 1_000, overlay: 1_000, want: 1_000, baseMode: "warn", mode: "block", wantMode: "block", fromOverlay: true},
+		{name: "hard-caps-narrow", base: 3_000, overlay: 2_000, want: 2_000, baseMode: "block", mode: "block", wantMode: "block", fromOverlay: true},
+		{name: "hard-caps-tie-keeps-base", base: 2_000, overlay: 2_000, want: 2_000, baseMode: "block", mode: "block", wantMode: "block"},
+		{name: "soft-meters-narrow", base: 3_000, overlay: 1_000, want: 1_000, baseMode: "warn", mode: "warn", wantMode: "warn", fromOverlay: true},
+		{name: "absent-base-default-does-not-harden-soft", overlay: 1_000, want: 1_000, mode: "warn", wantMode: "warn", fromOverlay: true},
 		{name: "absent-overlay-preserves-base", base: 3_000, want: 3_000, baseMode: "warn", wantMode: "warn"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			limit, mode := restrictiveBudget(tc.base, tc.baseMode, tc.overlay, tc.mode)
-			if limit != tc.want || mode != tc.wantMode {
-				t.Fatalf("got limit=%d mode=%q, want limit=%d mode=%q", limit, mode, tc.want, tc.wantMode)
+			limit, mode, fromOverlay := restrictiveBudget(tc.base, tc.baseMode, tc.overlay, tc.mode)
+			if limit != tc.want || mode != tc.wantMode || fromOverlay != tc.fromOverlay {
+				t.Fatalf("got limit=%d mode=%q overlay=%v, want limit=%d mode=%q overlay=%v", limit, mode, fromOverlay, tc.want, tc.wantMode, tc.fromOverlay)
 			}
 		})
 	}

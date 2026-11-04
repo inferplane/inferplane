@@ -197,6 +197,7 @@ internal/          - Private packages (gateway internals)
   router/          - Model→provider resolution, fallback chain, circuit breaker; SubstituteTier applies ADR-041 budget-tier substitution
   classifier/      - Opt-in PII classifier seam: registry, verdict cache, Run (sub-project 1 of the PII classifier design)
   sensitivity/     - Original-byte inspection and complete finite request redaction; latest-user context signals (ADR-043/044)
+  clientctx/       - Bounded client evidence: request class, key-scoped session digest, auto mode verdict tap (ADR-057)
   responses/       - Responses observation, stateless tool adapters, native/translated SSE
   tier/            - ADR-041 budget-tier substitution: per-team Table, window-latched activation, shared by controlplane/ and proxy/
   governance/      - Rate / quota / budget enforcement (PreCheck + Settle)
@@ -242,8 +243,10 @@ tests/             - Harness tests (hooks, secret patterns, structure) — bash,
   declared context/capabilities and pricing. Boundary labels are operator assertions;
   finite detectors do not guarantee universal PII detection. Local session pins
   retain successful actual targets, never authorization; hash/scoped hints stay
-  out of audit/metrics. Mask requires complete redaction and reinspection before
-  an egress chain is usable. Upgrade binaries/CRD before activating new rules.
+  out of audit/metrics, except the ADR-057 key-scoped session digest in audit
+  records and the analytics index (never metrics). Mask requires complete
+  redaction and reinspection before an egress chain is usable. Upgrade
+  binaries/CRD before activating new rules.
 - **Policy assembly:** install `live.Holder.RoutedAndPriced` on Store after effective
   topology construction; revalidate local policy before listeners; future ApplyWire
   validates too. Rejected privacy/strict-budget generations fail closed until valid recovery.

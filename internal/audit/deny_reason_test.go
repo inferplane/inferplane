@@ -10,26 +10,27 @@ import "testing"
 // closed set).
 func TestDenyReasonValues(t *testing.T) {
 	cases := map[DenyReason]string{
-		DenyModelNotAllowed:      "model_not_allowed",
-		DenyTeamRateLimited:      "team_rate_limited",
-		DenyTeamTokenRateLimited: "team_token_rate_limited",
-		DenyTeamQuotaExceeded:    "team_quota_exceeded",
-		DenyKeyRateLimited:       "key_rate_limited",
-		DenyKeyTokenRateLimited:  "key_token_rate_limited",
-		DenyTeamBudgetExceeded:   "team_budget_exceeded",
-		DenyKeyBudgetExceeded:    "key_budget_exceeded",
-		DenyUserBudgetExceeded:   "user_budget_exceeded",
-		DenyRegionBlocked:        "region_blocked",
-		DenyPricingMissing:       "pricing_missing",
-		DenyInvalidTokenEstimate: "invalid_token_estimate",
+		DenyModelNotAllowed:            "model_not_allowed",
+		DenyTeamRateLimited:            "team_rate_limited",
+		DenyTeamTokenRateLimited:       "team_token_rate_limited",
+		DenyTeamQuotaExceeded:          "team_quota_exceeded",
+		DenyKeyRateLimited:             "key_rate_limited",
+		DenyKeyTokenRateLimited:        "key_token_rate_limited",
+		DenyTeamBudgetExceeded:         "team_budget_exceeded",
+		DenyKeyBudgetExceeded:          "key_budget_exceeded",
+		DenyUserBudgetExceeded:         "user_budget_exceeded",
+		DenyRegionBlocked:              "region_blocked",
+		DenyPricingMissing:             "pricing_missing",
+		DenyInvalidTokenEstimate:       "invalid_token_estimate",
+		DenyBudgetAuthorityUnavailable: "budget_authority_unavailable",
 	}
 	for got, want := range cases {
 		if string(got) != want {
 			t.Fatalf("DenyReason %v = %q, want %q", got, string(got), want)
 		}
 	}
-	if len(cases) != 12 {
-		t.Fatalf("expected 12 taxonomy constants, test table has %d", len(cases))
+	if len(cases) != 13 {
+		t.Fatalf("expected 13 taxonomy constants, test table has %d", len(cases))
 	}
 }
 

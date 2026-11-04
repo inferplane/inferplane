@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/internal/governance"
 	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/pricing"
@@ -39,12 +40,15 @@ func errorStatus(err error) int {
 func retryStatus(status int) bool { return status == 429 || status >= 500 }
 
 func (a attempt) complete(w http.ResponseWriter, last bool) bool {
+	audit.BeginAttempt(a.req.Context(), a.target.ProviderName, a.target.Model)
 	resp, err := a.target.Provider.Complete(a.req.Context(), a.proxy)
 	if err != nil || resp == nil {
 		status := errorStatus(err)
 		a.errorCode = upstreamCode(err)
+		retry := !last && retryStatus(status) && a.req.Context().Err() == nil
+		a.endFailedAttempt(err, 0, retry)
 		a.finish(status, nil, nil, false, 0)
-		if !last && retryStatus(status) && a.req.Context().Err() == nil {
+		if retry {
 			return true
 		}
 		writeCodedError(w, status, "upstream request failed", a.errorCode)
@@ -56,14 +60,26 @@ func (a attempt) complete(w http.ResponseWriter, last bool) bool {
 			observed = resp.Parsed.Usage
 		}
 		a.errorCode = providers.ResponseErrorCode(resp.RawBody)
+		retry := !last && retryStatus(resp.StatusCode)
+		if retry {
+			requestpolicy.EndRetriedAttempt(a.req.Context(), nil, resp.StatusCode, false)
+		} else {
+			audit.EndOpenAttempt(a.req.Context(), requestpolicy.AttemptStatusForHTTP(resp.StatusCode), resp.StatusCode)
+		}
 		a.finish(resp.StatusCode, observed, nil, false, 0)
-		if !last && retryStatus(resp.StatusCode) {
+		if retry {
 			return true
 		}
 		writeCodedError(w, resp.StatusCode, "upstream request failed", a.errorCode)
 		return false
 	}
+	// The provider exchange is over. Every exit below closes the attempt before
+	// settlement, body capture and the record write: the unusable-body exits
+	// right here, the success path after rendering and before the client write.
+	// An unusable 2xx body is the gateway's verdict (the 502), not the
+	// upstream's status, so those attempts keep the upstream's 2xx.
 	if resp.Parsed == nil || resp.Parsed.Usage == nil {
+		audit.EndOpenAttempt(a.req.Context(), audit.AttemptUpstreamError, resp.StatusCode)
 		a.finish(502, nil, nil, false, 0)
 		writeError(w, 502, "upstream_error", "upstream response omitted usage")
 		return false
@@ -75,10 +91,12 @@ func (a attempt) complete(w http.ResponseWriter, last bool) bool {
 	if err != nil || len(body) == 0 {
 		// A provider successfully processed this request. Settle its observed
 		// usage even if the output cannot be rendered; do not bill a retry.
+		audit.EndOpenAttempt(a.req.Context(), audit.AttemptUpstreamError, resp.StatusCode)
 		a.finish(502, resp.Parsed.Usage, nil, false, 0)
 		writeError(w, 502, "upstream_error", "upstream response is incompatible")
 		return false
 	}
+	audit.EndOpenAttempt(a.req.Context(), requestpolicy.AttemptStatusForHTTP(resp.StatusCode), resp.StatusCode)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	_, writeErr := w.Write(body)
@@ -97,12 +115,15 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 		a.finish(500, nil, nil, false, 0)
 		return false
 	}
+	audit.BeginAttempt(a.req.Context(), a.target.ProviderName, a.target.Model)
 	seq, err := a.target.Provider.Stream(a.req.Context(), a.proxy)
 	if err != nil || seq == nil {
 		status := errorStatus(err)
 		a.errorCode = streamFailureCode(err)
+		retry := !last && retryStatus(status) && a.req.Context().Err() == nil
+		a.endFailedAttempt(err, 0, retry)
 		a.finish(status, nil, nil, false, 0)
-		if !last && retryStatus(status) && a.req.Context().Err() == nil {
+		if retry {
 			return true
 		}
 		writeCodedError(w, status, "upstream stream failed", a.errorCode)
@@ -121,6 +142,7 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 			w.WriteHeader(200)
 			committed = true
 			ttft = time.Since(a.started).Seconds()
+			audit.MarkFirstToken(a.req.Context())
 		}
 	}
 	fail := func(cause error) bool {
@@ -133,8 +155,10 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 		}
 		if !committed {
 			status := errorStatus(cause)
+			retry := conversionErr == nil && !last && retryStatus(status) && a.req.Context().Err() == nil
+			a.endFailedAttempt(cause, 0, retry)
 			a.finish(status, usage, nil, false, ttft)
-			if conversionErr == nil && !last && retryStatus(status) && a.req.Context().Err() == nil {
+			if retry {
 				return true
 			}
 			writeCodedError(w, status, "upstream stream failed", a.errorCode)
@@ -142,6 +166,7 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 		}
 		// Never expose arbitrary provider error strings or restart a committed
 		// stream on another model. Output already observed is still settled.
+		requestpolicy.EndStreamAttempt(a.req.Context(), false, cause)
 		if !errors.Is(cause, errClientWriteFailed) {
 			data, _ := json.Marshal(map[string]string{
 				"type": "error", "code": a.errorCode, "message": "upstream stream interrupted",
@@ -236,8 +261,21 @@ func (a attempt) stream(w http.ResponseWriter, last bool) bool {
 	}
 	a.h.r.RecordResult(a.target.ProviderName, a.target.Identity, true)
 	requestpolicy.RecordSuccess(a.req)
+	requestpolicy.EndStreamAttempt(a.req.Context(), true, nil)
 	a.finish(200, usage, nil, false, ttft)
 	return false
+}
+
+// endFailedAttempt closes the open attempt of a failed provider exchange:
+// retried failures keep the upstream status and never a model-not-found
+// verdict (this loop retries only 429/5xx), terminal ones use the error's own
+// status. The gateway's synthesized status is never written.
+func (a attempt) endFailedAttempt(err error, httpStatus int, retried bool) {
+	if retried {
+		requestpolicy.EndRetriedAttempt(a.req.Context(), err, httpStatus, false)
+		return
+	}
+	requestpolicy.EndAttemptOnError(a.req.Context(), err)
 }
 
 // Never copy a provider's raw error message into the client response.

@@ -5,7 +5,23 @@ import (
 	"fmt"
 
 	"github.com/inferplane/inferplane/internal/filter"
+	"github.com/inferplane/inferplane/pkg/schema"
 )
+
+// legacyMask runs maskBody and re-reads a changed body. A masking error and an
+// unreadable result are the same refusal, so the caller writes one mask_failed
+// denial for either. An unchanged body (n == 0) returns raw and no request.
+func legacyMask(raw []byte, f filter.RequestFilter) ([]byte, *schema.ChatRequest, int, error) {
+	masked, n, err := maskBody(raw, f)
+	if err != nil || n == 0 {
+		return masked, nil, n, err
+	}
+	var parsed schema.ChatRequest
+	if err := json.Unmarshal(masked, &parsed); err != nil {
+		return nil, nil, 0, err
+	}
+	return masked, &parsed, n, nil
+}
 
 // maskBody applies a RequestFilter to the TEXT of an Anthropic-ingress request
 // body and returns the masked bytes + the redaction count (ADR-009 T3). It masks

@@ -47,6 +47,7 @@ func TestServesAssets(t *testing.T) {
 	for path, wantCT := range map[string]string{
 		"/app.js":      "text/javascript",
 		"/i18n.js":     "text/javascript",
+		"/audit.js":    "text/javascript",
 		"/style.css":   "text/css",
 		"/favicon.svg": "image/svg+xml",
 	} {
@@ -100,7 +101,7 @@ func sessionStorageUsesOnlyAllowedKeys(body string) (ok bool, offendingKey strin
 // above (ADR-026) — any other sessionStorage usage, or any use of
 // localStorage/document.cookie, remains fully banned.
 func TestAssetsAreDataFreeAndTokenSafe(t *testing.T) {
-	for _, path := range []string{"/", "/app.js", "/i18n.js", "/style.css"} {
+	for _, path := range []string{"/", "/app.js", "/i18n.js", "/audit.js", "/style.css"} {
 		_, body := get(t, path)
 		// "sessionStorage[" (bracket/computed-key access) and "sessionStorage.clear"
 		// are banned outright — they bypass the named-key allowlist below, which only

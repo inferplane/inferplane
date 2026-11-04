@@ -43,6 +43,7 @@ func TestNoMetricCarriesAUserLabel(t *testing.T) {
 	m.ObservePIIMask("team-a", 3)
 	m.IncAnchorFailure()
 	m.IncUsageWindowDropped()
+	m.ObserveAutoModeUnparsed()
 	m.ObserveRoutingDecision("team-a", "Shadow", "context_shadow")
 	m.ObservePIIClassifier("laya-ko", "r1", "Shadow", "flagged", 0.1, 2, 1, 1)
 

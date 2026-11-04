@@ -3,26 +3,28 @@ package main
 // restrictiveBudget composes independent admission caps for one window.
 // Only explicit warn is soft; omitted on_exceeded has the governor's default
 // blocking meaning. Soft meters cannot erase or narrow a hard cap.
-func restrictiveBudget(base int64, baseMode string, overlay int64, overlayMode string) (int64, string) {
+// fromOverlay reports that the overlay's limit binds, so the denial it
+// produces names the overlay as its source (ADR-057).
+func restrictiveBudget(base int64, baseMode string, overlay int64, overlayMode string) (limit int64, mode string, fromOverlay bool) {
 	if overlay == 0 {
-		return base, baseMode
+		return base, baseMode, false
 	}
 	if base == 0 {
-		return overlay, overlayMode
+		return overlay, overlayMode, true
 	}
 	baseHard, overlayHard := baseMode != "warn", overlayMode != "warn"
 	if baseHard != overlayHard {
 		if overlayHard {
-			return overlay, "block"
+			return overlay, "block", true
 		}
-		return base, "block"
+		return base, "block", false
 	}
-	mode := "warn"
+	mode = "warn"
 	if baseHard {
 		mode = "block"
 	}
 	if overlay < base {
-		return overlay, mode
+		return overlay, mode, true
 	}
-	return base, mode
+	return base, mode, false
 }

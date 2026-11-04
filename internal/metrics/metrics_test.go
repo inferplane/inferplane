@@ -148,3 +148,19 @@ func TestSetBudgetStoreRejectionsConcurrentCallsDoNotDoubleCount(t *testing.T) {
 		t.Fatalf("inferplane_budget_store_rejected_total = %v, want exactly %d (no double-count, no dropped increment)", v, finalValue)
 	}
 }
+
+// ADR-057: one unlabelled counter for block calls and server safeguards that
+// did not parse.
+func TestObserveAutoModeUnparsed(t *testing.T) {
+	m := New()
+	m.ObserveAutoModeUnparsed()
+	m.ObserveAutoModeUnparsed()
+	if v := testutil.ToFloat64(m.autoModeUnparsed); v != 2 {
+		t.Fatalf("inferplane_audit_auto_mode_unparsed_total = %v, want 2", v)
+	}
+	if out := gather(t, m); !strings.Contains(out, "inferplane_audit_auto_mode_unparsed_total") {
+		t.Fatalf("counter not exposed:\n%s", out)
+	}
+	var nilM *Metrics
+	nilM.ObserveAutoModeUnparsed()
+}

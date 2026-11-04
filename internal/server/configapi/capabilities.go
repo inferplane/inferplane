@@ -26,6 +26,10 @@ type Capabilities struct {
 	Guardrails          bool   `json:"guardrails"`
 	BudgetAlerts        bool   `json:"budget_alerts"`
 	ProviderAutoHealth  bool   `json:"provider_auto_health"`
+	// AuditConsole: /admin/audit/* is mounted (ADR-057).
+	AuditConsole bool `json:"audit_console"`
+	// TraceLinkTemplate: optional otel.trace_link_template for console links.
+	TraceLinkTemplate string `json:"trace_link_template,omitempty"`
 }
 
 // CapabilitiesHandler serves the capability map (GET only, JSON). It is mounted

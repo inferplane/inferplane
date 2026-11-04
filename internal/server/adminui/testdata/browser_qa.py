@@ -51,11 +51,11 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path.startswith('/admin/ui/'):
             name = path[len('/admin/ui/'):] or 'index.html'
-            if name not in ('index.html', 'style.css', 'app.js', 'evaluation.js', 'i18n.js', 'favicon.svg'):
+            if name not in ('index.html', 'style.css', 'app.js', 'evaluation.js', 'audit.js', 'i18n.js', 'favicon.svg'):
                 self.respond(404, {})
                 return
             self.send_response(200)
-            self.send_header('Content-Type', {'index.html': 'text/html', 'style.css': 'text/css', 'app.js': 'text/javascript', 'evaluation.js': 'text/javascript', 'i18n.js': 'text/javascript', 'favicon.svg': 'image/svg+xml'}[name])
+            self.send_header('Content-Type', {'index.html': 'text/html', 'style.css': 'text/css', 'app.js': 'text/javascript', 'evaluation.js': 'text/javascript', 'audit.js': 'text/javascript', 'i18n.js': 'text/javascript', 'favicon.svg': 'image/svg+xml'}[name])
             self.send_header('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'")
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.end_headers()

@@ -251,6 +251,8 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		var maskErr error
 		canonical, maskErr = openai.RequestToCanonical(result.SanitizedBody)
 		if len(result.SanitizedBody) == 0 || maskErr != nil {
+			failed := "masking_failed"
+			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: 400, Error: &failed}, traceID)
 			writeErr(w, 400, "invalid_request_error", "request could not be PII-masked")
 			return
 		}
@@ -264,7 +266,11 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if h.mask.Enabled(p.Team) && !result.Decision.Masked {
 		// Audit the security-critical rejection (a masking-bypass attempt) — a
 		// silent reject would be a blind spot in the tamper-evident chain (P4 gate).
-		h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: 400}, traceID)
+		// Observe already ran after RouteRequest; nil metrics adds the
+		// refusal's evidence without a second routing-decision count.
+		result.Decision.Reason = "mask_failed"
+		req = requestpolicy.Observe(w, req, result, nil)
+		h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: 400, Error: &result.Decision.Reason}, traceID)
 		h.metrics.ObserveRequest(ingressName, rejectedModelLabel, "", p.Team, 400, time.Since(start).Seconds(), 0)
 		tracing.SetStatus(span, false, "pii mask bypass blocked")
 		writeErr(w, 400, "invalid_request_error", "PII masking is enabled for your team but not supported on the OpenAI-compatible endpoint yet; use /v1/messages")
@@ -297,6 +303,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// NOT gated on h.gov: on_missing "block" is a pricing setting, and a
 	// deployment with governance off would otherwise serve unpriced traffic free.
 	if dec := requestpolicy.PricingGuard(table, pricedTargets(chain), raw); !dec.Allowed {
+		audit.SetGovernance(req.Context(), dec.Governance)
 		h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, traceID)
 		h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
 		tracing.SetStatus(span, false, "pricing missing")
@@ -306,6 +313,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if h.gov != nil {
 		dec := h.gov.PreCheck(subjectOf(p), keyPolicyOf(p), estimateTokens(raw))
 		if !dec.Allowed {
+			audit.SetGovernance(req.Context(), dec.Governance)
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "governance deny")
@@ -348,18 +356,24 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if reserveErr != nil {
 			status := requestpolicy.BudgetStatus(reserveErr)
 			requestpolicy.BudgetErrorHeaders(w, reserveErr)
-			h.audit(req.Context(), p, model, ct.Upstream, &audit.OutcomeRef{Status: status}, traceID)
+			audit.SetGovernance(req.Context(), governance.DenialGovernance(reserveErr))
+			h.audit(req.Context(), p, model, ct.Upstream, &audit.OutcomeRef{Status: status, Error: audit.DenyBudgetAuthorityUnavailable.Ptr()}, traceID)
 			writeErr(w, status, "insufficient_quota", "budget authority unavailable")
 			return
 		}
 		defer finishBudget() // also retain authority if a provider panics
 		attemptReq := reservedReq.WithContext(audit.WithRoutingAttempt(reservedReq.Context(), ct.Model, ct.ProviderName, ct.DataBoundary))
 		attemptReq = requestpolicy.WithAffinityAttempt(attemptReq, h.r, result.AffinityToken, ct)
+		audit.BeginAttempt(attemptReq.Context(), ct.ProviderName, ct.Model)
 		var retriable bool
 		if stream {
 			retriable = h.serveStream(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		} else {
 			retriable = h.serveComplete(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
+		}
+		if retriable {
+			// Safety net: the serve path already ended the attempt (a no-op then).
+			audit.EndOpenAttempt(attemptReq.Context(), audit.AttemptUpstreamError, 0)
 		}
 		finishBudget()
 		if !retriable {
@@ -381,8 +395,10 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last {
+			requestpolicy.EndRetriedAttempt(req.Context(), err, 0, crossModelNext && errModelNotFound(err))
 			return true // fall back to the next target
 		}
+		requestpolicy.EndAttemptOnError(req.Context(), err)
 		// Tee a non-2xx upstream error verbatim when available.
 		var ue *providers.UpstreamError
 		if errors.As(err, &ue) {
@@ -404,8 +420,12 @@ func (h *ChatHandler) serveComplete(w http.ResponseWriter, req *http.Request, pr
 		return false
 	}
 	if !last && (resp.StatusCode >= 500 || resp.StatusCode == 429 || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
+		requestpolicy.EndRetriedAttempt(req.Context(), nil, resp.StatusCode, crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))
 		return true // upstream 5xx/429, or a cross-model "model not found" → fall back
 	}
+	// The provider exchange is over: close the attempt before writing to the
+	// client, settlement and body capture so none count toward its duration.
+	audit.EndOpenAttempt(req.Context(), requestpolicy.AttemptStatusForHTTP(resp.StatusCode), resp.StatusCode)
 	if resp.StatusCode < 400 {
 		h.r.RecordResult(providerName, identity, true)
 		if resp.StatusCode/100 == 2 && resp.Parsed != nil && resp.Parsed.Usage != nil {
@@ -461,8 +481,10 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last {
+			requestpolicy.EndRetriedAttempt(req.Context(), err, 0, crossModelNext && errModelNotFound(err))
 			return true // pre-TTFT failure → fall back
 		}
+		requestpolicy.EndAttemptOnError(req.Context(), err)
 		var ue *providers.UpstreamError
 		if errors.As(err, &ue) {
 			if w.Header().Get("Content-Type") == "" {
@@ -484,6 +506,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		audit.EndOpenAttempt(req.Context(), audit.AttemptUpstreamError, 0)
 		writeErr(w, 500, "api_error", "streaming unsupported")
 		h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, 500, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 		recordSpanResponse(req, prov.Name(), upstream, nil, false)
@@ -513,6 +536,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 			// writeStreamErrorEvent / bedrockapi's exception-frame path). The
 			// error detail is logged server-side only, never echoed to the
 			// client (an AWS SDK error string can carry an account id/ARN).
+			requestpolicy.EndStreamAttempt(req.Context(), false, err)
 			log.Printf("openaiapi: stream interrupted (model=%s upstream=%s provider=%s): %v", model, upstream, providerName, err)
 			writeStreamErrorEvent(w)
 			flusher.Flush()
@@ -533,6 +557,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 		}
 		if ttft == 0 {
 			ttft = time.Since(start).Seconds() // first streamed event = time to first token
+			audit.MarkFirstToken(req.Context())
 		}
 		if openaiWire {
 			// openai-wire provider: tee the upstream OpenAI SSE bytes verbatim
@@ -569,6 +594,7 @@ func (h *ChatHandler) serveStream(w http.ResponseWriter, req *http.Request, prov
 		w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
 	}
+	requestpolicy.EndStreamAttempt(req.Context(), streamCompleted && !streamFailed, nil)
 	cost := h.settle(p, providerName, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 	requestpolicy.SettleBudget(req, cost, lastUsage, streamCompleted && !streamFailed)
 	if streamCompleted && !streamFailed && lastUsage != nil {
@@ -601,6 +627,12 @@ func isModelNotFound(statusCode int, body []byte) bool {
 		return true
 	}
 	return statusCode == 400 && bytes.Contains(body, []byte("ValidationException"))
+}
+
+// errModelNotFound applies isModelNotFound to an upstream error's status and body.
+func errModelNotFound(err error) bool {
+	var ue *providers.UpstreamError
+	return errors.As(err, &ue) && isModelNotFound(ue.HTTPStatus(), ue.Body)
 }
 
 // govErrType maps a governance deny status to the OpenAI error `type`.
@@ -746,6 +778,7 @@ func (h *ChatHandler) audit(ctx context.Context, p keystore.Principal, model, up
 	if traceID != "" {
 		rec.TraceID = &traceID
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 
@@ -780,6 +813,7 @@ func (h *ChatHandler) auditCompleted(ctx context.Context, id string, p keystore.
 	if guardrailVersion != "" {
 		rec.GuardrailVersion = &guardrailVersion
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 
@@ -801,6 +835,7 @@ func (h *ChatHandler) auditCompletedPartial(ctx context.Context, p keystore.Prin
 	if traceID != "" {
 		rec.TraceID = &traceID
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 

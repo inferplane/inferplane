@@ -256,6 +256,33 @@ usage and a configured price; it does not mean an AWS invoice was reconciled.
 After fallback, a reported final settlement is not a known total for all attempts.
 Responses are `no-store`. The control-plane binary never handles these inferences.
 
+### Audit console (ADR-057)
+
+These read-only routes require **full-admin** authorization (401 without a
+token, 403 for a non-admin) and are mounted only when the analytics index is
+enabled; `GET /admin/capabilities` reports `audit_console`. Only `GET` is accepted.
+
+```text
+GET /admin/audit/events?kind=policy_denied&limit=100&before=<event-id>
+GET /admin/audit/events/{id}
+GET /admin/audit/sessions?since=2026-10-29T00:00:00Z
+GET /admin/audit/sessions/{ref}?after=<event-id>
+GET /admin/audit/summary
+```
+
+List routes take `since`/`until` (RFC 3339, default last 24 hours, at most 366
+days; encode a `+` offset as `%2B`), `limit` (1-200, default 100), the
+cursors `before`/`after`, and the filters `kind`, `team`, `key_id`, `model`,
+`provider`, `code`, `class`, `category`, `session`, `trace_id`, `pii=true` and
+`auto=true` (block and unknown auto mode verdicts only). Errors are
+`{"error":"<code>"}` with 400 `invalid_range`, `invalid_limit`, `invalid_cursor`,
+`invalid_kind`, `invalid_filter` or `invalid_id`, 404 `not_found`, 405
+`method_not_allowed` or 500 `query_failed`. The event detail response includes
+`hash`, the SHA-256 of the stored audit line, which shows the record's chain
+position and is not a verification. See the
+[field contract](reference/api.md#audit-console-adr-057) and
+[record fields](reference/data.md#audit-console-evidence-adr-057).
+
 ## Error Codes
 
 | Code | Meaning |

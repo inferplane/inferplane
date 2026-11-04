@@ -51,6 +51,18 @@ type TeamLimits struct {
 	// these fields only when no actual config/DB/policy admission limit exists.
 	RoutingBudgetMicrosPerMonth int64
 	RoutingBudgetMicrosPerDay   int64
+	// RPMRule, TPMRule, BudgetRule and BudgetDayRule name the rule whose value
+	// each merged admission limit above holds (ADR-057), so a governance denial
+	// can name it. A tie keeps the first rule; zero means no rule sets it.
+	RPMRule, TPMRule, BudgetRule, BudgetDayRule RuleRef
+}
+
+// RuleRef names one GovernancePolicy rule by policy name, generation and rule
+// name. It carries no limit value.
+type RuleRef struct {
+	Policy     string
+	Generation int64
+	Rule       string
 }
 
 // UserLimits is the merged, enforceable BUDGET view — both calendar windows —
@@ -69,6 +81,9 @@ type UserLimits struct {
 	BudgetMicrosPerDay   int64
 	BudgetDayHard        bool
 	AdminContactDay      string
+	// BudgetRule and BudgetDayRule name the rule each merged window holds
+	// (ADR-057), as TeamLimits does.
+	BudgetRule, BudgetDayRule RuleRef
 }
 
 // Store holds the data plane's currently-loaded local policy set behind an
@@ -546,8 +561,15 @@ func mergeTeamLimits(policies []*Policy) map[string]TeamLimits {
 		}
 		tl, contributed := out[p.Subject.Team]
 		for _, r := range p.Rules {
+			ref := RuleRef{Policy: p.Name, Generation: p.Generation, Rule: r.Name}
 			if r.Rate != nil {
 				contributed = true
+				if takesRate(tl.RPM, r.Rate.RPM) {
+					tl.RPMRule = ref
+				}
+				if takesRate(tl.TPM, r.Rate.TPM) {
+					tl.TPMRule = ref
+				}
 				tl.RPM = minNonZero(tl.RPM, r.Rate.RPM)
 				tl.TPM = minNonZero(tl.TPM, r.Rate.TPM)
 			}
@@ -575,6 +597,9 @@ func mergeTeamLimits(policies []*Policy) map[string]TeamLimits {
 					// unlimited rule cannot unlimit the day and leave the
 					// month capped, or vice versa.
 				case r.Budget.Period == v1alpha1.PeriodCalendarDay:
+					if takesBudget(tl.BudgetMicrosPerDay, tl.BudgetDayHard, r.Budget.LimitMicroUSD, r.Budget.HardCap) {
+						tl.BudgetDayRule = ref
+					}
 					tl.BudgetMicrosPerDay, tl.BudgetDayHard, tl.AdminContactDay = mergeBudgetWindow(
 						tl.BudgetMicrosPerDay, tl.BudgetDayHard, tl.AdminContactDay,
 						r.Budget.LimitMicroUSD, r.Budget.HardCap, r.Budget.AdminContact)
@@ -582,6 +607,9 @@ func mergeTeamLimits(policies []*Policy) map[string]TeamLimits {
 					// CalendarMonth, including a Budget built directly in a
 					// test with a zero-value Period — the month window is the
 					// meaning of "no period stated" everywhere in this schema.
+					if takesBudget(tl.BudgetMicrosPerMonth, tl.BudgetHard, r.Budget.LimitMicroUSD, r.Budget.HardCap) {
+						tl.BudgetRule = ref
+					}
 					tl.BudgetMicrosPerMonth, tl.BudgetHard, tl.AdminContact = mergeBudgetWindow(
 						tl.BudgetMicrosPerMonth, tl.BudgetHard, tl.AdminContact,
 						r.Budget.LimitMicroUSD, r.Budget.HardCap, r.Budget.AdminContact)
@@ -593,6 +621,12 @@ func mergeTeamLimits(policies []*Policy) map[string]TeamLimits {
 		}
 	}
 	return out
+}
+
+// takesRate reports whether minNonZero(current, next) takes next: a nonzero
+// rate binds over none, and the smaller one over a larger one.
+func takesRate(current, next int64) bool {
+	return next != 0 && (current == 0 || next < current)
 }
 
 func minNonZero(a, b int64) int64 {
@@ -625,6 +659,12 @@ type userKey struct{ team, user string }
 // ZERO OUT a month cap set by another policy, i.e. silently delete a money
 // control. There is a test for exactly this.
 func (u UserLimits) narrow(o UserLimits) UserLimits {
+	if takesBudget(u.BudgetMicrosPerMonth, u.BudgetHard, o.BudgetMicrosPerMonth, o.BudgetHard) {
+		u.BudgetRule = o.BudgetRule
+	}
+	if takesBudget(u.BudgetMicrosPerDay, u.BudgetDayHard, o.BudgetMicrosPerDay, o.BudgetDayHard) {
+		u.BudgetDayRule = o.BudgetDayRule
+	}
 	u.BudgetMicrosPerMonth, u.BudgetHard, u.AdminContact = mergeBudgetWindow(
 		u.BudgetMicrosPerMonth, u.BudgetHard, u.AdminContact,
 		o.BudgetMicrosPerMonth, o.BudgetHard, o.AdminContact)
@@ -634,13 +674,20 @@ func (u UserLimits) narrow(o UserLimits) UserLimits {
 	return u
 }
 
+// takesBudget reports whether a window merge keeps the other limit: hard caps
+// bind before soft meters, then the smaller limit wins; a tie keeps the
+// current one. mergeBudgetWindow and the ADR-057 rule names share it.
+func takesBudget(limit int64, hard bool, otherLimit int64, otherHard bool) bool {
+	return otherLimit != 0 && (limit == 0 || (otherHard && !hard) || (otherHard == hard && otherLimit < limit))
+}
+
 // mergeBudgetWindow preserves the independent hard admission cap. Original
 // soft rules remain in the policy snapshot for routing threshold evaluation.
 func mergeBudgetWindow(limit int64, hard bool, contact string, otherLimit int64, otherHard bool, otherContact string) (int64, bool, string) {
 	if otherLimit == 0 {
 		return limit, hard, contact
 	}
-	if limit == 0 || (otherHard && !hard) || (otherHard == hard && otherLimit < limit) {
+	if takesBudget(limit, hard, otherLimit, otherHard) {
 		return otherLimit, otherHard, otherContact
 	}
 	if otherLimit == limit && otherHard == hard && contact == "" {
@@ -651,16 +698,16 @@ func mergeBudgetWindow(limit int64, hard bool, contact string, otherLimit int64,
 
 // userLimitsFromBudget lifts ONE budget rule into a single-window UserLimits,
 // so narrow is the only place the comparison ladder exists. An `unlimited`
-// rule is the caller's business, not this function's.
-func userLimitsFromBudget(b *Budget) UserLimits {
+// rule is the caller's business, not this function's. ref names the rule.
+func userLimitsFromBudget(b *Budget, ref RuleRef) UserLimits {
 	if b.Period == v1alpha1.PeriodCalendarDay {
-		return UserLimits{BudgetMicrosPerDay: b.LimitMicroUSD, BudgetDayHard: b.HardCap, AdminContactDay: b.AdminContact}
+		return UserLimits{BudgetMicrosPerDay: b.LimitMicroUSD, BudgetDayHard: b.HardCap, AdminContactDay: b.AdminContact, BudgetDayRule: ref}
 	}
 	// CalendarMonth, INCLUDING a Budget built directly in a test with a
 	// zero-value Period: "no period stated" means the month window everywhere
 	// in this schema, so month must be the `default`, never an explicit
 	// `== PeriodCalendarMonth` equality case.
-	return UserLimits{BudgetMicrosPerMonth: b.LimitMicroUSD, BudgetHard: b.HardCap, AdminContact: b.AdminContact}
+	return UserLimits{BudgetMicrosPerMonth: b.LimitMicroUSD, BudgetHard: b.HardCap, AdminContact: b.AdminContact, BudgetRule: ref}
 }
 
 // mergeUserLimits folds every USER-subject budget rule into one UserLimits
@@ -692,7 +739,7 @@ func mergeUserLimits(policies []*Policy) map[userKey]UserLimits {
 				// all. It carries no period, so it is window-agnostic.
 				continue
 			}
-			ul = ul.narrow(userLimitsFromBudget(r.Budget))
+			ul = ul.narrow(userLimitsFromBudget(r.Budget, RuleRef{Policy: p.Name, Generation: p.Generation, Rule: r.Name}))
 		}
 		if contributed {
 			out[k] = ul

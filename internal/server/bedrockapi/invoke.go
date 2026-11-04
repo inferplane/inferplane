@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/inferplane/inferplane/internal/audit"
 	"github.com/inferplane/inferplane/internal/bodystore"
+	"github.com/inferplane/inferplane/internal/clientctx"
 	"github.com/inferplane/inferplane/internal/filter"
 	"github.com/inferplane/inferplane/internal/governance"
 	"github.com/inferplane/inferplane/internal/keystore"
@@ -266,6 +267,8 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	tracing.SetGenAIRequest(span, model)
 	if result.MaskRequired {
 		if len(result.SanitizedBody) == 0 || json.Unmarshal(result.SanitizedBody, &parsed) != nil {
+			failed := "masking_failed"
+			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest, Error: &failed}, false, traceID)
 			writeErr(w, http.StatusBadRequest, "request could not be PII-masked")
 			return
 		}
@@ -285,22 +288,23 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				n = 1
 			}
 		}
+		// A masking error and an unreadable result are the same refusal.
+		var reparsed schema.ChatRequest
+		if err == nil && n > 0 {
+			err = json.Unmarshal(masked, &reparsed)
+		}
 		if err != nil {
-			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
+			// Observe already ran after RouteRequest; nil metrics adds the
+			// refusal's evidence without a second routing-decision count.
+			result.Decision.Reason = "mask_failed"
+			req = requestpolicy.Observe(w, req, result, nil)
+			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest, Error: &result.Decision.Reason}, false, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "pii mask failed")
 			writeErr(w, http.StatusBadRequest, "request could not be PII-masked")
 			return
 		}
 		if n > 0 {
-			var reparsed schema.ChatRequest
-			if err := json.Unmarshal(masked, &reparsed); err != nil {
-				h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
-				h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
-				tracing.SetStatus(span, false, "pii mask failed")
-				writeErr(w, http.StatusBadRequest, "request could not be PII-masked")
-				return
-			}
 			raw = masked
 			parsed = reparsed
 			piiMasked = true
@@ -333,6 +337,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// NOT gated on h.gov: on_missing "block" is a pricing setting, and a
 	// deployment with governance off would otherwise serve unpriced traffic free.
 	if dec := requestpolicy.PricingGuard(table, pricedTargets(chain), raw); !dec.Allowed {
+		audit.SetGovernance(req.Context(), dec.Governance)
 		h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, false, traceID)
 		h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
 		tracing.SetStatus(span, false, "pricing missing")
@@ -342,6 +347,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if h.gov != nil {
 		dec := h.gov.PreCheck(subjectOf(p), keyPolicyOf(p), estimateTokens(raw))
 		if !dec.Allowed {
+			audit.SetGovernance(req.Context(), dec.Governance)
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: dec.Status, Error: dec.Code.Ptr()}, piiMasked, traceID)
 			h.metrics.ObserveRequest(ingressName, model, chain[0].ProviderName, p.Team, dec.Status, time.Since(start).Seconds(), 0)
 			tracing.SetStatus(span, false, "governance deny")
@@ -379,18 +385,24 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if reserveErr != nil {
 			status := requestpolicy.BudgetStatus(reserveErr)
 			requestpolicy.BudgetErrorHeaders(w, reserveErr)
-			h.audit(req.Context(), p, model, ct.Upstream, &audit.OutcomeRef{Status: status}, false, traceID)
+			audit.SetGovernance(req.Context(), governance.DenialGovernance(reserveErr))
+			h.audit(req.Context(), p, model, ct.Upstream, &audit.OutcomeRef{Status: status, Error: audit.DenyBudgetAuthorityUnavailable.Ptr()}, false, traceID)
 			writeErr(w, status, "budget authority unavailable")
 			return
 		}
 		defer finishBudget() // also retain authority if a provider panics
 		attemptReq := reservedReq.WithContext(audit.WithRoutingAttempt(reservedReq.Context(), ct.Model, ct.ProviderName, ct.DataBoundary))
 		attemptReq = requestpolicy.WithAffinityAttempt(attemptReq, h.r, result.AffinityToken, ct)
+		audit.BeginAttempt(attemptReq.Context(), ct.ProviderName, ct.Model)
 		var retriable bool
 		if h.streaming {
 			retriable = h.serveStream(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
 		} else {
 			retriable = h.serveComplete(w, attemptReq, ct.Provider, pr, p, ct.Model, ct.ProviderName, ct.Identity, ct.Upstream, last, crossModelNext, start, table)
+		}
+		if retriable {
+			// Safety net: the serve path already ended the attempt (a no-op then).
+			audit.EndOpenAttempt(attemptReq.Context(), audit.AttemptUpstreamError, 0)
 		}
 		finishBudget()
 		if !retriable {
@@ -429,12 +441,20 @@ func isModelNotFound(statusCode int, body []byte) bool {
 	return statusCode == http.StatusBadRequest && bytes.Contains(body, []byte("ValidationException"))
 }
 
+// errModelNotFound applies isModelNotFound to an upstream error's status and body.
+func errModelNotFound(err error) bool {
+	var ue *providers.UpstreamError
+	return errors.As(err, &ue) && isModelNotFound(ue.HTTPStatus(), ue.Body)
+}
+
 func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, prov providers.Provider, pr *providers.ProxyRequest, p keystore.Principal, model, providerName, identity, upstream string, last, crossModelNext bool, start time.Time, table *pricing.Table) (retriable bool) {
 	resp, err := prov.Complete(req.Context(), pr)
 	if err != nil {
 		if !last && h.retryError(err, crossModelNext) {
+			requestpolicy.EndRetriedAttempt(req.Context(), err, 0, crossModelNext && errModelNotFound(err))
 			return true
 		}
+		requestpolicy.EndAttemptOnError(req.Context(), err)
 		var ue *providers.UpstreamError
 		if errors.As(err, &ue) {
 			st := ue.HTTPStatus()
@@ -452,8 +472,11 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 	}
 	if resp == nil {
 		if !last {
+			// No response and no error: no upstream status to note.
+			requestpolicy.EndRetriedAttempt(req.Context(), nil, 0, false)
 			return true
 		}
+		audit.EndOpenAttempt(req.Context(), audit.AttemptUpstreamError, 0)
 		writeErr(w, http.StatusBadGateway, "bedrock upstream error")
 		h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, http.StatusBadGateway, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 		recordSpanResponse(req, prov.Name(), upstream, nil, false)
@@ -461,8 +484,12 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 		return false
 	}
 	if !last && (resp.StatusCode >= http.StatusInternalServerError || resp.StatusCode == http.StatusTooManyRequests || (crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))) {
+		requestpolicy.EndRetriedAttempt(req.Context(), nil, resp.StatusCode, crossModelNext && isModelNotFound(resp.StatusCode, resp.RawBody))
 		return true
 	}
+	// The provider exchange is over: close the attempt before settlement and
+	// body capture so those never count toward its duration.
+	audit.EndOpenAttempt(req.Context(), requestpolicy.AttemptStatusForHTTP(resp.StatusCode), resp.StatusCode)
 	if resp.Headers != nil {
 		copyUpstreamHeaders(w.Header(), resp.Headers)
 	}
@@ -507,6 +534,11 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 	}
 	h.content.Export(req.Context(), requestpolicy.ContentRecord{RecordID: recID, Team: p.Team, Account: p.AccountSubject(), Ingress: h.protocol(),
 		Model: model, Upstream: upstream, TraceID: tracing.TraceID(req.Context()), Request: pr.RawBody, Response: resp.RawBody})
+	if !h.converse && resp.StatusCode/100 == 2 {
+		tap := clientctx.AutoModeTapFor(req.Context(), pr.Parsed) // nil when auto mode evidence is off
+		tap.ObserveResponse(resp.Parsed)
+		h.recordAutoMode(req.Context(), tap)
+	}
 	h.auditCompleted(req.Context(), recID, p, model, upstream, resp.StatusCode, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
 	recordSpanSettled(req, prov.Name(), providerName, upstream, usage, cost, true, false)
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, resp.StatusCode, time.Since(start).Seconds(), 0)
@@ -517,8 +549,10 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	seq, err := prov.Stream(req.Context(), pr)
 	if err != nil {
 		if !last && h.retryError(err, crossModelNext) {
+			requestpolicy.EndRetriedAttempt(req.Context(), err, 0, crossModelNext && errModelNotFound(err))
 			return true
 		}
+		requestpolicy.EndAttemptOnError(req.Context(), err)
 		var ue *providers.UpstreamError
 		if errors.As(err, &ue) {
 			st := ue.HTTPStatus()
@@ -537,6 +571,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		audit.EndOpenAttempt(req.Context(), audit.AttemptUpstreamError, 0)
 		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
 		h.auditCompleted(req.Context(), ulid.New(), p, model, upstream, http.StatusInternalServerError, nil, nil, tracing.TraceID(req.Context()), "", pr.GuardrailID, pr.GuardrailVersion)
 		recordSpanResponse(req, prov.Name(), upstream, nil, false)
@@ -555,11 +590,18 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	var lastUsage *schema.Usage
 	var ttft float64
 	var streamCompleted, streamFailed bool
+	// Auto mode evidence reads Anthropic-format chunks only: InvokeModel,
+	// never Converse (ADR-057). nil when off or Converse.
+	var tap *clientctx.AutoModeTap
+	if !h.converse {
+		tap = clientctx.AutoModeTapFor(req.Context(), pr.Parsed)
+	}
 	// partialFinish records a stream that broke mid-flight: 200 is already
 	// committed, so the failure surfaces as an exception frame on the wire
 	// and a Partial audit record — mirroring anthropicapi's
 	// auditCompletedPartial path, never a clean 200 completion record.
-	partialFinish := func() bool {
+	partialFinish := func(cause error) bool {
+		requestpolicy.EndStreamAttempt(req.Context(), false, cause)
 		if writeExceptionFrame(w, enc, "internalServerException", "stream interrupted") == nil {
 			flusher.Flush()
 		}
@@ -580,17 +622,17 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	}
 	for ev, err := range seq {
 		if err != nil {
-			return partialFinish()
+			return partialFinish(err)
 		}
 		if ev == nil {
 			continue
 		}
 		if h.converse {
 			if len(ev.Raw) == 0 {
-				return partialFinish()
+				return partialFinish(nil)
 			}
 			if _, err := w.Write(ev.Raw); err != nil {
-				return partialFinish()
+				return partialFinish(err)
 			}
 			flusher.Flush()
 			if ev.Chunk == nil {
@@ -598,6 +640,7 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 			}
 			if ttft == 0 && ev.Chunk.Type == "content_block_delta" {
 				ttft = time.Since(start).Seconds()
+				audit.MarkFirstToken(req.Context())
 			}
 			streamCompleted = streamCompleted || ev.Chunk.Type == "message_stop"
 			streamFailed = streamFailed || ev.Chunk.Type == "error"
@@ -612,15 +655,17 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		}
 		chunkJSON, err := json.Marshal(ev.Chunk)
 		if err != nil {
-			return partialFinish()
+			return partialFinish(err)
 		}
 		if ttft == 0 {
 			ttft = time.Since(start).Seconds()
+			audit.MarkFirstToken(req.Context())
 		}
 		if err := writeChunkFrame(w, enc, chunkJSON); err != nil {
-			return partialFinish()
+			return partialFinish(err)
 		}
 		flusher.Flush()
+		tap.ObserveChunk(ev.Chunk) // after the frame is written; reads, never mutates
 		// FOLD every usage-bearing frame rather than overwriting (ADR-030) —
 		// the InvokeModel passthrough preserves Anthropic's frame vocabulary,
 		// so input and cache counts ride message_start's nested message.usage
@@ -638,9 +683,10 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 		}
 	}
 	if h.converse && (!streamCompleted || streamFailed || lastUsage == nil) {
-		return partialFinish()
+		return partialFinish(nil)
 	}
 
+	requestpolicy.EndStreamAttempt(req.Context(), streamCompleted && !streamFailed, nil)
 	cost := h.settle(p, providerName, model, upstream, lastUsage, table, requestpolicy.AdmissionFrom(req))
 	requestpolicy.SettleBudget(req, cost, lastUsage, streamCompleted && !streamFailed)
 	if streamCompleted && !streamFailed && lastUsage != nil {
@@ -654,10 +700,28 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	}
 	h.content.Export(req.Context(), requestpolicy.ContentRecord{RecordID: recID, Team: p.Team, Account: p.AccountSubject(), Ingress: h.protocol(),
 		Model: model, Upstream: upstream, TraceID: tracing.TraceID(req.Context()), Request: pr.RawBody})
+	if streamCompleted && !streamFailed {
+		h.recordAutoMode(req.Context(), tap)
+	}
 	h.auditCompleted(req.Context(), recID, p, model, upstream, http.StatusOK, usage, cost, tracing.TraceID(req.Context()), bodyRef, pr.GuardrailID, pr.GuardrailVersion)
 	recordSpanSettled(req, prov.Name(), providerName, upstream, usage, cost, true, false)
 	h.metrics.ObserveRequest(ingressName, model, providerName, p.Team, http.StatusOK, time.Since(start).Seconds(), ttft)
 	return false
+}
+
+// recordAutoMode stores the tap's estimated Claude Code auto mode verdict
+// before the terminal record is written, where audit.Finish stamps it
+// (ADR-057), and counts an unparsed block call or server safeguard. Only
+// successful responses reach it; the response bytes are never changed.
+func (h *InvokeHandler) recordAutoMode(ctx context.Context, tap *clientctx.AutoModeTap) {
+	ref, unparsed := tap.Result()
+	if ref == nil {
+		return
+	}
+	audit.SetAutoMode(ctx, ref)
+	if unparsed {
+		h.metrics.ObserveAutoModeUnparsed()
+	}
 }
 
 // settle runs the Governor's post-call settlement. Cache writes are TTL-tiered
@@ -758,6 +822,7 @@ func (h *InvokeHandler) audit(ctx context.Context, p keystore.Principal, model, 
 	if traceID != "" {
 		rec.TraceID = &traceID
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 
@@ -791,6 +856,7 @@ func (h *InvokeHandler) auditCompleted(ctx context.Context, id string, p keystor
 	if guardrailVersion != "" {
 		rec.GuardrailVersion = &guardrailVersion
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 
@@ -815,6 +881,7 @@ func (h *InvokeHandler) auditCompletedPartial(ctx context.Context, p keystore.Pr
 	if traceID != "" {
 		rec.TraceID = &traceID
 	}
+	audit.Finish(ctx, &rec)
 	h.aud.Append(rec)
 }
 

@@ -100,6 +100,7 @@ const context = vm.createContext({
 });
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../static/app.js"), "utf8"), context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../static/evaluation.js"), "utf8"), context);
+vm.runInContext(fs.readFileSync(path.join(__dirname, "../static/audit.js"), "utf8"), context);
 const run = code => vm.runInContext(code, context);
 context.fixtureProvider = provider;
 context.fixtureModel = model;

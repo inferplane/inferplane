@@ -1,0 +1,118 @@
+// Pure helper checks for audit.js (no DOM). Run: node testdata/audit_console.cjs
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+// Minimal element double so the waterfall renderer can be inspected without a browser.
+class El {
+  constructor(tag) { this.tag = tag; this.className = ""; this.textContent = ""; this.children = []; this.style = {}; this.attrs = {}; }
+  appendChild(c) { this.children.push(c); return c; }
+  append(...cs) { cs.forEach(c => this.children.push(c)); }
+  setAttribute(k, v) { this.attrs[k] = v; }
+  all() { return [this, ...this.children.flatMap(c => c.all())]; }
+}
+class Text extends El { constructor(text) { super("#text"); this.textContent = text; } }
+const ctx = vm.createContext({ navigator: { language: "en" }, document: { getElementById: () => null, createElement: t => new El(t), createTextNode: t => new Text(t), documentElement: {} }, Node: El, URLSearchParams, console });
+for (const f of ["i18n.js", "audit.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "static", f), "utf8"), ctx, { filename: f });
+const run = (src) => vm.runInContext(src, ctx);
+assert.equal(run('auditKindClass("policy_denied")'), "err");
+assert.equal(run('auditKindClass("auto_mode_blocked")'), "est");
+assert.equal(run('auditKindClass("upstream_error")'), "warn");
+assert.equal(run('msg("audit.kind.upstream_error")'), "Error");
+const w = JSON.parse(run('JSON.stringify(auditWindow("7d", Date.UTC(2026, 9, 29, 12)))'));
+assert.equal(w.since, "2026-10-22T12:00:00.000Z");
+assert.equal(run('auditQuery({ a: "", b: "x", c: null, d: 2 })'), "?b=x&d=2");
+run('auditState.keys = new Map([["ik_1", { key_id: "ik_1", metadata: { name: "laptop" } }], ["ik_2", { key_id: "ik_2", metadata: { name: "ci" } }], ["ik_3", { key_id: "ik_3", metadata: { name: "ci" } }]])');
+assert.equal(run('JSON.stringify(auditResolveKey("laptop"))'), '{"keyId":"ik_1","ambiguous":false}');
+assert.equal(run('JSON.stringify(auditResolveKey("ci"))'), '{"keyId":"","ambiguous":true}');   // ambiguous names never pick one
+assert.equal(run('JSON.stringify(auditResolveKey("ik_9"))'), '{"keyId":"ik_9","ambiguous":false}');
+assert.equal(run('auditKeyLabel("ik_1")'), "laptop");
+assert.equal(run('auditKeyLabel("ik_9")'), "ik_9");
+const trace = "4bf92f3577b34da6a3ce929d0e0e4736";
+assert.equal(run(`auditTraceLink("https://g.example/x?t={trace_id}", "${trace}")`), `https://g.example/x?t=${trace}`);
+assert.equal(run(`auditTraceLink("https://g.example/x?t={trace_id}", "not-hex")`), "");
+assert.equal(run(`auditTraceLink("javascript:alert({trace_id})", "${trace}")`), "");
+assert.equal(run('auditDuration(0)'), "—");
+assert.equal(run('auditDuration(412)'), "412ms");
+assert.equal(run('auditDuration(6810)'), "6.81s");
+assert.equal(run('JSON.stringify(auditBar({ start_ms: 0, dur_ms: 0 }, 0))'), '{"left":0,"width":100}'); // zero total: full-width neutral bar, no NaN
+assert.equal(run('JSON.stringify(auditBar({ start_ms: 250, dur_ms: 500 }, 1000))'), '{"left":25,"width":50}');
+assert.equal(run('auditScope("team_budget_exceeded")'), "team");
+assert.equal(run('auditScope("key_rate_limited")'), "key");
+assert.equal(run('auditScope("sensitive_blocked")'), "route");
+// Governance denials name their limit (ADR-057); a denial recorded before that evidence says so.
+assert.equal(run('auditDenySource("team_rate_limited", "team-rate#2·rpm", "policy", "rpm")'), "team-rate#2·rpm");
+assert.equal(run('auditDenySource("key_rate_limited", "", "key", "rpm")'), "key setting · requests/min");
+assert.equal(run('auditDenySource("team_budget_exceeded", "", "lease", "budget")'), "control-plane lease · budget");
+assert.equal(run('auditDenySource("budget_authority_unavailable", "", "budget_store", "budget_month")'), "budget store full · monthly budget");
+// A routing rule still wins over the code (routing denials, privacy blocks).
+assert.equal(run('auditDenySource("sensitive_blocked", "privacy#7·protect", "", "")'), "privacy#7·protect");
+// "older record" only for codes that name a limit when written today.
+for (const code of ["team_rate_limited", "team_token_rate_limited", "team_quota_exceeded", "key_rate_limited", "key_token_rate_limited",
+  "team_budget_exceeded", "key_budget_exceeded", "user_budget_exceeded", "pricing_missing"]) {
+  assert.equal(run(`auditDenySource("${code}", "", "", "")`), run('msg("audit.policyNotRecorded")'), code);
+}
+// An unavailable authority or store names no limit, by design.
+assert.equal(run('auditDenySource("budget_authority_unavailable", "", "", "")'), run('msg("audit.noLimitNamed")'));
+assert.equal(run('msg("audit.noLimitNamed")'), "no limit named");
+// Every other code names no limit and is never called an older record.
+for (const code of ["context_window_exceeded", "model_not_allowed", "region_blocked", "invalid_token_estimate", "mask_failed", "masking_failed",
+  "sensitive_blocked", "no_safe_route", "upstream_timeout", ""]) {
+  assert.equal(run(`auditDenySource("${code}", "", "", "")`), "—", code);
+}
+// A deny code may break after each "_" (so count and last time stay in view); its text is unchanged.
+const code = vm.runInContext('auditCode("budget_authority_unavailable")', ctx);
+assert.deepEqual(code.children.map(n => n.tag === "#text" ? n.textContent : "<" + n.tag + ">"), ["budget_", "<wbr>", "authority_", "<wbr>", "unavailable"]);
+assert.deepEqual(vm.runInContext('auditCode("ok")', ctx).children.map(n => n.textContent), ["ok"]);
+assert.equal(run('auditDenyScope("budget_authority_unavailable", "key")'), "key");
+assert.equal(run('auditDenyScope("key_rate_limited", "")'), "key");
+assert.equal(run('auditDenyScope("pricing_missing", "gateway")'), "gateway");
+assert.equal(run('auditSparkPoints([0, 0, 0], 120, 32).length'), 3);
+
+// A legacy record (no latency, no attempts) shows "no timing recorded", never a zero-width bar or NaN%.
+const legacy = vm.runInContext('renderAuditWaterfall({ total_ms: 0, rows: [] })', ctx);
+const legacyNodes = legacy.all();
+assert.equal(legacyNodes.filter(n => /audit-wf-bar/.test(n.className)).length, 0);
+assert.ok(legacyNodes.some(n => n.textContent === run('msg("audit.noTiming")')));
+assert.ok(!legacyNodes.some(n => /NaN/.test(n.textContent) || /NaN/.test(n.style.width || "")));
+// A gateway denial after an earlier attempt keeps both rows; the failed attempt shows its status.
+const after = vm.runInContext('renderAuditWaterfall({ total_ms: 900, rows: [{ kind: "attempt", provider: "bedrock", status: "timeout", start_ms: 10, dur_ms: 700 }, { kind: "denied", start_ms: 710, dur_ms: 5 }] })', ctx);
+const labels = after.all().filter(n => n.className === "lab").map(n => n.textContent);
+assert.deepEqual(labels, ["Attempt · bedrock · timeout", "Gateway denial"]);
+assert.ok(after.all().filter(n => /audit-wf-bar/.test(n.className)).every(n => /fail/.test(n.className) && !/NaN/.test(n.style.width)));
+assert.equal(run('msg("audit.wf.denied")'), "Gateway denial");
+// A current record with latency but no attempts (e.g. count_tokens) is not "legacy": one neutral full-width bar plus a short hint.
+const noAttempts = vm.runInContext('renderAuditWaterfall({ total_ms: 35, rows: [] }, { request: { ingress: "anthropic", routing: { requested_model: "m" } } })', ctx).all();
+assert.ok(!noAttempts.some(n => n.textContent === run('msg("audit.noTiming")')));
+assert.ok(noAttempts.some(n => n.textContent === run('msg("audit.noAttempt")')));
+const bars = noAttempts.filter(n => /audit-wf-bar/.test(n.className));
+assert.equal(bars.length, 1);
+assert.deepEqual([bars[0].style.left, bars[0].style.width], ["0%", "100%"]);
+assert.ok(!/fail|ok/.test(bars[0].className.replace("audit-wf-bar", "")));
+assert.ok(!noAttempts.some(n => n.textContent === run('msg("audit.attemptTimingMissing")')));
+// A pre-upgrade Responses record has latency, provider and usage but no attempts:
+// attempt timing was not recorded, the gateway did not answer it itself.
+const preUpgrade = vm.runInContext('renderAuditWaterfall({ total_ms: 900, rows: [] }, { request: { ingress: "responses", provider: "openai" }, usage: { input_tokens: 10, output_tokens: 2 } })', ctx).all();
+assert.ok(preUpgrade.some(n => n.textContent === run('msg("audit.attemptTimingMissing")')));
+assert.ok(!preUpgrade.some(n => n.textContent === run('msg("audit.noAttempt")') || n.textContent === run('msg("audit.noTiming")')));
+assert.equal(preUpgrade.filter(n => /audit-wf-bar/.test(n.className)).length, 0); // no "gateway work" bar for provider time
+assert.equal(run('msg("audit.attemptTimingMissing")'), "Attempt timing was not recorded (written before attempt timing existed).");
+// Usage alone (provider name missing) is still not a gateway-only answer.
+assert.ok(vm.runInContext('renderAuditWaterfall({ total_ms: 5, rows: [] }, { request: {}, usage: { input_tokens: 1 } })', ctx).all().some(n => n.textContent === run('msg("audit.attemptTimingMissing")')));
+assert.equal(run('auditShownNote(100, 100)'), run('msg("audit.showingFirst")').replace("{n}", "100"));
+assert.equal(run('auditShownNote(5, "")'), "");
+// A key without a name is shown once, never "ik_… · ik_…".
+assert.equal(run('auditKeyText("ik_1")'), "laptop · ik_1");
+assert.equal(run('auditKeyText("ik_9")'), "ik_9");
+assert.equal(run('auditKeyText("")'), "—");
+// Session periods are UTC; a multi-day period carries both dates.
+assert.equal(run('auditPeriod("2026-10-29T10:02:11Z", "2026-10-29T10:44:12Z")'), "2026-10-29 10:02–10:44");
+assert.equal(run('auditPeriod("2026-10-28T23:50:00Z", "2026-10-29T00:10:00Z")'), "2026-10-28 23:50 – 2026-10-29 00:10");
+assert.equal(run('msg("audit.time")'), "time (UTC)");
+// An ambiguous key name yields no query parameters at all, so nothing is fetched for every key.
+const now = Date.UTC(2026, 9, 29, 12);
+assert.equal(run(`JSON.stringify(auditFilterParams("24h", "", "ci", ${now}))`), '{"params":null,"ambiguous":true}');
+assert.equal(run(`auditFilterParams("24h", "platform", "laptop", ${now}).params.key_id`), "ik_1");
+assert.equal(run(`auditFilterParams("24h", "platform", "laptop", ${now}).params.team`), "platform");
+assert.equal(run(`auditFilterParams("24h", "", "", ${now}).params.key_id`), "");
+console.log("audit_console.cjs: ok");

@@ -56,6 +56,9 @@ type TeamPolicy struct {
 	// AdminContact is surfaced verbatim in a 402 team-budget-exceeded
 	// response, when set (see policy.TeamLimits.AdminContact).
 	AdminContact string
+	// Sources names where each limit above was set, so a denial can name it
+	// in the audit record (ADR-057). The zero value names none.
+	Sources TeamSources
 }
 
 // KeyPolicy is the resolved per-key governance limits (a virtual key's
@@ -103,6 +106,8 @@ type UserPolicy struct {
 	// AdminContact is surfaced verbatim in the 402 body, same as
 	// TeamPolicy.AdminContact.
 	AdminContact string
+	// Sources names the rule behind each window (ADR-057).
+	Sources UserSources
 }
 
 type BudgetUsage struct {
@@ -302,13 +307,16 @@ func PricingVersionOf(table *pricing.Table) string {
 }
 
 // GovDecision is the PreCheck verdict. Status is the HTTP status to return when
-// !Allowed: 429 (rate/quota), 402 (budget), 0 (allowed).
+// !Allowed: 429 (rate/quota), 402 (budget), 0 (allowed). Governance names the
+// limit behind a denial for the audit record (ADR-057); nil when allowed or
+// when the refusal is not a configured limit (an invalid estimate).
 type GovDecision struct {
-	Admission *Admission // owned by the caller only when Allowed
-	Allowed   bool
-	Status    int
-	Reason    string
-	Code      audit.DenyReason
+	Admission  *Admission // owned by the caller only when Allowed
+	Allowed    bool
+	Status     int
+	Reason     string
+	Code       audit.DenyReason
+	Governance *audit.GovernanceRef
 }
 
 // mustDenyBudget decides whether a budget.Check result should deny the
@@ -359,24 +367,28 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) (deci
 	// charging any rate/quota counter.
 	if g.leaseGate != nil {
 		if blocked, reason := g.leaseGate(s.Team); blocked {
-			return GovDecision{Status: 402, Reason: reason, Code: audit.DenyTeamBudgetExceeded}
+			return GovDecision{Status: 402, Reason: reason, Code: audit.DenyTeamBudgetExceeded,
+				Governance: denial(audit.GovScopeTeam, audit.GovLimitBudget, LimitSource{Source: audit.GovSourceLease})}
 		}
 	}
 	if p, ok := g.policyOf(s.Team); ok {
 		// rate limit (RPM): 1 request unit
 		if p.RatePerMin > 0 && !g.lim.AllowRate("rate:"+s.Team, 1, p.RatePerMin, max64(p.RateBurst, 1)) {
-			return GovDecision{Status: 429, Reason: "rate limit exceeded", Code: audit.DenyTeamRateLimited}
+			return GovDecision{Status: 429, Reason: "rate limit exceeded", Code: audit.DenyTeamRateLimited,
+				Governance: denial(audit.GovScopeTeam, audit.GovLimitRPM, p.Sources.Rate)}
 		}
 		// token rate limit (TPM): charge the request estimate against a per-minute
 		// token bucket whose burst is one minute's worth of tokens.
 		if p.TokensPerMinute > 0 && !reserve("tpm:"+s.Team, p.TokensPerMinute) {
-			return GovDecision{Status: 429, Reason: "token rate limit exceeded", Code: audit.DenyTeamTokenRateLimited}
+			return GovDecision{Status: 429, Reason: "token rate limit exceeded", Code: audit.DenyTeamTokenRateLimited,
+				Governance: denial(audit.GovScopeTeam, audit.GovLimitTPM, p.Sources.TokenRate)}
 		}
 		// quota (daily tokens)
 		if p.TokensPerDay > 0 {
 			if g.lim.CheckQuota("quota:"+s.Team, estimateTokens, p.TokensPerDay, 24*time.Hour) == limiter.Block {
 				if p.QuotaExceeded != "warn" {
-					return GovDecision{Status: 429, Reason: "token quota exceeded", Code: audit.DenyTeamQuotaExceeded}
+					return GovDecision{Status: 429, Reason: "token quota exceeded", Code: audit.DenyTeamQuotaExceeded,
+						Governance: denial(audit.GovScopeTeam, audit.GovLimitTokensPerDay, p.Sources.Quota)}
 				}
 			}
 		}
@@ -400,7 +412,8 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) (deci
 			tbk := budget.Key(budget.ScopeTeam, s.Team, mw)
 			if dec := g.bud.Check(tbk, 0, p.BudgetMicrosPerMonth, mw); mustDenyBudget(dec, p.BudgetExceeded) {
 				resetsAt := g.bud.ResetsAt(tbk, mw)
-				budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("budget", resetsAt, g.budgetLocOrUTC(), p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
+				budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("budget", resetsAt, g.budgetLocOrUTC(), p.AdminContact), Code: audit.DenyTeamBudgetExceeded,
+					Governance: budgetDenial(audit.GovScopeTeam, audit.GovLimitBudgetMonth, p.Sources.Budget, dec)}
 				budgetDenyResets = resetsAt
 			}
 		}
@@ -411,7 +424,8 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) (deci
 				resetsAt := g.bud.ResetsAt(tbkDay, dw)
 				// Block wins on tie: keep whichever window binds soonest.
 				if budgetDeny.Status == 0 || resetsAt.Before(budgetDenyResets) {
-					budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("daily budget", resetsAt, g.budgetLocOrUTC(), p.AdminContact), Code: audit.DenyTeamBudgetExceeded}
+					budgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("daily budget", resetsAt, g.budgetLocOrUTC(), p.AdminContact), Code: audit.DenyTeamBudgetExceeded,
+						Governance: budgetDenial(audit.GovScopeTeam, audit.GovLimitBudgetDay, p.Sources.BudgetDay, dec)}
 					budgetDenyResets = resetsAt
 				}
 			}
@@ -422,10 +436,12 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) (deci
 	}
 	// Per-key limits (§8 D2) — independent of team governance, always block.
 	if kp.RatePerMin > 0 && !g.lim.AllowRate("rate:key:"+s.KeyID, 1, kp.RatePerMin, kp.RatePerMin) {
-		return GovDecision{Status: 429, Reason: "key rate limit exceeded", Code: audit.DenyKeyRateLimited}
+		return GovDecision{Status: 429, Reason: "key rate limit exceeded", Code: audit.DenyKeyRateLimited,
+			Governance: denial(audit.GovScopeKey, audit.GovLimitRPM, keySource)}
 	}
 	if kp.TokensPerMinute > 0 && !reserve("tpm:key:"+s.KeyID, kp.TokensPerMinute) {
-		return GovDecision{Status: 429, Reason: "key token rate limit exceeded", Code: audit.DenyKeyTokenRateLimited}
+		return GovDecision{Status: 429, Reason: "key token rate limit exceeded", Code: audit.DenyKeyTokenRateLimited,
+			Governance: denial(audit.GovScopeKey, audit.GovLimitTPM, keySource)}
 	}
 	// Per-key budget: same two-window shape as the team block above, minus the
 	// on_exceeded knob (a key limit always blocks).
@@ -436,7 +452,8 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) (deci
 		kbk := budget.Key(budget.ScopeKey, s.KeyID, mw)
 		if dec := g.bud.Check(kbk, 0, kp.BudgetMicrosPerMonth, mw); mustDenyBudget(dec, "") {
 			resetsAt := g.bud.ResetsAt(kbk, mw)
-			keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key budget", resetsAt, g.budgetLocOrUTC(), ""), Code: audit.DenyKeyBudgetExceeded}
+			keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key budget", resetsAt, g.budgetLocOrUTC(), ""), Code: audit.DenyKeyBudgetExceeded,
+				Governance: budgetDenial(audit.GovScopeKey, audit.GovLimitBudgetMonth, keySource, dec)}
 			keyBudgetDenyResets = resetsAt
 		}
 	}
@@ -446,7 +463,8 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) (deci
 		if dec := g.bud.Check(kbkDay, 0, kp.BudgetMicrosPerDay, dw); mustDenyBudget(dec, "") {
 			resetsAt := g.bud.ResetsAt(kbkDay, dw)
 			if keyBudgetDeny.Status == 0 || resetsAt.Before(keyBudgetDenyResets) {
-				keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key daily budget", resetsAt, g.budgetLocOrUTC(), ""), Code: audit.DenyKeyBudgetExceeded}
+				keyBudgetDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("key daily budget", resetsAt, g.budgetLocOrUTC(), ""), Code: audit.DenyKeyBudgetExceeded,
+					Governance: budgetDenial(audit.GovScopeKey, audit.GovLimitBudgetDay, keySource, dec)}
 				keyBudgetDenyResets = resetsAt
 			}
 		}
@@ -474,7 +492,8 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) (deci
 				ubk := budget.Key(budget.ScopeUser, uid, mw)
 				if dec := g.bud.Check(ubk, 0, up.BudgetMicrosPerMonth, mw); mustDenyBudget(dec, up.BudgetExceeded) {
 					resetsAt := g.bud.ResetsAt(ubk, mw)
-					userDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("user budget", resetsAt, g.budgetLocOrUTC(), up.AdminContact), Code: audit.DenyUserBudgetExceeded}
+					userDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("user budget", resetsAt, g.budgetLocOrUTC(), up.AdminContact), Code: audit.DenyUserBudgetExceeded,
+						Governance: budgetDenial(audit.GovScopeUser, audit.GovLimitBudgetMonth, up.Sources.Budget, dec)}
 					userDenyResets = resetsAt
 				}
 			}
@@ -484,7 +503,8 @@ func (g *Governor) PreCheck(s Subject, kp KeyPolicy, estimateTokens int64) (deci
 				if dec := g.bud.Check(ubkDay, 0, up.BudgetMicrosPerDay, dw); mustDenyBudget(dec, up.BudgetExceeded) {
 					resetsAt := g.bud.ResetsAt(ubkDay, dw)
 					if userDeny.Status == 0 || resetsAt.Before(userDenyResets) {
-						userDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("user daily budget", resetsAt, g.budgetLocOrUTC(), up.AdminContact), Code: audit.DenyUserBudgetExceeded}
+						userDeny = GovDecision{Status: 402, Reason: budgetExceededMessage("user daily budget", resetsAt, g.budgetLocOrUTC(), up.AdminContact), Code: audit.DenyUserBudgetExceeded,
+							Governance: budgetDenial(audit.GovScopeUser, audit.GovLimitBudgetDay, up.Sources.BudgetDay, dec)}
 						userDenyResets = resetsAt
 					}
 				}
@@ -837,9 +857,10 @@ func PricingGuard(table *pricing.Table, targets []PricedTarget) GovDecision {
 	for _, t := range targets {
 		if !table.HasRate(t.Provider, t.Upstream) {
 			return GovDecision{
-				Status: 402,
-				Reason: "no pricing rate for " + t.Provider + "/" + t.Upstream,
-				Code:   audit.DenyPricingMissing,
+				Status:     402,
+				Reason:     "no pricing rate for " + t.Provider + "/" + t.Upstream,
+				Code:       audit.DenyPricingMissing,
+				Governance: PricingDenial(),
 			}
 		}
 	}
