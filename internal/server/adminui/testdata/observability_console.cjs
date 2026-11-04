@@ -127,22 +127,23 @@ const cells = tr => tr.children.map(td => td.textContent);
 // Apply succeeds, the follow-up status GET fails: the apply result and the error stay visible.
 const statusFixture = { configured: true, policy_source: "files", limits: { editable: true, revision: "sha256:r1" },
   rules: { editable: true, revision: "sha256:q1", content_rules: false, console: [] }, exporters: [], decisions: [], selections: [] };
-async function applyScenario(getAfterApply, delayPreview) {
-  let phase = "load", gate = null;
+async function applyScenario(getAfterApply, delayPreview, delayApply) {
+  let phase = "load", gate = null, puts = 0;
   const fetchImpl = async (url, opts) => {
     if (opts.method === "GET") {
       if (phase === "load") return { status: 200, text: async () => JSON.stringify(statusFixture) };
       return getAfterApply();
     }
+    puts++;
     const body = JSON.parse(opts.body);
-    if (body.dry_run && delayPreview) await new Promise(r => { gate = r; });
+    if ((body.dry_run && delayPreview) || (!body.dry_run && delayApply)) await new Promise(r => { gate = r; });
     const change = [{ exporter: "corp", field: "paused", before: false, after: true }];
     return { status: 200, text: async () => JSON.stringify(body.dry_run ? { changes: change } : { changes: change, result_revision: "sha256:0123456789abcdef" }) };
   };
   const app = appContext(fetchImpl);
   app.run("whoamiIsAdmin = true");
   await app.run("refreshObservabilityView()");
-  return { ...app, release: () => gate && gate(), setPhase: p => { phase = p; } };
+  return { ...app, release: () => gate && gate(), setPhase: p => { phase = p; }, puts: () => puts };
 }
 (async () => {
   {
@@ -176,6 +177,66 @@ async function applyScenario(getAfterApply, delayPreview) {
     await pending;
     assert.equal(a.byId("obs-limits-apply").disabled, true);
     assert.equal(a.byId("obs-limits-status").textContent, "The form changed after the preview. Preview again.");
+  }
+  {
+    // Minor 4: an editor's Preview and Apply are off while its request is in
+    // flight, and a second click then sends nothing; the other editor stays usable.
+    const okStatus = async () => ({ status: 200, text: async () => JSON.stringify(statusFixture) });
+    const a = await applyScenario(okStatus, true, true);
+    const click = id => a.byId(id).listeners.click[0]();
+    const tick = () => new Promise(r => setImmediate(r));
+    const preview = click("obs-limits-preview");
+    await tick();
+    assert.equal(a.byId("obs-limits-preview").disabled, true, "Preview is off while the dry run is pending");
+    assert.equal(a.byId("obs-limits-apply").disabled, true, "Apply is off while the dry run is pending");
+    assert.equal(a.byId("obs-rules-preview").disabled, false, "the other editor stays usable");
+    click("obs-limits-preview"); click("obs-limits-apply");
+    await tick();
+    assert.equal(a.puts(), 1, "a second click during a pending dry run sent a request");
+    a.release(); await preview;
+    assert.equal(a.byId("obs-limits-preview").disabled, false);
+    assert.equal(a.byId("obs-limits-apply").disabled, false, "a dry run with changes arms Apply afterwards");
+    const apply = click("obs-limits-apply");
+    await tick();
+    assert.equal(a.byId("obs-limits-preview").disabled, true);
+    assert.equal(a.byId("obs-limits-apply").disabled, true);
+    click("obs-limits-apply"); click("obs-limits-preview");
+    await tick();
+    assert.equal(a.puts(), 2, "a second click during a pending apply sent a request");
+    a.release(); await apply;
+    assert.match(a.byId("obs-limits-status").textContent, /^Applied\./);
+    assert.equal(a.byId("obs-limits-preview").disabled, false, "Preview comes back after the apply");
+    assert.equal(a.byId("obs-limits-apply").disabled, true, "Apply needs a new preview after an apply");
+    // A refused dry run re-enables Preview and keeps Apply off.
+    const b = await applyScenario(okStatus);
+    b.run('obsRequest = async () => ({ status: 409, data: { code: "revision_conflict", error: "x" } })');
+    await b.run("obsSubmitLimits(true)");
+    assert.equal(b.byId("obs-limits-preview").disabled, false);
+    assert.equal(b.byId("obs-limits-apply").disabled, true);
+  }
+  {
+    // Minor 8: without content_rules an existing content rule offers only its
+    // own exporter (keep) or none (remove); every other choice would be refused.
+    const { run } = appContext(async () => { throw Error("no network"); });
+    const exporters = [{ name: "vault", signals: ["content"] }, { name: "vault2", signals: ["content"] }, { name: "corp", signals: ["audit"] }];
+    const contentOptions = rule => JSON.parse(run(`JSON.stringify((() => { const sel = obsRuleRow(${JSON.stringify(rule)}, true).children[5].children[0];
+      return { disabled: sel.disabled, value: sel.value, options: sel.children.map(o => o.value) }; })())`));
+    run(`obsState = ${JSON.stringify({ rules: { content_rules: false }, exporters })}`);
+    const withContent = { name: "console-v", subject: { team: "eng" }, content: { exporter: "vault" } };
+    assert.deepEqual(contentOptions(withContent), { disabled: false, value: "vault", options: ["", "vault"] });
+    assert.equal(contentOptions({ name: "console-a", subject: { team: "eng" }, audit: { exporter: "corp" } }).disabled, true);
+    run("obsState.rules.content_rules = true");
+    assert.deepEqual(contentOptions(withContent).options, ["", "vault", "vault2"]);
+  }
+  {
+    // Minor 6: with the legacy otel block configured, the decisions table says
+    // the baseline is not counted there; without it the hint stays hidden.
+    const { byId, run } = appContext(async () => { throw Error("no network"); });
+    run(`renderObsDecisions(${JSON.stringify({ decisions: [], legacy_otel: { endpoint: "e", protocol: "http", tls: false, sample_ratio: 1 } })})`);
+    assert.equal(byId("obs-decisions-legacy").hidden, false);
+    assert.equal(byId("obs-decisions-legacy").textContent, "The legacy otel baseline is not a policy selection: a span only it exports counts as no rule here.");
+    run(`renderObsDecisions(${JSON.stringify({ decisions: [] })})`);
+    assert.equal(byId("obs-decisions-legacy").hidden, true);
   }
   console.log("observability_console.cjs: ok");
 })().catch(err => { console.error(err); process.exit(1); });

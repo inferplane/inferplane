@@ -12,6 +12,9 @@ let obsBound = false;
 // obsGen bumps whenever an editor changes or is invalidated, so a dry run that
 // finishes after an edit never arms Apply for a body it did not validate.
 const obsGen = { limits: 0, rules: 0 };
+// obsBusy marks an editor whose request (and the re-fetch after an apply) is
+// in flight: its Preview and Apply are off and a second submit sends nothing.
+const obsBusy = { limits: false, rules: false };
 
 const OBS_DROPPED = ["dropped_queue_full", "dropped_oversize", "dropped_export_error"];
 const OBS_DECISIONS = ["selected", "no_rule", "content_conflict", "withheld_limit"];
@@ -227,6 +230,11 @@ function renderObsDecisions(s) {
     tbody.appendChild(tr);
   }
   if (!tbody.children.length) tbody.appendChild(emptyRow(5, msg("obs.noDecisions")));
+  // The legacy otel baseline is not a policy selection, so its spans count as
+  // no_rule here; say so when that block is configured.
+  const legacy = $("obs-decisions-legacy");
+  legacy.textContent = msg("obs.decisionsLegacyHint");
+  legacy.hidden = !s.legacy_otel;
 }
 
 function renderObsSelections(s) {
@@ -279,7 +287,7 @@ function renderObsLimits(s) {
     if (e.signals.includes("traces")) set.appendChild(obsNumberField("max_sample_percent", msg("obs.maxSample"), limit.max_sample_percent, 100, 100, editable));
     box.appendChild(set);
   }
-  $("obs-limits-preview").disabled = !editable;
+  $("obs-limits-preview").disabled = !editable || obsBusy.limits;
   $("obs-limits-apply").disabled = true;
   $("obs-limits-status").textContent = "";
   $("obs-limits-diff").replaceChildren();
@@ -308,9 +316,9 @@ function obsRuleRow(rule, editable) {
     i.autocomplete = "off"; i.spellcheck = false; i.disabled = !editable; i.setAttribute("aria-label", msg(label));
     return i;
   };
-  const select = (field, signal, value, enabled, label) => {
+  const select = (field, signal, value, enabled, label, names) => {
     const sel = document.createElement("select"); sel.dataset.field = field; sel.disabled = !enabled; sel.setAttribute("aria-label", msg(label));
-    for (const name of ["", ...obsExportersFor(signal)]) {
+    for (const name of ["", ...(names || obsExportersFor(signal))]) {
       const o = document.createElement("option"); o.value = name; o.textContent = name || "—"; sel.appendChild(o);
     }
     sel.value = value || "";
@@ -325,9 +333,12 @@ function obsRuleRow(rule, editable) {
   remove.addEventListener("click", () => { tr.remove(); obsInvalidate("rules"); });
   const subject = rule.subject || {};
   const contentEditable = editable && (obsState.rules.content_rules || !!rule.content);
+  // Without content_rules an existing content rule can only keep its exporter
+  // or drop it ("—"); the server refuses any other choice, so none is offered.
+  const contentNames = !obsState.rules.content_rules && rule.content ? [rule.content.exporter] : null;
   tr.append(cell(text("name", rule.name, "obs.colName")), cell(text("team", subject.team, "obs.colTeam")), cell(text("user", subject.user, "obs.colUser")),
     cell(traces), cell(select("audit", "audit", rule.audit && rule.audit.exporter, editable, "obs.colAudit")),
-    cell(select("content", "content", rule.content && rule.content.exporter, contentEditable, "obs.colContent")), cell(remove));
+    cell(select("content", "content", rule.content && rule.content.exporter, contentEditable, "obs.colContent", contentNames)), cell(remove));
   return tr;
 }
 
@@ -339,7 +350,8 @@ function renderObsRules(s) {
   tbody.replaceChildren();
   for (const rule of r.console || []) tbody.appendChild(obsRuleRow(rule, editable));
   if (!tbody.children.length) tbody.appendChild(emptyRow(7, msg("obs.noRules")));
-  for (const id of ["obs-rules-add", "obs-rules-preview"]) $(id).disabled = !editable;
+  $("obs-rules-add").disabled = !editable;
+  $("obs-rules-preview").disabled = !editable || obsBusy.rules;
   $("obs-rules-apply").disabled = true;
   $("obs-rules-status").textContent = "";
   $("obs-rules-diff").replaceChildren();
@@ -380,8 +392,24 @@ function obsShowResult(kind, text, lines) {
 }
 
 // obsSubmit runs one dry run or apply for an editor. Apply refuses a body that
-// differs from the last previewed one.
+// differs from the last previewed one. While the request is in flight the
+// editor's Preview and Apply are off; afterwards Preview follows the editor's
+// editable state and Apply stays off unless a dry run with changes armed it.
 async function obsSubmit(kind, dryRun, build, path, describe) {
+  if (obsBusy[kind]) return;
+  const previewBtn = $("obs-" + kind + "-preview"), applyBtn = $("obs-" + kind + "-apply");
+  obsBusy[kind] = true;
+  previewBtn.disabled = true;
+  applyBtn.disabled = true;
+  try {
+    await obsSend(kind, dryRun, build, path, describe);
+  } finally {
+    obsBusy[kind] = false;
+    previewBtn.disabled = !(obsState && obsState[kind] && obsState[kind].editable);
+  }
+}
+
+async function obsSend(kind, dryRun, build, path, describe) {
   const status = $("obs-" + kind + "-status");
   let body;
   try {

@@ -277,9 +277,12 @@ Full administrators can open **Observability** in the gateway console
 (`/admin/ui/`). It shows each declared exporter (endpoint, protocol, TLS, data
 boundary, header names, declared and current signals, queue bytes), records per signal since the
 process started (sent, dropped, withheld by a limit, sampled out, last success,
-last error as a status code), governed decisions per signal (exported, no rule,
+last error), governed decisions per signal (exported, no rule,
 rules disagree on content, withheld by a limit) and every observability rule with
-its sampling after limits. Counters reset when mayu restarts; use
+its sampling after limits. The last error is a status code or a fixed text such
+as `collector unreachable` or `span export failed`, never collector content. The
+legacy `otel` baseline is not a policy selection, so a span only it exports
+counts as `no_rule` in the decisions. Counters reset when mayu restarts; use
 `inferplane_otel_export_records_total` and `inferplane_otel_export_decisions_total`
 for history. The legacy `otel` exporter is listed read-only.
 

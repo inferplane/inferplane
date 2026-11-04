@@ -1,6 +1,6 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: 1a539e43fdc8f705062490bc7fa8d2c95e53a7c56334d0bde71b9cf31a172b60
+translation_source_sha256: b163af0791346a8dd72219582caea09cb98217db7dd8bc8fdf1284e4233ad339
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
@@ -225,7 +225,7 @@ spec:
 
 ### 관측성 콘솔 {#observability-console}
 
-전체 관리자는 게이트웨이 콘솔(`/admin/ui/`)의 **관측성**에서 다음을 볼 수 있습니다. 선언된 exporter마다 엔드포인트·프로토콜·TLS·데이터 경계·헤더 이름·선언 신호와 현재 신호·큐 바이트, 프로세스 시작 이후 신호별 기록(전송·버림·한도로 보류·샘플링 제외·마지막 성공·상태 코드로 표시한 마지막 오류), 신호별 정책 결정(내보냄·규칙 없음·본문 규칙 불일치·한도로 보류), 한도 적용 뒤의 샘플링을 포함한 모든 observability 규칙입니다. 카운터는 mayu를 재시작하면 초기화되므로 이력은 `inferplane_otel_export_records_total`과 `inferplane_otel_export_decisions_total`로 보세요. 기존 `otel` exporter는 읽기 전용으로 표시합니다.
+전체 관리자는 게이트웨이 콘솔(`/admin/ui/`)의 **관측성**에서 다음을 볼 수 있습니다. 선언된 exporter마다 엔드포인트·프로토콜·TLS·데이터 경계·헤더 이름·선언 신호와 현재 신호·큐 바이트, 프로세스 시작 이후 신호별 기록(전송·버림·한도로 보류·샘플링 제외·마지막 성공·마지막 오류), 신호별 정책 결정(내보냄·규칙 없음·본문 규칙 불일치·한도로 보류), 한도 적용 뒤의 샘플링을 포함한 모든 observability 규칙입니다. 마지막 오류는 상태 코드나 `collector unreachable`, `span export failed` 같은 고정 문구이며 수집기 응답 내용은 표시하지 않습니다. 기존 `otel` 기본 exporter는 정책 선택이 아니므로, 그것만 내보내는 span은 정책 결정에서 `no_rule`로 셉니다. 카운터는 mayu를 재시작하면 초기화되므로 이력은 `inferplane_otel_export_records_total`과 `inferplane_otel_export_decisions_total`로 보세요. 기존 `otel` exporter는 읽기 전용으로 표시합니다.
 
 편집은 부트스트랩 설정에서 켜야 합니다.
 

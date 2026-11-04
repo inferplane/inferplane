@@ -580,6 +580,7 @@ const MSG = {
   "obs.colLastError": { en: "last error (UTC)", ko: "마지막 오류 (UTC)", zh: "最近错误（UTC）", ja: "最終エラー（UTC）" },
   "obs.decisionsTitle": { en: "Governed decisions", ko: "정책 결정", zh: "治理决策", ja: "ポリシー判定" },
   "obs.decisionsHint": { en: "Audit is counted per record, content per request that reached a provider, traces per span.", ko: "감사는 기록마다, 본문은 공급자에 도달한 요청마다, 트레이스는 span마다 셉니다.", zh: "审计按记录计数，内容按到达提供方的请求计数，追踪按 span 计数。", ja: "監査はレコードごと、本文はプロバイダーに届いたリクエストごと、トレースは span ごとに数えます。" },
+  "obs.decisionsLegacyHint": { en: "The legacy otel baseline is not a policy selection: a span only it exports counts as no rule here.", ko: "기존 otel 기본 exporter는 정책 선택이 아니므로, 그것만 내보내는 span은 여기서 규칙 없음으로 셉니다.", zh: "旧版 otel 基线不是策略选择：仅由它导出的 span 在此计为无规则。", ja: "従来の otel ベースラインはポリシー選択ではないため、それだけがエクスポートする span はここでは「ルールなし」として数えます。" },
   "obs.decision.selected": { en: "exported", ko: "내보냄", zh: "已导出", ja: "エクスポート" },
   "obs.decision.no_rule": { en: "no rule", ko: "규칙 없음", zh: "无规则", ja: "ルールなし" },
   "obs.decision.content_conflict": { en: "rules disagree", ko: "규칙 불일치", zh: "规则不一致", ja: "ルール不一致" },

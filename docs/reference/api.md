@@ -81,7 +81,10 @@ by `server.WithFullAdminRoutes`, so every route, reads included, needs a full
 administrator. Both PUTs take `dry_run` and `expected_revision`: a dry run changes
 nothing; an apply must name the revision its preview saw (400 `invalid_request` when
 `expected_revision` is omitted, 409 `revision_conflict` when it is stale), then persists, installs and appends `admin_observability_changed`.
-Errors are `{"error": message, "code": code}`. `/admin/capabilities` adds
+The observability routes' own errors are `{"error": message, "code": code}`;
+401 and 403 come from the shared admin middleware with its usual bodies (the
+`authentication_error` envelope for 401, `{"error":"admin only"}` for 403).
+`/admin/capabilities` adds
 `observability_export`. Request and response shapes are in the
 [API reference](../api-reference.md#observability-console-mayu-only).
 
