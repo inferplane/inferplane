@@ -82,6 +82,16 @@ func TestObserveTraceKeepsAFixedOutcomeSet(t *testing.T) {
 	if counter(m, "corp", "traces", "bogus") != 0 {
 		t.Fatal("an unknown outcome created a series")
 	}
+	s.ObserveTrace("nope", "sent", 1)
+	if counter(m, "nope", "traces", "sent") != 0 {
+		t.Fatal("an undeclared exporter created a series")
+	}
+	if got := s.SignalStats("nope", "traces"); got.LastSuccessAt != "" || got.Outcomes["sent"] != 0 {
+		t.Fatalf("an undeclared exporter created stats: %+v", got)
+	}
+	if _, ok := s.st.last.Load(lastKey{"nope", "traces"}); ok {
+		t.Fatal("an undeclared exporter created a last-state key")
+	}
 	var nilSet *Set
 	nilSet.ObserveTrace("otel", "sent", 1)
 	if got := nilSet.SignalStats("otel", "traces"); len(got.Outcomes) != 0 {
@@ -106,4 +116,22 @@ func TestDecisionCountsMirrorPrometheus(t *testing.T) {
 	if decisionCounter(m, "audit", "no_rule") != 2 {
 		t.Fatal("the decision series does not match the console count")
 	}
+}
+
+func TestEmitToUndeclaredExporterCreatesNoStatsKey(t *testing.T) {
+	m := metrics.New()
+	s := newTestSet(t, m, Exporter{Name: "corp", Endpoint: "127.0.0.1:1", Insecure: true, Signals: []string{"audit"}})
+	s.emit("nope", SignalAudit, item{})
+	if counter(m, "nope", "audit", "dropped_export_error") != 1 {
+		t.Fatal("the Prometheus count for the undeclared exporter must stay")
+	}
+	if got := s.SignalStats("nope", "audit"); got.Outcomes["dropped_export_error"] != 0 {
+		t.Fatalf("an undeclared exporter created a stats row: %+v", got)
+	}
+	s.st.counts.Range(func(k, _ any) bool {
+		if k.(countKey).exporter == "nope" {
+			t.Fatal("stats key created for an undeclared exporter")
+		}
+		return true
+	})
 }

@@ -183,6 +183,12 @@ func (s *Set) emit(exporter, signal string, it item) {
 	if d == nil || d.logs == nil || !d.cfg.allows(signal) {
 		// Policy apply already checked the ceiling, so this is a programming
 		// or reload-skew error: count it rather than export off-ceiling.
+		if d == nil {
+			// An undeclared name gets its Prometheus count only: it must not
+			// create a stats key, which stays bounded by declared exporters.
+			s.st.m.ObserveOTelExport(exporter, signal, outcomeExportError, 1)
+			return
+		}
 		s.st.count(exporter, signal, outcomeExportError, 1)
 		return
 	}

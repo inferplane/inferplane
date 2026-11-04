@@ -25,6 +25,10 @@ const (
 	DecisionWithheld = "withheld_limit"   // the policy selected exporters; runtime limits withheld all
 )
 
+// legacyTraceExporter is the reserved exporter name of the pre-observability
+// tracing config (config.ReservedLegacyExporter, tracing.LegacyExporter).
+const legacyTraceExporter = "otel"
+
 var (
 	allOutcomes  = []string{outcomeSent, outcomeQueueFull, outcomeOversize, outcomeExportError, outcomeWithheld, outcomeSampledOut}
 	allDecisions = []string{DecisionSelected, DecisionNoRule, DecisionConflict, DecisionWithheld}
@@ -58,8 +62,9 @@ type lastState struct {
 
 func newStats(m *metrics.Metrics) *stats { return &stats{m: m, since: time.Now()} }
 
-// loadCounter returns the counter for key, creating it on first use. The
-// Load first keeps the request path allocation-free once a key exists.
+// loadCounter returns the counter for key, creating it on first use. Load
+// runs before LoadOrStore so an existing key never allocates a new counter
+// (the boxed map key itself may still allocate).
 func loadCounter(m *sync.Map, key any) *atomic.Uint64 {
 	if v, ok := m.Load(key); ok {
 		return v.(*atomic.Uint64)
@@ -176,6 +181,11 @@ func (s *Set) SignalStats(exporter, signal string) SignalStats {
 // outcome is ignored, so the label set stays fixed. nil-safe.
 func (s *Set) ObserveTrace(exporter, outcome string, n int) {
 	if s == nil {
+		return
+	}
+	// Only the legacy tracing name and exporters declared for traces get a
+	// series or a stats row, so keys stay bounded by configuration.
+	if d := s.exporters[exporter]; exporter != legacyTraceExporter && (d == nil || !d.cfg.allows(SignalTraces)) {
 		return
 	}
 	switch outcome {
