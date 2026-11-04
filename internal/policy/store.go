@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -110,6 +111,9 @@ type Store struct {
 	// observabilityCeiling validates observability exporter/signal pairs
 	// against this data plane's local ceiling; nil skips (control plane).
 	observabilityCeiling func(exporter, signal string) error
+	// reloadMu serializes Reload: the Watch and the observability console
+	// both call it, and an older read must never install after a newer one.
+	reloadMu sync.Mutex
 }
 
 // SetSharedEnforcement is a startup-only capability declaration. It must only
@@ -286,7 +290,11 @@ func (s *Store) ApplyWire(docs []v1alpha1.GovernancePolicy) []Rejection {
 }
 
 // Reload re-reads every configured path and atomically swaps the snapshot.
-// On error the previous snapshot (if any) stays in force.
+// On error the previous snapshot (if any) stays in force. Reloads are
+// serialized (the Watch and the observability console both call it), and
+// every file's mtime is recorded BEFORE it is read: a write that lands during
+// the read moves the mtime past the recorded one, so the next Watch poll
+// reloads it instead of treating it as loaded.
 func (s *Store) Reload() error {
 	// Runtime guard, not just a doc comment (PR #50 review finding): on a
 	// control-plane-fed store (NewEmptyStore) a stray generic Reload —
@@ -295,24 +303,27 @@ func (s *Store) Reload() error {
 	if len(s.paths) == 0 {
 		return errors.New("policy store has no file paths (control-plane-fed): Reload/Watch do not apply")
 	}
-	policies, files, err := LoadPaths(s.paths...)
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	files, err := enumerate(s.paths...)
 	if err != nil {
 		return err
 	}
-	for _, p := range policies {
-		if err := validateIdentitySubject(p.Subject.User, s.identityConfig); err != nil {
-			return err
-		}
-		if err := checkEnforceable(p, s.routedAndPriced, s.observabilityCeiling, s.sharedEnforcement); err != nil {
-			return err
-		}
-	}
-
 	mtimes := make(map[string]time.Time, len(files))
 	for _, f := range files {
 		if info, err := os.Stat(f); err == nil {
 			mtimes[f] = info.ModTime()
 		}
+	}
+	policies, _, err := LoadPaths(s.paths...)
+	if err != nil {
+		return err
+	}
+	if afterPolicyRead != nil {
+		afterPolicyRead()
+	}
+	if err := s.checkApplicable(policies); err != nil {
+		return err
 	}
 	s.snap.Store(&snapshot{
 		policies:      policies,
@@ -321,6 +332,38 @@ func (s *Store) Reload() error {
 		users:         mergeUserLimits(policies),
 		observability: hasObservability(policies),
 	})
+	return nil
+}
+
+// afterPolicyRead is a test seam: it runs after Reload has read the policy
+// files and before it validates and installs them.
+var afterPolicyRead func()
+
+// CheckLocal runs Reload's apply-time checks — unique names, identity
+// subjects, enforceability and the observability ceiling — over policies
+// without installing them. The observability console uses it for a dry run;
+// Reload stays the authoritative check when the edit is applied.
+func (s *Store) CheckLocal(policies []*Policy) error {
+	seen := make(map[string]string, len(policies))
+	for _, p := range policies {
+		if err := claimPolicyName(seen, p.Name, ""); err != nil {
+			return err
+		}
+	}
+	return s.checkApplicable(policies)
+}
+
+// checkApplicable is the per-policy apply-time check shared by Reload and
+// CheckLocal: identity subject, then enforceability and the ceiling.
+func (s *Store) checkApplicable(policies []*Policy) error {
+	for _, p := range policies {
+		if err := validateIdentitySubject(p.Subject.User, s.identityConfig); err != nil {
+			return err
+		}
+		if err := checkEnforceable(p, s.routedAndPriced, s.observabilityCeiling, s.sharedEnforcement); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

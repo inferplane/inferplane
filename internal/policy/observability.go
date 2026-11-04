@@ -38,11 +38,15 @@ type TraceExport struct {
 
 // ObservabilityDecision is the merged governed export for one request subject:
 // trace targets (sorted by exporter, max percent per exporter), audit exporters
-// (sorted, unique) and at most one content exporter.
+// (sorted, unique) and at most one content exporter. ContentConflict reports
+// that matching rules named different content exporters, which is why Content
+// is empty; the observability console counts that case separately from "no
+// rule".
 type ObservabilityDecision struct {
-	Traces  []TraceExport
-	Audit   []string
-	Content string
+	Traces          []TraceExport
+	Audit           []string
+	Content         string
+	ContentConflict bool
 }
 
 func observabilityFromV1Alpha1(wr v1alpha1.Rule, reject func(string, string) *UnsupportedError) (*Observability, error) {
@@ -125,11 +129,18 @@ func (s *Store) Observability(team, user string) ObservabilityDecision {
 	if snap == nil || !snap.observability {
 		return ObservabilityDecision{}
 	}
+	return MergeObservability(snap.policies, team, user)
+}
+
+// MergeObservability is the Observability merge over an explicit policy set,
+// so the console's dry run compares the decision before and after an edit
+// with exactly the rules the request path uses.
+func MergeObservability(policies []*Policy, team, user string) ObservabilityDecision {
 	var d ObservabilityDecision
 	traces := map[string]int{}
 	audit := map[string]bool{}
-	content, conflict := "", false
-	for _, p := range snap.policies {
+	content := ""
+	for _, p := range policies {
 		if !p.Subject.matches(team, user) {
 			continue
 		}
@@ -146,7 +157,7 @@ func (s *Store) Observability(team, user string) ObservabilityDecision {
 			}
 			if o.Content != "" {
 				if content != "" && content != o.Content {
-					conflict = true
+					d.ContentConflict = true
 				}
 				content = o.Content
 			}
@@ -160,7 +171,7 @@ func (s *Store) Observability(team, user string) ObservabilityDecision {
 		d.Audit = append(d.Audit, name)
 	}
 	sort.Strings(d.Audit)
-	if !conflict {
+	if !d.ContentConflict {
 		d.Content = content
 	}
 	return d

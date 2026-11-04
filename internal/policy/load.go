@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,6 +109,24 @@ func enumerate(paths ...string) ([]string, error) {
 	return files, nil
 }
 
+// claimPolicyName records name in seen (name -> origin) and rejects an empty
+// or already-claimed name. A non-empty origin names where the first definition
+// came from. LoadPaths and Store.CheckLocal share it so the uniqueness rule
+// has one definition.
+func claimPolicyName(seen map[string]string, name, origin string) error {
+	if name == "" {
+		return errors.New("metadata.name is required")
+	}
+	if prev, dup := seen[name]; dup {
+		if prev == "" {
+			return fmt.Errorf("duplicate policy name %q", name)
+		}
+		return fmt.Errorf("duplicate policy name %q (already defined in %s)", name, prev)
+	}
+	seen[name] = origin
+	return nil
+}
+
 // Enumerate is the exported enumeration used by external watchers
 // (internal/controlplane) to poll the same file set LoadPaths would read.
 func Enumerate(paths ...string) ([]string, error) { return enumerate(paths...) }
@@ -133,13 +152,9 @@ func LoadPaths(paths ...string) ([]*Policy, []string, error) {
 			return nil, nil, fmt.Errorf("policy file %s: %w", f, err)
 		}
 		for _, p := range docs {
-			if p.Name == "" {
-				return nil, nil, fmt.Errorf("policy file %s: metadata.name is required", f)
+			if err := claimPolicyName(seen, p.Name, f); err != nil {
+				return nil, nil, fmt.Errorf("policy file %s: %w", f, err)
 			}
-			if prev, dup := seen[p.Name]; dup {
-				return nil, nil, fmt.Errorf("policy file %s: duplicate policy name %q (already defined in %s)", f, p.Name, prev)
-			}
-			seen[p.Name] = f
 			out = append(out, p)
 		}
 	}

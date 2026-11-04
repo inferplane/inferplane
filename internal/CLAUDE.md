@@ -190,3 +190,7 @@ user, key and policy scopes before dispatch. This is process-local authority,
 not fleet-global escrow. Valid complete usage settles exactly once; interrupted,
 missing or invalid usage retains uncertainty rather than fabricating actual cost.
 A soft budget-tier meter never replaces an independent hard cap.
+
+## Observability console (sub-project B)
+
+- `policy/`: `MergeObservability` is the request-path observability merge over an explicit set (the console's dry run uses it); `ObservabilityDecision.ContentConflict` marks content withheld because matching rules disagree. `Store.CheckLocal` runs Reload's apply-time checks without installing. `Store.Reload` is serialized and records file mtimes before reading, so a console write racing the 2 s Watch is never masked.
