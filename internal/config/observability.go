@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -36,6 +37,9 @@ var headerName = regexp.MustCompile(`^[a-z0-9][a-z0-9!#$%&'*+.^_|~-]*$`)
 type ObservabilityConfig struct {
 	ServiceName string                           `json:"service_name,omitempty"`
 	Exporters   map[string]ObservabilityExporter `json:"exporters"`
+	// Console enables runtime edits from the observability console; absent
+	// keeps the console read-only.
+	Console *ObservabilityConsoleConfig `json:"console,omitempty"`
 }
 
 // ObservabilityExporter declares one OTLP collector. Endpoint is host:port;
@@ -194,4 +198,63 @@ func loopbackHost(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// ObservabilityConsoleConfig lets full administrators narrow export and edit
+// console-owned observability rules at runtime (sub-project B). Each key is
+// optional; an absent key keeps that part of the console read-only.
+type ObservabilityConsoleConfig struct {
+	// StateFile persists the runtime export limits (JSON, written by mayu).
+	StateFile string `json:"state_file,omitempty"`
+	// PolicyFile is the console-owned GovernancePolicy file. It must also be
+	// a `policies` entry, so console rules load, validate and hot-reload
+	// through the same local file channel as every other local policy.
+	PolicyFile string `json:"policy_file,omitempty"`
+	// ContentRules lets console rules add or change a content selection. Off
+	// by default: copying prompts stays a bootstrap decision.
+	ContentRules bool `json:"content_rules,omitempty"`
+}
+
+// validateObservabilityConsole checks the console block against the rest of
+// the config. It runs after validateControlPlane, which already rejects
+// `policies` together with `control_plane`.
+func validateObservabilityConsole(cfg *Config) error {
+	if cfg.Observability == nil || cfg.Observability.Console == nil {
+		return nil
+	}
+	c := cfg.Observability.Console
+	policyDirs := map[string]bool{}
+	for _, p := range cfg.Policies {
+		policyDirs[filepath.Clean(p)] = true
+	}
+	if c.StateFile != "" {
+		if !filepath.IsAbs(c.StateFile) || filepath.Clean(c.StateFile) != c.StateFile || filepath.Ext(c.StateFile) != ".json" {
+			return fmt.Errorf("config: observability.console.state_file must be a clean absolute path ending in .json")
+		}
+		if policyDirs[c.StateFile] {
+			return fmt.Errorf("config: observability.console.state_file must not be listed in policies (it would load as a policy file)")
+		}
+		if policyDirs[filepath.Dir(c.StateFile)] {
+			return fmt.Errorf("config: observability.console.state_file must not sit in a directory listed in policies (it would load as a policy file)")
+		}
+	}
+	if c.PolicyFile != "" {
+		if cfg.ControlPlane != nil {
+			return fmt.Errorf("config: observability.console.policy_file needs the local policy file channel; with control_plane the control plane is the policy source and console rules are read-only")
+		}
+		ext := filepath.Ext(c.PolicyFile)
+		if !filepath.IsAbs(c.PolicyFile) || filepath.Clean(c.PolicyFile) != c.PolicyFile || (ext != ".yaml" && ext != ".yml") {
+			return fmt.Errorf("config: observability.console.policy_file must be a clean absolute path ending in .yaml or .yml")
+		}
+		if !policyDirs[c.PolicyFile] {
+			return fmt.Errorf("config: observability.console.policy_file must also be listed in policies, so console rules load through the local policy file channel")
+		}
+		if policyDirs[filepath.Dir(c.PolicyFile)] {
+			return fmt.Errorf("config: observability.console.policy_file's directory is also listed in policies; the file would load twice")
+		}
+	}
+	if c.ContentRules && c.PolicyFile == "" {
+		return fmt.Errorf("config: observability.console.content_rules requires observability.console.policy_file")
+	}
+	return nil
 }

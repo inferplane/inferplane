@@ -70,6 +70,13 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
     `config.observability.exporters` to the teams/users an `observability` policy
     rule selects ([governed export](../operations/observability.md#governed-otlp-export)).
     Best-effort and bounded; the WAL chain stays the record of evidence.
+  - **observability console** — the optional `observability.console` block names a
+    `state_file` (runtime export limits that mayu writes) and a `policy_file`
+    (console-owned observability rules, which must also be an entry of `policies`
+    and cannot be used with `control_plane`). Both must be on a writable volume:
+    the chart mounts the data volume at `/var/lib/inferplane` (an emptyDir unless
+    `persistence.enabled`), while its `policies` ConfigMap mount at
+    `/etc/inferplane/policies` is read-only.
   - **usage windows** — `POST /v1alpha1/usage` to `inferplaned` (ADR-036). This is
     inferplane's own protocol on its own channel; it is NOT OTLP and no collector
     receiver consumes it.

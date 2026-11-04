@@ -865,6 +865,9 @@ func LoadRaw(path string) (*Config, error) {
 	if err := validateControlPlane(&cfg); err != nil {
 		return nil, err
 	}
+	if err := validateObservabilityConsole(&cfg); err != nil {
+		return nil, err
+	}
 	if err := validateSharedStores(&cfg); err != nil {
 		return nil, err
 	}
