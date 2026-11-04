@@ -52,6 +52,7 @@ type Target struct {
 
 type statusResponse struct {
 	Configured    bool                        `json:"configured"`
+	Instance      string                      `json:"instance,omitempty"` // the answering process (Options.Instance)
 	PolicySource  string                      `json:"policy_source"`
 	ServiceName   string                      `json:"service_name,omitempty"`
 	CountersSince string                      `json:"counters_since,omitempty"`
@@ -66,7 +67,7 @@ type statusResponse struct {
 func (c *Console) status(w http.ResponseWriter, _ *http.Request) {
 	st := c.opts.Set.Status()
 	resp := statusResponse{
-		Configured: c.opts.Set != nil, PolicySource: c.source(),
+		Configured: c.opts.Set != nil, Instance: c.opts.Instance, PolicySource: c.source(),
 		ServiceName: st.ServiceName, CountersSince: st.CountersSince,
 		Limits: c.limitsState(), Rules: c.rulesState(),
 		Exporters: st.Exporters, Decisions: st.Decisions,

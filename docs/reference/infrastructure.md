@@ -76,7 +76,13 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
     and cannot be used with `control_plane`). Both must be on a writable volume:
     the chart mounts the data volume at `/var/lib/inferplane` (an emptyDir unless
     `persistence.enabled`), while its `policies` ConfigMap mount at
-    `/etc/inferplane/policies` is read-only.
+    `/etc/inferplane/policies` is read-only. Both files, like the console's
+    counters, belong to one mayu process: with more than one replica an edit
+    applies only to the replica that served it (the status `instance` names it),
+    and with the default emptyDir a replaced pod starts without them, so a pause
+    lapses. Set `persistence.enabled` whenever `state_file` is set (the shared
+    profile then renders one claim per replica), and keep one replica per edit
+    target or make the edit on each replica.
   - **usage windows** — `POST /v1alpha1/usage` to `inferplaned` (ADR-036). This is
     inferplane's own protocol on its own channel; it is NOT OTLP and no collector
     receiver consumes it.

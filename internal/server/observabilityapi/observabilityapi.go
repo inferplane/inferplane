@@ -62,8 +62,13 @@ type Options struct {
 	PolicyFile   string
 	ContentRules bool
 	Legacy       *LegacyExporter
-	Emit         func(audit.Record)
-	AuditReady   func() (bool, string) // nil = ready
+	// Instance names the answering process in the status: the audit chain's
+	// instance id (audit.Writer.Instance). Limits, console rules and counters
+	// belong to one mayu process, so behind a load balancer it tells an
+	// administrator which replica answered. Empty omits the field.
+	Instance   string
+	Emit       func(audit.Record)
+	AuditReady func() (bool, string) // nil = ready
 	// Organization returns the verified-identity organization, "" when
 	// identity is unconfigured; nil means unconfigured. An error refuses an
 	// apply with audit_unavailable.

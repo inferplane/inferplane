@@ -1,6 +1,6 @@
 ---
 translation_source: api-reference.md
-translation_source_sha256: 2f5a4fcfd748476d86e3d10890fed3087320153ceea8e30f22baab33eccf8c62
+translation_source_sha256: 7be7c75ec864bdea624c48a866ff54554c7ac7ac8182c672f3298a3b97149a8f
 ---
 
 # API 레퍼런스 {#api-reference}
@@ -247,13 +247,14 @@ GET /admin/audit/summary
 
 ### 관측성 콘솔 · mayu 전용 {#observability-console-mayu-only}
 
-읽기를 포함해 전체 관리자만 쓸 수 있습니다(팀에 매핑된 신원은 403과 `admin_denied` 기록을 받습니다). 카운터는 `counters_since` 이후의 프로세스별 값입니다.
+읽기를 포함해 전체 관리자만 쓸 수 있습니다(팀에 매핑된 신원은 403과 `admin_denied` 기록을 받습니다). 카운터는 `counters_since` 이후의 프로세스별 값입니다. `instance`는 응답한 프로세스를 감사 체인의 인스턴스 ID로 나타냅니다. 실행 중 한도, 콘솔 규칙, 카운터는 그 프로세스의 것이므로 복제본이 여럿이면 각 복제본이 자기 상태만 응답합니다([범위](operations/observability.md#observability-console)).
 
 `GET /admin/observability`:
 
 ```json
 {
   "configured": true,
+  "instance": "mayu-0-01JC8X3V4N5Q6R7S8T9V0WXYZA",
   "policy_source": "files",
   "service_name": "inferplane",
   "counters_since": "2026-10-29T10:00:00Z",
@@ -266,9 +267,13 @@ GET /admin/audit/summary
     "header_names": ["authorization"], "signals": ["audit", "traces"], "effective_signals": ["audit", "traces"],
     "queue_limit_bytes": 67108864, "queued_bytes": 0, "limit": {},
     "stats": [{"signal": "audit", "outcomes": {"sent": 12, "dropped_queue_full": 0, "dropped_oversize": 0,
-      "dropped_export_error": 0, "withheld_limit": 0, "sampled_out": 0}, "last_success_at": "2026-10-29T10:05:00Z"}]
+      "dropped_export_error": 0, "withheld_limit": 0, "sampled_out": 0}, "last_success_at": "2026-10-29T10:05:00Z"},
+     {"signal": "traces", "outcomes": {"sent": 30, "dropped_queue_full": 0, "dropped_oversize": 0,
+      "dropped_export_error": 0, "withheld_limit": 0, "sampled_out": 9}, "last_success_at": "2026-10-29T10:05:01Z"}]
   }],
-  "decisions": [{"signal": "audit", "decisions": {"selected": 12, "no_rule": 30, "content_conflict": 0, "withheld_limit": 0}}],
+  "decisions": [{"signal": "traces", "decisions": {"selected": 39, "no_rule": 3, "content_conflict": 0, "withheld_limit": 0}},
+   {"signal": "audit", "decisions": {"selected": 12, "no_rule": 30, "content_conflict": 0, "withheld_limit": 0}},
+   {"signal": "content", "decisions": {"selected": 0, "no_rule": 42, "content_conflict": 0, "withheld_limit": 0}}],
   "selections": [{"policy": "console-eng", "rule": "export", "source": "console", "subject": {"team": "engineering"},
     "targets": [{"signal": "audit", "exporter": "corp", "exported": true}]},
    {"policy": "engineering-observability", "rule": "export", "source": "files", "subject": {"team": "engineering"},

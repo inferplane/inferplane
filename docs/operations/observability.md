@@ -330,6 +330,19 @@ Edits are opt-in in the bootstrap config:
   restores the file) and appends `admin_observability_changed` with the
   administrator and the SHA-256 of the persisted state before and after. Edits are
   refused while the audit chain is not accepting records.
+- **Scope: one mayu process.** The state file, the console policy file and the
+  counters belong to the mayu process that answered; the view's header names it
+  (`instance` in the status, the audit chain's instance id). With several
+  replicas (the ADR-046 shared profile allows `replicaCount` above 1), a pause or
+  a rule edit applies only to the replica that served the request, and a later
+  refresh may be answered by another replica. Keep one replica per edit target,
+  or make the same edit on each replica by reaching its pod directly (for
+  example `kubectl port-forward` to that pod's admin port) and check the header
+  each time. The files live on the process's data volume, so a pause survives
+  a process restart only on the same volume: with the chart's default
+  `emptyDir` volume a replaced pod starts without the state file, so the pause
+  lapses, and with an empty console policy file, so console rules lapse too. Set `persistence.enabled` whenever `state_file` or `policy_file` is set;
+  the shared profile then gives each replica its own claim.
 
 Runtime limits and console rules apply without a restart; changes to
 `observability.exporters` and `observability.console` still need one. The

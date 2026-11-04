@@ -287,12 +287,17 @@ position and is not a verification. See the
 
 Full administrators only, reads included (team-mapped identities get 403 and an
 `admin_denied` record). Counters are per process since `counters_since`.
+`instance` names the answering process with the audit chain's instance id:
+runtime limits, console rules and counters belong to that process, so with
+several replicas each one answers for itself
+([scope](operations/observability.md#observability-console)).
 
 `GET /admin/observability`:
 
 ```json
 {
   "configured": true,
+  "instance": "mayu-0-01JC8X3V4N5Q6R7S8T9V0WXYZA",
   "policy_source": "files",
   "service_name": "inferplane",
   "counters_since": "2026-10-29T10:00:00Z",
@@ -305,9 +310,13 @@ Full administrators only, reads included (team-mapped identities get 403 and an
     "header_names": ["authorization"], "signals": ["audit", "traces"], "effective_signals": ["audit", "traces"],
     "queue_limit_bytes": 67108864, "queued_bytes": 0, "limit": {},
     "stats": [{"signal": "audit", "outcomes": {"sent": 12, "dropped_queue_full": 0, "dropped_oversize": 0,
-      "dropped_export_error": 0, "withheld_limit": 0, "sampled_out": 0}, "last_success_at": "2026-10-29T10:05:00Z"}]
+      "dropped_export_error": 0, "withheld_limit": 0, "sampled_out": 0}, "last_success_at": "2026-10-29T10:05:00Z"},
+     {"signal": "traces", "outcomes": {"sent": 30, "dropped_queue_full": 0, "dropped_oversize": 0,
+      "dropped_export_error": 0, "withheld_limit": 0, "sampled_out": 9}, "last_success_at": "2026-10-29T10:05:01Z"}]
   }],
-  "decisions": [{"signal": "audit", "decisions": {"selected": 12, "no_rule": 30, "content_conflict": 0, "withheld_limit": 0}}],
+  "decisions": [{"signal": "traces", "decisions": {"selected": 39, "no_rule": 3, "content_conflict": 0, "withheld_limit": 0}},
+   {"signal": "audit", "decisions": {"selected": 12, "no_rule": 30, "content_conflict": 0, "withheld_limit": 0}},
+   {"signal": "content", "decisions": {"selected": 0, "no_rule": 42, "content_conflict": 0, "withheld_limit": 0}}],
   "selections": [{"policy": "console-eng", "rule": "export", "source": "console", "subject": {"team": "engineering"},
     "targets": [{"signal": "audit", "exporter": "corp", "exported": true}]},
    {"policy": "engineering-observability", "rule": "export", "source": "files", "subject": {"team": "engineering"},

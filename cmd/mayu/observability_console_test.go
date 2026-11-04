@@ -293,6 +293,10 @@ func TestGatewayConsoleWithoutObservabilityBlock(t *testing.T) {
 	if code != 200 || st["configured"] != false {
 		t.Fatalf("status %d %v", code, st)
 	}
+	// The status names the answering process with the audit chain's instance id.
+	if g.instance == "" || st["instance"] != g.instance {
+		t.Fatalf("instance = %v, want the audit writer's %q", st["instance"], g.instance)
+	}
 	code, caps := consoleCall(t, g, "GET", "/admin/capabilities", nil)
 	if code != 200 || caps["observability_export"] != false {
 		t.Fatalf("capabilities %d %v", code, caps)

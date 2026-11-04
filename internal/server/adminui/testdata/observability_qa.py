@@ -29,6 +29,8 @@ def en(key):
 REV_L0, REV_L1 = 'sha256:' + '1' * 64, 'sha256:' + '2' * 64
 REV_R0, REV_R1 = 'sha256:' + '3' * 64, 'sha256:' + '4' * 64
 LONG_ENDPOINT = 'otel-collector.observability.svc.cluster.local:4318'
+# A pod-style hostname plus the per-run ULID, as instanceID() builds it.
+INSTANCE = 'inferplane-7d9f8c6b5-x2k4p-01JC8X3V4N5Q6R7S8T9V0WXYZA'
 OBS = {}
 
 
@@ -51,7 +53,7 @@ def status():
     rules = ({'editable': False, 'reason': 'control_plane', 'content_rules': False, 'console': []} if OBS['cp'] else
              {'editable': True, 'revision': OBS['rules_rev'], 'content_rules': False, 'console': copy.deepcopy(OBS['rules'])})
     return {
-        'configured': True, 'policy_source': 'control_plane' if OBS['cp'] else 'files', 'service_name': 'inferplane',
+        'configured': True, 'instance': INSTANCE, 'policy_source': 'control_plane' if OBS['cp'] else 'files', 'service_name': 'inferplane',
         'counters_since': '2026-10-29T10:00:00Z', 'limits': {'editable': True, 'revision': OBS['limits_rev']}, 'rules': rules,
         'exporters': [
             {'name': 'corp', 'endpoint': LONG_ENDPOINT, 'protocol': 'http', 'tls': True, 'header_names': ['authorization'],
@@ -154,6 +156,7 @@ def run_scenario(page, base, width, scheme, shots):
     assert page.locator('#obs-decisions tbody tr').count() == 3
     assert page.locator('#obs-selections tbody tr').count() == 2
     assert text('#obs-source').endswith(en('obs.source.files'))
+    assert text('#obs-instance') == en('obs.instance').replace('{i}', INSTANCE), text('#obs-instance')
     # Each exporter's endpoint cell carries its data boundary; only vault declares one.
     boundary = en('obs.boundary').replace('{b}', 'internal')
     assert text('#obs-exporters tbody tr:nth-child(2)').count(boundary) == 1 and text('#obs-exporters').count(boundary) == 1

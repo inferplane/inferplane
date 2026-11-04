@@ -167,6 +167,9 @@ function obsSignalRows(s) {
 function renderObservability() {
   const s = obsState;
   $("obs-since").textContent = s.configured ? msg("obs.since").replace("{t}", obsTime(s.counters_since)) : msg("obs.notConfigured");
+  // Limits, console rules and counters belong to the process that answered.
+  $("obs-instance").textContent = s.instance ? msg("obs.instance").replace("{i}", s.instance) : "";
+  $("obs-instance").hidden = !s.instance;
   $("obs-source").textContent = msg("obs.sourceLabel") + ": " + msg("obs.source." + s.policy_source);
   renderObsExporters(s);
   renderObsSignals(s);

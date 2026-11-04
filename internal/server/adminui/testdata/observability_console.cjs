@@ -109,6 +109,12 @@ const cells = tr => tr.children.map(td => td.textContent);
   assert.deepEqual(cells(row[0]), ["otel", "traces", ...Array(4).fill("not counted (no observability block)"), "—", "—"]);
   run(`renderObsSignals(${JSON.stringify(withStats)})`);
   assert.deepEqual(cells(byId("obs-signals").querySelector("tbody").children[0]).slice(0, 4), ["otel", "traces", "3", "0"]);
+  // The header names the answering process; without an instance it says nothing.
+  run(`obsState = ${JSON.stringify({ configured: true, instance: "gw-a-01JINSTANCE", counters_since: "2026-10-29T10:00:00Z", policy_source: "files", exporters: [], decisions: [], selections: [], limits: {}, rules: {} })}; renderObservability()`);
+  assert.equal(byId("obs-instance").textContent, "Answered by gw-a-01JINSTANCE");
+  assert.equal(byId("obs-instance").hidden, false);
+  run(`obsState = ${JSON.stringify({ configured: false, policy_source: "none", exporters: [], decisions: [], selections: [], limits: {}, rules: {} })}; renderObservability()`);
+  assert.equal(byId("obs-instance").hidden, true);
   const exp = { name: "corp", endpoint: "collector:4317", protocol: "grpc", tls: true, header_names: ["authorization"], data_boundary: "internal",
     signals: ["audit"], effective_signals: ["audit"], limit: {}, queued_bytes: 0 };
   run(`renderObsExporters(${JSON.stringify({ exporters: [exp] })})`);

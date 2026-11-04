@@ -177,9 +177,13 @@ func ensureConsolePolicyFile(cfg *config.Config) error {
 // observabilityConsole builds the full-admin observability console API. It is
 // mounted even without an observability block, so the view can say what is
 // missing instead of failing with 404. keys supplies the verified-identity
-// organization so change records carry digest identity when it is configured.
+// organization so change records carry digest identity when it is configured;
+// the audit writer's instance id names the answering process in the status.
 func observabilityConsole(cfg *config.Config, set *otelexport.Set, pol *policy.Store, aud *audit.Writer, keys keystore.Store) *observabilityapi.Console {
 	opts := observabilityapi.Options{Set: set, PolicySource: observabilityapi.SourceNone, Emit: aud.Append, AuditReady: aud.Ready}
+	if aud != nil {
+		opts.Instance = aud.Instance() // the same id every audit record of this process carries
+	}
 	opts.Organization = func(ctx context.Context) (string, error) {
 		c, err := principal.IdentityConfig(ctx, keys)
 		return c.Organization, err

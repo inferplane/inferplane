@@ -218,6 +218,20 @@ func TestStatusRuleReadOnlyReasons(t *testing.T) {
 	}
 }
 
+// The status names the answering process (the audit chain's instance id), so
+// an administrator behind a load balancer can tell which replica's limits and
+// counters it shows. An unset instance is omitted.
+func TestStatusNamesTheAnsweringInstance(t *testing.T) {
+	st, _ := getStatus(t, New(Options{Set: newSet(t), Instance: "gw-a-01JINSTANCE"}))
+	if st["instance"] != "gw-a-01JINSTANCE" {
+		t.Fatalf("instance = %v", st["instance"])
+	}
+	st, _ = getStatus(t, New(Options{}))
+	if v, has := st["instance"]; has {
+		t.Fatalf("an unset instance must be omitted, got %v", v)
+	}
+}
+
 // D11: without an observability block there are no counters for the legacy
 // exporter, so its row carries no stats rather than a misleading zero.
 func TestStatusLegacyWithoutSetHasNoStats(t *testing.T) {

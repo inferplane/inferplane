@@ -605,6 +605,7 @@ const MSG = {
   "obs.colContent": { en: "content", ko: "본문", zh: "内容", ja: "本文" },
   "obs.addRule": { en: "Add rule", ko: "규칙 추가", zh: "添加规则", ja: "ルールを追加" },
   "obs.since": { en: "Counters since {t} UTC (this gateway process)", ko: "{t} UTC 이후 집계 (이 게이트웨이 프로세스)", zh: "自 {t} UTC 起的计数（本网关进程）", ja: "{t} UTC 以降の集計（このゲートウェイプロセス）" },
+  "obs.instance": { en: "Answered by {i}", ko: "응답한 프로세스: {i}", zh: "应答进程：{i}", ja: "応答したプロセス: {i}" },
   "obs.notConfigured": { en: "Governed export is not configured on this gateway.", ko: "이 게이트웨이에는 정책 기반 내보내기가 설정되지 않았습니다.", zh: "此网关未配置受治理的导出。", ja: "このゲートウェイにはポリシー制御のエクスポートが設定されていません。" },
   "obs.sourceLabel": { en: "Policy source", ko: "정책 출처", zh: "策略来源", ja: "ポリシーの出所" },
   "obs.source.files": { en: "policy files", ko: "정책 파일", zh: "策略文件", ja: "ポリシーファイル" },
