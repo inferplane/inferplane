@@ -50,6 +50,10 @@ type RequestRef struct {
 	ModelSubstitutedFrom string `json:"model_substituted_from,omitempty"`
 	// Append-only: legacy requests omit routing and retain exact audit bytes.
 	Routing *RoutingRef `json:"routing,omitempty"`
+	// Change is admin change evidence (admin_observability_changed): what
+	// changed and the revisions before and after. Appended at the end with
+	// omitempty like Routing, so every other record keeps its exact bytes.
+	Change *ChangeRef `json:"change,omitempty"`
 }
 
 type OutcomeRef struct {

@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: ea3e205b093088efda04c0d70998ca8d0811b45d99d766ebd510290d6742fab8
+translation_source_sha256: cb235acd2484ba49e8399913bea5d0ddc83d006fca7afbfa2127dde7c6641880
 ---
 
 # 데이터 구현 {#data}
@@ -235,3 +235,7 @@ Usage 행과 체크포인트도 커밋되지 않습니다. 잃는 데이터는 �
 | `audit.client_evidence.session_ref` | `key_scoped`(기본), `off` | `off`는 `client.session_ref` 기록을 멈춥니다. 기존 기록의 연결은 그대로입니다. `request_class`에는 영향이 없습니다. |
 | `audit.client_evidence.auto_mode` | `on`(기본), `off` | `off`는 자동 모드 추정을 끕니다. |
 | `otel.trace_link_template` | `{trace_id}`를 포함한 `http`·`https` URL. 사용자 정보(`user:password@`)는 거부합니다 | 콘솔 링크 전용. `{trace_id}`는 기록의 32자리 16진수 trace ID로 치환합니다. `/admin/capabilities`로 콘솔에 전달합니다. |
+
+## 관리 변경 증거 (관측성 콘솔) {#admin-change-evidence-observability-console}
+
+`request.change`는 감사 `request` 객체 끝에 `omitempty`로 덧붙습니다. 이 필드가 없는 기록은 바이트가 그대로입니다. 관측성 콘솔은 `admin_observability_changed` 기록에 이 필드를 씁니다. `target`은 `observability_limits` 또는 `observability_rules`이고, `before`와 `after`는 저장된 상태 파일 바이트의 `sha256:` 리비전이며, `names`는 바뀐 exporter나 콘솔 규칙 이름입니다. `principal.user`와 `principal.auth_method`가 관리자를 나타냅니다. 상태 내용 자체는 체인에 들어가지 않습니다. 관리 기록은 위의 감사 콘솔 테이블에 투영되지 않습니다.

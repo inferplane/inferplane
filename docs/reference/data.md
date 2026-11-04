@@ -308,3 +308,14 @@ ingest path repopulates them. A record no longer in any source is not in the con
 | `audit.client_evidence.session_ref` | `key_scoped` (default), `off` | `off` stops writing `client.session_ref`; existing records keep their links. `request_class` is unaffected. |
 | `audit.client_evidence.auto_mode` | `on` (default), `off` | `off` stops auto mode estimation. |
 | `otel.trace_link_template` | `http` or `https` URL containing `{trace_id}`, without user info (`user:password@` is rejected) | Console link only; `{trace_id}` is replaced by the record's 32-hex trace ID. Sent to the console through `/admin/capabilities`. |
+
+## Admin change evidence (observability console)
+
+`request.change` is appended at the end of the audit `request` object with
+`omitempty`, so records without it keep their exact bytes. The observability
+console sets it on `admin_observability_changed` records: `target` is
+`observability_limits` or `observability_rules`, `before` and `after` are
+`sha256:` revisions of the persisted state file bytes, and `names` lists the
+changed exporters or console rules. `principal.user` and `principal.auth_method`
+name the administrator. The state itself never enters the chain. Admin records
+are not projected into the audit console tables above.
