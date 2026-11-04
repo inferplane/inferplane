@@ -85,6 +85,7 @@ func (c *Console) Routes() map[string]http.Handler {
 	return map[string]http.Handler{
 		"GET /admin/observability":        http.HandlerFunc(c.status),
 		"PUT /admin/observability/limits": http.HandlerFunc(c.putLimits),
+		"PUT /admin/observability/rules":  http.HandlerFunc(c.putRules),
 	}
 }
 

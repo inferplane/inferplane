@@ -1,6 +1,6 @@
 ---
 translation_source: api-reference.md
-translation_source_sha256: 2590629c85d8a3910533cb043c8c273f3efce0061295cf194157282d8c51a579
+translation_source_sha256: 39990b9e9f8120c8a081b555fbbff707d50b85d412b2c2d1fa3bd45e307e030b
 ---
 
 # API 레퍼런스 {#api-reference}
@@ -244,6 +244,90 @@ GET /admin/audit/summary
 행의 SHA-256으로 기록의 체인 위치를 보여 줄 뿐 검증이 아닙니다.
 [필드 계약](reference/api.ko.md#audit-console-adr-057)과
 [기록 필드](reference/data.ko.md#audit-console-evidence-adr-057)를 참고하세요.
+
+### 관측성 콘솔 · mayu 전용 {#observability-console-mayu-only}
+
+읽기를 포함해 전체 관리자만 쓸 수 있습니다(팀에 매핑된 신원은 403과 `admin_denied` 기록을 받습니다). 카운터는 `counters_since` 이후의 프로세스별 값입니다.
+
+`GET /admin/observability`:
+
+```json
+{
+  "configured": true,
+  "policy_source": "files",
+  "service_name": "inferplane",
+  "counters_since": "2026-10-29T10:00:00Z",
+  "limits": {"editable": true, "revision": "sha256:4f8b…"},
+  "rules": {"editable": true, "revision": "sha256:e3b0…", "content_rules": false, "console": [
+    {"name": "console-eng", "subject": {"team": "engineering"}, "audit": {"exporter": "corp"}}
+  ]},
+  "exporters": [{
+    "name": "corp", "endpoint": "otel-collector.internal:4318", "protocol": "http", "tls": true,
+    "header_names": ["authorization"], "signals": ["audit", "traces"], "effective_signals": ["audit", "traces"],
+    "queue_limit_bytes": 67108864, "queued_bytes": 0, "limit": {},
+    "stats": [{"signal": "audit", "outcomes": {"sent": 12, "dropped_queue_full": 0, "dropped_oversize": 0,
+      "dropped_export_error": 0, "withheld_limit": 0, "sampled_out": 0}, "last_success_at": "2026-10-29T10:05:00Z"}]
+  }],
+  "decisions": [{"signal": "audit", "decisions": {"selected": 12, "no_rule": 30, "content_conflict": 0, "withheld_limit": 0}}],
+  "selections": [{"policy": "console-eng", "rule": "export", "source": "console", "subject": {"team": "engineering"},
+    "targets": [{"signal": "audit", "exporter": "corp", "exported": true}]},
+   {"policy": "engineering-observability", "rule": "export", "source": "files", "subject": {"team": "engineering"},
+    "targets": [{"signal": "audit", "exporter": "corp", "exported": true}]}]
+}
+```
+
+`PUT /admin/observability/limits`는 실행 중 한도 전체를 바꿉니다. 빠진 exporter에는 한도가 없고, `signals`는 남길 선언 신호 목록이며, `max_content_bytes`와 `max_sample_percent`는 부트스트랩 값보다 낮추기만 합니다.
+
+```json
+{"dry_run": true, "expected_revision": "sha256:4f8b…", "exporters": {"corp": {"paused": true}}}
+```
+
+```json
+{
+  "dry_run": true,
+  "current_revision": "sha256:4f8b…",
+  "result_revision": "sha256:9a1c…",
+  "changes": [{"exporter": "corp", "field": "paused", "before": false, "after": true}],
+  "effects": [{"policy": "engineering-observability", "rule": "export", "signal": "audit", "exporter": "corp",
+    "before": {"exported": true}, "after": {"exported": false}}]
+}
+```
+
+`PUT /admin/observability/rules`는 콘솔이 관리하는 규칙, 곧 `observability.console.policy_file`의 `console-…` 문서 전체를 바꿉니다.
+
+```json
+{"dry_run": true, "expected_revision": "sha256:e3b0…", "rules": [
+  {"name": "console-eng", "subject": {"team": "engineering"},
+   "traces": {"exporter": "corp", "sample_percent": 20}, "audit": {"exporter": "corp"}}]}
+```
+
+```json
+{
+  "dry_run": true,
+  "current_revision": "sha256:e3b0…",
+  "result_revision": "sha256:7c2d…",
+  "changes": [{"name": "console-eng", "action": "added"}],
+  "summary": {"added": 1, "changed": 0, "removed": 0, "unchanged": 0},
+  "decisions": [{"subject": {"team": "engineering"},
+    "before": {"traces": [], "audit": []},
+    "after": {"traces": [{"exporter": "corp", "sample_percent": 20}], "audit": ["corp"]}}]
+}
+```
+
+적용하려면 같은 본문을 `"dry_run": false`로 보냅니다. 오류:
+
+| 상태 | `code` | 의미 |
+| --- | --- | --- |
+| 400 | `invalid_request` | 본문이 알려진 필드만 가진 JSON 객체 하나가 아니거나, 적용 요청에 `expected_revision`이 없음 |
+| 400 | `invalid_limits` / `invalid_rules` | 부트스트랩 상한을 벗어나거나 정책 로더가 거부하는 규칙 |
+| 400 | `content_not_allowed` | `observability.console.content_rules` 없이 콘솔 규칙이 본문 내보내기를 추가하거나 바꿈 |
+| 409 | `read_only` | 이 게이트웨이에서 편집할 수 없음(`reason`: `not_configured`, `no_state_file`, `no_policy_file`, `control_plane`) |
+| 409 | `revision_conflict` | 읽은 뒤 상태가 바뀜(`current_revision`을 함께 반환) |
+| 409 | `limits_file_changed` | 디스크의 상태 파일을 직접 고침. mayu를 재시작해 불러오세요 |
+| 409 | `console_file_foreign` | 콘솔 정책 파일에 콘솔이 관리하지 않는 문서가 있음 |
+| 409 | `policy_reload_failed` | 정책 세트를 다시 읽지 못해 콘솔 파일을 되돌림 |
+| 503 | `audit_unavailable` | 감사 체인이 기록을 받지 않아 아무것도 바꾸지 않음 |
+| 500 | `persist_failed` / `read_failed` | 상태 파일을 쓰거나 읽지 못해 아무것도 바꾸지 않음 |
 
 ## 오류 코드 {#error-codes}
 

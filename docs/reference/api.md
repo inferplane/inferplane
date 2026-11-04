@@ -73,6 +73,18 @@ data plane rejects a rule naming an undeclared exporter or a signal that exporte
 does not allow, and refuses every such rule when it declares no ceiling. See
 [governed OTLP export](../operations/observability.md#governed-otlp-export).
 
+### Observability console API (`mayu` only)
+
+`GET /admin/observability`, `PUT /admin/observability/limits` and
+`PUT /admin/observability/rules` (`internal/server/observabilityapi`) are mounted
+by `server.WithFullAdminRoutes`, so every route, reads included, needs a full
+administrator. Both PUTs take `dry_run` and `expected_revision`: a dry run changes
+nothing; an apply must name the revision its preview saw (409 `revision_conflict`
+otherwise), then persists, installs and appends `admin_observability_changed`.
+Errors are `{"error": message, "code": code}`. `/admin/capabilities` adds
+`observability_export`. Request and response shapes are in the
+[API reference](../api-reference.md#observability-console-mayu-only).
+
 ### Policy-routing schema and evidence (ADR-043)
 
 `GovernancePolicy.spec.rules[].sensitiveData` has required `onDetected` and

@@ -23,10 +23,7 @@ func put(t *testing.T, c *Console, pattern string, body any) (int, map[string]an
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pattern != limitsRoute {
-		t.Fatalf("put only drives %s", limitsRoute)
-	}
-	return rawPut(t, c, string(b))
+	return rawPutAsRoute(t, c, pattern, string(b), principal.AdminIdentity{Subject: "admin-sub", IsAdmin: true, AuthMethod: "oidc"})
 }
 
 type limitsHarness struct {
@@ -235,10 +232,15 @@ func rawPut(t *testing.T, c *Console, body string) (int, map[string]any) {
 
 func rawPutAs(t *testing.T, c *Console, body string, admin principal.AdminIdentity) (int, map[string]any) {
 	t.Helper()
-	req := httptest.NewRequest("PUT", "/admin/observability/limits", strings.NewReader(body))
+	return rawPutAsRoute(t, c, limitsRoute, body, admin)
+}
+
+func rawPutAsRoute(t *testing.T, c *Console, pattern, body string, admin principal.AdminIdentity) (int, map[string]any) {
+	t.Helper()
+	req := httptest.NewRequest("PUT", strings.TrimPrefix(pattern, "PUT "), strings.NewReader(body))
 	req = req.WithContext(principal.WithAdmin(req.Context(), admin))
 	rec := httptest.NewRecorder()
-	c.Routes()[limitsRoute].ServeHTTP(rec, req)
+	c.Routes()[pattern].ServeHTTP(rec, req)
 	var out map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("status %d, body %q", rec.Code, rec.Body)

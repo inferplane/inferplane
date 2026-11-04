@@ -326,3 +326,9 @@ are not projected into the audit console tables above.
 through a temp file, fsync and rename. The limits revision is the SHA-256 of the
 canonical bytes mayu writes, so for a file mayu wrote it equals the digest in the
 audit record. A file that does not parse refuses boot.
+
+`observability.console.policy_file` holds the console-owned GovernancePolicy
+documents: names start with `console-`, each has one FailOpen observability rule
+named `export`, and documents are sorted by name and separated by `---`. The
+local policy file channel loads it like any other policy file. Its revision is the
+SHA-256 of the file bytes.

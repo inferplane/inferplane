@@ -283,6 +283,94 @@ position and is not a verification. See the
 [field contract](reference/api.md#audit-console-adr-057) and
 [record fields](reference/data.md#audit-console-evidence-adr-057).
 
+### Observability console (`mayu` only)
+
+Full administrators only, reads included (team-mapped identities get 403 and an
+`admin_denied` record). Counters are per process since `counters_since`.
+
+`GET /admin/observability`:
+
+```json
+{
+  "configured": true,
+  "policy_source": "files",
+  "service_name": "inferplane",
+  "counters_since": "2026-10-29T10:00:00Z",
+  "limits": {"editable": true, "revision": "sha256:4f8b…"},
+  "rules": {"editable": true, "revision": "sha256:e3b0…", "content_rules": false, "console": [
+    {"name": "console-eng", "subject": {"team": "engineering"}, "audit": {"exporter": "corp"}}
+  ]},
+  "exporters": [{
+    "name": "corp", "endpoint": "otel-collector.internal:4318", "protocol": "http", "tls": true,
+    "header_names": ["authorization"], "signals": ["audit", "traces"], "effective_signals": ["audit", "traces"],
+    "queue_limit_bytes": 67108864, "queued_bytes": 0, "limit": {},
+    "stats": [{"signal": "audit", "outcomes": {"sent": 12, "dropped_queue_full": 0, "dropped_oversize": 0,
+      "dropped_export_error": 0, "withheld_limit": 0, "sampled_out": 0}, "last_success_at": "2026-10-29T10:05:00Z"}]
+  }],
+  "decisions": [{"signal": "audit", "decisions": {"selected": 12, "no_rule": 30, "content_conflict": 0, "withheld_limit": 0}}],
+  "selections": [{"policy": "console-eng", "rule": "export", "source": "console", "subject": {"team": "engineering"},
+    "targets": [{"signal": "audit", "exporter": "corp", "exported": true}]},
+   {"policy": "engineering-observability", "rule": "export", "source": "files", "subject": {"team": "engineering"},
+    "targets": [{"signal": "audit", "exporter": "corp", "exported": true}]}]
+}
+```
+
+`PUT /admin/observability/limits` replaces the runtime limits. An exporter left
+out has no limit; `signals` lists the declared signals to keep; `max_content_bytes`
+and `max_sample_percent` only lower the bootstrap values.
+
+```json
+{"dry_run": true, "expected_revision": "sha256:4f8b…", "exporters": {"corp": {"paused": true}}}
+```
+
+```json
+{
+  "dry_run": true,
+  "current_revision": "sha256:4f8b…",
+  "result_revision": "sha256:9a1c…",
+  "changes": [{"exporter": "corp", "field": "paused", "before": false, "after": true}],
+  "effects": [{"policy": "engineering-observability", "rule": "export", "signal": "audit", "exporter": "corp",
+    "before": {"exported": true}, "after": {"exported": false}}]
+}
+```
+
+`PUT /admin/observability/rules` replaces the console-owned rules, the
+`console-…` documents in `observability.console.policy_file`:
+
+```json
+{"dry_run": true, "expected_revision": "sha256:e3b0…", "rules": [
+  {"name": "console-eng", "subject": {"team": "engineering"},
+   "traces": {"exporter": "corp", "sample_percent": 20}, "audit": {"exporter": "corp"}}]}
+```
+
+```json
+{
+  "dry_run": true,
+  "current_revision": "sha256:e3b0…",
+  "result_revision": "sha256:7c2d…",
+  "changes": [{"name": "console-eng", "action": "added"}],
+  "summary": {"added": 1, "changed": 0, "removed": 0, "unchanged": 0},
+  "decisions": [{"subject": {"team": "engineering"},
+    "before": {"traces": [], "audit": []},
+    "after": {"traces": [{"exporter": "corp", "sample_percent": 20}], "audit": ["corp"]}}]
+}
+```
+
+Send the same body with `"dry_run": false` to apply. Errors:
+
+| Status | `code` | Meaning |
+| --- | --- | --- |
+| 400 | `invalid_request` | The body is not one JSON object with known fields, or an apply has no `expected_revision` |
+| 400 | `invalid_limits` / `invalid_rules` | Outside the bootstrap ceiling, or a rule the policy loader refuses |
+| 400 | `content_not_allowed` | A console rule adds or changes content export without `observability.console.content_rules` |
+| 409 | `read_only` | Not editable here (`reason`: `not_configured`, `no_state_file`, `no_policy_file`, `control_plane`) |
+| 409 | `revision_conflict` | The state changed since it was read (`current_revision` is returned) |
+| 409 | `limits_file_changed` | The state file was edited on disk; restart mayu to load it |
+| 409 | `console_file_foreign` | The console policy file holds documents the console does not manage |
+| 409 | `policy_reload_failed` | The policy set did not reload; the console file was restored |
+| 503 | `audit_unavailable` | The audit chain is not accepting records; nothing changed |
+| 500 | `persist_failed` / `read_failed` | A state file could not be written or read; nothing changed |
+
 ## Error Codes
 
 | Code | Meaning |
