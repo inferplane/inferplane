@@ -97,7 +97,7 @@ func (s *Set) EmitContent(exporter string, c Content) {
 	d := s.exporters[exporter]
 	size := int64(len(c.Request) + len(c.Response))
 	if d != nil && size > d.cfg.MaxContentBytes {
-		s.m.ObserveOTelExport(exporter, SignalContent, outcomeOversize, 1)
+		s.st.count(exporter, SignalContent, outcomeOversize, 1)
 		return
 	}
 	values := []*commonpb.KeyValue{stringAttr("request", string(c.Request))}

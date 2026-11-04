@@ -21,3 +21,18 @@ func TestObserveOTelExport(t *testing.T) {
 	var nilMetrics *Metrics
 	nilMetrics.ObserveOTelExport("corp", "audit", "sent", 1)
 }
+
+func TestObserveOTelDecision(t *testing.T) {
+	m := New()
+	m.ObserveOTelDecision("audit", "selected")
+	m.ObserveOTelDecision("audit", "selected")
+	m.ObserveOTelDecision("content", "content_conflict")
+	if got := testutil.ToFloat64(m.otelDecisions.WithLabelValues("audit", "selected")); got != 2 {
+		t.Fatalf("audit/selected = %v", got)
+	}
+	if got := testutil.ToFloat64(m.otelDecisions.WithLabelValues("content", "content_conflict")); got != 1 {
+		t.Fatalf("content/content_conflict = %v", got)
+	}
+	var nilMetrics *Metrics
+	nilMetrics.ObserveOTelDecision("audit", "selected")
+}

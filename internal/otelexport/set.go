@@ -64,7 +64,7 @@ func (e Exporter) allows(signal string) bool {
 // allows audit or content.
 type Set struct {
 	exporters map[string]*declared
-	m         *metrics.Metrics
+	st        *stats
 }
 
 type declared struct {
@@ -80,7 +80,7 @@ func New(serviceName string, exporters []Exporter, m *metrics.Metrics) (*Set, er
 		serviceName = "inferplane"
 	}
 	resource := &resourcepb.Resource{Attributes: []*commonpb.KeyValue{stringAttr("service.name", serviceName)}}
-	s := &Set{exporters: make(map[string]*declared, len(exporters)), m: m}
+	s := &Set{exporters: make(map[string]*declared, len(exporters)), st: newStats(m)}
 	for _, e := range exporters {
 		if e.Name == "" || e.Endpoint == "" {
 			s.closeAll()
@@ -103,7 +103,7 @@ func New(serviceName string, exporters []Exporter, m *metrics.Metrics) (*Set, er
 				s.closeAll()
 				return nil, fmt.Errorf("otelexport: exporter %q: %w", e.Name, err)
 			}
-			d.logs = newPipeline(e.Name, client, resource, e.QueueBytes, m)
+			d.logs = newPipeline(e.Name, client, resource, e.QueueBytes, s.st)
 		}
 		s.exporters[e.Name] = d
 	}
@@ -183,7 +183,7 @@ func (s *Set) emit(exporter, signal string, it item) {
 	if d == nil || d.logs == nil || !d.cfg.allows(signal) {
 		// Policy apply already checked the ceiling, so this is a programming
 		// or reload-skew error: count it rather than export off-ceiling.
-		s.m.ObserveOTelExport(exporter, signal, outcomeExportError, 1)
+		s.st.count(exporter, signal, outcomeExportError, 1)
 		return
 	}
 	it.signal = signal

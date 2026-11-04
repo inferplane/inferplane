@@ -43,6 +43,7 @@ type Metrics struct {
 	autoModeUnparsed   prometheus.Counter     // inferplane_audit_auto_mode_unparsed_total (ADR-057)
 	classifiers        *classifierMetrics     // PII classifier collectors (classifier.go)
 	otelExport         *prometheus.CounterVec // inferplane_otel_export_records_total
+	otelDecisions      *prometheus.CounterVec // inferplane_otel_export_decisions_total
 }
 
 func New() *Metrics {
@@ -122,14 +123,19 @@ func New() *Metrics {
 		}, []string{"team", "from_model", "to_model"}),
 		otelExport: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "inferplane_otel_export_records_total",
-			Help: "Governed OTLP export records by exporter, signal and outcome (sent, dropped_queue_full, dropped_oversize, dropped_export_error)." +
+			Help: "Governed OTLP export records by exporter, signal and outcome (sent, dropped_queue_full, dropped_oversize, dropped_export_error, withheld_limit, sampled_out)." +
 				" Exporter names come from local config; no team, user or key label.",
 		}, []string{"exporter", "signal", "outcome"}),
+		otelDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "inferplane_otel_export_decisions_total",
+			Help: "Governed OTLP export decisions by signal and decision (selected, no_rule, content_conflict, withheld_limit)." +
+				" Audit counts records, content counts egress requests, traces count spans; no team, user or key label.",
+		}, []string{"signal", "decision"}),
 	}
 	reg.MustRegister(m.tokenUsage, m.requestDuration, m.ttft, m.requestsTotal,
 		m.fallbackTotal, m.circuitState, m.quotaUtil, m.budgetUtil, m.budgetSpend, m.pricingMiss,
 		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected, m.substitution, m.routingDecisions,
-		m.otelExport, m.autoModeUnparsed)
+		m.otelExport, m.autoModeUnparsed, m.otelDecisions)
 	m.classifiers = newClassifierMetrics(reg)
 	// Prometheus only emits a labeled metric family once it has at least one
 	// observed child series. Pre-initialize the token-usage family to zero so
@@ -217,6 +223,15 @@ func (m *Metrics) ObserveOTelExport(exporter, signal, outcome string, n int) {
 		return
 	}
 	m.otelExport.WithLabelValues(exporter, signal, outcome).Add(float64(n))
+}
+
+// ObserveOTelDecision counts one governed export decision. Both labels are
+// fixed sets (signal, decision).
+func (m *Metrics) ObserveOTelDecision(signal, decision string) {
+	if m == nil {
+		return
+	}
+	m.otelDecisions.WithLabelValues(signal, decision).Inc()
 }
 
 // ObserveAutoModeUnparsed counts one Claude Code auto mode block call or

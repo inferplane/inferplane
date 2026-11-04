@@ -252,6 +252,10 @@ Rules a data plane enforces:
   records. HTTP 429/502/503/504 and gRPC `Unavailable`, `ResourceExhausted`,
   `DeadlineExceeded` and `Aborted` are retried twice. Watch
   `inferplane_otel_export_records_total{exporter,signal,outcome}`.
+  `withheld_limit` (a runtime limit withheld a policy selection) and `sampled_out`
+  (a trace target's sampling skipped the span) are outcome values of that metric too.
+  `inferplane_otel_export_decisions_total{signal,decision}` counts what governed export decided
+  (`selected`, `no_rule`, `content_conflict`, `withheld_limit`); neither family has a team, user or key label.
 - Changes to `observability` need a restart; SIGHUP reload does not rebuild
   exporters. Shutdown drains the audit writer first, then flushes exporters for up
   to 5 seconds.

@@ -13,8 +13,6 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
-
-	"github.com/inferplane/inferplane/internal/metrics"
 )
 
 // Outcome label values of inferplane_otel_export_records_total.
@@ -55,7 +53,7 @@ type pipeline struct {
 	name     string
 	client   logClient
 	resource *resourcepb.Resource
-	m        *metrics.Metrics
+	st       *stats
 
 	ch      chan item
 	queued  atomic.Int64 // bytes enqueued and not yet exported or dropped
@@ -70,9 +68,9 @@ type pipeline struct {
 	lastLog atomic.Int64 // unix seconds of the last failure log line
 }
 
-func newPipeline(name string, client logClient, resource *resourcepb.Resource, limit int64, m *metrics.Metrics) *pipeline {
+func newPipeline(name string, client logClient, resource *resourcepb.Resource, limit int64, st *stats) *pipeline {
 	ctx, cancel := context.WithCancel(context.Background())
-	p := &pipeline{name: name, client: client, resource: resource, m: m, limit: limit,
+	p := &pipeline{name: name, client: client, resource: resource, st: st, limit: limit,
 		ch: make(chan item, queueCapacity(limit)), ctx: ctx, cancel: cancel,
 		stop: make(chan struct{}), done: make(chan struct{})}
 	go p.run()
@@ -94,19 +92,19 @@ func queueCapacity(limit int64) int {
 // enqueue accepts the record if it fits the byte budget; it never blocks.
 func (p *pipeline) enqueue(it item) {
 	if p.stopped.Load() {
-		p.m.ObserveOTelExport(p.name, it.signal, outcomeQueueFull, 1)
+		p.st.count(p.name, it.signal, outcomeQueueFull, 1)
 		return
 	}
 	if p.queued.Add(it.size) > p.limit {
 		p.queued.Add(-it.size)
-		p.m.ObserveOTelExport(p.name, it.signal, outcomeQueueFull, 1)
+		p.st.count(p.name, it.signal, outcomeQueueFull, 1)
 		return
 	}
 	select {
 	case p.ch <- it:
 	default:
 		p.queued.Add(-it.size)
-		p.m.ObserveOTelExport(p.name, it.signal, outcomeQueueFull, 1)
+		p.st.count(p.name, it.signal, outcomeQueueFull, 1)
 	}
 }
 
@@ -196,7 +194,12 @@ func (p *pipeline) export(batch []item) {
 		counts[it.signal]++
 	}
 	for signal, n := range counts {
-		p.m.ObserveOTelExport(p.name, signal, outcome, n)
+		p.st.count(p.name, signal, outcome, n)
+		if err != nil {
+			p.st.failed(p.name, signal, err.Error()) // status code or fixed text (client.go)
+		} else {
+			p.st.delivered(p.name, signal)
+		}
 	}
 }
 
