@@ -15,6 +15,16 @@ type Sink interface {
 	Close() error
 }
 
+// RecordSink is an optional Sink extension: the writer hands it the in-memory
+// record alongside the exact canonical bytes the chain hashed, instead of
+// calling Write. It lets a sink route by fields that are never serialized
+// (PrincipalRef.Account). WriteRecord must not retain or mutate rec, and must
+// not block — the writer loop is serialized.
+type RecordSink interface {
+	Sink
+	WriteRecord(rec *Record, canon []byte) error
+}
+
 // WriterSink writes JSONL to any io.Writer (used for stdout and tests).
 type WriterSink struct {
 	name     string

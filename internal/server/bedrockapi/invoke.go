@@ -49,7 +49,8 @@ type InvokeHandler struct {
 	mask               *filter.Masking
 	teamPolicy         func(team string) (keystore.TeamRecord, bool)
 	bodies             *bodystore.Recorder
-	usage              *telemetry.Collector // nil-safe: usage telemetry off when nil (control-plane mode)
+	content            requestpolicy.ContentExport // nil-safe: governed content export off when nil
+	usage              *telemetry.Collector        // nil-safe: usage telemetry off when nil (control-plane mode)
 	streaming          bool
 	converse           bool
 	preflightInspector sensitivity.Inspector // startup-only injection; nil uses the built-in inspector
@@ -112,6 +113,9 @@ func (h *InvokeHandler) SetTeamPolicy(fn func(team string) (keystore.TeamRecord,
 func (h *InvokeHandler) SetUsageCollector(c *telemetry.Collector) { h.usage = c }
 
 func (h *InvokeHandler) SetBodyRecorder(r *bodystore.Recorder) { h.bodies = r }
+
+// SetContentExport enables governed egress content export (observability rules).
+func (h *InvokeHandler) SetContentExport(f requestpolicy.ContentExport) { h.content = f }
 
 func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
@@ -535,6 +539,8 @@ func (h *InvokeHandler) serveComplete(w http.ResponseWriter, req *http.Request, 
 	if h.bodies != nil {
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, resp.RawBody)
 	}
+	h.content.Export(req.Context(), requestpolicy.ContentRecord{RecordID: recID, Team: p.Team, Account: p.AccountSubject(), Ingress: h.protocol(),
+		Model: model, Upstream: upstream, TraceID: tracing.TraceID(req.Context()), Request: pr.RawBody, Response: resp.RawBody})
 	if !h.converse && resp.StatusCode/100 == 2 {
 		tap := clientctx.AutoModeTapFor(req.Context(), pr.Parsed) // nil when auto mode evidence is off
 		tap.ObserveResponse(resp.Parsed)
@@ -699,6 +705,8 @@ func (h *InvokeHandler) serveStream(w http.ResponseWriter, req *http.Request, pr
 	if h.bodies != nil {
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, nil)
 	}
+	h.content.Export(req.Context(), requestpolicy.ContentRecord{RecordID: recID, Team: p.Team, Account: p.AccountSubject(), Ingress: h.protocol(),
+		Model: model, Upstream: upstream, TraceID: tracing.TraceID(req.Context()), Request: pr.RawBody})
 	if streamCompleted && !streamFailed {
 		h.recordAutoMode(req.Context(), tap)
 	}

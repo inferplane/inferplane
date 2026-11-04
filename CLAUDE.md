@@ -194,6 +194,7 @@ internal/          - Private packages (gateway internals)
   controlplane/    - inferplaned distribution core: sync heartbeat, lease ledger, dataplane view (ADR-034)
   proxy/ cache/ telemetry/ - proxy/ owns the control-plane Syncer + LeaseTable (ADR-034) and the UsagePusher (ADR-036); telemetry/ is live (ADR-036): usage wire types, window collector, memory/postgres/durable aggregators; cache/ owns VolatileStore (unimplemented, ADR-031 consolidation target)
   server/          - HTTP data plane + admin plane, ingress handlers
+  server/observabilityapi/ - Observability console API (full-admin): export status, dry-run-first runtime limits (state file) and console-owned observability rules
   router/          - Model→provider resolution, fallback chain, circuit breaker; SubstituteTier applies ADR-041 budget-tier substitution
   classifier/      - Opt-in PII classifier seam: registry, verdict cache, Run (sub-project 1 of the PII classifier design)
   sensitivity/     - Original-byte inspection and complete finite request redaction; latest-user context signals (ADR-043/044)
@@ -214,6 +215,7 @@ internal/          - Private packages (gateway internals)
   live/            - Reloadable topology generation behind an atomic pointer (ADR-006)
   filter/          - Request-transform filter seam (ADR-009); concrete filters under plugins/
   tracing/         - Opt-in OpenTelemetry seam, no-op default (ADR-011)
+  otelexport/      - Governed OTLP log export: local exporter ceiling, bounded audit-copy/content pipelines, runtime limits and console status
   adminauth/       - Admin-plane OIDC identity leaf (ADR-004)
   openai/          - OpenAI ⇄ canonical conversion
   config/ principal/ - Config loading; request-scoped principal context

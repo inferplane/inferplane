@@ -1,0 +1,20 @@
+# Governed OTLP export (docs/operations/observability.md#governed-otlp-export).
+# Every exporter named here must be declared in the data plane's local
+# `observability.exporters` ceiling with the signal allowed; otherwise the data
+# plane refuses this document (local files fail the load, control-plane
+# documents are rejected and reported). Kept out of examples/policies/ so the
+# demo policy directory still loads on a data plane without a ceiling.
+apiVersion: inferplane.dev/v1alpha1
+kind: GovernancePolicy
+metadata:
+  name: engineering-observability
+spec:
+  subject:
+    team: engineering
+  rules:
+  - name: export
+    failurePolicy: FailOpen          # export is best-effort; the audit chain is the record
+    observability:
+      traces: { exporter: corp, samplePercent: 20 }
+      audit: { exporter: corp }      # canonical audit lines with hash/prev_hash
+      content: { exporter: vault }   # egress request (and buffered response) bodies

@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -136,5 +137,54 @@ func TestRoutingPolicyCRDSchema(t *testing.T) {
 	}
 	if at(bt, "properties", "tiers")["maxItems"] != float64(100) {
 		t.Error("CRD tiers must be bounded by the 100 strictly increasing runtime thresholds")
+	}
+}
+
+// Kubernetes prunes unknown properties, so an observability rule applied as a
+// CRD would silently lose its exporters without a structural schema. The CEL
+// list must also count it as a rule kind and keep it FailOpen.
+func TestObservabilityCRDSchema(t *testing.T) {
+	data, err := os.ReadFile("../../deploy/crd/inferplane.dev_governancepolicies.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var crd map[string]any
+	if err := sigyaml.Unmarshal(data, &crd); err != nil {
+		t.Fatal(err)
+	}
+	at := func(m map[string]any, keys ...string) map[string]any {
+		t.Helper()
+		for _, k := range keys {
+			next, ok := m[k].(map[string]any)
+			if !ok {
+				t.Fatalf("schema missing %s", k)
+			}
+			m = next
+		}
+		return m
+	}
+	version := at(crd, "spec")["versions"].([]any)[0].(map[string]any)
+	items := at(version, "schema", "openAPIV3Schema", "properties", "spec", "properties", "rules", "items")
+	obs := at(items, "properties", "observability")
+	props := at(obs, "properties")
+	traces := at(props, "traces", "properties")
+	if at(traces, "exporter")["pattern"] != exporterName.String() {
+		t.Fatalf("traces.exporter pattern drifted from the runtime name check: %v", at(traces, "exporter")["pattern"])
+	}
+	pct := at(traces, "samplePercent")
+	if pct["minimum"] != float64(1) || pct["maximum"] != float64(100) {
+		t.Fatalf("samplePercent bounds: %v", pct)
+	}
+	for _, sig := range []string{"audit", "content"} {
+		if at(props, sig, "properties", "exporter")["pattern"] != exporterName.String() {
+			t.Fatalf("%s.exporter pattern drifted", sig)
+		}
+	}
+	if _, ok := obs["x-kubernetes-validations"]; !ok {
+		t.Fatal("an empty observability block must be refused by the CRD")
+	}
+	rulesCEL := fmt.Sprint(items["x-kubernetes-validations"])
+	if !strings.Contains(rulesCEL, "has(self.observability)") || !strings.Contains(rulesCEL, "observability requires FailOpen") {
+		t.Fatalf("rule-kind CEL does not cover observability: %s", rulesCEL)
 	}
 }

@@ -1,6 +1,6 @@
 ---
 translation_source: reference/agent-llm.md
-translation_source_sha256: dd91701d3d386d41f05b9643ecd64e618b1c0a61a043c7ce218203e774e07a49
+translation_source_sha256: 18b1692a1513895b1d60785e44bb17e8d42680c0fd8e57145ecbc723b380e79e
 ---
 
 # 에이전트·LLM 구현 {#agent-llm}
@@ -26,7 +26,8 @@ Anthropic·Bedrock·OpenAI 호환 업스트림과 통신하는 공급자 추상�
 | 필터 | `internal/filter/` | RequestFilter와 레지스트리 |
 | 기존 PII 필터 | `plugins/piimask/` | 선택적 정규식·Luhn, 형식별 자리표시자, 단방향·금고 없음, 메시지 텍스트 마스킹 |
 | PII 분류기 (systemone) | `internal/classifier/`, `plugins/systemone/` | `/v1/systemone`·`/v1/systemone/batch`(`noul`)를 쓰는 선택적 학습 기반 PII 신호; 라우팅만 제한; 체크포인트 학습 때의 `model`/`criteria` 설정을 전송; 한국어 샘플은 `examples/pii-classifier-ko/` |
-| 트레이싱 | `internal/tracing/` | 선택적 OTLP 트레이스, GenAI와 캐시·비용·부분 결과, W3C 전파·감사 trace_id. 기본 no-op |
+| 트레이싱 | `internal/tracing/` | 선택적 OTLP 트레이스, GenAI와 캐시·비용·부분 결과, W3C 전파·감사 trace_id. span은 요청 정책이 고른 exporter로만 가고 샘플링은 게이트웨이가 정함. 선택적 `Observer`가 관측성 콘솔에 exporter별 span 수(전송·실패·샘플링 제외)를 넘기며 SDK 오류 문구는 넘기지 않음. 기본 no-op |
+| 정책 기반 내보내기 | `internal/otelexport/` | 로컬 exporter 상한(`Allows`)과 감사 기록 사본·송신 본문용 크기 제한 OTLP 로그 파이프라인. `observability` 정책 규칙이 주체별로 선택. 실행 중 한도(`Normalize`/`SetLimits`)가 결정 시점과 대기 중인 로그 배치를 보낼 때 좁히고 `withheld_limit`로 셈 |
 
 정산 span에는 `inferplane.cost.pricing_version`과 유한한 `inferplane.cost.context_tier`도 표시됩니다. 각 정산은 정수 microUSD·누락 여부·가격 메타데이터를 가진 `inferplane.cost.settled` 이벤트를 추가해 재시도가 앞선 시도 증거를 덮어쓰지 않게 합니다. 호환되는 span 수준 금액은 마지막 정산 시도입니다. 샘플링·전송 손실 때문에 어느 쪽도 회계 원장이 아니며 내용 없는 시도별 audit가 영속 원천입니다. 클라이언트 보고 금액이나 AWS 청구서가 아닌 게이트웨이 설정 단가 추정값입니다. 컨텍스트 요금은 [가격 가이드](pricing.ko.md)를 참고하세요.
 
@@ -44,7 +45,7 @@ Bedrock Guardrails는 모든 InvokeModel·스트림·Converse 호출의 데이�
 
 **Span은 정산된 수치를 기록합니다.** 표준 input/output_tokens만으로 캐시·비용을 표현할 수 없어 inferplane.usage.cache_read_input_tokens, cache_write_5m/1h_input_tokens, 정수 inferplane.cost.amount_usd_micros와 pricing_missing을 사용합니다. 0이면서 missing이면 가격 누락이고, missing이 아니면 명시적 무료나 정상적인 round-half-even 결과일 수 있습니다. 부분 스트림에는 response.partial과 Error 상태를 기록해 이미 HTTP 200인 잘린 응답을 정상 종료와 구분합니다. 비밀·key_id·원시 클라이언트 입력을 넣지 않고 라우팅 후 설정 범위 모델·공급자만 사용합니다.
 
-OTLP는 트레이스에만 사용합니다. 메트릭은 관리 포트 Prometheus이고 사용량 윈도는 CP 자체 API입니다. [수집기 계약](infrastructure.md)을 참고하세요.
+OTLP는 트레이스와, `observability` 정책이 고른 경우의 정책 기반 로그(감사 기록 사본·송신 본문)에 사용합니다. 메트릭은 관리 포트 Prometheus이고 사용량 윈도는 CP 자체 API입니다. [수집기 계약](infrastructure.md)을 참고하세요.
 
 ### 4. 경로별 프롬프트 캐시 보존 {#4-prompt-cache-preservation-by-path}
 

@@ -56,7 +56,7 @@ function boot(options = {}) {
   let jwtInFlight = 0, maxJWTInFlight = 0, jwtDenied = 0;
   let usage = options.usage || { total_micro_usd: 1496085, rows, degraded: false };
   let userUsage = options.users || { total_micro_usd: 1496085, rows: [{ ...rows[0], key: 'developer-a' }], degraded: false };
-  let policy = { generation: 'g2', writable: options.writable !== false, policies: [{ name: 'engineering', policy: structuredClone(doc) }] };
+  let policy = { generation: 'g2', writable: options.writable !== false, policies: options.policies || [{ name: 'engineering', policy: structuredClone(doc) }] };
   let fail = options.fail || {};
   let custom = options.custom;
   const resp = (status, body) => ({ status, ok: status >= 200 && status < 300, text: async () => typeof body === 'string' ? body : JSON.stringify(body), json: async () => body });
@@ -202,6 +202,15 @@ process.exitCode = 1; // unresolved promises must not exit as a successful suite
   assert.equal(app.$('policies-list').children.length, 0, 'disconnect retained policy data');
   assert.equal(app.$('dialog-description').textContent, '', 'disconnect retained policy review context');
 
+  // Observability rules are distributed like any other kind; the console must
+  // name them instead of rendering an "unknown" rule.
+  const exportDoc = { apiVersion: 'inferplane.dev/v1alpha1', kind: 'GovernancePolicy', metadata: { name: 'export', generation: 1 }, spec: { subject: { team: 'engineering' }, rules: [
+    { name: 'otel', failurePolicy: 'FailOpen', observability: { traces: { exporter: 'corp', samplePercent: 20 }, audit: { exporter: 'corp' } } },
+  ] } };
+  app = boot({ policies: [{ name: 'export', policy: exportDoc }] }); await app.connect();
+  const badges = app.$('policies-list').querySelector('.policy-badges').textContent;
+  assert.match(badges, /otel · observability · traces→corp 20% · audit→corp/);
+  assert.doesNotMatch(badges, /unknown/);
   app = boot({ fail: { '/v1alpha1/usage': 401 } }); await app.connect();
   assert.equal(app.$('workspace-content').hidden, true, 'invalid auth unlocked console');
   assert.equal(app.$('auth-section').hidden, false);

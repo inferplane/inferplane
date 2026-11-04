@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -107,6 +108,12 @@ type Store struct {
 	routedAndPriced   func(model string) error
 	sharedEnforcement bool
 	identityConfig    *identity.Config
+	// observabilityCeiling validates observability exporter/signal pairs
+	// against this data plane's local ceiling; nil skips (control plane).
+	observabilityCeiling func(exporter, signal string) error
+	// reloadMu serializes Reload: the Watch and the observability console
+	// both call it, and an older read must never install after a newer one.
+	reloadMu sync.Mutex
 }
 
 // SetSharedEnforcement is a startup-only capability declaration. It must only
@@ -130,6 +137,9 @@ type snapshot struct {
 	files           map[string]time.Time // watched file → mtime at load
 	teams           map[string]TeamLimits
 	users           map[userKey]UserLimits
+	// observability is true when any accepted policy has an observability
+	// rule, so the request-path lookup returns immediately otherwise.
+	observability bool
 }
 
 // NewStore loads the given paths (files or directories) and fails on any
@@ -176,7 +186,7 @@ func (s *Store) ApplyWire(docs []v1alpha1.GovernancePolicy) []Rejection {
 			seen[name] = true
 			p, err := FromV1Alpha1(&docs[i])
 			if err == nil {
-				err = checkEnforceable(p, s.routedAndPriced, s.sharedEnforcement)
+				err = checkEnforceable(p, s.routedAndPriced, s.observabilityCeiling, s.sharedEnforcement)
 			}
 			if err != nil {
 				return []Rejection{{Policy: name, Reason: err.Error()}}
@@ -242,7 +252,7 @@ func (s *Store) ApplyWire(docs []v1alpha1.GovernancePolicy) []Rejection {
 		seen[name] = true
 		p, err := FromV1Alpha1(&docs[i])
 		if err == nil {
-			err = checkEnforceable(p, s.routedAndPriced, s.sharedEnforcement)
+			err = checkEnforceable(p, s.routedAndPriced, s.observabilityCeiling, s.sharedEnforcement)
 		}
 		if err != nil {
 			rememberRejection(&docs[i])
@@ -274,12 +284,17 @@ func (s *Store) ApplyWire(docs []v1alpha1.GovernancePolicy) []Rejection {
 		policies:        accepted,
 		teams:           mergeTeamLimits(accepted),
 		users:           mergeUserLimits(accepted),
+		observability:   hasObservability(accepted),
 	})
 	return rejected
 }
 
 // Reload re-reads every configured path and atomically swaps the snapshot.
-// On error the previous snapshot (if any) stays in force.
+// On error the previous snapshot (if any) stays in force. Reloads are
+// serialized (the Watch and the observability console both call it), and
+// every file's mtime is recorded BEFORE it is read: a write that lands during
+// the read moves the mtime past the recorded one, so the next Watch poll
+// reloads it instead of treating it as loaded.
 func (s *Store) Reload() error {
 	// Runtime guard, not just a doc comment (PR #50 review finding): on a
 	// control-plane-fed store (NewEmptyStore) a stray generic Reload —
@@ -288,42 +303,84 @@ func (s *Store) Reload() error {
 	if len(s.paths) == 0 {
 		return errors.New("policy store has no file paths (control-plane-fed): Reload/Watch do not apply")
 	}
-	policies, files, err := LoadPaths(s.paths...)
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	files, err := enumerate(s.paths...)
 	if err != nil {
 		return err
 	}
-	for _, p := range policies {
-		if err := validateIdentitySubject(p.Subject.User, s.identityConfig); err != nil {
-			return err
-		}
-		if err := checkEnforceable(p, s.routedAndPriced, s.sharedEnforcement); err != nil {
-			return err
-		}
-	}
-
 	mtimes := make(map[string]time.Time, len(files))
 	for _, f := range files {
 		if info, err := os.Stat(f); err == nil {
 			mtimes[f] = info.ModTime()
 		}
 	}
+	policies, _, err := LoadPaths(s.paths...)
+	if err != nil {
+		return err
+	}
+	if afterPolicyRead != nil {
+		afterPolicyRead()
+	}
+	if err := s.checkApplicable(policies); err != nil {
+		return err
+	}
 	s.snap.Store(&snapshot{
-		policies: policies,
-		files:    mtimes,
-		teams:    mergeTeamLimits(policies),
-		users:    mergeUserLimits(policies),
+		policies:      policies,
+		files:         mtimes,
+		teams:         mergeTeamLimits(policies),
+		users:         mergeUserLimits(policies),
+		observability: hasObservability(policies),
 	})
+	return nil
+}
+
+// afterPolicyRead is a test seam: it runs after Reload has read the policy
+// files and before it validates and installs them.
+var afterPolicyRead func()
+
+// CheckLocal runs Reload's apply-time checks — unique names, identity
+// subjects, enforceability and the observability ceiling — over policies
+// without installing them. The observability console uses it for a dry run;
+// Reload stays the authoritative check when the edit is applied.
+func (s *Store) CheckLocal(policies []*Policy) error {
+	seen := make(map[string]string, len(policies))
+	for _, p := range policies {
+		if err := claimPolicyName(seen, p.Name, ""); err != nil {
+			return err
+		}
+	}
+	return s.checkApplicable(policies)
+}
+
+// checkApplicable is the per-policy apply-time check shared by Reload and
+// CheckLocal: identity subject, then enforceability and the ceiling.
+func (s *Store) checkApplicable(policies []*Policy) error {
+	for _, p := range policies {
+		if err := validateIdentitySubject(p.Subject.User, s.identityConfig); err != nil {
+			return err
+		}
+		if err := checkEnforceable(p, s.routedAndPriced, s.observabilityCeiling, s.sharedEnforcement); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 // checkEnforceable rejects rules this data plane build cannot enforce yet.
 // routedAndPriced is the ADR-041 apply-time target check for budgetTiers
-// substitution rules (nil skips it — see Store.routedAndPriced doc).
-func checkEnforceable(p *Policy, routedAndPriced func(model string) error, shared bool) error {
+// substitution rules (nil skips it — see Store.routedAndPriced doc);
+// observabilityCeiling checks observability exporters the same way.
+func checkEnforceable(p *Policy, routedAndPriced func(model string) error, observabilityCeiling func(exporter, signal string) error, shared bool) error {
 	reject := func(rule, reason string) error {
 		return &UnsupportedError{APIVersion: SupportedAPIVersions[0], Kind: "GovernancePolicy", Rule: rule, Reason: reason}
 	}
 	for _, r := range p.Rules {
+		if r.Observability != nil && observabilityCeiling != nil {
+			if err := checkObservabilityCeiling(r.Observability, observabilityCeiling); err != nil {
+				return reject(r.Name, err.Error())
+			}
+		}
 		if r.TokenQuota != nil && !shared {
 			return reject(r.Name, "tokenQuota requires shared Postgres governance")
 		}
@@ -803,6 +860,14 @@ func clonePolicy(p *Policy) *Policy {
 }
 
 func cloneRule(r Rule) Rule {
+	if r.Observability != nil {
+		o := *r.Observability
+		if o.Traces != nil {
+			t := *o.Traces
+			o.Traces = &t
+		}
+		r.Observability = &o
+	}
 	if r.TokenQuota != nil {
 		q := *r.TokenQuota
 		r.TokenQuota = &q

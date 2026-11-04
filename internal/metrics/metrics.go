@@ -46,6 +46,8 @@ type Metrics struct {
 	inflightRefusals   *prometheus.CounterVec // inferplane_inflight_refusals_total
 	autoModeUnparsed   prometheus.Counter     // inferplane_audit_auto_mode_unparsed_total (ADR-057)
 	classifiers        *classifierMetrics     // PII classifier collectors (classifier.go)
+	otelExport         *prometheus.CounterVec // inferplane_otel_export_records_total
+	otelDecisions      *prometheus.CounterVec // inferplane_otel_export_decisions_total
 }
 
 func New() *Metrics {
@@ -123,6 +125,16 @@ func New() *Metrics {
 			// config-declared values (team, from/to model names) — never
 			// raw, unvalidated client input.
 		}, []string{"team", "from_model", "to_model"}),
+		otelExport: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "inferplane_otel_export_records_total",
+			Help: "Governed OTLP export records by exporter, signal and outcome (sent, dropped_queue_full, dropped_oversize, dropped_export_error, withheld_limit, sampled_out)." +
+				" Exporter names come from local config; no team, user or key label.",
+		}, []string{"exporter", "signal", "outcome"}),
+		otelDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "inferplane_otel_export_decisions_total",
+			Help: "Governed OTLP export decisions by signal and decision (selected, no_rule, content_conflict, withheld_limit)." +
+				" Audit counts records, content counts egress requests, traces count spans; no team, user or key label.",
+		}, []string{"signal", "decision"}),
 		modelFallback: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "inferplane_model_fallback_total",
 			Help: "Requests for an unrouted model resolved to a configured one (ADR-029), by source and resolved model.",
@@ -140,7 +152,7 @@ func New() *Metrics {
 	reg.MustRegister(m.tokenUsage, m.requestDuration, m.ttft, m.requestsTotal,
 		m.fallbackTotal, m.circuitState, m.quotaUtil, m.budgetUtil, m.budgetSpend, m.pricingMiss,
 		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected, m.substitution, m.routingDecisions,
-		m.autoModeUnparsed, m.modelFallback, m.inflightBytes, m.inflightRefusals)
+		m.otelExport, m.autoModeUnparsed, m.otelDecisions, m.modelFallback, m.inflightBytes, m.inflightRefusals)
 	// Go runtime (heap, GC, goroutines) and process (RSS, CPU, file
 	// descriptors) collectors: their families carry no request data and only
 	// fixed labels. Without them a large-body memory burst was visible only
@@ -245,6 +257,24 @@ func (m *Metrics) IncUsageWindowDropped() {
 		return
 	}
 	m.usageDropped.Inc()
+}
+
+// ObserveOTelExport counts n governed export records for one exporter,
+// signal and outcome. Every label value is config-bounded or a fixed set.
+func (m *Metrics) ObserveOTelExport(exporter, signal, outcome string, n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	m.otelExport.WithLabelValues(exporter, signal, outcome).Add(float64(n))
+}
+
+// ObserveOTelDecision counts one governed export decision. Both labels are
+// fixed sets (signal, decision).
+func (m *Metrics) ObserveOTelDecision(signal, decision string) {
+	if m == nil {
+		return
+	}
+	m.otelDecisions.WithLabelValues(signal, decision).Inc()
 }
 
 // ObserveAutoModeUnparsed counts one Claude Code auto mode block call or

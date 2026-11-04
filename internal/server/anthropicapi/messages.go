@@ -54,6 +54,7 @@ type MessagesHandler struct {
 	mask       *filter.Masking                               // nil-safe: masking off when nil (ADR-009)
 	teamPolicy func(team string) (keystore.TeamRecord, bool) // nil-safe: no per-team overrides when nil (D6/D7, ADR-016 fresh-read pattern)
 	bodies     *bodystore.Recorder                           // nil-safe: body capture off when nil (D4, ADR-018)
+	content    requestpolicy.ContentExport                   // nil-safe: governed content export off when nil
 	usage      *telemetry.Collector                          // nil-safe: usage telemetry off when nil (control-plane mode)
 }
 
@@ -73,6 +74,9 @@ func (h *MessagesHandler) SetTeamPolicy(fn func(team string) (keystore.TeamRecor
 // SetBodyRecorder enables opt-in request/response body capture (D4, ADR-018).
 // nil-safe: leaving it unset keeps the zero-overhead fast path.
 func (h *MessagesHandler) SetBodyRecorder(r *bodystore.Recorder) { h.bodies = r }
+
+// SetContentExport enables governed egress content export (observability rules).
+func (h *MessagesHandler) SetContentExport(f requestpolicy.ContentExport) { h.content = f }
 
 // SetUsageCollector enables per-request usage telemetry (control-plane mode):
 // every settle folds (team, owner, upstream model, usage, cost) into the
@@ -542,6 +546,10 @@ func (h *MessagesHandler) serveComplete(w http.ResponseWriter, req *http.Request
 	if h.bodies != nil && resp.StatusCode < 400 {
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, resp.RawBody)
 	}
+	if resp.StatusCode < 400 {
+		h.content.Export(req.Context(), requestpolicy.ContentRecord{RecordID: recID, Team: p.Team, Account: p.AccountSubject(), Ingress: "anthropic",
+			Model: model, Upstream: upstream, TraceID: tracing.TraceID(req.Context()), Request: pr.RawBody, Response: resp.RawBody})
+	}
 	if resp.StatusCode/100 == 2 {
 		tap := clientctx.AutoModeTapFor(req.Context(), pr.Parsed) // nil when auto mode evidence is off
 		tap.ObserveResponse(resp.Parsed)
@@ -677,6 +685,8 @@ func (h *MessagesHandler) serveStream(w http.ResponseWriter, req *http.Request, 
 	if h.bodies != nil {
 		bodyRef = h.bodies.Capture(recID, p.Team, pr.RawBody, nil)
 	}
+	h.content.Export(req.Context(), requestpolicy.ContentRecord{RecordID: recID, Team: p.Team, Account: p.AccountSubject(), Ingress: "anthropic",
+		Model: model, Upstream: upstream, TraceID: tracing.TraceID(req.Context()), Request: pr.RawBody})
 	if streamCompleted && !streamFailed {
 		h.recordAutoMode(req.Context(), tap)
 	}

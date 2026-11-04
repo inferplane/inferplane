@@ -37,15 +37,19 @@ type Handler struct {
 	mask       *filter.Masking
 	teamPolicy func(string) (keystore.TeamRecord, bool)
 	bodies     *bodystore.Recorder
+	content    requestpolicy.ContentExport // nil-safe: governed content export off when nil
 	usage      *telemetry.Collector
 }
 
 func NewHandler(r *router.Router, aud *audit.Writer, gov *governance.Governor, m *metrics.Metrics) *Handler {
 	return &Handler{r: r, aud: aud, gov: gov, metrics: m}
 }
-func (h *Handler) SetMasking(m *filter.Masking)             { h.mask = m }
-func (h *Handler) SetBodyRecorder(r *bodystore.Recorder)    { h.bodies = r }
-func (h *Handler) SetUsageCollector(c *telemetry.Collector) { h.usage = c }
+func (h *Handler) SetMasking(m *filter.Masking)          { h.mask = m }
+func (h *Handler) SetBodyRecorder(r *bodystore.Recorder) { h.bodies = r }
+
+// SetContentExport enables governed egress content export (observability rules).
+func (h *Handler) SetContentExport(f requestpolicy.ContentExport) { h.content = f }
+func (h *Handler) SetUsageCollector(c *telemetry.Collector)       { h.usage = c }
 func (h *Handler) SetTeamPolicy(f func(string) (keystore.TeamRecord, bool)) {
 	h.teamPolicy = f
 }

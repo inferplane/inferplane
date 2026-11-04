@@ -65,7 +65,7 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
   additionally requires `ingress.admin.enabled: true` to be routed — it carries
   key-issuance/governance actions, so exposing it is an explicit second opt-in, not
   a side effect of turning on the data-plane Ingress.
-- **OTel Collector contract — four channels, only one of them OTLP.** A collector
+- **OTel Collector contract — five channels, two of them OTLP.** A collector
   cannot pick up everything from one receiver, so the split is deliberate:
   - **metrics** — a `prometheus` receiver scrapes `http://<svc>:9090/metrics` (the
     Service's named `admin` port). The Prometheus registry (`internal/metrics`) is the
@@ -74,11 +74,30 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
     drift. `gen_ai_*` names follow OTel GenAI semconv naming, but the transport is
     Prometheus exposition, not OTLP.
   - **traces** — an `otlp` receiver on `:4318` (http) or `:4317` (grpc), pushed by the
-    opt-in `config.otel` block (ADR-011). Spans carry GenAI request/response
+    opt-in `config.otel` block (ADR-011) and by governed exporters that allow
+    `traces`. Spans carry GenAI request/response
     attributes plus `inferplane.usage.cache_{read,write_5m,write_1h}_input_tokens`,
     `inferplane.cost.amount_usd_micros` / `inferplane.cost.pricing_missing`, and
     `inferplane.response.partial` on an interrupted stream (span status `Error` even
     though the wire status was already 200).
+  - **governed logs** — OTLP logs (`/v1/logs` or the gRPC logs service) carrying
+    audit-record copies and egress content, sent by exporters declared in
+    `config.observability.exporters` to the teams/users an `observability` policy
+    rule selects ([governed export](../operations/observability.md#governed-otlp-export)).
+    Best-effort and bounded; the WAL chain stays the record of evidence.
+  - **observability console** — the optional `observability.console` block names a
+    `state_file` (runtime export limits that mayu writes) and a `policy_file`
+    (console-owned observability rules, which must also be an entry of `policies`
+    and cannot be used with `control_plane`). Both must be on a writable volume:
+    the chart mounts the data volume at `/var/lib/inferplane` (an emptyDir unless
+    `persistence.enabled`), while its `policies` ConfigMap mount at
+    `/etc/inferplane/policies` is read-only. Both files, like the console's
+    counters, belong to one mayu process: with more than one replica an edit
+    applies only to the replica that served it (the status `instance` names it),
+    and with the default emptyDir a replaced pod starts without them, so a pause
+    lapses. Set `persistence.enabled` whenever `state_file` is set (the shared
+    profile then renders one claim per replica), and keep one replica per edit
+    target or make the edit on each replica.
   - **usage windows** — `POST /v1alpha1/usage` to `inferplaned` (ADR-036). This is
     inferplane's own protocol on its own channel; it is NOT OTLP and no collector
     receiver consumes it.

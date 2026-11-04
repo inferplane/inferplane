@@ -1,6 +1,6 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 38d4fa76f6f271a12f78c9ad0bd8bf97ecadf361d809501c48ed901f615d9769
+translation_source_sha256: 85c4477fa1238d108cfac2de6a96cd2a963e0673b107afb834a1304c578bcf00
 ---
 
 # 데이터 구현 {#data}
@@ -237,3 +237,11 @@ Usage 행과 체크포인트도 커밋되지 않습니다. 잃는 데이터는 �
 | `audit.client_evidence.session_ref` | `key_scoped`(기본), `off` | `off`는 `client.session_ref` 기록을 멈춥니다. 기존 기록의 연결은 그대로입니다. `request_class`에는 영향이 없습니다. |
 | `audit.client_evidence.auto_mode` | `on`(기본), `off` | `off`는 자동 모드 추정을 끕니다. |
 | `otel.trace_link_template` | `{trace_id}`를 포함한 `http`·`https` URL. 사용자 정보(`user:password@`)는 거부합니다 | 콘솔 링크 전용. `{trace_id}`는 기록의 32자리 16진수 trace ID로 치환합니다. `/admin/capabilities`로 콘솔에 전달합니다. |
+
+## 관리 변경 증거 (관측성 콘솔) {#admin-change-evidence-observability-console}
+
+`request.change`는 감사 `request` 객체 끝에 `omitempty`로 덧붙습니다. 이 필드가 없는 기록은 바이트가 그대로입니다. 관측성 콘솔은 `admin_observability_changed` 기록에 이 필드를 씁니다. `target`은 `observability_limits` 또는 `observability_rules`이고, `before`와 `after`는 저장된 상태 파일 바이트의 `sha256:` 리비전이며, `names`는 바뀐 exporter나 콘솔 규칙 이름입니다. 비상 토큰 관리자나 검증된 신원이 설정되지 않은 관리자는 `principal.user`와 `principal.auth_method`로, 검증된 신원(`key_store.identity`) 아래의 OIDC 관리자는 원본 subject 대신 `principal.identity`(다이제스트)로 기록됩니다. 상태 내용 자체는 체인에 들어가지 않습니다. 관리 기록은 위의 감사 콘솔 테이블에 투영되지 않습니다.
+
+`observability.console.state_file`은 실행 중 한도를 `{"version": 1, "exporters": {...}}` 형식(exporter마다 `paused`, `signals`, `max_content_bytes`, `max_sample_percent`)으로 담습니다. mayu가 임시 파일·fsync·rename을 거쳐 0600 권한으로 씁니다. 한도 리비전은 mayu가 쓰는 정규 바이트의 SHA-256이므로, mayu가 쓴 파일이라면 감사 기록의 다이제스트와 같습니다. 해석할 수 없는 파일이면 부팅을 거부합니다.
+
+`observability.console.policy_file`에는 콘솔이 관리하는 GovernancePolicy 문서가 들어갑니다. 이름은 `console-`로 시작하고, 문서마다 `export`라는 FailOpen observability 규칙이 하나 있으며, 문서는 이름순으로 `---`로 구분합니다. 로컬 정책 파일 채널이 다른 정책 파일과 똑같이 읽습니다. 리비전은 파일 바이트의 SHA-256입니다.

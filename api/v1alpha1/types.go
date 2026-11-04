@@ -87,8 +87,9 @@ const (
 )
 
 // Rule is one governance rule. Exactly one of the kind-specific fields
-// (Budget, Routing, ModelAccess, Rate, SensitiveData) is set. FailurePolicy is REQUIRED —
-// there is no default, because a defaulted failure mode is a silent one.
+// (Budget, Routing, ModelAccess, Rate, SensitiveData, TokenQuota,
+// Observability) is set. FailurePolicy is REQUIRED — there is no default,
+// because a defaulted failure mode is a silent one.
 type Rule struct {
 	Name          string             `json:"name"`
 	FailurePolicy FailurePolicy      `json:"failurePolicy"`
@@ -98,6 +99,38 @@ type Rule struct {
 	Rate          *RateRule          `json:"rate,omitempty"`
 	SensitiveData *SensitiveDataRule `json:"sensitiveData,omitempty"`
 	TokenQuota    *TokenQuotaRule    `json:"tokenQuota,omitempty"`
+	Observability *ObservabilityRule `json:"observability,omitempty"`
+}
+
+// ObservabilityRule selects governed OTLP export for the subject's requests.
+// Each exporter is a NAME from the data plane's local observability ceiling
+// (mayu config `observability.exporters`): the endpoint, credentials, TLS and
+// the signals an exporter may carry are local, so a policy can only choose
+// among destinations an operator declared — never add one. A data plane
+// rejects a rule naming an undeclared exporter or a signal the exporter does
+// not allow. Export is best-effort (the local audit chain stays the evidence
+// of record), so the rule requires FailOpen.
+type ObservabilityRule struct {
+	// Traces exports the subject's request spans.
+	Traces *TraceExport `json:"traces,omitempty"`
+	// Audit exports a copy of the subject's audit records as OTLP logs.
+	Audit *SignalExport `json:"audit,omitempty"`
+	// Content exports the egress request body (after routing and masking) and,
+	// when buffered, the response body as OTLP logs.
+	Content *SignalExport `json:"content,omitempty"`
+}
+
+// TraceExport exports spans to one exporter. SamplePercent is 1..100 and
+// defaults to 100; the draw is made by the gateway, never by the client's
+// trace context.
+type TraceExport struct {
+	Exporter      string `json:"exporter"`
+	SamplePercent *int   `json:"samplePercent,omitempty"`
+}
+
+// SignalExport exports one log signal to one exporter.
+type SignalExport struct {
+	Exporter string `json:"exporter"`
 }
 
 // TokenQuotaRule is a global calendar token cap. Only the shared-governance

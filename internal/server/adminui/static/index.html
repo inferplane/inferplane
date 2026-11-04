@@ -41,6 +41,7 @@
         <button class="nav" data-view="usage">▤&ensp;<span data-i18n="nav.usage">Usage</span></button>
         <button class="nav" data-view="logs">≡&ensp;<span data-i18n="nav.logs">Logs</span></button>
         <button class="nav" data-view="audit">◉&ensp;<span data-i18n="nav.audit">Audit</span></button>
+        <button class="nav" data-view="observability">◎&ensp;<span data-i18n="nav.observability">Observability</span></button>
         <button class="nav" data-view="evaluation">⇆&ensp;<span data-i18n="nav.evaluation">Compare models</span></button>
         <button class="nav" data-view="keys">⚿&ensp;<span data-i18n="nav.keys">Virtual keys</span></button>
         <button class="nav" data-view="teams">⚇&ensp;<span data-i18n="nav.teamsUsers">Teams &amp; Users</span></button>
@@ -267,6 +268,81 @@
                 </tr></thead><tbody></tbody></table></div>
                 <p class="hint audit-callout" data-i18n="audit.autoCallout">The gateway sees only the verdict. Which tool call was blocked is visible only when body capture is on.</p></div>
             </div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ===== observability (sub-project B) ===== -->
+      <section id="view-observability" class="view" hidden>
+        <div class="card affordance" data-cap="observability_export">
+          <div class="microlabel" data-i18n="obs.enableTitle">governed OTLP export</div>
+          <p class="hint" data-i18n="obs.enableHint">Declare collectors under observability.exporters in mayu's config to export traces, audit copies and egress content per policy. This view then shows exporter health and lets full administrators narrow export at runtime.</p>
+        </div>
+        <p id="obs-admin-only" class="hint" hidden data-i18n="obs.adminOnly">Only full administrators can open the observability console.</p>
+        <div id="obs-content" hidden>
+          <div class="obs-head">
+            <p id="obs-since" class="hint"></p>
+            <p id="obs-instance" class="hint" hidden></p>
+            <p id="obs-source" class="hint"></p>
+            <button id="obs-refresh" type="button" class="ghost" data-i18n="obs.refresh">Refresh</button>
+          </div>
+          <div class="card">
+            <h2 data-i18n="obs.exportersTitle">Exporters</h2>
+            <p class="hint" data-i18n="obs.exportersHint">Destinations come only from mayu's config. Header values are never shown.</p>
+            <table class="data" id="obs-exporters"><thead><tr>
+              <th data-i18n="obs.colExporter">exporter</th><th data-i18n="obs.colEndpoint">endpoint</th><th data-i18n="obs.colSignals">signals (declared → now)</th>
+              <th data-i18n="obs.colQueue">queue (queued / limit)</th><th data-i18n="obs.colContentCap">content cap (now)</th>
+            </tr></thead><tbody></tbody></table>
+          </div>
+          <div class="card">
+            <h2 data-i18n="obs.signalsTitle">Records by signal</h2>
+            <p class="hint" data-i18n="obs.signalsHint">Counted since this gateway process started; Prometheus keeps the history. Errors show a status code or a fixed message, never collector responses.</p>
+            <table class="data" id="obs-signals"><thead><tr>
+              <th data-i18n="obs.colExporter">exporter</th><th data-i18n="obs.colSignal">signal</th><th class="num" data-i18n="obs.colSent">sent</th>
+              <th class="num" data-i18n="obs.colDropped">dropped</th><th class="num" data-i18n="obs.colWithheld">withheld by limit</th><th class="num" data-i18n="obs.colSampledOut">sampled out</th>
+              <th data-i18n="obs.colLastSuccess">last success (UTC)</th><th data-i18n="obs.colLastError">last error (UTC)</th>
+            </tr></thead><tbody></tbody></table>
+          </div>
+          <div class="obs-two">
+            <div class="card">
+              <h2 data-i18n="obs.decisionsTitle">Governed decisions</h2>
+              <p class="hint" data-i18n="obs.decisionsHint">Audit is counted per record, content per request that reached a provider, traces per span.</p>
+              <table class="data" id="obs-decisions"><thead><tr>
+                <th data-i18n="obs.colSignal">signal</th><th class="num" data-i18n="obs.decision.selected">exported</th><th class="num" data-i18n="obs.decision.no_rule">no rule</th>
+                <th class="num" data-i18n="obs.decision.content_conflict">rules disagree</th><th class="num" data-i18n="obs.decision.withheld_limit">withheld by limit</th>
+              </tr></thead><tbody></tbody></table>
+              <p id="obs-decisions-legacy" class="hint" hidden data-i18n="obs.decisionsLegacyHint">The legacy otel baseline is not a policy selection: a span only it exports counts as no rule here.</p>
+            </div>
+            <div class="card">
+              <h2 data-i18n="obs.selectionsTitle">Policy selections</h2>
+              <p class="hint" data-i18n="obs.selectionsHint">Every observability rule this gateway enforces, with sampling after limits.</p>
+              <table class="data" id="obs-selections"><thead><tr>
+                <th data-i18n="obs.colPolicy">policy · rule</th><th data-i18n="obs.colSource">source</th><th data-i18n="obs.colSubject">subject</th>
+                <th data-i18n="obs.colTarget">signal → exporter</th><th data-i18n="obs.colState">state</th>
+              </tr></thead><tbody></tbody></table>
+            </div>
+          </div>
+          <div class="card" id="obs-limits-card">
+            <h2 data-i18n="obs.limitsTitle">Runtime limits</h2>
+            <p class="hint" data-i18n="obs.limitsHint">A limit can only narrow what mayu's config allows: pause an exporter, drop signals, lower the content cap or the trace sample rate. Endpoints and credentials cannot be changed here.</p>
+            <p id="obs-limits-readonly" class="hint" hidden></p>
+            <div id="obs-limits-rows"></div>
+            <div class="row"><button id="obs-limits-preview" type="button" class="ghost" data-i18n="obs.preview">Preview changes</button><button id="obs-limits-apply" type="button" disabled data-i18n="obs.apply">Apply</button></div>
+            <p id="obs-limits-status" class="hint" role="status" aria-live="polite"></p>
+            <ul id="obs-limits-diff" class="obs-diff"></ul>
+          </div>
+          <div class="card" id="obs-rules-card">
+            <h2 data-i18n="obs.rulesTitle">Console rules</h2>
+            <p class="hint" data-i18n="obs.rulesHint">Rules saved here are GovernancePolicy documents in the console policy file, loaded by the local policy file channel. Rules from other policy files or the control plane are read-only.</p>
+            <p id="obs-rules-readonly" class="hint" hidden></p>
+            <table class="data" id="obs-rules-table"><thead><tr>
+              <th data-i18n="obs.colName">name</th><th data-i18n="obs.colTeam">team</th><th data-i18n="obs.colUser">user</th><th data-i18n="obs.colTraces">traces · %</th>
+              <th data-i18n="obs.colAudit">audit</th><th data-i18n="obs.colContent">content</th><th></th>
+            </tr></thead><tbody></tbody></table>
+            <div class="row"><button id="obs-rules-add" type="button" class="ghost" data-i18n="obs.addRule">Add rule</button><button id="obs-rules-preview" type="button" class="ghost" data-i18n="obs.preview">Preview changes</button><button id="obs-rules-apply" type="button" disabled data-i18n="obs.apply">Apply</button></div>
+            <p id="obs-rules-status" class="hint" role="status" aria-live="polite"></p>
+            <ul id="obs-rules-diff" class="obs-diff"></ul>
           </div>
         </div>
       </section>
@@ -628,6 +704,7 @@ api key:  the same virtual key</code></pre>
   <script src="i18n.js"></script>
   <script src="app.js"></script>
   <script src="audit.js"></script>
+  <script src="observability.js"></script>
   <script src="evaluation.js"></script>
 </body>
 </html>

@@ -67,8 +67,11 @@ spec:
                     required: ["name", "failurePolicy"]
                     x-kubernetes-validations:
                       # Exactly one rule kind — mirrors internal/policy.
-                      - rule: "[has(self.budget), has(self.routing), has(self.modelAccess), has(self.rate), has(self.sensitiveData), has(self.tokenQuota)].filter(x, x).size() == 1"
-                        message: "exactly one of budget, routing, modelAccess, rate, sensitiveData, or tokenQuota must be set"
+                      - rule: "[has(self.budget), has(self.routing), has(self.modelAccess), has(self.rate), has(self.sensitiveData), has(self.tokenQuota), has(self.observability)].filter(x, x).size() == 1"
+                        message: "exactly one of budget, routing, modelAccess, rate, sensitiveData, tokenQuota, or observability must be set"
+                      # Export is best-effort; the local audit chain is the evidence of record.
+                      - rule: "!has(self.observability) || self.failurePolicy == 'FailOpen'"
+                        message: "observability requires FailOpen"
                       - rule: "!has(self.tokenQuota) || self.failurePolicy == 'FailClosed'"
                         message: "tokenQuota requires FailClosed"
                       # A hard-cap budget rule must fail closed (ADR-032).
@@ -257,6 +260,43 @@ spec:
                             items:
                               type: string
                               minLength: 1
+                      # Governed OTLP export. Exporter names refer to the data
+                      # plane's local observability ceiling; a data plane rejects
+                      # undeclared exporters or signals an exporter does not allow.
+                      observability:
+                        type: object
+                        x-kubernetes-validations:
+                          - rule: "has(self.traces) || has(self.audit) || has(self.content)"
+                            message: "observability must set at least one of traces, audit, or content"
+                        properties:
+                          traces:
+                            type: object
+                            required: ["exporter"]
+                            properties:
+                              exporter:
+                                type: string
+                                maxLength: 63
+                                pattern: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+                              samplePercent:
+                                type: integer
+                                minimum: 1
+                                maximum: 100
+                          audit:
+                            type: object
+                            required: ["exporter"]
+                            properties:
+                              exporter:
+                                type: string
+                                maxLength: 63
+                                pattern: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+                          content:
+                            type: object
+                            required: ["exporter"]
+                            properties:
+                              exporter:
+                                type: string
+                                maxLength: 63
+                                pattern: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
                       tokenQuota:
                         type: object
                         required: ["limitTokens", "period"]

@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: 49d2537ced03b75586c2f7cc34baba0a2a01372960651081df2ef601a8c564c1
+translation_source_sha256: 4992d8b59759a8b6d3732b1b2efdc6a0cbeb3c6b7676f0972a7e8bef3dee9bbc
 ---
 
 # API 구현 {#api}
@@ -92,6 +92,14 @@ Messages에서 OpenAI 호환 업스트림의 HTTP 400 오류는 Anthropic `inval
 ### 5. 관련 문서 {#5-cross-references}
 
 router·tier·governance·alert·bodystore·providers와 ADR-016/017/018/021/028/029/040/041/042를 참고하세요. [운영 절차](../runbooks/)와 [CLI 로그인](../runbooks/cli-login.md)이 실무 흐름을 설명합니다.
+
+### observability 규칙 스키마 {#observability-rule-schema}
+
+`GovernancePolicy.spec.rules[].observability`는 해당 주체의 정책 기반 OTLP 내보내기를 고릅니다. `traces`(`exporter`, 선택 `samplePercent` 1–100, 기본 100), `audit`(`exporter`), `content`(`exporter`) 중 하나 이상을 지정하며 FailOpen이어야 합니다. exporter 이름은 데이터 영역의 로컬 `observability.exporters` 상한을 가리킵니다. 데이터 영역은 선언되지 않은 exporter나 그 exporter가 허용하지 않는 신호를 지정한 규칙을 거부하고, 상한을 선언하지 않았으면 이런 규칙을 모두 거부합니다. [정책 기반 OTLP 내보내기](../operations/observability.md#governed-otlp-export)를 참고하세요.
+
+### 관측성 콘솔 API · mayu 전용 {#observability-console-api-mayu-only}
+
+`GET /admin/observability`, `PUT /admin/observability/limits`, `PUT /admin/observability/rules`(`internal/server/observabilityapi`)는 `server.WithFullAdminRoutes`로 붙으므로 읽기를 포함한 모든 경로에 전체 관리자 권한이 필요합니다. 두 PUT은 `dry_run`과 `expected_revision`을 받습니다. dry run은 아무것도 바꾸지 않고, 적용은 미리보기 때 본 리비전을 지정해야 하며(`expected_revision`이 없으면 400 `invalid_request`, 오래된 값이면 409 `revision_conflict`), 저장·설치한 뒤 `admin_observability_changed`를 기록합니다. 관측성 경로 자체의 오류 본문은 `{"error": message, "code": code}`입니다. 401과 403은 공용 관리 미들웨어가 평소 본문으로 답합니다(401은 `authentication_error` 형식, 403은 `{"error":"admin only"}`). `/admin/capabilities`에 `observability_export`가 추가됩니다. 요청·응답 형식은 [API 레퍼런스](../api-reference.md#observability-console-mayu-only)에 있습니다.
 
 ### 정책 라우팅 스키마와 증거 · ADR-043 {#policy-routing-schema-and-evidence-adr-043}
 

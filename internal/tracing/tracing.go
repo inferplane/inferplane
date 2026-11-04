@@ -1,7 +1,10 @@
 // Package tracing is the opt-in OpenTelemetry seam (ADR-011). It owns the OTel
-// SDK import (Init builds the OTLP exporter + TracerProvider) and exposes small
-// request-span helpers so the rest of the gateway depends only on this package,
-// not the SDK. When Init is not called, every helper is a cheap no-op (the
+// SDK import (InitRouted builds the OTLP exporters + TracerProvider; Init is the
+// legacy single-exporter form) and exposes small request-span helpers so the
+// rest of the gateway depends only on this package, not the SDK. Under a routed
+// provider, Start decides per span which exporters receive it (the injected
+// Decider plus a gateway-side draw); unselected spans are dropped as
+// non-recording. When Init is not called, every helper is a cheap no-op (the
 // default tracer is the library no-op and an `enabled` guard skips header/context
 // work), so a deployment without an `otel` config is byte-for-byte unchanged.
 //
@@ -18,11 +21,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/resource"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 )
@@ -44,51 +43,32 @@ var (
 	// tracer defaults to the library no-op, so Start works (cheaply) before Init.
 	tracer trace.Tracer                  = tracenoop.NewTracerProvider().Tracer(scopeName)
 	prop   propagation.TextMapPropagator = propagation.TraceContext{}
+	// router is the routed provider's processor; nil for an explicitly
+	// installed provider (SetTracerProvider), which then samples on its own.
+	router *routingProcessor
 )
 
-// Init installs the OTLP exporter + TracerProvider and the W3C propagator, and
-// returns the provider's Shutdown (the caller flushes it on teardown under a
-// bounded context). An unreachable collector is non-fatal — the OTLP exporter
-// connects lazily and the batch processor isolates export failures from serving.
+// Init is the legacy single-exporter setup (the `otel` config block): every
+// request span goes to cfg's collector with probability sample_ratio. It is
+// InitRouted with one exporter, named LegacyExporter, and a constant decider,
+// so the gateway's own draw — not the client's traceparent — decides export.
+// An unreachable collector is non-fatal: the exporter connects lazily.
 func Init(ctx context.Context, cfg Config) (func(context.Context) error, error) {
-	var (
-		exp sdktrace.SpanExporter
-		err error
-	)
-	switch cfg.Protocol {
-	case "grpc":
-		opts := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(cfg.Endpoint)}
-		if cfg.Insecure {
-			opts = append(opts, otlptracegrpc.WithInsecure())
-		}
-		exp, err = otlptracegrpc.New(ctx, opts...)
-	default: // "" | "http"
-		opts := []otlptracehttp.Option{otlptracehttp.WithEndpoint(cfg.Endpoint)}
-		if cfg.Insecure {
-			opts = append(opts, otlptracehttp.WithInsecure())
-		}
-		exp, err = otlptracehttp.New(ctx, opts...)
-	}
-	if err != nil {
-		return nil, err
-	}
+	targets := []Target{LegacyTarget(cfg.SampleRatio)}
+	return InitExporters(ctx, cfg.ServiceName, map[string]ExporterConfig{LegacyExporter: {Endpoint: cfg.Endpoint, Protocol: cfg.Protocol, Insecure: cfg.Insecure}},
+		func(context.Context) []Target { return targets }, nil)
+}
 
+// LegacyExporter names the `otel` block's exporter among routed exporters.
+const LegacyExporter = "otel"
+
+// LegacyTarget is the `otel` block's baseline target (nil ratio → 1.0).
+func LegacyTarget(sampleRatio *float64) Target {
 	ratio := 1.0
-	if cfg.SampleRatio != nil {
-		ratio = *cfg.SampleRatio
+	if sampleRatio != nil {
+		ratio = *sampleRatio
 	}
-	svc := cfg.ServiceName
-	if svc == "" {
-		svc = "inferplane"
-	}
-	res := resource.NewSchemaless(attribute.String("service.name", svc))
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exp),
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(ratio))),
-		sdktrace.WithResource(res),
-	)
-	SetTracerProvider(tp)
-	return tp.Shutdown, nil
+	return Target{Exporter: LegacyExporter, Ratio: ratio}
 }
 
 // SetTracerProvider installs an explicit TracerProvider and enables tracing.
@@ -98,12 +78,14 @@ func SetTracerProvider(tp trace.TracerProvider) {
 	otel.SetTextMapPropagator(prop)
 	tracer = tp.Tracer(scopeName)
 	enabled = true
+	router = nil
 }
 
 // Disable reverts to the no-op tracer (test cleanup).
 func Disable() {
 	tracer = tracenoop.NewTracerProvider().Tracer(scopeName)
 	enabled = false
+	router = nil
 }
 
 // Enabled reports whether tracing is installed (false → no-op fast path).
@@ -119,7 +101,13 @@ func Extract(ctx context.Context, h http.Header) context.Context {
 }
 
 // Start begins a server span (no-op span when tracing is off).
+// Under a routed provider the export decision is made here, once per span, and
+// carried in the context to both the sampler (a span no target selected is
+// dropped: non-recording, no attribute allocation) and the routing processor.
 func Start(ctx context.Context, name string) (context.Context, trace.Span) {
+	if r := router; r != nil {
+		ctx = context.WithValue(ctx, routeKey{}, r.choose(ctx))
+	}
 	return tracer.Start(ctx, name, trace.WithSpanKind(trace.SpanKindServer))
 }
 

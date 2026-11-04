@@ -64,6 +64,31 @@ contract is in [docs/api-reference.md](../api-reference.md).
 - Related ADRs: docs/decisions/ADR-016-teams-as-keystore-records.md, docs/decisions/ADR-017-budget-alert-webhooks.md, docs/decisions/ADR-018-opt-in-body-logging.md, docs/decisions/ADR-021-ticket-driven-ux-fixes.md, docs/decisions/ADR-028-cli-oidc-login-short-lived-keys.md, docs/decisions/ADR-029-model-level-fallback.md, docs/decisions/ADR-040-credential-brokering.md, docs/decisions/ADR-041-budget-tier-model-substitution.md, docs/decisions/ADR-042-budget-windows.md
 - Related runbooks: docs/runbooks/, docs/runbooks/cli-login.md
 
+### Observability rule schema
+
+`GovernancePolicy.spec.rules[].observability` selects governed OTLP export for the
+subject: `traces` (`exporter`, optional `samplePercent` 1–100, default 100), `audit`
+(`exporter`) and `content` (`exporter`), at least one of them. It requires FailOpen.
+Exporter names refer to the data plane's local `observability.exporters` ceiling; a
+data plane rejects a rule naming an undeclared exporter or a signal that exporter
+does not allow, and refuses every such rule when it declares no ceiling. See
+[governed OTLP export](../operations/observability.md#governed-otlp-export).
+
+### Observability console API (`mayu` only)
+
+`GET /admin/observability`, `PUT /admin/observability/limits` and
+`PUT /admin/observability/rules` (`internal/server/observabilityapi`) are mounted
+by `server.WithFullAdminRoutes`, so every route, reads included, needs a full
+administrator. Both PUTs take `dry_run` and `expected_revision`: a dry run changes
+nothing; an apply must name the revision its preview saw (400 `invalid_request` when
+`expected_revision` is omitted, 409 `revision_conflict` when it is stale), then persists, installs and appends `admin_observability_changed`.
+The observability routes' own errors are `{"error": message, "code": code}`;
+401 and 403 come from the shared admin middleware with its usual bodies (the
+`authentication_error` envelope for 401, `{"error":"admin only"}` for 403).
+`/admin/capabilities` adds
+`observability_export`. Request and response shapes are in the
+[API reference](../api-reference.md#observability-console-mayu-only).
+
 ### Policy-routing schema and evidence (ADR-043)
 
 `GovernancePolicy.spec.rules[].sensitiveData` has required `onDetected` and

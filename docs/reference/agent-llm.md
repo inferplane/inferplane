@@ -21,7 +21,8 @@ client and upstream protocols without losing thinking blocks or `cache_control`.
 | Filter chain | `internal/filter/` | `RequestFilter` interface + registry (the spec's filter chain ⑥, ADR-009) |
 | PII mask filter | `plugins/piimask/` | opt-in regex+Luhn PII masking → typed placeholders; one-way (no vault); masks messages text only |
 | PII classifier (systemone) | `internal/classifier/`, `plugins/systemone/` | opt-in learned PII signal over `/v1/systemone` and `/v1/systemone/batch` (`noul`); restricts routing only; sends the `model`/`criteria` settings the checkpoint was trained with; Korean sample in `examples/pii-classifier-ko/` |
-| Tracing | `internal/tracing/` | opt-in OTel: OTLP **trace** exporter + GenAI-semconv spans (+ `inferplane.*` cache-tier / cost / partial attributes) + W3C propagation + trace_id in audit; no-op default (ADR-011) |
+| Tracing | `internal/tracing/` | opt-in OTel: OTLP **trace** exporters + GenAI-semconv spans (+ `inferplane.*` cache-tier / cost / partial attributes) + W3C propagation + trace_id in audit; a routing processor sends each span only to the exporters its request's policy selects, with a gateway-side sampling draw; an optional `Observer` receives per-exporter span counts (sent, failed, sampled out) for the observability console, never the SDK's error text; no-op default (ADR-011) |
+| Governed export | `internal/otelexport/` | local exporter ceiling (`Allows`) and bounded OTLP log pipelines for audit-record copies and egress content, selected per subject by `observability` policy rules; runtime limits (`Normalize`/`SetLimits`) narrow it at decision time and again when a queued log batch is sent, counted as `withheld_limit` |
 
 Settled spans also expose `inferplane.cost.pricing_version` and bounded
 `inferplane.cost.context_tier`. Each settlement appends an
@@ -58,7 +59,8 @@ or an AWS invoice. Context pricing is described in [the pricing guide](pricing.m
   truncated stream is indistinguishable from a clean one. Span attributes never carry a
   secret, a `key_id`, or raw client input; model/provider values are the config-bounded
   post-routing ones.
-- Tracing (OTLP) is the ONLY signal mayu speaks over OTLP. Metrics are Prometheus
+- mayu speaks OTLP for traces and, when an `observability` policy selects them, for
+  governed logs (audit-record copies and egress content). Metrics are Prometheus
   exposition on `:9090/metrics` and control-plane usage windows are `POST /v1alpha1/usage`
   — see the Collector contract in [infrastructure.md](infrastructure.md).
 

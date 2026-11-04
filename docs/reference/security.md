@@ -194,3 +194,20 @@ to 256 bytes, NUL dropped, invalid UTF-8 replaced), so keep secrets out of them.
 Responses carry digests, closed codes and the stored audit line, never the raw
 session ID, prompts or response text. Error bodies are closed codes and never
 echo input. The `hash` on an event shows chain position, not verification.
+
+## Observability console edits
+
+- Every `/admin/observability*` route is full-admin only, reads included. The
+  status shows header names, never header values, and errors carry status codes or
+  fixed text, never collector responses.
+- Runtime limits only narrow the bootstrap exporter ceiling. No console or
+  control-plane input names an endpoint, protocol, TLS setting or credential, so no
+  edit can redirect prompts. A console rule may add or change a content
+  selection only with `observability.console.content_rules: true`; keeping an
+  unchanged one or removing one is always allowed.
+- Console rules load through the local policy file channel and its ceiling check;
+  with a control plane the console cannot become a second policy source.
+- An edit is refused while the audit chain is not accepting records, and each
+  applied edit records the actor and the before/after revisions.
+- Whoever administers mayu's host can still edit the config and both files; export
+  that users cannot turn off still needs a host they do not administer.

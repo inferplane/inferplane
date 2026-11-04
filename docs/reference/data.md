@@ -315,3 +315,29 @@ ingest path repopulates them. A record no longer in any source is not in the con
 | `audit.client_evidence.session_ref` | `key_scoped` (default), `off` | `off` stops writing `client.session_ref`; existing records keep their links. `request_class` is unaffected. |
 | `audit.client_evidence.auto_mode` | `on` (default), `off` | `off` stops auto mode estimation. |
 | `otel.trace_link_template` | `http` or `https` URL containing `{trace_id}`, without user info (`user:password@` is rejected) | Console link only; `{trace_id}` is replaced by the record's 32-hex trace ID. Sent to the console through `/admin/capabilities`. |
+
+## Admin change evidence (observability console)
+
+`request.change` is appended at the end of the audit `request` object with
+`omitempty`, so records without it keep their exact bytes. The observability
+console sets it on `admin_observability_changed` records: `target` is
+`observability_limits` or `observability_rules`, `before` and `after` are
+`sha256:` revisions of the persisted state file bytes, and `names` lists the
+changed exporters or console rules. A break-glass or
+unconfigured-identity administrator is recorded as `principal.user` plus
+`principal.auth_method`; an OIDC administrator under verified identity
+(`key_store.identity`) as `principal.identity` (a digest), never the raw subject. The state itself never enters the chain. Admin records
+are not projected into the audit console tables above.
+
+`observability.console.state_file` holds the runtime limits as
+`{"version": 1, "exporters": {...}}` (per exporter `paused`, `signals`,
+`max_content_bytes`, `max_sample_percent`), written by mayu with mode 0600
+through a temp file, fsync and rename. The limits revision is the SHA-256 of the
+canonical bytes mayu writes, so for a file mayu wrote it equals the digest in the
+audit record. A file that does not parse refuses boot.
+
+`observability.console.policy_file` holds the console-owned GovernancePolicy
+documents: names start with `console-`, each has one FailOpen observability rule
+named `export`, and documents are sorted by name and separated by `---`. The
+local policy file channel loads it like any other policy file. Its revision is the
+SHA-256 of the file bytes.

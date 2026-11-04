@@ -283,6 +283,106 @@ position and is not a verification. See the
 [field contract](reference/api.md#audit-console-adr-057) and
 [record fields](reference/data.md#audit-console-evidence-adr-057).
 
+### Observability console (`mayu` only)
+
+Full administrators only, reads included (team-mapped identities get 403 and an
+`admin_denied` record). Counters are per process since `counters_since`.
+`instance` names the answering process with the audit chain's instance id:
+runtime limits, console rules and counters belong to that process, so with
+several replicas each one answers for itself
+([scope](operations/observability.md#observability-console)).
+
+`GET /admin/observability`:
+
+```json
+{
+  "configured": true,
+  "instance": "mayu-0-01JC8X3V4N5Q6R7S8T9V0WXYZA",
+  "policy_source": "files",
+  "service_name": "inferplane",
+  "counters_since": "2026-10-29T10:00:00Z",
+  "limits": {"editable": true, "revision": "sha256:4f8b…"},
+  "rules": {"editable": true, "revision": "sha256:5f1c…", "content_rules": false, "console": [
+    {"name": "console-eng", "subject": {"team": "engineering"}, "audit": {"exporter": "corp"}}
+  ]},
+  "exporters": [{
+    "name": "corp", "endpoint": "otel-collector.internal:4318", "protocol": "http", "tls": true,
+    "header_names": ["authorization"], "signals": ["audit", "traces"], "effective_signals": ["audit", "traces"],
+    "queue_limit_bytes": 67108864, "queued_bytes": 0, "limit": {},
+    "stats": [{"signal": "audit", "outcomes": {"sent": 12, "dropped_queue_full": 0, "dropped_oversize": 0,
+      "dropped_export_error": 0, "withheld_limit": 0, "sampled_out": 0}, "last_success_at": "2026-10-29T10:05:00Z"},
+     {"signal": "traces", "outcomes": {"sent": 30, "dropped_queue_full": 0, "dropped_oversize": 0,
+      "dropped_export_error": 0, "withheld_limit": 0, "sampled_out": 9}, "last_success_at": "2026-10-29T10:05:01Z"}]
+  }],
+  "decisions": [{"signal": "traces", "decisions": {"selected": 39, "no_rule": 3, "content_conflict": 0, "withheld_limit": 0}},
+   {"signal": "audit", "decisions": {"selected": 12, "no_rule": 30, "content_conflict": 0, "withheld_limit": 0}},
+   {"signal": "content", "decisions": {"selected": 0, "no_rule": 42, "content_conflict": 0, "withheld_limit": 0}}],
+  "selections": [{"policy": "console-eng", "rule": "export", "source": "console", "subject": {"team": "engineering"},
+    "targets": [{"signal": "audit", "exporter": "corp", "exported": true}]},
+   {"policy": "engineering-observability", "rule": "export", "source": "files", "subject": {"team": "engineering"},
+    "targets": [{"signal": "audit", "exporter": "corp", "exported": true}]}]
+}
+```
+
+`PUT /admin/observability/limits` replaces the runtime limits. An exporter left
+out has no limit; `signals` lists the declared signals to keep; `max_content_bytes`
+and `max_sample_percent` only lower the bootstrap values.
+
+```json
+{"dry_run": true, "expected_revision": "sha256:4f8b…", "exporters": {"corp": {"paused": true}}}
+```
+
+```json
+{
+  "dry_run": true,
+  "current_revision": "sha256:4f8b…",
+  "result_revision": "sha256:9a1c…",
+  "changes": [{"exporter": "corp", "field": "paused", "before": false, "after": true}],
+  "effects": [{"policy": "engineering-observability", "rule": "export", "signal": "audit", "exporter": "corp",
+    "before": {"exported": true}, "after": {"exported": false}}]
+}
+```
+
+`PUT /admin/observability/rules` replaces the console-owned rules, the
+`console-…` documents in `observability.console.policy_file`:
+
+```json
+{"dry_run": true, "expected_revision": "sha256:5f1c…", "rules": [
+  {"name": "console-eng", "subject": {"team": "engineering"}, "audit": {"exporter": "corp"}},
+  {"name": "console-finance", "subject": {"team": "finance"},
+   "traces": {"exporter": "corp", "sample_percent": 20}, "audit": {"exporter": "corp"}}]}
+```
+
+```json
+{
+  "dry_run": true,
+  "current_revision": "sha256:5f1c…",
+  "result_revision": "sha256:7c2d…",
+  "changes": [{"name": "console-finance", "action": "added"}],
+  "summary": {"added": 1, "changed": 0, "removed": 0, "unchanged": 1},
+  "decisions": [{"subject": {"team": "finance"},
+    "before": {"traces": [], "audit": []},
+    "after": {"traces": [{"exporter": "corp", "sample_percent": 20}], "audit": ["corp"]}}]
+}
+```
+
+Send the same body with `"dry_run": false` to apply. Errors:
+
+| Status | `code` | Meaning |
+| --- | --- | --- |
+| 400 | `invalid_request` | The body is not one JSON object with known fields, or an apply has no `expected_revision` |
+| 413 | `invalid_request` | The body is larger than the limit |
+| 400 | `invalid_limits` / `invalid_rules` | Outside the bootstrap ceiling, or a rule the policy loader refuses |
+| 400 | `content_not_allowed` | A console rule adds or changes content export without `observability.console.content_rules` |
+| 409 | `read_only` | Not editable here (`reason`: `not_configured`, `no_state_file`, `no_policy_file`, `control_plane`) |
+| 409 | `revision_conflict` | The state changed since it was read (`current_revision` is returned) |
+| 409 | `limits_file_changed` | The state file was edited on disk; restart mayu to load it |
+| 409 | `console_file_foreign` | The console policy file holds documents the console does not manage |
+| 409 | `policy_reload_failed` | The policy set did not reload; the console file was restored, so nothing changed |
+| 503 | `audit_unavailable` | The audit chain is not accepting records, or the audit identity configuration cannot be resolved; nothing changed |
+| 500 | `persist_failed` / `read_failed` | A state file could not be written or read, or the limits could not be installed and the state file was restored; nothing changed |
+| 500 | `restore_failed` | The change was not installed and its file could not be put back, so the file may still hold it: a restart would install unapplied limits, and the policy watcher may install unapplied rules later without a change record |
+
 ## Error Codes
 
 | Code | Meaning |

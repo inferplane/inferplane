@@ -173,7 +173,13 @@ func (w *Writer) loop() {
 		}
 		flushedAll := true
 		for _, s := range w.sinks {
-			if err := s.Write(canon); err != nil {
+			var err error
+			if rs, ok := s.(RecordSink); ok {
+				err = rs.WriteRecord(&rec, canon)
+			} else {
+				err = s.Write(canon)
+			}
+			if err != nil {
 				if s.Required() {
 					writeFailuresTotal.Add(1)
 					bufferedRecords.Add(1)
