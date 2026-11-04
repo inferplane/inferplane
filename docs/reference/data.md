@@ -319,3 +319,10 @@ console sets it on `admin_observability_changed` records: `target` is
 changed exporters or console rules. `principal.user` and `principal.auth_method`
 name the administrator. The state itself never enters the chain. Admin records
 are not projected into the audit console tables above.
+
+`observability.console.state_file` holds the runtime limits as
+`{"version": 1, "exporters": {...}}` (per exporter `paused`, `signals`,
+`max_content_bytes`, `max_sample_percent`), written by mayu with mode 0600
+through a temp file, fsync and rename. The limits revision is the SHA-256 of the
+canonical bytes mayu writes, so for a file mayu wrote it equals the digest in the
+audit record. A file that does not parse refuses boot.

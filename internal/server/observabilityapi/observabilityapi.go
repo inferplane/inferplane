@@ -78,7 +78,8 @@ func New(opts Options) *Console { return &Console{opts: opts} }
 // server.WithFullAdminRoutes.
 func (c *Console) Routes() map[string]http.Handler {
 	return map[string]http.Handler{
-		"GET /admin/observability": http.HandlerFunc(c.status),
+		"GET /admin/observability":        http.HandlerFunc(c.status),
+		"PUT /admin/observability/limits": http.HandlerFunc(c.putLimits),
 	}
 }
 
