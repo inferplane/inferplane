@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,11 +14,13 @@ import (
 )
 
 const (
-	genesisHash   = "sha256:genesis"
-	queueCapacity = 1024
-	blockedBuffer = 1
-	blockedWAL    = 2
-	blockedRecord = 3
+	genesisHash          = "sha256:genesis"
+	queueCapacity        = 1024
+	blockedBuffer        = 1
+	blockedWAL           = 2
+	blockedRecord        = 3
+	maxIntentRecords     = 1024
+	maxIntentRecordBytes = 12 << 10
 )
 
 // WriterOption configures boot-time audit durability behavior.
@@ -43,17 +46,24 @@ type chainHead struct {
 // to the WAL, and flushes to sinks — strictly serialized so concurrent
 // started/completed records can't race on prev_hash (r4 implementation note).
 type Writer struct {
-	instance string
-	queue    chan Record
-	done     chan struct{}
-	wal      *WAL
-	sinks    []Sink
-	prevHash string
-	pending  int
-	count    int64                     // records written (loop-local; published via head)
-	head     atomic.Pointer[chainHead] // race-safe chain-head snapshot for anchoring (ADR-012)
-	metrics  *metrics.Metrics          // nil-safe: no-op when nil
-	blocked  atomic.Uint32             // once set, admission stays closed for this process
+	instance    string
+	queue       chan queuedRecord
+	done        chan struct{}
+	wal         *WAL
+	intents     *WAL
+	intentCount int
+	sinks       []Sink
+	prevHash    string
+	pending     int
+	count       int64                     // records written (loop-local; published via head)
+	head        atomic.Pointer[chainHead] // race-safe chain-head snapshot for anchoring (ADR-012)
+	metrics     *metrics.Metrics          // nil-safe: no-op when nil
+	blocked     atomic.Uint32             // once set, admission stays closed for this process
+}
+
+type queuedRecord struct {
+	record Record
+	ack    chan error
 }
 
 // Ready reports whether new inference may be admitted. Reasons are fixed,
@@ -115,7 +125,7 @@ func NewWriter(instance, walPath string, sinks []Sink, opts ...WriterOption) (*W
 	}
 	w := &Writer{
 		instance: instance,
-		queue:    make(chan Record, queueCapacity),
+		queue:    make(chan queuedRecord, queueCapacity),
 		done:     make(chan struct{}),
 		wal:      wal,
 		sinks:    sinks,
@@ -129,6 +139,23 @@ func NewWriter(instance, walPath string, sinks []Sink, opts ...WriterOption) (*W
 		_ = wal.Close()
 		return nil, err
 	}
+	required := false
+	for _, sink := range sinks {
+		required = required || sink.Required()
+	}
+	if !required {
+		w.intents, err = OpenWAL(walPath + ".intents")
+		if err == nil {
+			w.intentCount, err = retainedIntents(w.intents)
+		}
+		if err != nil {
+			if w.intents != nil {
+				_ = w.intents.Close()
+			}
+			_ = wal.Close()
+			return nil, err
+		}
+	}
 	if w.pending >= cap(w.queue) {
 		w.blocked.Store(blockedBuffer)
 	}
@@ -137,17 +164,59 @@ func NewWriter(instance, walPath string, sinks []Sink, opts ...WriterOption) (*W
 }
 
 // Append enqueues a record. Non-blocking unless the queue is full (back-pressure).
-func (w *Writer) Append(rec Record) { w.queue <- rec }
+func (w *Writer) Append(rec Record) { w.queue <- queuedRecord{record: rec} }
+
+func (w *Writer) AppendDurable(ctx context.Context, rec Record) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if ready, _ := w.Ready(); !ready {
+		return errors.New("audit unavailable")
+	}
+	ack := make(chan error, 1)
+	select {
+	case w.queue <- queuedRecord{record: rec, ack: ack}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-ack:
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
 func (w *Writer) loop() {
 	defer close(w.done)
-	for rec := range w.queue {
+	for item := range w.queue {
+		if item.ack != nil {
+			if ready, _ := w.Ready(); !ready {
+				item.ack <- errors.New("audit unavailable")
+				continue
+			}
+			if w.intents != nil && w.intentCount >= maxIntentRecords {
+				item.ack <- errors.New("audit intent journal full")
+				continue
+			}
+		}
+		rec := item.record
 		rec.Instance = w.instance
 		rec.PrevHash = w.prevHash
 		canon, err := rec.Canonical()
 		if err != nil {
 			writeFailuresTotal.Add(1)
 			w.blocked.CompareAndSwap(0, blockedRecord)
+			if item.ack != nil {
+				item.ack <- errors.New("audit unavailable")
+			}
+			continue
+		}
+		if item.ack != nil && len(canon) > maxIntentRecordBytes {
+			item.ack <- errors.New("audit intent record too large")
 			continue
 		}
 		// chain advances on the canonical bytes actually emitted
@@ -161,6 +230,14 @@ func (w *Writer) loop() {
 			w.pending++ // retained records, including earlier undelivered records
 		} else {
 			w.walFailure()
+		}
+		if walErr == nil && item.ack != nil && w.intents != nil {
+			walErr = w.intents.Append(canon)
+			if walErr != nil {
+				w.walFailure()
+			} else {
+				w.intentCount++
+			}
 		}
 		// Publish the chain head ONLY after the record is DURABLE (ADR-012 P4
 		// CRITICAL): on a WAL-append failure the record may be lost on crash, so an
@@ -208,7 +285,56 @@ func (w *Writer) loop() {
 		// to all required sinks, over the in-flight queue capacity (observability
 		// approximation of buffer_then_block pressure, §5.4).
 		w.metrics.SetAuditBufferUtilization(float64(w.pending) / float64(cap(w.queue)))
+		if item.ack != nil {
+			if ready, _ := w.Ready(); !ready || walErr != nil {
+				item.ack <- errors.New("audit unavailable")
+			} else {
+				item.ack <- nil
+			}
+		}
 	}
+}
+
+func retainedIntents(wal *WAL) (int, error) {
+	stat, err := wal.f.Stat()
+	if err != nil {
+		return 0, errors.New("audit: cannot inspect intent journal")
+	}
+	if stat.Size() == 0 {
+		return 0, nil
+	}
+	invalid := errors.New("audit: invalid intent journal; preserve and repair it before restart")
+	if stat.Size() > 16<<20 {
+		return 0, invalid
+	}
+	var last [1]byte
+	if _, err := wal.f.ReadAt(last[:], stat.Size()-1); err != nil || last[0] != '\n' {
+		return 0, invalid
+	}
+	count := 0
+	if err := wal.Replay(func(line []byte) error {
+		var rec Record
+		if len(line) > maxIntentRecordBytes {
+			return invalid
+		}
+		if err := json.Unmarshal(line, &rec); err != nil || rec.Event == "" || rec.Instance == "" || rec.PrevHash == "" {
+			return invalid
+		}
+		if rec.PrevHash != genesisHash {
+			digest, ok := strings.CutPrefix(rec.PrevHash, "sha256:")
+			if !ok || len(digest) != sha256.Size*2 {
+				return invalid
+			}
+			if _, err := hex.DecodeString(digest); err != nil {
+				return invalid
+			}
+		}
+		count++
+		return nil
+	}); err != nil {
+		return 0, invalid
+	}
+	return count, nil
 }
 
 func (w *Writer) walFailure() {
@@ -276,5 +402,8 @@ func retainedRecords(wal *WAL) (int, error) {
 func (w *Writer) Close() error {
 	close(w.queue)
 	<-w.done
+	if w.intents != nil {
+		return errors.Join(w.wal.Close(), w.intents.Close())
+	}
 	return w.wal.Close()
 }

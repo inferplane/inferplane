@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+var classifierCalls = make(chan struct{}, 16)
+
 // Outcome is the bounded audit and metric result of one entry on one request.
 type Outcome string
 
@@ -109,6 +111,17 @@ func (s *Set) Run(ctx context.Context, entries []Entry, req Request) []Result {
 func (s *Set) runEntry(ctx context.Context, e *Entry, req Request, res *Result) {
 	start := time.Now()
 	defer func() { res.Duration = time.Since(start) }()
+	select {
+	case classifierCalls <- struct{}{}:
+		defer func() { <-classifierCalls }()
+	default:
+		res.Outcome = OutcomeError
+		return
+	}
+	if ctx.Err() != nil {
+		res.Outcome = OutcomeError
+		return
+	}
 	var pending []string
 	var keys [][32]byte
 	seen := make(map[string]bool)
@@ -127,6 +140,10 @@ func (s *Set) runEntry(ctx context.Context, e *Entry, req Request, res *Result) 
 		}
 		res.CacheMisses++
 		pending = append(pending, w)
+	}
+	if ctx.Err() != nil {
+		res.Outcome = OutcomeError
+		return
 	}
 	if len(pending) == 0 {
 		res.Outcome = OutcomeClear

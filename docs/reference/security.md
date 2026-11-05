@@ -139,7 +139,11 @@ digests or endpoints.
   admitted requests queue. Batch mode sends one sidecar request per gateway
   request, with up to `max_windows` windows. Saturation fails closed in
   Enforce (`onUninspectable`) and adds up to `timeout_ms` of latency in
-  Shadow. A cross-request cap on classifier calls is a follow-up.
+  Shadow. The gateway permits at most 16 concurrent classifier calls across
+  requests and configuration generations, including window preparation and
+  cache lookups. Work that ignores cancellation keeps its slot until it returns;
+  saturation is treated as a classifier error, even for a cache hit. A call may
+  itself make several sidecar requests.
 
 ## Audit console (ADR-057)
 

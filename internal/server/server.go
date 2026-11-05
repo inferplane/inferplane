@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -229,8 +230,10 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 		anthropicapi.NewModelsHandler(r), openaiapi.NewModelsHandler(r)))
 	mux.Handle("GET /v1/usage", usageapi.NewHandler(gov))
 	var emit func(audit.Record)
+	var durable func(context.Context, audit.Record) error
 	if aud != nil {
 		emit = aud.Append
+		durable = aud.AppendDurable
 	}
 	if cliVerifier != nil {
 		// Self-revoke (ADR-028 `mayu logout`) authenticates with the
@@ -255,7 +258,8 @@ func DataMux(r *router.Router, holder *live.Holder, store keystore.Store, aud *a
 		// identity (403), mirroring adminDenialEmitter for the admin plane.
 		dataMux.Handle("GET /v1/auth/config", authapi.NewConfigHandler(cliConfig))
 		mintLimiter := limiter.NewMemory() // per-subject mint throttle (ADR-028 follow-up r1); instance-local, like every other in-memory governance store
-		dataMux.Handle("POST /v1/auth/key", AdminAuth(nil, cliVerifier, cliMapping, cliDenialEmitter(emit), authapi.MintHandler(store, cliKeyTTL, mintLimiter, emit)))
+		mint := authapi.MintHandler(store, cliKeyTTL, mintLimiter, emit, durable)
+		dataMux.Handle("POST /v1/auth/key", AdminAuth(nil, cliVerifier, cliMapping, cliDenialEmitter(emit), maxBytesMiddleware(min(limit, 64<<10), mint)))
 	}
 	var governed http.Handler = mux
 	if o.governanceGate != nil {
@@ -424,6 +428,9 @@ func AdminMux(store keystore.Store, adminTokens []string, verifier OIDCVerifier,
 		emit = aud.Append
 	}
 	keys := adminapi.NewKeysHandler(store, emit)
+	if aud != nil {
+		keys.SetDurable(aud.AppendDurable)
+	}
 	// Middleware-level denial audit (authenticated 403s only — 401s never grow
 	// the chain): the middleware knows no team, so Team stays empty.
 	denied := adminDenialEmitter(emit)

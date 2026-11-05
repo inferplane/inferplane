@@ -967,7 +967,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		maxAge := raw.ControlPlane.MaxPolicyAgeDuration
 		governanceGate = func() (bool, string) { return syncer.GovernanceReady(maxAge) }
 	}
-	g.dataSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol), server.WithMaxRequestBytes(cfg.Server.MaxRequestBytes), server.WithMaxInflightRequestBytes(cfg.Server.MaxInflightRequestBytes), server.WithGovernanceGate(governanceGate), server.WithClientEvidence(clientEvidenceMode(cfg)), contentOption(obsSet, polStore))}
+	g.dataSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 2 * time.Minute, Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol), server.WithMaxRequestBytes(cfg.Server.MaxRequestBytes), server.WithMaxInflightRequestBytes(cfg.Server.MaxInflightRequestBytes), server.WithGovernanceGate(governanceGate), server.WithClientEvidence(clientEvidenceMode(cfg)), contentOption(obsSet, polStore))}
 	if authority != nil || shared != nil {
 		next := g.dataSrv.Handler
 		g.dataSrv.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -1058,7 +1058,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 			return true, ""
 		}
 	}
-	g.adminSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore != nil), auditFileSinks, aud, anchorReader, readiness, m, writer, liveExport(holder), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), cfg.Probe.AllowedHosts...)}
+	g.adminSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 2 * time.Minute, Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore != nil), auditFileSinks, aud, anchorReader, readiness, m, writer, liveExport(holder), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), cfg.Probe.AllowedHosts...)}
 	g.adminSrv.Handler = server.WithEvaluations(g.adminSrv.Handler, g.dataSrv.Handler, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), aud)
 	// Observability console (sub-project B): full-admin routes, reads included.
 	g.adminSrv.Handler = server.WithFullAdminRoutes(g.adminSrv.Handler, observabilityConsole(cfg, obsSet, polStore, aud, store).Routes(),

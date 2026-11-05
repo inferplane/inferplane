@@ -2,12 +2,115 @@ package audit
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestDurableAdmissionRequiresWALAndRetainsEvidenceWithoutRequiredSink(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.wal")
+	writer, err := NewWriter("test", path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.AppendDurable(context.Background(), Record{SchemaVersion: 1, Event: "key_create_requested"}); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(path + ".intents")
+	if err != nil || !bytes.Contains(content, []byte("key_create_requested")) {
+		t.Fatalf("missing durable intent: %v", err)
+	}
+	for count := 0; count < queueCapacity; count++ {
+		writer.Append(Record{SchemaVersion: 1, Event: "request_completed"})
+	}
+	if err := writer.AppendDurable(context.Background(), Record{SchemaVersion: 1, Event: "second_intent"}); err != nil {
+		t.Fatalf("ordinary traffic accumulated behind intent: %v", err)
+	}
+	if err := writer.wal.f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.AppendDurable(context.Background(), Record{SchemaVersion: 1, Event: "must_refuse"}); err == nil {
+		t.Fatal("failed WAL admitted mutation")
+	}
+	_ = writer.Close()
+}
+
+func TestIntentJournalFullSurvivesRestartAndDoesNotBlockInference(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.wal")
+	rec := Record{SchemaVersion: 1, Event: "key_create_requested", Instance: "old", PrevHash: genesisHash}
+	line, err := rec.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := bytes.Repeat(append(line, '\n'), maxIntentRecords)
+	if err := os.WriteFile(path+".intents", content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for restart := 0; restart < 2; restart++ {
+		writer, err := NewWriter("test", path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.AppendDurable(context.Background(), rec); err == nil {
+			t.Fatal("full journal admitted key creation")
+		}
+		if ready, _ := writer.Ready(); !ready {
+			t.Fatal("full intent journal blocked inference")
+		}
+		writer.Append(Record{SchemaVersion: 1, Event: "request_completed"})
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, err := os.ReadFile(path + ".intents")
+	if err != nil || !bytes.Equal(content, after) {
+		t.Fatal("restart changed retained intent evidence")
+	}
+}
+
+func TestMalformedIntentJournalRefusesStartup(t *testing.T) {
+	for _, content := range []string{`{"event":"secret"}`, "{\"event\":\"test\",\"instance\":\"test\",\"prev_hash\":\"invalid\"}\n"} {
+		path := filepath.Join(t.TempDir(), "audit.wal")
+		if err := os.WriteFile(path+".intents", []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		writer, err := NewWriter("test", path, nil)
+		if err == nil {
+			_ = writer.Close()
+			t.Fatal("malformed journal admitted")
+		}
+		if strings.Contains(err.Error(), "secret") {
+			t.Fatal("journal contents leaked in error")
+		}
+	}
+}
+
+func TestIntentJournalFailureRetainsWALAndBlocksAdmission(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.wal")
+	writer, err := NewWriter("test", path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.intents.f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.AppendDurable(context.Background(), Record{SchemaVersion: 1, Event: "key_create_requested"}); err == nil {
+		t.Fatal("failed intent journal admitted key creation")
+	}
+	if ready, _ := writer.Ready(); ready {
+		t.Fatal("journal write failure did not block admission")
+	}
+	if err := writer.Close(); err == nil {
+		t.Fatal("expected closed journal error")
+	}
+	content, err := os.ReadFile(path)
+	if err != nil || !bytes.Contains(content, []byte("key_create_requested")) {
+		t.Fatal("failed journal lost WAL evidence")
+	}
+}
 
 // Missing readiness represents the historical writer's always-admit posture,
 // so these regressions exercise observable behavior on both implementations.

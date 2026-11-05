@@ -120,8 +120,8 @@ For an issue report, include the commit/image, profile, client version, status/e
 ## Audit durability limits
 
 The default chart writes audit records to container stdout (a best-effort sink)
-with a WAL on the data volume and the local analytics index disabled, so nothing
-accumulates there during successful WAL operation; see
+with a WAL on the data volume and the local analytics index disabled, so the WAL
+does not accumulate during successful operation; see
 [Collect audit records](#collect-audit-records). Any other deployment must
 configure its sinks explicitly.
 
@@ -142,6 +142,19 @@ performed because a previous partial fan-out may already have delivered some
 records. Preserve and reconcile evidence using the
 [audit recovery procedure](recovery.md#recover-audit-admission) before restart.
 Readiness and local chain verification do not prove complete historical delivery.
+
+Key issuance also requires an audit creation-intent record to be synced before
+the key store changes. When no required sink is configured, those intents are
+retained in `<audit WAL path>.intents`, a separate file-synced JSONL journal.
+It contains only intent records, not the complete hash chain, and is not
+automatically replayed. At 1024 records, new key issuance returns 503 until the
+journal is archived; inference and revocation remain available. Stop and fence
+the writer before securely archiving the complete journal and creating an empty
+replacement, retaining it according to the audit policy. A malformed journal
+refuses startup; preserve and repair its evidence rather than deleting it.
+An intent does not prove the key was created, and success events remain subject
+to the configured sink's delivery guarantees. The file uses the same volume as
+the WAL: ephemeral storage does not survive volume loss.
 
 ## Collect audit records
 

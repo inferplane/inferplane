@@ -46,6 +46,11 @@ Messages·Chat Completions·Responses·Bedrock 수신과 상태·메트릭·키 
 | CP 인증 설정 | `controlplane/authconfig.go` | GET /ui/auth/config의 비밀 없는 sso·issuer·client_id. issuer·client_id 있을 때만 등록, 아니면 404 |
 | CLI 로그인 | `internal/server/authapi/` | 데이터 영역의 선택적 config·발급·자기 폐기. 콘솔과 별도 OIDC client_id·검증기, 만료·owner는 서버 결정, 주체별 발급 제한. 폐기는 일반 KeyAuth |
 
+CLI·관리 키 발급 본문은 최대 64 KiB이며 CLI에는 더 작은
+`server.max_request_bytes`도 적용됩니다. CLI의 주체별 제한은 본문 파싱 전에
+실행합니다. 감사 요청 기록에 실패하면 키를 만들지 않고 503을 반환합니다.
+키 폐기는 감사 준비 상태에 의해 차단하지 않습니다.
+
 ### 3. 주요 결정 {#3-key-decisions}
 
 Messages·Chat Completions·Bedrock Invoke/Converse의 컨텍스트 사전 검사 실패는 각 수신

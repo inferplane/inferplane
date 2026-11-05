@@ -23,6 +23,7 @@ reservation journal for node-local fleets. Postgres also backs `bodystore`,
 | Provider store | `internal/providerstore/sqlite.go` | opt-in DB topology (ADR-008): `providers` (refs only — no secret column; `guardrail_id`/`guardrail_version` TEXT columns, D6/ADR-019 — a DB-registered Bedrock provider's own default Guardrail, ALTER-TABLE migrations mirroring `auth_header`), `model_targets` (ordered routes), `model_aliases` (`model`, `alias` PK — ADR-021 follow-up: a model's alias→canonical names, group-level so a multi-target fallback chain can't duplicate them; a brand-new `CREATE TABLE IF NOT EXISTS`, no ALTER-TABLE needed), `meta` (durable `seeded` marker); portable TEXT/INTEGER DDL |
 | Audit writer | `internal/audit/writer.go` | single-writer hash chain, retained-WAL validation and latched admission pressure |
 | Audit WAL | `internal/audit/wal.go` | disk buffer for `buffer_then_block` durability |
+| Key issuance intent journal | `<audit WAL path>.intents` | file-synced creation requests when no required audit sink is configured |
 | Audit verify | `internal/audit/verify.go` | per-instance segmented chain verification |
 | Audit anchoring | `internal/audit/s3anchor/` | opt-in WORM (S3 Object Lock) chain-head anchoring → tamper-resistant (ADR-012); refs/PII-free anchor objects |
 | Limiter store | `internal/limiter/limiter.go` | in-memory token bucket (TPM/RPM), two-phase |
@@ -39,6 +40,10 @@ reservation journal for node-local fleets. Postgres also backs `bodystore`,
   WAL records or any WAL append/truncate failure close new inference admission.
   Restart counts the retained backlog without automatic sink replay. In-flight
   requests can still record settlement; see [durability and recovery](../operations/observability.md#audit-durability-limits).
+- CLI and admin key creation require a file-synced `*_key_create_requested`
+  audit record before changing the key store. This is an intent, not proof of
+  creation; the existing `*_key_created` event reports success separately.
+  Revocation remains available when audit admission is blocked.
 - Admin-plane events (`admin_key_created` / `admin_key_revoked` / `admin_denied`, ADR-004) carry `principal.user` (opaque OIDC `sub` — never email) and `principal.auth_method` (`oidc` | `break_glass`); `auth_method` is appended at the END of `PrincipalRef` so pre-change chains still verify byte-exactly (mixed-version fixture test).
 - Two-phase stores (check then debit) so a denied request never charges the team.
 - Prompt/response bodies are NEVER in the audit chain (ADR-003 content-free

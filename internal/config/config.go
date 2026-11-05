@@ -199,9 +199,8 @@ type ServerConfig struct {
 	// MaxInflightRequestBytes bounds the request-body bytes all data-plane
 	// requests hold at once; a request that does not fit is refused with a
 	// protocol-shaped 503 (counts are answered locally, still HTTP 200).
-	// A request with a slow or stalled body keeps its reservation until the body
-	// ends or the connection closes (no read deadline), so set it to several
-	// times MaxRequestBytes; an equal value lets one stalled upload refuse all.
+	// A slow body keeps its reservation until it ends or the read deadline expires,
+	// so set it to several times MaxRequestBytes.
 	// 0 (unset) disables it; otherwise it must be >= MaxRequestBytes so any
 	// admissible request can run alone.
 	MaxInflightRequestBytes int64 `json:"max_inflight_request_bytes,omitempty"`

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,12 +13,60 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inferplane/inferplane/internal/adminauth"
 	"github.com/inferplane/inferplane/internal/audit"
+	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/server/configapi"
 	"github.com/inferplane/inferplane/internal/server/routingtest"
 )
+
+func TestAuditPressureRefusesKeyIssuanceButPermitsRevocation(t *testing.T) {
+	store, err := keystore.OpenSQLite(filepath.Join(t.TempDir(), "keys.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	plaintext, key, err := store.Create(context.Background(), "alpha", []string{"*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aud := retainedAudit(t)
+	verifier := &fakeVerifier{claims: adminauth.Claims{Subject: "alice", Groups: []string{"team-alpha"}}}
+	mapping := adminauth.MappingConfig{GroupMappings: []adminauth.GroupMapping{{Group: "team-alpha", Teams: []string{"alpha"}}}}
+	data := DataMux(nil, newHolder(nil, nil), store, aud, nil, nil, nil, nil, nil, verifier, mapping, nil, time.Hour)
+	admin := AdminMux(store, []string{"admin-token"}, nil, adminauth.MappingConfig{}, nil, nil, aud, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	for _, item := range []struct {
+		handler           http.Handler
+		path, body, token string
+	}{
+		{data, "/v1/auth/key", `{}`, jwtShaped},
+		{admin, "/admin/keys", `{"team":"alpha","allowed_models":["*"]}`, "admin-token"},
+	} {
+		req := httptest.NewRequest(http.MethodPost, item.path, strings.NewReader(item.body))
+		req.Header.Set("Authorization", "Bearer "+item.token)
+		rec := httptest.NewRecorder()
+		item.handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s admitted issuance: %d %s", item.path, rec.Code, rec.Body.String())
+		}
+	}
+	keys, err := store.List(context.Background())
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("unexpected keys: %d, %v", len(keys), err)
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/v1/auth/key", nil)
+	req.Header.Set("x-api-key", plaintext)
+	rec := httptest.NewRecorder()
+	data.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("revocation blocked: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := store.Resolve(context.Background(), plaintext); err == nil {
+		t.Fatalf("key %s remains active", key.KeyID)
+	}
+}
 
 func retainedAudit(t *testing.T) *audit.Writer {
 	t.Helper()

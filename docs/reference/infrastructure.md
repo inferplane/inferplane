@@ -41,8 +41,9 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
   validation through `LoadRaw`. It does not open runtime stores, construct
   provider/AWS credentials or contact upstreams; a valid declaration does not
   establish runtime readiness. `serve` checks those runtime dependencies.
-- Both gateway listeners have a 10-second request-header deadline. There is no
-  total response deadline that would cut off long-running SSE streams.
+- Both gateway listeners have a 10-second request-header deadline and a
+  two-minute deadline for reading the complete request. There is no total
+  response deadline that would cut off long-running SSE streams.
 - `server.max_request_bytes` (default 64 MiB) bounds one request body.
   `server.max_inflight_request_bytes` (default 0, off; otherwise at least the
   per-request cap) bounds the body bytes all data-plane requests hold at once.
@@ -54,8 +55,8 @@ renders config into a ConfigMap and wires an optional IRSA ServiceAccount for Be
   measured on 2026-10-27), so size the budget as (memory limit − idle RSS) / 6
   and also set `GOMEMLIMIT` and the container or systemd memory limit. A request
   whose body arrives slowly or stalls keeps its reservation until the body
-  finishes, the client gives up or the connection closes (there is no body read
-  deadline), so size the budget at several times `server.max_request_bytes`: an
+  finishes, the client gives up or the two-minute read deadline expires, so
+  size the budget at several times `server.max_request_bytes`: an
   equal value lets one stalled upload refuse every other request. Watch
   `inferplane_inflight_refusals_total{route}`.
 - Default/local mode is single-replica. ADR-046 shared Postgres mode supports multiple gateways; the chart rejects unsafe local replication. Persistent shared mode renders a StatefulSet with separate PVCs, required node anti-affinity and a disruption budget. See [shared governance](../shared-governance.md).
