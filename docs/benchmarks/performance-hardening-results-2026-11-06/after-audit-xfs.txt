@@ -1,0 +1,10 @@
+goos: linux
+goarch: arm64
+pkg: github.com/inferplane/inferplane/internal/audit
+BenchmarkReviewAuditDrain/file_sink=false-4         	   23740	     47595 ns/op	    2272 B/op	       5 allocs/op
+BenchmarkReviewAuditDrain/file_sink=false-4         	   25921	     52209 ns/op	    2271 B/op	       5 allocs/op
+BenchmarkReviewAuditDrain/file_sink=false-4         	   23168	     45744 ns/op	    2272 B/op	       5 allocs/op
+BenchmarkReviewAuditDrain/file_sink=true-4          	   17428	     78370 ns/op	    2272 B/op	       5 allocs/op
+BenchmarkReviewAuditDrain/file_sink=true-4          	   13888	     83896 ns/op	    2272 B/op	       5 allocs/op
+BenchmarkReviewAuditDrain/file_sink=true-4          	   14155	     82160 ns/op	    2272 B/op	       5 allocs/op
+PASS

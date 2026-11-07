@@ -5,6 +5,16 @@ import (
 	"testing"
 )
 
+func TestMaskingFormBehavior(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("form behavior test needs Node")
+	}
+	if out, err := exec.Command(node, "testdata/routing_forms.cjs", "--masking").CombinedOutput(); err != nil {
+		t.Fatalf("masking form: %v\n%s", err, out)
+	}
+}
+
 // Executes shipped form handlers and observes their fetch payloads; it does not
 // assert on source text. Node's standard library is the only test prerequisite.
 func TestRoutingFormBehavior(t *testing.T) {

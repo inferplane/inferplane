@@ -23,6 +23,7 @@ lives in its own package. This is the project's headline extensibility promise
 
 ## Invariants
 - Preserve same-protocol `RawBody` bytes by default. Documented model substitution, streaming usage options, required native guardrail insertion and completely verified PII masking are bounded exceptions; never rewrite unrelated content.
+- Default HTTP clients use `providers.NewHTTPClient`: 120-second response-header timeout, no total stream timeout, and redirects refused. Injected transports/timeouts remain intact (including guarded admin probe transports).
 - Streaming: `Stream` returns an `iter.Seq2[*StreamEvent, error]`; never retry mid-stream (pre-TTFT failover only).
 - Cache-affecting rewrites (e.g. Bedrock model injection) must be top-level-only so `cache_control` stays byte-stable.
 

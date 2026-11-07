@@ -65,10 +65,7 @@ func factory(cfg providers.Config) (providers.Provider, error) {
 	if _, cached := credentials.(*aws.CredentialsCache); !cached {
 		credentials = aws.NewCredentialsCache(credentials)
 	}
-	client := http.Client{}
-	if cfg.HTTPClient != nil {
-		client = *cfg.HTTPClient
-	}
+	client := providers.NewHTTPClient(cfg.HTTPClient)
 	base := client.Transport
 	if base == nil {
 		base = http.DefaultTransport
@@ -82,7 +79,7 @@ func factory(cfg providers.Config) (providers.Provider, error) {
 		credentials: credentials, signer: v4.NewSigner(),
 	}
 	cfg.Type = "openai_responses"
-	cfg.HTTPClient = &client
+	cfg.HTTPClient = client
 	// Config.Credentials is globally injected for the old bedrock broker
 	// opt-in. This transport must use only its own default SDK chain.
 	cfg.Credentials = nil

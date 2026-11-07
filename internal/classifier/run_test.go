@@ -73,6 +73,136 @@ func enforce(name string, c Classifier) Entry {
 	return Entry{Name: name, Mode: Enforce, Classifier: c, Global: true}
 }
 
+func TestShadowSaturationDoesNotBlockEnforce(t *testing.T) {
+	const capacity = 16
+	started := make(chan struct{}, capacity)
+	release := make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	blocker := &fake{score: func(_ context.Context, windows []string) (Scores, error) {
+		started <- struct{}{}
+		<-release
+		return allClear(context.Background(), windows)
+	}}
+	shadow := Entry{Name: "shadow", Mode: Shadow, Classifier: blocker, Global: true}
+	set := testSet(t, 0, shadow)
+	set.Timeout = 100 * time.Millisecond
+	for range capacity {
+		go set.Run(context.Background(), set.Entries, req("shadow-team", "text"))
+	}
+	for range capacity {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("shadow calls did not fill their capacity")
+		}
+	}
+	worker := &fake{score: allClear}
+	enforced := testSet(t, 0, enforce("enforced", worker))
+	result := enforced.Run(context.Background(), enforced.Entries, req("protected-team", "text"))
+	if result[0].Outcome != OutcomeClear || worker.callCount() != 1 {
+		t.Fatalf("shadow calls blocked enforcement: result=%+v calls=%d", result[0], worker.callCount())
+	}
+}
+
+func TestClassifierConcurrencyBoundPersistsAfterTimeoutAndAcrossSets(t *testing.T) {
+	const capacity = 16
+	started := make(chan struct{}, capacity)
+	release := make(chan struct{})
+	finished := make(chan struct{}, capacity)
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	blocker := &fake{score: func(_ context.Context, windows []string) (Scores, error) {
+		started <- struct{}{}
+		<-release
+		finished <- struct{}{}
+		return allClear(context.Background(), windows)
+	}}
+	entries := make([]Entry, capacity)
+	for index := range entries {
+		entries[index] = enforce("blocked", blocker)
+	}
+	first := testSet(t, 0, entries...)
+	first.Timeout = 100 * time.Millisecond
+	done := make(chan struct{})
+	go func() { first.Run(context.Background(), first.Entries, req("team", "text")); close(done) }()
+	for index := 0; index < capacity; index++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("classifiers did not start")
+		}
+	}
+	<-done
+	other := &fake{score: allClear}
+	second := testSet(t, 0, enforce("other", other))
+	result := second.Run(context.Background(), second.Entries, req("team", "different"))
+	if result[0].Outcome != OutcomeError || other.callCount() != 0 {
+		t.Fatalf("saturated set ran classifier: outcome=%s calls=%d", result[0].Outcome, other.callCount())
+	}
+	once.Do(func() { close(release) })
+	for index := 0; index < capacity; index++ {
+		<-finished
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(classifierCalls) != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(classifierCalls) != 0 {
+		t.Fatal("classifier slots did not recover")
+	}
+	result = second.Run(context.Background(), second.Entries, req("team", "different"))
+	if result[0].Outcome != OutcomeClear || other.callCount() != 1 {
+		t.Fatal("classifier did not recover after release")
+	}
+}
+
+func TestClassifierConcurrencyBoundsWindowPreparation(t *testing.T) {
+	const capacity = 16
+	started := make(chan struct{}, capacity)
+	release := make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	blocker := &fake{windows: func(segments []string) []string {
+		started <- struct{}{}
+		<-release
+		return segments
+	}, score: allClear}
+	entries := make([]Entry, capacity)
+	for index := range entries {
+		entries[index] = enforce("blocked", blocker)
+	}
+	first := testSet(t, 0, entries...)
+	first.Timeout = 100 * time.Millisecond
+	done := make(chan struct{})
+	go func() { first.Run(context.Background(), first.Entries, req("team", "text")); close(done) }()
+	for index := 0; index < capacity; index++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("window preparation did not start")
+		}
+	}
+	<-done
+	other := &fake{score: allClear}
+	second := testSet(t, 0, enforce("other", other))
+	result := second.Run(context.Background(), second.Entries, req("team", "different"))
+	if result[0].Outcome != OutcomeError || other.callCount() != 0 {
+		t.Fatal("saturation did not bound preparation")
+	}
+	once.Do(func() { close(release) })
+	deadline := time.Now().Add(time.Second)
+	for len(classifierCalls) != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(classifierCalls) != 0 {
+		t.Fatal("classifier slots did not recover")
+	}
+	if blocker.callCount() != 0 {
+		t.Fatal("timed-out preparation dispatched a classifier call")
+	}
+}
+
 func req(team string, segments ...string) Request {
 	return Request{Team: team, Policies: []PolicyRef{{Name: "privacy", Generation: 7, Rule: "protect"}}, Segments: segments}
 }

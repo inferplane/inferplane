@@ -80,6 +80,9 @@ func TestGatewayBootsAndShutsDown(t *testing.T) {
 	if g.dataSrv.ReadHeaderTimeout != 10*time.Second || g.adminSrv.ReadHeaderTimeout != 10*time.Second {
 		t.Fatal("both HTTP planes must bound slow request headers")
 	}
+	if g.dataSrv.ReadTimeout <= 0 || g.adminSrv.ReadTimeout <= 0 {
+		t.Fatal("both HTTP planes must bound slow request bodies")
+	}
 	if g.dataSrv.WriteTimeout != 0 {
 		t.Fatal("header protection must not impose a total streaming deadline")
 	}

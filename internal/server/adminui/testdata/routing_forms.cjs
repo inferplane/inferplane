@@ -86,6 +86,10 @@ const context = vm.createContext({
       if (writeFailure) return { ok: false, status: 400, text: async () => '{"error":"invalid configuration"}', json: async () => ({ error: "invalid configuration" }) };
     }
     if (url === "/fixture/exact") return { ok: true, status: 200, text: async () => '{"cost_micros":9007199254740993}' };
+    if (url === "/admin/masking") return { ok: true, status: 200, text: async () => JSON.stringify({
+      enabled: options.method === "PUT" ? JSON.parse(options.body).enabled : false,
+      revision: "fixture-revision", writable: true,
+    }) };
     if (url === "/admin/keys" && options.method === "POST") return { ok: true, status: 200, text: async () => '{"plaintext":"once-only-fixture"}' };
     if (url === "/admin/config/export") {
       if (exportWait) await exportWait;
@@ -115,6 +119,22 @@ async function saveProvider() { await get("provider-form").fire("submit"); retur
 async function saveModel() { await get("model-form").fire("submit"); return writes.at(-1); }
 
 (async () => {
+  if (process.argv.includes("--masking")) {
+    run("whoamiIsAdmin = true");
+    await run("refreshMasking()");
+    assert.equal(get("masking-enabled").checked, false);
+    get("masking-enabled").checked = true;
+    await get("masking-form").fire("submit");
+    assert.deepEqual(writes.at(-1), { path: "/admin/masking", body: { enabled: true, expected_revision: "fixture-revision" } });
+    get("masking-enabled").checked = false;
+    await get("masking-form").fire("submit");
+    assert.equal(writes.at(-1).body.enabled, false);
+    run("whoamiIsAdmin = false");
+    await run("refreshMasking()");
+    assert.equal(get("masking-save").disabled, true);
+    console.log("masking form behavior: PASS");
+    return;
+  }
   await editProvider();
   const savedProvider = await saveProvider();
   run("fillModelForm(fixtureModel)");

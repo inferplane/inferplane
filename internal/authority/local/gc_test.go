@@ -14,15 +14,24 @@ import (
 
 func readJournal(t *testing.T, s *Store) (*journal, int) {
 	t.Helper()
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 	var raw []byte
-	if err := s.db.QueryRow(`SELECT state FROM local_escrow WHERE id=1`).Scan(&raw); err != nil {
+	if err := tx.QueryRow(`SELECT state FROM local_escrow WHERE id=1`).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
-	var j journal
-	if err := json.Unmarshal(raw, &j); err != nil {
+	j, err := loadJournal(context.Background(), tx, raw)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return &j, len(raw)
+	raw, err = json.Marshal(j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return j, len(raw)
 }
 
 func TestCompletedReceiptRetentionIsBoundedWithoutLosingAccounting(t *testing.T) {

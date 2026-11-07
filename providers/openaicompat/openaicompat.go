@@ -31,17 +31,14 @@ type provider struct {
 }
 
 func factory(cfg providers.Config) (providers.Provider, error) {
-	client := http.Client{}
-	if cfg.HTTPClient != nil {
-		client = *cfg.HTTPClient
-	}
+	client := providers.NewHTTPClient(cfg.HTTPClient)
 	// Preserve the caller's transport/settings without letting a redirect
 	// move a credential-bearing request beyond the selected destination.
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	// Accept the same root or /v1 base form operators use for Responses and
 	// OpenAI SDK clients; both generation and health append their own /v1 path.
 	baseURL := strings.TrimSuffix(strings.TrimRight(cfg.BaseURL, "/"), "/v1")
-	return &provider{baseURL: baseURL, apiKey: cfg.APIKey, client: &client}, nil
+	return &provider{baseURL: baseURL, apiKey: cfg.APIKey, client: client}, nil
 }
 
 func (p *provider) Name() string { return "openai_compatible" }

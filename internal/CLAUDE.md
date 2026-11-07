@@ -85,7 +85,7 @@ Both count handlers receive the DataMux readiness callback: unready/stale, refus
 and oversized/unreadable count requests use local HTTP-200 estimates without egress.
 Deploy CP privacy with `require_sync` and upgrade binaries/CRD before activation.
 See `docs/policy-routing.md` for exact limits and rollout gates.
-Opt-in classifiers run inside `RouteRequest` after regex inspection, only for privacy-governed non-count requests; Enforce flags map to `onDetected` (Mask escalates to `onUninspectable`) and abstain/error map to `onUninspectable`, independently (a flag never hides another entry's failure; the stricter action wins); Shadow never routes. A count makes no classifier call; for a team with an Enforce entry and an applicable `sensitiveData` rule it is uninspectable (Ruling 13) and stays HTTP 200 (an internal route, or the local estimate when denied). Classification precedes governance admission, so per-key limits do not bound classifier load (a cross-request cap is a follow-up).
+Opt-in classifiers run inside `RouteRequest` after regex inspection, only for privacy-governed non-count requests; Enforce flags map to `onDetected` (Mask escalates to `onUninspectable`) and abstain/error map to `onUninspectable`, independently (a flag never hides another entry's failure; the stricter action wins); Shadow never routes. A count makes no classifier call; for a team with an Enforce entry and an applicable `sensitiveData` rule it is uninspectable (Ruling 13) and stays HTTP 200 (an internal route, or the local estimate when denied). Classification precedes governance admission, so per-key limits do not bound classifier load. Separate process-wide limits permit 16 Enforce and 16 Shadow calls across generations; cancellation retains a slot until the call returns. A shared sidecar can still be saturated by either mode.
 
 ## Key Packages
 - `server/` — HTTP data plane + admin plane. Ingress handlers: `anthropicapi/`, `openaiapi/`, `responsesapi/`, `bedrockapi/` (ADR-024/052); `usageapi/` self-service `GET /v1/usage` (ADR-021); `authapi/` opt-in CLI login (ADR-028); `adminapi/`, `configapi/`, `auditapi/`, `analyticsapi/`, `auditconsoleapi/` (read-only full-admin `/admin/audit/*`, ADR-057, mounted only when the analytics store implements `AuditEventQuerier`); `configapi.Capabilities.ObservabilityExport` (`observability_export`: plain bool, true when an `observability` block is configured; readable by any authenticated admin like every capability); `adminui/` embedded console (ADR-001, SSO ADR-026, i18n ADR-027). A mid-stream upstream failure surfaces as a wire-appropriate error frame (SSE `error` event / eventstream exception), never a silent truncation, and the audit record is marked `partial: true`. **Every observability sink sees the same settled usage.** Invalid quantities are omitted from settled audit usage and span token attributes; completion and cost evidence remain (`pricing_missing: true` on rejected settlement), and valid partial TTL counts are preserved. A partial stream's usage is settled, so it must also be `observeTokens`'d — metering only the clean path left `gen_ai_client_token_usage_total` below the budget spend, the audit ledger, and the usage windows on every interrupted stream. `recordSpanSettled` (not `recordSpanResponse`) is the span call at the three COMMITTED sites; `recordSpanResponse` stays for the terminal pre-commit rejects, where there is no usage or cost to report. Every pricing, `PreCheck` and reservation refusal calls `audit.SetGovernance` before writing its denial record (ADR-057), and a reservation refusal carries `outcome.error` `budget_authority_unavailable` on all four ingresses. Every ingress records a legacy-mask refusal as `outcome.error` `mask_failed` (with routing reason `mask_failed`) and an unreadable `MaskRequired` body as `masking_failed`, keeping its own status and message. Refusals made before a handler runs use `writeIngressError` (`ingress_error.go`) for the route's envelope; an oversized body gets 413 in that envelope whether its length was declared (middleware) or not (each handler's `MaxBytesError` branch).
@@ -166,8 +166,34 @@ checked arithmetic and declared usage bounds guard refunds. Process restart burn
 old OPEN grants, never restores credit. No central Postgres or control-plane HTTP call is added to node-local inference.
 The private SQLite journal still performs transactional Reserve/Finish writes on
 the request path under a process mutex; benchmark that serialized work separately.
+ADR-058 journal v2 persists changed entities and a root count manifest, not the
+whole snapshot. Cached decoded state requires owner/revision/root validation
+inside every BEGIN IMMEDIATE. Copy before mutation; publish only after commit.
+Missing entities refuse. Startup atomically migrates v1 and still burns old
+authority; older binaries cannot reopen v2. Never delete a journal to downgrade.
 An exhausted hard budget refuses with `governance.BudgetDenial` naming its policy
 and rule for the audit record (ADR-057); grants carry no document generation.
+
+## Performance controls (ADR-058)
+
+`responses.ParsedRequest` caches root parsing and compatibility observations for
+one immutable body. Masking requires a fresh document. Native bytes, duplicate-key
+validation and independent policy inspection remain unchanged.
+
+`masking` is the default-off local optional control, mutually exclusive with
+legacy `plugins`. A configured state file enables full-admin GET/PUT
+`/admin/masking` and the console setting. Writes are revision checked and
+atomically persisted. Team scope is static; required policy privacy cannot be
+disabled through this switch. Controlled masking uses complete structural
+redaction, including system messages. Count endpoints remain local.
+
+Audit groups at most 64 queued normal records per WAL/file sync without a timer.
+Issuance acknowledgements keep their separate durable path. Required OTLP is an
+explicit `audit.sinks` entry selecting a declared audit exporter, independent of
+best-effort subject copies. Full collector acceptance permits WAL reclamation
+only if no earlier retained history exists. Partial, malformed or failed
+acceptance retains evidence; restart never blindly replays it. Existing file
+archives, issuance journals and analytics retention are separate.
 
 ## Shared gateway profile (ADR-046)
 

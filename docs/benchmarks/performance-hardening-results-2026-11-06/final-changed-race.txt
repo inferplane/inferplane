@@ -1,0 +1,2 @@
+ok  	github.com/inferplane/inferplane/cmd/mayu	50.439s
+ok  	github.com/inferplane/inferplane/internal/server/responsesapi	(cached)

@@ -3,6 +3,7 @@
 package local
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -23,9 +24,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Store serializes journal transactions and keeps only monotonic deadlines in
-// memory. The durable owner is checked inside every SQLite write transaction,
-// including reads used to construct sync requests.
+// Store serializes journal transactions and caches decoded committed state.
+// The durable owner, revision and metadata are checked inside every SQLite
+// write transaction, including reads used to construct sync requests.
 type Store struct {
 	mu        sync.Mutex
 	db        *sql.DB
@@ -36,15 +37,17 @@ type Store struct {
 	now       func() time.Time
 	deadlines map[string]time.Time
 	windows   map[string]time.Time
+	snapshot  *journal
+	rootRaw   []byte
+	revision  int64
 }
 
 var _ governance.BudgetAuthority = (*Store)(nil)
 
-// The journal is one versioned snapshot in a SQLite row. Every transition reads
-// it under BEGIN IMMEDIATE and replaces it at FULL durability before returning.
-// This deliberately favors simple atomic multi-budget accounting over partial
-// table updates. Only pending liabilities and bounded retry receipts survive
-// collection; acknowledged historical windows do not grow this row forever.
+// The journal is the transactional working view of versioned SQLite entity
+// rows. Only changed entities are persisted, with FULL durability. A cached
+// decoded snapshot is usable only after checking the durable owner, revision
+// and metadata inside BEGIN IMMEDIATE.
 type journal struct {
 	Version    int
 	Ready      bool
@@ -64,6 +67,7 @@ type journal struct {
 	Completed        []string
 	Receipts         map[string]replayReceipt
 	ReceiptOrder     []string
+	EntryCounts      map[string]int `json:",omitempty"`
 }
 
 type grant struct {
@@ -200,6 +204,9 @@ func (s *Store) initialize() error {
 	)`); err != nil {
 		return err
 	}
+	if err := entrySchema(ctx, tx); err != nil {
+		return err
+	}
 	var raw []byte
 	err = tx.QueryRowContext(ctx, `SELECT state FROM local_escrow WHERE id = 1`).Scan(&raw)
 	j := emptyJournal()
@@ -207,7 +214,8 @@ func (s *Store) initialize() error {
 		return err
 	}
 	if err == nil {
-		if err := decode(raw, j); err != nil {
+		j, err = loadJournal(ctx, tx, raw)
+		if err != nil {
 			return err
 		}
 		if err := retire(j); err != nil {
@@ -218,7 +226,8 @@ func (s *Store) initialize() error {
 	j.ServerTime = time.Time{}
 	j.Budgets = map[string]policy.AuthorityBudget{}
 	collect(j, s.instance)
-	raw, err = json.Marshal(j)
+	j.Version = 2
+	raw, err = journalMetadata(j)
 	if err != nil {
 		return err
 	}
@@ -227,7 +236,23 @@ func (s *Store) initialize() error {
 		s.instance, raw); err != nil {
 		return err
 	}
-	return tx.Commit()
+	// Restart already retires old authority; replace entities atomically with
+	// that retired snapshot before publishing the new owner.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM local_escrow_entries`); err != nil {
+		return err
+	}
+	if err := persistEntries(ctx, tx, nil, j); err != nil {
+		return err
+	}
+	var revision int64
+	if err := tx.QueryRowContext(ctx, `SELECT revision FROM local_escrow WHERE id=1`).Scan(&revision); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.snapshot, s.rootRaw, s.revision = j, raw, revision
+	return nil
 }
 
 func retire(j *journal) error {
@@ -303,31 +328,45 @@ func (s *Store) transaction(ctx context.Context, fn func(*journal) error) error 
 	defer tx.Rollback()
 	var owner string
 	var raw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT owner, state FROM local_escrow WHERE id = 1`).Scan(&owner, &raw); err != nil {
+	var revision int64
+	if err := tx.QueryRowContext(ctx, `SELECT owner, state, revision FROM local_escrow WHERE id = 1`).Scan(&owner, &raw, &revision); err != nil {
 		return s.storageError(err)
 	}
 	if owner != s.instance {
 		return fmt.Errorf("%w: journal owner fenced", governance.ErrAuthorityUnavailable)
 	}
-	j := emptyJournal()
-	if err := decode(raw, j); err != nil {
-		s.broken = err
-		return err
+	before := s.snapshot
+	if before == nil || revision != s.revision || !bytes.Equal(raw, s.rootRaw) {
+		before, err = loadJournal(ctx, tx, raw)
+		if err != nil {
+			return s.storageError(err)
+		}
+		if before.Version != 2 {
+			return s.storageError(invalid("journal version changed"))
+		}
 	}
+	j := cloneJournal(before)
 	if err := fn(j); err != nil {
 		return err
 	}
 	collect(j, s.instance)
-	raw, err = json.Marshal(j)
+	raw, err = journalMetadata(j)
 	if err != nil {
 		return s.storageError(err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE local_escrow SET state = ? WHERE id = 1 AND owner = ?`, raw, s.instance); err != nil {
+	if err := persistEntries(ctx, tx, before, j); err != nil {
+		return s.storageError(err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE local_escrow SET state = ?, revision = revision+1 WHERE id = 1 AND owner = ?`, raw, s.instance); err != nil {
+		return s.storageError(err)
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT revision FROM local_escrow WHERE id=1`).Scan(&revision); err != nil {
 		return s.storageError(err)
 	}
 	if err := tx.Commit(); err != nil {
 		return s.storageError(err)
 	}
+	s.snapshot, s.rootRaw, s.revision = j, raw, revision
 	pruneDeadlines(s.deadlines, j)
 	return nil
 }
@@ -346,8 +385,15 @@ func decode(raw []byte, j *journal) error {
 		return fmt.Errorf("%w: decode journal: %w", governance.ErrAuthorityInvalid, err)
 	}
 	*j = decoded
-	if j.Version != 1 || j.Grants == nil || j.Requests == nil || j.Permits == nil || j.Meters == nil || j.Budgets == nil {
+	return validateJournal(j)
+}
+
+func validateJournal(j *journal) error {
+	if (j.Version != 1 && j.Version != 2) || j.Grants == nil || j.Requests == nil || j.Permits == nil || j.Meters == nil || j.Budgets == nil {
 		return invalid("unsupported or incomplete journal")
+	}
+	if j.Receipts == nil {
+		j.Receipts = map[string]replayReceipt{}
 	}
 	for id, g := range j.Grants {
 		if g == nil || g.Wire.ID != id || g.Wire.Amount <= 0 || g.Consumed < 0 || g.Observed < 0 ||

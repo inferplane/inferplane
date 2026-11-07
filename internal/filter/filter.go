@@ -24,14 +24,18 @@ type RequestFilter interface {
 // *Masking, or one with a nil Filter, means masking is off — Enabled is
 // false-safe so handlers can hold a single nil field.
 type Masking struct {
-	Filter RequestFilter
-	Global bool
-	Teams  map[string]bool
+	Filter  RequestFilter
+	Global  bool
+	Teams   map[string]bool
+	Control *Control
 }
 
 // Enabled reports whether the given team's requests must be masked.
 func (m *Masking) Enabled(team string) bool {
 	if m == nil || m.Filter == nil {
+		return false
+	}
+	if m.Control != nil && !m.Control.enabled() {
 		return false
 	}
 	return m.Global || m.Teams[team]

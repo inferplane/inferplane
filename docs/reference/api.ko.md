@@ -1,9 +1,16 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: 4992d8b59759a8b6d3732b1b2efdc6a0cbeb3c6b7676f0972a7e8bef3dee9bbc
+translation_source_sha256: 974de98768729355a626e84ea6eb5314b61407d331d7900906123dfc1ea8ca17
 ---
 
 # API 구현 {#api}
+
+`GET`/`PUT /admin/masking`은 전체 관리자에게 로컬 선택 마스킹 설정을 제공합니다.
+GET은 `enabled`, `revision`, `writable`을 반환하고 PUT은 `enabled`와
+`expected_revision`을 받습니다(최대 4 KiB). 인증 누락은 401, 권한 부족은 403,
+오래된 버전은 409, 영속성 미설정은 405, 저장소·감사 장애는 503입니다.
+변경하면 `admin_masking_changed`를 기록합니다. 필수 개인정보 정책은 유지됩니다.
+[선택 마스킹](security.md#administrator-controlled-optional-masking)을 참고하세요.
 
 ### 1. 개요 {#1-overview}
 
@@ -45,6 +52,11 @@ Messages·Chat Completions·Responses·Bedrock 수신과 상태·메트릭·키 
 | CP 콘솔 | `internal/controlplane/ui/` | /ui/ [운영 대시보드](../runbooks/inferplaned-dashboard.md): 개요·정밀 사용량과 내보내기·최근 데이터 플레인 generation과 거절·검토 후 정책 CRUD(기존 서버 쓰기 권한). 데이터 없는 공개 셸, 분리된 읽기·쓰기 자격 증명은 JS 메모리만, self CSP와 API 불가·degraded 표시. 로그인 origin 환경 변수로 Code+PKCE |
 | CP 인증 설정 | `controlplane/authconfig.go` | GET /ui/auth/config의 비밀 없는 sso·issuer·client_id. issuer·client_id 있을 때만 등록, 아니면 404 |
 | CLI 로그인 | `internal/server/authapi/` | 데이터 영역의 선택적 config·발급·자기 폐기. 콘솔과 별도 OIDC client_id·검증기, 만료·owner는 서버 결정, 주체별 발급 제한. 폐기는 일반 KeyAuth |
+
+CLI·관리 키 발급 본문은 최대 64 KiB이며 CLI에는 더 작은
+`server.max_request_bytes`도 적용됩니다. CLI의 주체별 제한은 본문 파싱 전에
+실행합니다. 감사 요청 기록에 실패하면 키를 만들지 않고 503을 반환합니다.
+키 폐기는 감사 준비 상태에 의해 차단하지 않습니다.
 
 ### 3. 주요 결정 {#3-key-decisions}
 

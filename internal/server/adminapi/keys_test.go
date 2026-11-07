@@ -3,7 +3,9 @@ package adminapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
@@ -15,6 +17,35 @@ import (
 	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/principal"
 )
+
+func TestCreateKeyRefusesWhenDurableIntentFails(t *testing.T) {
+	store := newTestStore(t)
+	h := NewKeysHandler(store, nil)
+	h.SetDurable(func(context.Context, audit.Record) error { return errors.New("secret") })
+	rec := doAs(t, h, &memberID, "POST", "/admin/keys", `{"team":"alpha"}`)
+	keys, err := store.List(context.Background())
+	if rec.Code != http.StatusServiceUnavailable || err != nil || len(keys) != 0 || strings.Contains(rec.Body.String(), "secret") {
+		t.Fatalf("create admitted: %d, keys=%d", rec.Code, len(keys))
+	}
+}
+
+func TestCreateKeyBoundsBody(t *testing.T) {
+	h := NewKeysHandler(newTestStore(t), nil)
+	for _, body := range []string{`{"team":"alpha","ignored":"` + strings.Repeat("x", 1<<20) + `"}`, `{"team":"alpha"}` + strings.Repeat(" ", 1<<20)} {
+		for _, declared := range []bool{true, false} {
+			req := httptest.NewRequest(http.MethodPost, "/admin/keys", strings.NewReader(body))
+			if !declared {
+				req.ContentLength = -1
+			}
+			req = req.WithContext(principal.WithAdmin(req.Context(), memberID))
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("declared=%v: got %d", declared, rec.Code)
+			}
+		}
+	}
+}
 
 func newTestStore(t *testing.T) *keystore.SQLiteStore {
 	s, err := keystore.OpenSQLite(filepath.Join(t.TempDir(), "k.db"))

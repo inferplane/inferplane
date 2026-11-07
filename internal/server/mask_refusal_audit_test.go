@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,6 +18,45 @@ import (
 	"github.com/inferplane/inferplane/internal/sensitivity"
 	"github.com/inferplane/inferplane/internal/server/routingtest"
 )
+
+func TestAdminControlledMaskingAndRequiredPolicy(t *testing.T) {
+	for _, ing := range policyIngresses {
+		for _, required := range []bool{false, true} {
+			t.Run(ing.name()+"/"+map[bool]string{false: "optional", true: "required-policy"}[required], func(t *testing.T) {
+				f := routingtest.New(t, nil)
+				f.Router.SetRequestRedactor(sensitivity.NewRedactor())
+				if required {
+					f.Policies = []*policy.Policy{maskRoutingPolicy()}
+				}
+				c, err := filter.OpenControl(filepath.Join(t.TempDir(), "masking.json"), false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				store := stubStore{key: "dev-key", p: keystore.Principal{KeyID: "opaque-key", Team: "team", AllowedModels: []string{"*"}, KeyOptions: keystore.KeyOptions{Owner: "user"}}}
+				h := DataMux(f.Router, f.Holder, store, nil, nil, nil, &filter.Masking{Global: true, Filter: &policyMasker{}, Control: c}, nil, nil, nil, adminauth.MappingConfig{}, nil, 0)
+				body := routingtest.Body(ing.protocol, "system", ing.stream)
+				for _, enabled := range []bool{false, true, false} {
+					if err := c.Set(enabled, c.Snapshot().Revision); err != nil {
+						t.Fatal(err)
+					}
+					rec := policyDo(h, ing.path, body, true)
+					if rec.Code != 200 {
+						t.Fatalf("enabled=%v: %d %s", enabled, rec.Code, rec.Body)
+					}
+					all := append(append([]routingtest.Call{}, f.Public.Calls...), f.Private.Calls...)
+					if len(all) == 0 {
+						t.Fatal("no provider call")
+					}
+					gotPII := strings.Contains(all[len(all)-1].Body, "person@example.test")
+					if gotPII == (enabled || required) {
+						t.Fatalf("masking enabled=%v required=%v pii=%v", enabled, required, gotPII)
+					}
+				}
+			})
+		}
+	}
+
+}
 
 // maskDenials returns the terminal denials (request_started with an outcome)
 // and fails if the refused request completed.

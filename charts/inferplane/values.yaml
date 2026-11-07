@@ -89,8 +89,10 @@ config:
       targets: [ { provider: anthropic-direct, model: claude-sonnet-4-6 } ]
   # Audit: records go to container stdout, collected off the node by an OTel
   # Collector filelog receiver (examples/otel-collector/audit-filelog.yaml);
-  # kubelet log rotation bounds local disk. Nothing grows on the pod volume:
-  # the WAL is truncated after each delivered record. stdout is best-effort
+  # kubelet log rotation bounds container logs; the WAL is truncated after each
+  # delivered record. Key-issuance intents use bounded local segments: monitor
+  # inferplane_audit_intent_utilization_ratio and archive completed segments.
+  # stdout is best-effort
   # (not a required sink), so the container log file is the only local copy
   # until the collector durably enqueues it. The collector's persistent queue
   # holds a separate copy pending export; size kubelet rotation for ingestion outages.

@@ -191,6 +191,25 @@ func TestMintHandler_perSubjectRateLimit(t *testing.T) {
 	}
 }
 
+func TestMintRateLimitPrecedesBodyParsing(t *testing.T) {
+	store := newTestStore(t)
+	h := MintHandler(store, time.Hour, limiter.NewMemory(), nil)
+	id := principal.AdminIdentity{Subject: "alice", Teams: []string{"alpha"}, AuthMethod: "oidc"}
+	for attempt := 0; attempt < 11; attempt++ {
+		req := httptest.NewRequest("POST", "/v1/auth/key", strings.NewReader(`{`))
+		req = req.WithContext(principal.WithAdmin(req.Context(), id))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		want := 400
+		if attempt == 10 {
+			want = 429
+		}
+		if rec.Code != want {
+			t.Fatalf("attempt %d: got %d, want %d", attempt, rec.Code, want)
+		}
+	}
+}
+
 // TestMintHandler_perSubjectRateLimitIsIndependentPerSubject makes sure the
 // limiter key is scoped to the caller, not global — a busy subject must not
 // starve out a different one.

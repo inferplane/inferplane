@@ -37,6 +37,7 @@ import (
 	"github.com/inferplane/inferplane/internal/metrics"
 	"github.com/inferplane/inferplane/internal/otelexport"
 	"github.com/inferplane/inferplane/internal/policy"
+	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/providerstore"
 	"github.com/inferplane/inferplane/internal/proxy"
 	"github.com/inferplane/inferplane/internal/router"
@@ -45,6 +46,7 @@ import (
 	"github.com/inferplane/inferplane/internal/server/analyticsapi"
 	"github.com/inferplane/inferplane/internal/server/authapi"
 	"github.com/inferplane/inferplane/internal/server/configapi"
+	"github.com/inferplane/inferplane/internal/server/maskingapi"
 	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/internal/tier"
 	"github.com/inferplane/inferplane/pkg/ulid"
@@ -244,7 +246,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 	}
 
 	// Audit writer: build sinks from config, then the single-writer chain.
-	sinks, err := buildSinks(raw.Audit.Sinks)
+	sinks, err := buildSinks(raw.Audit.Sinks, obsSet)
 	if err != nil {
 		store.Close()
 		return nil, fmt.Errorf("audit sinks: %w", err)
@@ -967,7 +969,7 @@ func newGateway(cfgPath string) (*gateway, error) {
 		maxAge := raw.ControlPlane.MaxPolicyAgeDuration
 		governanceGate = func() (bool, string) { return syncer.GovernanceReady(maxAge) }
 	}
-	g.dataSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol), server.WithMaxRequestBytes(cfg.Server.MaxRequestBytes), server.WithMaxInflightRequestBytes(cfg.Server.MaxInflightRequestBytes), server.WithGovernanceGate(governanceGate), server.WithClientEvidence(clientEvidenceMode(cfg)), contentOption(obsSet, polStore))}
+	g.dataSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 2 * time.Minute, Handler: server.DataMux(r, holder, store, aud, gov, m, masking, teamPolicy, bodyRec, cliVerifier(cfg), oidcMapping(cfg), cliAuthConfigView(cfg), cliKeyTTL(cfg), server.WithUsageCollector(usageCol), server.WithMaxRequestBytes(cfg.Server.MaxRequestBytes), server.WithMaxInflightRequestBytes(cfg.Server.MaxInflightRequestBytes), server.WithGovernanceGate(governanceGate), server.WithClientEvidence(clientEvidenceMode(cfg)), contentOption(obsSet, polStore))}
 	if authority != nil || shared != nil {
 		next := g.dataSrv.Handler
 		g.dataSrv.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -1058,11 +1060,22 @@ func newGateway(cfgPath string) (*gateway, error) {
 			return true, ""
 		}
 	}
-	g.adminSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore != nil), auditFileSinks, aud, anchorReader, readiness, m, writer, liveExport(holder), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), cfg.Probe.AllowedHosts...)}
+	g.adminSrv = &http.Server{ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 2 * time.Minute, Handler: server.AdminMux(store, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), liveView(holder, pstore != nil), auditFileSinks, aud, anchorReader, readiness, m, writer, liveExport(holder), capabilities, analyticsQ, store, configTeams, alertFires, healthSnapshot, bodyRec, authConfigView(cfg), ssoConnectSrc(cfg), cfg.Probe.AllowedHosts...)}
 	g.adminSrv.Handler = server.WithEvaluations(g.adminSrv.Handler, g.dataSrv.Handler, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), aud)
 	// Observability console (sub-project B): full-admin routes, reads included.
 	g.adminSrv.Handler = server.WithFullAdminRoutes(g.adminSrv.Handler, observabilityConsole(cfg, obsSet, polStore, aud, store).Routes(),
 		cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), aud)
+	var maskControl *filter.Control
+	if masking != nil {
+		maskControl = masking.Control
+	}
+	maskHandler := maskingapi.New(maskControl, aud, func(ctx context.Context) (string, error) {
+		identity, err := principal.IdentityConfig(ctx, store)
+		return identity.Organization, err
+	})
+	g.adminSrv.Handler = server.WithFullAdminRoutes(g.adminSrv.Handler, map[string]http.Handler{
+		"GET /admin/masking": maskHandler, "PUT /admin/masking": maskHandler,
+	}, cfg.Server.AdminAuth.Tokens, oidcVerifier(cfg), oidcMapping(cfg), aud)
 	authorityTransferred = true
 	sharedTransferred = true
 	return g, nil
@@ -1177,6 +1190,24 @@ func classifierRevisions(st *live.State) map[string]string {
 // configured one wins. Enabling masking logs the cache/cost warning (never
 // silent). Returns nil when no plugin is configured (masking off, zero overhead).
 func buildMasking(cfg *config.Config) (*filter.Masking, error) {
+	if cfg.Masking != nil {
+		if len(cfg.Plugins) != 0 {
+			return nil, fmt.Errorf("masking and legacy plugins are mutually exclusive")
+		}
+		f, ok := filter.Get("pii-mask")
+		if !ok {
+			return nil, fmt.Errorf("pii-mask plugin is unavailable")
+		}
+		control, err := filter.OpenControl(cfg.Masking.StateFile, cfg.Masking.Enabled)
+		if err != nil {
+			return nil, fmt.Errorf("masking control: %w", err)
+		}
+		m := &filter.Masking{Filter: f, Control: control, Global: len(cfg.Masking.Teams) == 0, Teams: map[string]bool{}}
+		for _, team := range cfg.Masking.Teams {
+			m.Teams[team] = true
+		}
+		return m, nil
+	}
 	var masking *filter.Masking
 	for _, pc := range cfg.Plugins {
 		f, ok := filter.Get(pc.Name)
@@ -1897,8 +1928,8 @@ func instanceID() string {
 }
 
 // buildSinks constructs audit sinks from config. "stdout" is best-effort;
-// "file" sinks are required (they gate buffer_then_block durability §5.4).
-func buildSinks(cfgs []config.AuditSink) ([]audit.Sink, error) {
+// "file" and "otlp" sinks are required (they gate buffer_then_block durability).
+func buildSinks(cfgs []config.AuditSink, exporters *otelexport.Set) ([]audit.Sink, error) {
 	var sinks []audit.Sink
 	for _, s := range cfgs {
 		switch s.Type {
@@ -1910,6 +1941,12 @@ func buildSinks(cfgs []config.AuditSink) ([]audit.Sink, error) {
 				return nil, fmt.Errorf("file sink %q: %w", s.Path, err)
 			}
 			sinks = append(sinks, fs)
+		case "otlp":
+			sink, err := exporters.RequiredAuditSink(s.Exporter)
+			if err != nil {
+				return nil, fmt.Errorf("required audit exporter: %w", err)
+			}
+			sinks = append(sinks, sink)
 		default:
 			return nil, fmt.Errorf("unknown sink type %q", s.Type)
 		}

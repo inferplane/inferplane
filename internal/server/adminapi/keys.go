@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -22,14 +23,19 @@ import (
 )
 
 type KeysHandler struct {
-	store keystore.Store
-	emit  func(audit.Record) // nil-safe; wired to the audit writer in server.go
+	store   keystore.Store
+	emit    func(audit.Record) // nil-safe; wired to the audit writer in server.go
+	durable func(context.Context, audit.Record) error
 }
 
 // NewKeysHandler builds the handler. emit receives admin-action audit records
 // (admin_key_created / admin_key_revoked / admin_denied); pass nil to skip.
 func NewKeysHandler(store keystore.Store, emit func(audit.Record)) *KeysHandler {
 	return &KeysHandler{store: store, emit: emit}
+}
+
+func (h *KeysHandler) SetDurable(durable func(context.Context, audit.Record) error) {
+	h.durable = durable
 }
 
 func (h *KeysHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -168,12 +174,22 @@ func keyView(p keystore.Principal) map[string]any {
 }
 
 func (h *KeysHandler) create(w http.ResponseWriter, r *http.Request, id principal.AdminIdentity, cfg identity.Config) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	var body struct {
 		Team          string   `json:"team"`
 		AllowedModels []string `json:"allowed_models"`
 		keyOptionsBody
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	content, err := io.ReadAll(r.Body)
+	if err == nil {
+		err = json.Unmarshal(content, &body)
+	}
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, `{"error":"request body too large"}`, http.StatusRequestEntityTooLarge)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body: " + err.Error()})
@@ -201,6 +217,15 @@ func (h *KeysHandler) create(w http.ResponseWriter, r *http.Request, id principa
 		}
 		http.Error(w, `{"error":"invalid or unavailable managed identity"}`, status)
 		return
+	}
+	if h.durable != nil {
+		ref := principal.AdminAuditRef(id, cfg.Organization)
+		ref.Team = body.Team
+		record := audit.Record{SchemaVersion: 1, Event: "admin_key_create_requested", ID: ulid.New(), TS: time.Now().UTC().Format(time.RFC3339Nano), Principal: ref, Request: audit.RequestRef{Ingress: "admin"}}
+		if err := h.durable(r.Context(), record); err != nil {
+			http.Error(w, `{"error":"audit unavailable"}`, http.StatusServiceUnavailable)
+			return
+		}
 	}
 	plaintext, p, err := h.store.CreateWithOptions(r.Context(), body.Team, body.AllowedModels, opts)
 	if err != nil {

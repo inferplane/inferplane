@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -12,6 +13,31 @@ import (
 	"github.com/inferplane/inferplane/internal/keystore"
 	"github.com/inferplane/inferplane/internal/server/authapi"
 )
+
+func TestCLIMintBoundsBodyBeforeDecoding(t *testing.T) {
+	store, err := keystore.OpenSQLite(t.TempDir() + "/keys.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	verifier := &fakeVerifier{claims: adminauth.Claims{Subject: "alice", Groups: []string{"team-alpha"}}}
+	mapping := adminauth.MappingConfig{GroupMappings: []adminauth.GroupMapping{{Group: "team-alpha", Teams: []string{"alpha"}}}}
+	mux := DataMux(nil, newHolder(nil, nil), store, nil, nil, nil, nil, nil, nil, verifier, mapping, nil, time.Hour, WithMaxRequestBytes(64))
+	for _, body := range []string{`{"ignored":"` + strings.Repeat("x", 256) + `"}`, `{}` + strings.Repeat(" ", 256)} {
+		for _, declared := range []bool{true, false} {
+			request := httptest.NewRequest(http.MethodPost, "/v1/auth/key", strings.NewReader(body))
+			request.Header.Set("Authorization", "Bearer "+jwtShaped)
+			if !declared {
+				request.ContentLength = -1
+			}
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+			if response.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("declared=%v: got %d", declared, response.Code)
+			}
+		}
+	}
+}
 
 // TestDataMuxCLILoginOff pins the opt-in default (ADR-028): with cliVerifier
 // nil (oidc.cli_login absent/disabled), none of the three CLI-login routes

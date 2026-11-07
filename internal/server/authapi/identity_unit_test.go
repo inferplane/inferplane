@@ -44,7 +44,7 @@ func TestMintBoundaryLeavesRequiredOwnerToStoreAndNeverTrustsJSON(t *testing.T) 
 	for _, required := range []bool{false, true} {
 		s := &capturingIdentityStore{cfg: identity.Config{Organization: "configured-org", Required: required}}
 		var events []audit.Record
-		h := MintHandler(s, time.Hour, limiter.NewMemory(), func(r audit.Record) { events = append(events, r) })
+		h := MintHandler(s, time.Hour, limiter.NewMemory(), func(r audit.Record) { events = append(events, r) }, func(_ context.Context, r audit.Record) error { events = append(events, r); return nil })
 		actor := principal.AdminIdentity{Issuer: "https://verified.example", Subject: "verified-subject", Teams: []string{"alpha"}, AuthMethod: "oidc"}
 		req := httptest.NewRequest("POST", "/v1/auth/key", strings.NewReader(`{"organization":"attacker","issuer":"https://attacker.example","subject":"victim","owner":"victim","identity":{"kind":"service"}}`))
 		req = req.WithContext(principal.WithAdmin(req.Context(), actor))
@@ -61,9 +61,21 @@ func TestMintBoundaryLeavesRequiredOwnerToStoreAndNeverTrustsJSON(t *testing.T) 
 			t.Fatal("required owner was not delegated, or optional legacy owner changed")
 		}
 		raw, _ := json.Marshal(events)
-		if len(events) != 1 || events[0].Principal.Identity == nil || strings.Contains(string(raw), actor.Issuer) || strings.Contains(string(raw), actor.Subject) {
+		if len(events) != 2 || events[0].Event != "cli_key_create_requested" || events[0].Principal.Identity == nil || events[1].Principal.Identity == nil || strings.Contains(string(raw), actor.Issuer) || strings.Contains(string(raw), actor.Subject) {
 			t.Fatal("mint audit lost digest-only attribution")
 		}
+	}
+}
+
+func TestMintRefusesWhenDurableIntentFails(t *testing.T) {
+	store := &capturingIdentityStore{}
+	actor := principal.AdminIdentity{Subject: "alice", Teams: []string{"alpha"}, AuthMethod: "oidc"}
+	request := httptest.NewRequest("POST", "/v1/auth/key", strings.NewReader(`{}`))
+	request = request.WithContext(principal.WithAdmin(request.Context(), actor))
+	response := httptest.NewRecorder()
+	MintHandler(store, time.Hour, limiter.NewMemory(), nil, func(context.Context, audit.Record) error { return errors.New("secret") }).ServeHTTP(response, request)
+	if response.Code != 503 || len(store.options) != 0 || strings.Contains(response.Body.String(), "secret") {
+		t.Fatalf("mint admitted: %d", response.Code)
 	}
 }
 

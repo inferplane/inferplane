@@ -40,14 +40,11 @@ func factory(cfg providers.Config) (providers.Provider, error) {
 	} else {
 		base += "/v1/responses"
 	}
-	client := http.Client{}
-	if cfg.HTTPClient != nil {
-		client = *cfg.HTTPClient
-	}
+	client := providers.NewHTTPClient(cfg.HTTPClient)
 	// A configured upstream cannot redirect a credential-bearing request to
 	// another destination. The caller's transport/timeout remain intact.
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &provider{endpoint: base, apiKey: cfg.APIKey, client: &client}, nil
+	return &provider{endpoint: base, apiKey: cfg.APIKey, client: client}, nil
 }
 
 func (p *provider) Name() string                        { return "openai_responses" }

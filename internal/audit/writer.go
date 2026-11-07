@@ -1,24 +1,33 @@
 package audit
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 
 	"github.com/inferplane/inferplane/internal/metrics"
+	"github.com/inferplane/inferplane/pkg/ulid"
 )
 
 const (
-	genesisHash   = "sha256:genesis"
-	queueCapacity = 1024
-	blockedBuffer = 1
-	blockedWAL    = 2
-	blockedRecord = 3
+	genesisHash          = "sha256:genesis"
+	queueCapacity        = 1024
+	blockedBuffer        = 1
+	blockedWAL           = 2
+	blockedRecord        = 3
+	maxIntentRecords     = 1024
+	maxIntentRecordBytes = 12 << 10
+	maxIntentArchives    = 64
 )
+
+var errIntentJournalFull = errors.New("audit intent journal full")
 
 // WriterOption configures boot-time audit durability behavior.
 type WriterOption func(*writerOptions)
@@ -43,17 +52,25 @@ type chainHead struct {
 // to the WAL, and flushes to sinks — strictly serialized so concurrent
 // started/completed records can't race on prev_hash (r4 implementation note).
 type Writer struct {
-	instance string
-	queue    chan Record
-	done     chan struct{}
-	wal      *WAL
-	sinks    []Sink
-	prevHash string
-	pending  int
-	count    int64                     // records written (loop-local; published via head)
-	head     atomic.Pointer[chainHead] // race-safe chain-head snapshot for anchoring (ADR-012)
-	metrics  *metrics.Metrics          // nil-safe: no-op when nil
-	blocked  atomic.Uint32             // once set, admission stays closed for this process
+	instance       string
+	queue          chan queuedRecord
+	done           chan struct{}
+	wal            *WAL
+	intents        *WAL
+	intentCount    int
+	intentArchives int
+	sinks          []Sink
+	prevHash       string
+	pending        int
+	count          int64                     // records written (loop-local; published via head)
+	head           atomic.Pointer[chainHead] // race-safe chain-head snapshot for anchoring (ADR-012)
+	metrics        *metrics.Metrics          // nil-safe: no-op when nil
+	blocked        atomic.Uint32             // once set, admission stays closed for this process
+}
+
+type queuedRecord struct {
+	record Record
+	ack    chan error
 }
 
 // Ready reports whether new inference may be admitted. Reasons are fixed,
@@ -99,6 +116,16 @@ func (w *Writer) Instance() string { return w.instance }
 func (w *Writer) SetMetrics(m *metrics.Metrics) {
 	w.metrics = m
 	m.SetAuditBufferUtilization(float64(w.pending) / float64(cap(w.queue)))
+	w.updateIntentMetric()
+}
+
+func (w *Writer) updateIntentMetric() {
+	if w.intents == nil {
+		return
+	}
+	used := w.intentArchives*maxIntentRecords + w.intentCount
+	capacity := (maxIntentArchives + 1) * maxIntentRecords
+	w.metrics.SetAuditIntentUtilization(min(float64(used)/float64(capacity), 1))
 }
 
 func NewWriter(instance, walPath string, sinks []Sink, opts ...WriterOption) (*Writer, error) {
@@ -115,7 +142,7 @@ func NewWriter(instance, walPath string, sinks []Sink, opts ...WriterOption) (*W
 	}
 	w := &Writer{
 		instance: instance,
-		queue:    make(chan Record, queueCapacity),
+		queue:    make(chan queuedRecord, queueCapacity),
 		done:     make(chan struct{}),
 		wal:      wal,
 		sinks:    sinks,
@@ -129,6 +156,26 @@ func NewWriter(instance, walPath string, sinks []Sink, opts ...WriterOption) (*W
 		_ = wal.Close()
 		return nil, err
 	}
+	required := false
+	for _, sink := range sinks {
+		required = required || sink.Required()
+	}
+	if !required {
+		w.intents, err = OpenWAL(walPath + ".intents")
+		if err == nil {
+			w.intentCount, err = retainedIntents(w.intents)
+		}
+		if err == nil {
+			w.intentArchives, err = retainedIntentArchives(w.intents.path, true)
+		}
+		if err != nil {
+			if w.intents != nil {
+				_ = w.intents.Close()
+			}
+			_ = wal.Close()
+			return nil, err
+		}
+	}
 	if w.pending >= cap(w.queue) {
 		w.blocked.Store(blockedBuffer)
 	}
@@ -137,78 +184,267 @@ func NewWriter(instance, walPath string, sinks []Sink, opts ...WriterOption) (*W
 }
 
 // Append enqueues a record. Non-blocking unless the queue is full (back-pressure).
-func (w *Writer) Append(rec Record) { w.queue <- rec }
+func (w *Writer) Append(rec Record) { w.queue <- queuedRecord{record: rec} }
 
-func (w *Writer) loop() {
-	defer close(w.done)
-	for rec := range w.queue {
-		rec.Instance = w.instance
-		rec.PrevHash = w.prevHash
-		canon, err := rec.Canonical()
+func (w *Writer) AppendDurable(ctx context.Context, rec Record) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if ready, _ := w.Ready(); !ready {
+		return errors.New("audit unavailable")
+	}
+	ack := make(chan error, 1)
+	select {
+	case w.queue <- queuedRecord{record: rec, ack: ack}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-ack:
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (w *Writer) writeOne(item queuedRecord) {
+	if item.ack != nil {
+		if ready, _ := w.Ready(); !ready {
+			item.ack <- errors.New("audit unavailable")
+			return
+		}
+		if w.intents != nil && w.intentCount >= maxIntentRecords {
+			if err := w.rotateIntents(); err != nil {
+				if !errors.Is(err, errIntentJournalFull) {
+					w.walFailure()
+				}
+				item.ack <- errors.New("audit unavailable")
+				return
+			}
+		}
+	}
+	rec := item.record
+	rec.Instance = w.instance
+	rec.PrevHash = w.prevHash
+	canon, err := rec.Canonical()
+	if err != nil {
+		writeFailuresTotal.Add(1)
+		w.blocked.CompareAndSwap(0, blockedRecord)
+		if item.ack != nil {
+			item.ack <- errors.New("audit unavailable")
+		}
+		return
+	}
+	if item.ack != nil && len(canon) > maxIntentRecordBytes {
+		item.ack <- errors.New("audit intent record too large")
+		return
+	}
+	// chain advances on the canonical bytes actually emitted
+	sum := sha256.Sum256(canon)
+	w.prevHash = "sha256:" + hex.EncodeToString(sum[:])
+
+	// durability first: WAL, then sinks. A required-sink failure leaves the
+	// record in the WAL for replay (buffer_then_block; §5.4).
+	walErr := w.wal.Append(canon)
+	if walErr == nil {
+		w.pending++ // retained records, including earlier undelivered records
+	} else {
+		w.walFailure()
+	}
+	if walErr == nil && item.ack != nil && w.intents != nil {
+		walErr = w.intents.checkIdentity()
+		if walErr == nil {
+			walErr = w.intents.Append(canon)
+		}
+		if walErr != nil {
+			w.walFailure()
+		} else {
+			w.intentCount++
+		}
+	}
+	// Publish the chain head ONLY after the record is DURABLE (ADR-012 P4
+	// CRITICAL): on a WAL-append failure the record may be lost on crash, so an
+	// anchor must NOT witness it — advance the published head/count only when
+	// the WAL write succeeded. (The chain link `prevHash` already advanced, so
+	// chaining returns; the witnessed head simply lags an undurable record.)
+	if walErr == nil {
+		w.count++
+		w.head.Store(&chainHead{hash: w.prevHash, count: w.count})
+	}
+	flushedAll := true
+	for _, s := range w.sinks {
+		var err error
+		if rs, ok := s.(RecordSink); ok {
+			err = rs.WriteRecord(&rec, canon)
+		} else {
+			err = s.Write(canon)
+		}
 		if err != nil {
-			writeFailuresTotal.Add(1)
-			w.blocked.CompareAndSwap(0, blockedRecord)
+			if s.Required() {
+				writeFailuresTotal.Add(1)
+				bufferedRecords.Add(1)
+				flushedAll = false
+				w.metrics.IncAuditFailure(s.Name())
+			}
+		}
+	}
+	// Truncate ONLY when this record delivered to all required sinks AND it
+	// is the sole record in the WAL — i.e. no earlier record is still
+	// buffered-undelivered. A later success must never drop an earlier
+	// buffered record (buffer_then_block durability). Once any record is
+	// buffered, the WAL retains everything for operator-managed recovery.
+	// Restart alone must not erase that backlog or clear full pressure.
+	if walErr == nil && flushedAll && w.pending == 1 {
+		if err := w.wal.Truncate(); err != nil {
+			w.walFailure()
+		} else {
+			w.pending = 0
+		}
+	}
+	if w.pending >= cap(w.queue) {
+		w.blocked.CompareAndSwap(0, blockedBuffer)
+	}
+	// Buffer utilization: records persisted to the WAL but not yet delivered
+	// to all required sinks, over the in-flight queue capacity (observability
+	// approximation of buffer_then_block pressure, §5.4).
+	w.metrics.SetAuditBufferUtilization(float64(w.pending) / float64(cap(w.queue)))
+	w.updateIntentMetric()
+	if item.ack != nil {
+		if ready, _ := w.Ready(); !ready || walErr != nil {
+			item.ack <- errors.New("audit unavailable")
+		} else {
+			item.ack <- nil
+		}
+	}
+}
+
+// rotateIntents retains the old segment before unlinking its active name.
+// A crash between those operations may leave two names for the same evidence;
+// neither the writer nor recovery deletes archived segments automatically.
+func (w *Writer) rotateIntents() error {
+	path := w.intents.path
+	if err := w.intents.checkIdentity(); err != nil {
+		return err
+	}
+	count, err := retainedIntentArchives(path, false)
+	if err != nil {
+		return err
+	}
+	w.intentArchives = count
+	w.updateIntentMetric()
+	if count >= maxIntentArchives {
+		return errIntentJournalFull
+	}
+	archive := path + ".segment-" + ulid.New()
+	if err := os.Link(path, archive); err != nil {
+		return fmt.Errorf("audit: retain intent segment: %w", err)
+	}
+	openInfo, err := w.intents.f.Stat()
+	if err != nil {
+		return fmt.Errorf("audit: inspect intent segment: %w", err)
+	}
+	archiveInfo, err := os.Lstat(archive)
+	if err != nil || !os.SameFile(openInfo, archiveInfo) {
+		return errors.New("audit: intent segment changed during rotation")
+	}
+	if err := syncWALDirectory(path); err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("audit: detach intent segment: %w", err)
+	}
+	if err := syncWALDirectory(path); err != nil {
+		return err
+	}
+	next, err := OpenWAL(path)
+	if err != nil {
+		return err
+	}
+	if err := w.intents.Close(); err != nil {
+		_ = next.Close()
+		return fmt.Errorf("audit: close intent segment: %w", err)
+	}
+	w.intents = next
+	w.intentCount = 0
+	w.intentArchives++
+	return nil
+}
+
+func retainedIntentArchives(path string, validate bool) (int, error) {
+	dir := filepath.Dir(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, errors.New("audit: cannot inspect intent segments")
+	}
+	prefix := filepath.Base(path) + ".segment-"
+	count := 0
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), prefix) {
 			continue
 		}
-		// chain advances on the canonical bytes actually emitted
-		sum := sha256.Sum256(canon)
-		w.prevHash = "sha256:" + hex.EncodeToString(sum[:])
-
-		// durability first: WAL, then sinks. A required-sink failure leaves the
-		// record in the WAL for replay (buffer_then_block; §5.4).
-		walErr := w.wal.Append(canon)
-		if walErr == nil {
-			w.pending++ // retained records, including earlier undelivered records
-		} else {
-			w.walFailure()
+		if !entry.Type().IsRegular() {
+			return 0, errors.New("audit: invalid intent segment; preserve and repair it before restart")
 		}
-		// Publish the chain head ONLY after the record is DURABLE (ADR-012 P4
-		// CRITICAL): on a WAL-append failure the record may be lost on crash, so an
-		// anchor must NOT witness it — advance the published head/count only when
-		// the WAL write succeeded. (The chain link `prevHash` already advanced, so
-		// chaining continues; the witnessed head simply lags an undurable record.)
-		if walErr == nil {
-			w.count++
-			w.head.Store(&chainHead{hash: w.prevHash, count: w.count})
+		count++
+		if !validate {
+			continue
 		}
-		flushedAll := true
-		for _, s := range w.sinks {
-			var err error
-			if rs, ok := s.(RecordSink); ok {
-				err = rs.WriteRecord(&rec, canon)
-			} else {
-				err = s.Write(canon)
-			}
-			if err != nil {
-				if s.Required() {
-					writeFailuresTotal.Add(1)
-					bufferedRecords.Add(1)
-					flushedAll = false
-					w.metrics.IncAuditFailure(s.Name())
-				}
-			}
+		file, err := os.Open(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return 0, errors.New("audit: cannot inspect intent segment")
 		}
-		// Truncate ONLY when this record delivered to all required sinks AND it
-		// is the sole record in the WAL — i.e. no earlier record is still
-		// buffered-undelivered. A later success must never drop an earlier
-		// buffered record (buffer_then_block durability). Once any record is
-		// buffered, the WAL retains everything for operator-managed recovery.
-		// Restart alone must not erase that backlog or clear full pressure.
-		if walErr == nil && flushedAll && w.pending == 1 {
-			if err := w.wal.Truncate(); err != nil {
-				w.walFailure()
-			} else {
-				w.pending = 0
-			}
+		_, err = retainedIntents(&WAL{f: file})
+		closeErr := file.Close()
+		if err != nil || closeErr != nil {
+			return 0, errors.New("audit: invalid intent segment; preserve and repair it before restart")
 		}
-		if w.pending >= cap(w.queue) {
-			w.blocked.CompareAndSwap(0, blockedBuffer)
-		}
-		// Buffer utilization: records persisted to the WAL but not yet delivered
-		// to all required sinks, over the in-flight queue capacity (observability
-		// approximation of buffer_then_block pressure, §5.4).
-		w.metrics.SetAuditBufferUtilization(float64(w.pending) / float64(cap(w.queue)))
 	}
+	return count, nil
+}
+
+func retainedIntents(wal *WAL) (int, error) {
+	stat, err := wal.f.Stat()
+	if err != nil {
+		return 0, errors.New("audit: cannot inspect intent journal")
+	}
+	if stat.Size() == 0 {
+		return 0, nil
+	}
+	invalid := errors.New("audit: invalid intent journal; preserve and repair it before restart")
+	if stat.Size() > 16<<20 {
+		return 0, invalid
+	}
+	var last [1]byte
+	if _, err := wal.f.ReadAt(last[:], stat.Size()-1); err != nil || last[0] != '\n' {
+		return 0, invalid
+	}
+	count := 0
+	if err := wal.Replay(func(line []byte) error {
+		var rec Record
+		if len(line) > maxIntentRecordBytes {
+			return invalid
+		}
+		if err := json.Unmarshal(line, &rec); err != nil || rec.Event == "" || rec.Instance == "" || rec.PrevHash == "" {
+			return invalid
+		}
+		if rec.PrevHash != genesisHash {
+			digest, ok := strings.CutPrefix(rec.PrevHash, "sha256:")
+			if !ok || len(digest) != sha256.Size*2 {
+				return invalid
+			}
+			if _, err := hex.DecodeString(digest); err != nil {
+				return invalid
+			}
+		}
+		count++
+		return nil
+	}); err != nil {
+		return 0, invalid
+	}
+	return count, nil
 }
 
 func (w *Writer) walFailure() {
@@ -276,5 +512,8 @@ func retainedRecords(wal *WAL) (int, error) {
 func (w *Writer) Close() error {
 	close(w.queue)
 	<-w.done
+	if w.intents != nil {
+		return errors.Join(w.wal.Close(), w.intents.Close())
+	}
 	return w.wal.Close()
 }

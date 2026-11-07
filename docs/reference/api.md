@@ -1,5 +1,13 @@
 # API
 
+`GET`/`PUT /admin/masking` expose the local optional masking control to full
+administrators. GET returns `enabled`, `revision` and `writable`; PUT accepts
+`enabled` and `expected_revision` (4 KiB maximum). Missing authentication is 401,
+insufficient role is 403, a stale revision is 409, unconfigured persistence is
+405 and storage/audit unavailability is 503. Successful changes append
+`admin_masking_changed`. Required privacy policies remain binding; see
+[optional masking](security.md#administrator-controlled-optional-masking).
+
 ### 1. Overview
 The HTTP surface: a data plane with Anthropic Messages, OpenAI Chat
 Completions, Responses, and native Bedrock ingresses and an admin plane (health, metrics, key management). Full endpoint
@@ -42,6 +50,10 @@ contract is in [docs/api-reference.md](../api-reference.md).
 | CLI login API | `internal/server/authapi/` | **Data-plane**, opt-in (`oidc.cli_login.enabled`, ADR-028): `GET /v1/auth/config` unauthenticated secret-free `{cli, issuer?, client_id?}`; `POST /v1/auth/key` (OIDC bearer, DISTINCT `client_id`/`Verifier` from the console's) mints a short-lived key — server decides `expires_at`/`owner`, never the client; per-subject mint rate limit; `DELETE /v1/auth/key` (ordinary `KeyAuth`) self-revoke, used by `mayu logout`. `mayu login`/`token` are the CLI counterpart |
 
 ### 3. Key Decisions
+- CLI and admin key creation accept at most 64 KiB per request (the CLI also
+  honors a smaller `server.max_request_bytes`). The CLI's per-subject limiter
+  runs before body parsing. A failed audit intent returns 503 without creating
+  a key; revocation is not gated by audit readiness.
 - After successful key authentication, `count_tokens` returns 200 even on routing/readiness refusals (aliases are canonicalized here too, ADR-021). Missing or invalid keys still return 401 before the count handler.
 - Context-window preflight failures on Messages, Chat Completions and Bedrock Invoke/Converse return HTTP 400 with `prompt is too long: N tokens > M maximum` inside the ingress's own error envelope. Claude Code recognizes that wording for compaction rather than generic model fallback and can extract the overage. `N` is the gateway's content-aware estimate (`internal/tokenest`), not an upstream tokenizer result: decoded JSON text is split into character-class runs with calibrated rates (within 3% of o200k_base for English prose, code and digit-heavy text, about 9% over o200k_base for natural Korean, under for random-looking syllables and hex), each inline image at a recognized content position counts 1,600 tokens, and other base64 payloads (documents, signatures, opaque state) count four bytes per token. Claude's tokenizer read natural Korean at about 1.7× this estimate (measured 2026-11-02); an under-estimate reaches the upstream, whose overflow is answered as the recoverable prompt-too-long error. bytes/4 over-estimated English prose by about 60%, so it refused prose above about 62% of the window (a measured request of about 97k tokens was refused against a 128k window), and under-estimated digits, hex and random-looking syllables. The same estimate is the local `count_tokens` answer (a Bedrock count estimates its decoded `input.invokeModel.body`), except for a count that does not fit the in-flight byte budget, which is answered at four bytes per token (below); it is also the governance PreCheck admission estimate (TPM reservation and token-quota pre-check) and the explicitly requested Responses model's routing capacity. Monetary reservations, privacy inspection and conservative automatic/strict-target capacity checks are unchanged. Borderline requests reach the upstream, whose recognized overflow is mapped to the same recoverable error. A client's displayed window and the gateway declaration remain independent. Compaction may still fail if the remaining input does not fit; do not assume a larger model window.
 - Verbatim body forwarding on protocol match; canonical conversion only on mismatch. Model **aliases** (config `models.<name>.aliases`, ADR-021) are normalized to the canonical name BEFORE RBAC/routing/audit/metrics; on the anthropic verbatim path the only body change is a cache-safe top-level `model` rewrite (nested `cache_control` preserved, HTML escaping off).

@@ -1,0 +1,47 @@
+package audit
+
+import (
+	"fmt"
+	"path/filepath"
+	"testing"
+)
+
+// The timed interval includes draining the writer, so this measures durable
+// throughput rather than the speed of filling its asynchronous channel.
+func BenchmarkReviewAuditDrain(b *testing.B) {
+	for _, file := range []bool{false, true} {
+		b.Run(fmt.Sprintf("file_sink=%t", file), func(b *testing.B) {
+			dir := b.TempDir()
+			var sinks []Sink
+			if file {
+				sink, err := NewFileSink(filepath.Join(dir, "audit.jsonl"), true)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.Cleanup(func() { sink.Close() })
+				sinks = append(sinks, sink)
+			}
+			w, err := NewWriter("performance-fixture", filepath.Join(dir, "audit.wal"), sinks)
+			if err != nil {
+				b.Fatal(err)
+			}
+			rec := Record{SchemaVersion: 1, Event: "request_completed", ID: "synthetic-record", TS: "2026-11-06T00:00:00Z"}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				w.Append(rec)
+			}
+			if err := w.Close(); err != nil {
+				b.Fatal(err)
+			}
+			b.StopTimer()
+			if ready, reason := w.Ready(); !ready {
+				b.Fatal(reason)
+			}
+			_, count := w.HeadHash()
+			if count != int64(b.N) {
+				b.Fatalf("durable count %d != %d", count, b.N)
+			}
+		})
+	}
+}

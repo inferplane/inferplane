@@ -1,9 +1,47 @@
 ---
 translation_source: operations/observability.md
-translation_source_sha256: 70e6b8072b309e707bddbfd6b97af1c16a7682bab85512f217df055d8039e5d2
+translation_source_sha256: 1c743ae4bdd0b36856b86da6096cc095ebfcadea85ae6830e2b86677fd805c7e
 ---
 
 # 모니터링과 문제 해결 {#monitor-and-troubleshoot}
+
+### OTLP 수신 확인 후 로컬 감사 저장 공간 정리 {#release-local-audit-storage-after-otlp-delivery}
+
+영구 파일 출력 대신 **필수 OTLP 출력**을 선택합니다.
+
+```json
+{
+  "audit": {
+    "buffer": {"path": "/var/lib/inferplane/audit.wal"},
+    "sinks": [{"type": "otlp", "exporter": "archive"}]
+  },
+  "observability": {
+    "exporters": {
+      "archive": {
+        "endpoint": "collector.internal:4318",
+        "protocol": "http",
+        "signals": ["audit"]
+      }
+    }
+  }
+}
+```
+
+이 출력은 모든 감사 기록의 정확한 원문 바이트를 전송합니다. 수집기 인증이
+필요하면 헤더의 비밀 참조를 설정합니다. HTTP/protobuf 또는 gRPC 응답이
+전체 묶음을 수신 확인한 뒤 WAL을 비우고 동기화합니다. 부분 수신·잘못된 응답·
+오류·일시 중지는 삭제 근거가 되지 않습니다. 이후 보존은 수집기 책임이며,
+HTTP 수신 확인 자체가 최종 저장소의 영구 저장을 보증하지는 않습니다.
+
+정책으로 선택하는 기존 OTLP 복사본은 best-effort라 삭제 근거로 사용할 수
+없습니다. 같은 목적지를 중복 선택하지 않습니다. `file` 출력을 함께 두면 해당
+파일은 계속 보존됩니다. 기존 아카이브는 자동 이전·삭제하지 않으며, 분석 DB와
+본문 저장소의 보존 정책도 별도입니다.
+
+이전 미전송 기록이나 일부 목적지만 수신한 기록이 있으면 자동 정리를 멈추고
+기존 복구 절차를 따릅니다. 재시작 자동 재전송이나 숨은 재시도는 없습니다.
+대기 기록은 최대 64개씩 묶어 동기화하지만 단독 내구성 쓰기의 디스크 지연까지
+없애지는 않습니다. ADR-058 참고.
 
 준비 상태로 요청 승인 가능 여부를, 메트릭으로 추세를, 감사·권한 기록으로 회계 증거를 확인합니다. 프로세스 상태가 정상이어도 요청을 승인할 수 있다고 단정할 수 없습니다.
 
@@ -31,6 +69,7 @@ translation_source_sha256: 70e6b8072b309e707bddbfd6b97af1c16a7682bab85512f217df0
 | `inferplane_pricing_miss_total` | 경로 가격 누락·가격 메타데이터 오류 |
 | `inferplane_audit_write_failures_total` | 저장 권한·용량·하위 시스템 가용성 |
 | `inferplane_audit_buffer_utilization_ratio` | 보관 WAL 기록 수 / 1024. 1 이상이면 새 추론 차단. 1 미만에서도 WAL 실패가 고정될 수 있으므로 `/readyz` 확인 |
+| `inferplane_audit_intent_utilization_ratio` | 키 발급 요청 저널 사용률. 1에 도달하기 전에 완료된 구간을 보관해야 함. 1이면 발급은 거절되지만 추론 준비 상태는 유지 |
 | `inferplane_audit_anchor_failures_total` | 객체 저장소·IAM·보존 설정 |
 | `inferplane_audit_auto_mode_unparsed_total` | 콘솔이 읽지 못한 Claude Code 자동 모드 차단 호출·서버 안전장치(ADR-057). 증가하면 클라이언트 형식 변경을 의심 |
 | `gen_ai_server_time_to_first_token_seconds` | 업스트림·요청 경로 지연 |
@@ -120,7 +159,7 @@ bin/mayu report --file /path/to/instance-audit.jsonl --by team,model
 
 차트 기본 설정은 컨테이너 stdout(최선 노력 저장 대상)으로 감사 기록을 내보내고,
 WAL은 데이터 볼륨에 두며 로컬 분석 인덱스는 비활성화합니다. WAL이 정상 동작하면
-해당 볼륨에 데이터가 누적되지 않습니다. [감사 기록 수집](#collect-audit-records)을
+WAL 자체에는 기록이 누적되지 않습니다. [감사 기록 수집](#collect-audit-records)을
 참고하세요. 다른 배포는 저장 대상을 명시적으로 구성해야 합니다.
 
 `audit.failure_mode` 기본값은 유일하게 지원하는 `buffer_then_block`입니다.
@@ -138,6 +177,22 @@ WAL은 데이터 볼륨에 두며 로컬 분석 인덱스는 비활성화합니�
 이미 전달된 기록이 있을 수 있으므로 자동 저장 대상 재생은 하지 않습니다.
 [감사 승인 복구 절차](recovery.md#recover-audit-admission)에 따라 증거를 보존하고
 대조한 뒤 재시작하세요. 준비 상태와 로컬 체인 검증은 전체 이력 전달의 증거가 아닙니다.
+
+키 발급은 저장소 변경 전에 발급 요청 감사 기록을 동기화해야 합니다. 필수 저장
+대상이 없으면 `<audit WAL 경로>.intents`에 기록하고, 1024건마다 이를
+`<audit WAL 경로>.intents.segment-*`로 보존한 뒤 새 저널을 시작합니다.
+완료된 구간 64개와 활성 저널 하나를 유지하며 최대 약 780 MiB입니다.
+`inferplane_audit_intent_utilization_ratio`가 1에 도달하기 전에 알림을 설정하세요.
+가득 차면 발급은 503을 반환하지만 추론과 폐기는 계속됩니다. 감사 정책에 따라
+완료된 `.segment-*` 파일을 안전한 저장소에 복사한 다음 로컬 사본을 제거하세요.
+활성 `.intents` 파일은 이동하거나 잘라내지 마세요. 완료된 구간을 보관·제거하면
+재시작 없이 발급이 재개됩니다. 분할 중 장애로 같은 구간의 사본이 둘 생길 수
+있으므로 서로 다른 기록으로 간주하지 말고 보존·대조하세요. 손상된 저널이나
+구간은 시작을 거부하므로 증거를 보존·복구하세요. 이 파일들은 전체 해시 체인이
+아니며 자동 재생하지 않습니다. 분할에는 저널 파일시스템의 하드 링크와 디렉터리
+동기화가 필요하며 실패하면 감사 승인을 닫습니다. 요청
+기록은 발급 성공을 증명하지 않으며 성공 이벤트 전달은 저장 대상 설정에 따릅니다.
+파일은 WAL과 같은 볼륨에 있어 임시 볼륨이 사라지면 함께 사라집니다.
 
 ## 감사 기록 수집 {#collect-audit-records}
 

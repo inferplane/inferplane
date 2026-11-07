@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -111,7 +112,7 @@ func pickTeam(id principal.AdminIdentity, requested string) (team string, err er
 // to the CLI's own client_id — see cliVerifier in cmd/mayu/gateway.go)
 // so principal.AdminFrom(ctx) is already populated on entry; a request that
 // reached here without it is denied, never silently trusted.
-func MintHandler(store keystore.Store, ttl time.Duration, mint limiter.LimiterStore, emit func(audit.Record)) http.Handler {
+func MintHandler(store keystore.Store, ttl time.Duration, mint limiter.LimiterStore, emit func(audit.Record), durable ...func(context.Context, audit.Record) error) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
@@ -141,8 +142,22 @@ func MintHandler(store keystore.Store, ttl time.Duration, mint limiter.LimiterSt
 				opts.Owner = "" // registry resolves the immutable accounting reference
 			}
 		}
+		if !mint.AllowRate("cli_mint:"+throttleSubject, 1, 10, 10) {
+			http.Error(w, `{"error":"too many key requests, slow down"}`, http.StatusTooManyRequests)
+			return
+		}
 		var body mintRequest
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+		content, err := io.ReadAll(r.Body)
+		if err == nil {
+			err = json.Unmarshal(content, &body)
+		}
+		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				http.Error(w, `{"error":"request body too large"}`, http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, `{"error":"invalid request body: `+jsonEscape(err.Error())+`"}`, http.StatusBadRequest)
 			return
 		}
@@ -155,13 +170,14 @@ func MintHandler(store keystore.Store, ttl time.Duration, mint limiter.LimiterSt
 			http.Error(w, `{"error":"`+jsonEscape(err.Error())+`"}`, status)
 			return
 		}
-		// Issuer-qualified in managed mode, legacy subject otherwise: a valid ID token
-		// alone must not be able to grow the keys table without bound. 10/min
-		// with a burst of 10 comfortably covers a normal login+every-renewal
-		// cadence while capping an accidental or malicious mint loop.
-		if !mint.AllowRate("cli_mint:"+throttleSubject, 1, 10, 10) {
-			http.Error(w, `{"error":"too many key requests, slow down"}`, http.StatusTooManyRequests)
-			return
+		if len(durable) > 0 && durable[0] != nil {
+			ref := principal.AdminAuditRef(id, cfg.Organization)
+			ref.Team = team
+			record := audit.Record{SchemaVersion: 1, Event: "cli_key_create_requested", ID: ulid.New(), TS: time.Now().UTC().Format(time.RFC3339Nano), Principal: ref, Request: audit.RequestRef{Ingress: "cli"}}
+			if err := durable[0](r.Context(), record); err != nil {
+				http.Error(w, `{"error":"audit unavailable"}`, http.StatusServiceUnavailable)
+				return
+			}
 		}
 		expiresAt := time.Now().UTC().Add(ttl)
 		opts.ExpiresAt = &expiresAt
