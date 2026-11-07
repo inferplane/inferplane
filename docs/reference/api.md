@@ -1,5 +1,13 @@
 # API
 
+`GET`/`PUT /admin/masking` expose the local optional masking control to full
+administrators. GET returns `enabled`, `revision` and `writable`; PUT accepts
+`enabled` and `expected_revision` (4 KiB maximum). Missing authentication is 401,
+insufficient role is 403, a stale revision is 409, unconfigured persistence is
+405 and storage/audit unavailability is 503. Successful changes append
+`admin_masking_changed`. Required privacy policies remain binding; see
+[optional masking](security.md#administrator-controlled-optional-masking).
+
 ### 1. Overview
 The HTTP surface: a data plane with Anthropic Messages, OpenAI Chat
 Completions, Responses, and native Bedrock ingresses and an admin plane (health, metrics, key management). Full endpoint

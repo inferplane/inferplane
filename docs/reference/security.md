@@ -1,5 +1,27 @@
 # Security
 
+### Administrator-controlled optional masking
+
+Optional masking defaults to off:
+
+```json
+{"masking":{"enabled":false,"teams":["private"],"state_file":"/var/lib/inferplane/masking.json"}}
+```
+
+An empty `teams` list covers all teams. Full administrators use **Settings →
+Optional PII masking** or `GET`/`PUT /admin/masking`. PUT requires
+`{"enabled":true,"expected_revision":"<revision from GET>"}`. A dedicated
+`state_file` permits writes; without it the control is read-only. Persisted
+choices override the bootstrap `enabled` value after restart. Team/path changes
+require restart. This control is local to the answering gateway.
+
+Turning it off does not bypass `sensitiveData` policies; edit the authorized
+policy source to change a required obligation. Legacy `plugins` and `masking`
+are mutually exclusive. The new control supports structural OpenAI Chat masking;
+the legacy plugin-only Chat refusal stays unchanged. Masking reinspects its
+output, refuses unsafe/opaque content, adds latency and can reduce prompt-cache
+reuse. See ADR-058.
+
 ### 1. Overview
 Cross-cutting security: virtual-key authentication, team RBAC, key/secret isolation,
 inline-secret rejection, optional self-TLS, and metrics that never leak secrets. These
@@ -139,9 +161,11 @@ digests or endpoints.
   admitted requests queue. Batch mode sends one sidecar request per gateway
   request, with up to `max_windows` windows. Saturation fails closed in
   Enforce (`onUninspectable`) and adds up to `timeout_ms` of latency in
-  Shadow. The gateway permits at most 16 concurrent classifier calls across
-  requests and configuration generations, including window preparation and
-  cache lookups. Work that ignores cancellation keeps its slot until it returns;
+  Shadow. The gateway permits at most 16 concurrent Enforce calls and 16
+  concurrent Shadow calls across requests and configuration generations,
+  including window preparation and cache lookups. These limits isolate gateway
+  capacity; classifiers sharing a sidecar can still compete for its capacity.
+  Work that ignores cancellation keeps its slot until it returns;
   saturation is treated as a classifier error, even for a cache hit. A call may
   itself make several sidecar requests.
 

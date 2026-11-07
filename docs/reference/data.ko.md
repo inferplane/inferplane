@@ -1,9 +1,26 @@
 ---
 translation_source: reference/data.md
-translation_source_sha256: 85c4477fa1238d108cfac2de6a96cd2a963e0673b107afb834a1304c578bcf00
+translation_source_sha256: c506ab12fdc69537cebf6d8f79533451597e9b4c5f97f93a5614ecc4ff20171b
 ---
 
 # 데이터 구현 {#data}
+
+### 로컬 금액 저널 버전 2
+
+ADR-045 예약은 변경된 항목만 `local_escrow_entries`에 저장합니다.
+`local_escrow`에는 메타데이터·항목 수·작성자·리비전이 남습니다. 각 작업은
+여전히 FULL 동기화 로컬 SQLite 트랜잭션을 사용합니다. 이 프로필의 추론
+경로에는 중앙 Postgres 호출이 없습니다. 캐시된 상태도 디스크의 작성자·리비전·
+메타데이터가 일치해야 사용할 수 있습니다. 항목 변경은 캐시를 무효화하고,
+누락된 항목은 거부하며, 롤백은 임시 상태를 폐기합니다.
+
+버전 1은 시작 시 원자적으로 이전됩니다. 기존 크레딧 폐기와 이전 작성자
+차단은 유지됩니다. 구버전 바이너리는 버전 2 저널을 거부하므로 저널 삭제나
+오래된 권한 복원으로 다운그레이드하지 않습니다. ADR-058 참고.
+
+감사 로그는 최대 64개의 대기 기록을 묶어 동기화합니다. 필수 OTLP 출력으로
+영구 로컬 JSONL 저장을 대체하면, 수신 확인이 완료되고 이전 미전송 이력이 없을
+때 현재 WAL 묶음을 정리합니다. 기존 파일·분석 DB·본문 저장소는 삭제하지 않습니다.
 
 ### 1. 개요 {#1-overview}
 
@@ -13,7 +30,7 @@ translation_source_sha256: 85c4477fa1238d108cfac2de6a96cd2a963e0673b107afb834a13
 
 | 구성 | 경로 | 역할 |
 | --- | --- | --- |
-| 전역 금전 권한 | `internal/authority/pgstore/`, `internal/authority/local/` | Postgres의 유한 권한·UTC 윈도, 호출 전 private 저널 예약. 추론마다 중앙 DB 호출 없음. 만료·재시작 환급 없음, 불명확 결과 상한 유지 |
+| 전역 금전 권한 | `internal/authority/pgstore/`, `internal/authority/local/` | Postgres의 유한 권한·UTC 윈도, 호출 전 private 저널 예약. 추론마다 중앙 DB 호출은 없지만 로컬 SQLite는 각 예약·정산을 커밋합니다. 만료·재시작 환급 없음, 불명확 결과 상한 유지 |
 | 공유 승인 | `internal/authority/pgstore/shared*.go` | 전역 RPM·TPM·달력 토큰·팀/키 금전·정책 금전 원자 예약, 원래 윈도·재전송 안전 정산 |
 | 공유 키 | `internal/keystore/postgres*.go`, `import.go` | 해시 키·팀, 요청별 스냅샷, 조건부 폐기, 불변 시드 지문, 원자적 SQLite 가져오기 |
 | SQLite 키 | `internal/keystore/sqlite.go` | SHA-256 키와 teams. name 기본키, allowed_models, rpm/tpm, tokens_per_day, quota_on_exceeded, budget_usd_micros, budget_on_exceeded, budget_usd_micros_per_day(0=무제한), guardrail_id/version, allowed_regions, 생성·갱신 시각 |
@@ -21,7 +38,7 @@ translation_source_sha256: 85c4477fa1238d108cfac2de6a96cd2a963e0673b107afb834a13
 | 공급자 저장소 | `internal/providerstore/sqlite.go` | 참조만 있는 providers, 기본 guardrail_id/version, 순서 있는 model_targets, 모델 단위 model_aliases, 영속 seeded 표시 meta. 이식 가능한 TEXT/INTEGER DDL |
 | 감사 기록 | `internal/audit/writer.go` | 단일 쓰기 해시 체인·보관 WAL 검증·고정된 승인 압력 |
 | 감사 WAL | `internal/audit/wal.go` | buffer_then_block 디스크 버퍼 |
-| 키 발급 요청 저널 | `<audit WAL 경로>.intents` | 필수 감사 저장 대상이 없을 때 파일에 동기화한 발급 요청 |
+| 키 발급 요청 저널 | `<audit WAL 경로>.intents` 및 `.intents.segment-*` | 필수 감사 저장 대상이 없을 때 동기화한 발급 요청과 제한된 보존 구간 |
 | 감사 검증 | `internal/audit/verify.go` | 인스턴스 구간별 체인 검증 |
 | 감사 앵커 | `internal/audit/s3anchor/` | 선택적 S3 Object Lock WORM 해시 앵커, 비밀·개인정보 없는 객체 |
 | 요청률 저장소 | `internal/limiter/limiter.go` | 메모리 TPM·RPM 토큰 버킷과 두 단계 처리 |

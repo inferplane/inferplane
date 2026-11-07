@@ -1,9 +1,31 @@
 ---
 translation_source: reference/security.md
-translation_source_sha256: 80945381c3e015b3ac6e1cfd3675d1636569f7536f34a3cee96c30534585b81e
+translation_source_sha256: bc25af520c4b3b810daaab2027328ee9ea986549f8d431e44258dd9d393a0d82
 ---
 
 # 보안 {#security}
+
+### 관리자 선택형 개인정보 마스킹 {#administrator-controlled-optional-masking}
+
+선택형 마스킹은 기본 꺼짐입니다. 다음 설정으로 전체 관리자가 콘솔 **설정 →
+선택적 개인정보 마스킹**에서 켜거나 끌 수 있습니다.
+
+```json
+{"masking":{"enabled":false,"teams":["private"],"state_file":"/var/lib/inferplane/masking.json"}}
+```
+
+`teams`가 비어 있으면 전체 팀에 적용됩니다. 전용 `state_file`이 없으면 읽기
+전용입니다. `GET`/`PUT /admin/masking`은 전체 관리자만 사용할 수 있으며,
+PUT에는 `enabled`와 GET에서 받은 `expected_revision`이 필요합니다.
+저장된 선택은 재시작 후에도 유지되고 초기 `enabled`보다 우선합니다.
+대상 팀·경로 변경에는 재시작이 필요하며 해당 게이트웨이에만 적용됩니다.
+
+스위치를 꺼도 `sensitiveData` 정책의 필수 보호는 유지됩니다. 필수 보호를
+바꾸려면 승인된 정책 원본을 수정해야 합니다. 기존 `plugins`와 새 `masking`
+설정은 함께 사용할 수 없습니다. 새 제어는 OpenAI Chat도 지원하며 기존
+레거시 플러그인의 Chat 거부 동작은 유지됩니다. 마스킹은 변환 결과를 재검사하고
+안전하게 변환할 수 없는 입력을 거부합니다. 지연과 프롬프트 캐시 비용을 고려해
+활성화합니다. ADR-058 참고.
 
 ### 1. 개요 {#1-overview}
 
@@ -122,8 +144,10 @@ UI 토폴로지 쓰기, 재시작 때마다 비웁니다.
   게이트웨이 요청마다 최대 `max_windows`개 윈도를 담은 사이드카 요청 하나를
   보냅니다. 포화되면 Enforce에서는 fail-closed(`onUninspectable`)가 되고,
   Shadow에서는 지연이 최대 `timeout_ms`까지 늘어납니다. 게이트웨이는 요청과
-  설정 세대를 통틀어 윈도 준비·캐시 조회를 포함한 분류기 작업을 최대 16개로
-  제한합니다. 취소를 무시하는 작업은 반환할 때까지 자리를 차지하며, 포화 시
+  설정 세대를 통틀어 윈도 준비·캐시 조회를 포함한 Enforce 작업과 Shadow 작업을
+  각각 최대 16개로 제한합니다. 게이트웨이의 용량은 분리되지만 같은 사이드카를
+  공유하는 분류기는 사이드카 용량을 두고 경쟁할 수 있습니다. 취소를 무시하는
+  작업은 반환할 때까지 자리를 차지하며, 포화 시
   캐시 적중 여부와 무관하게 분류기 오류로 처리합니다. 호출 하나가 여러 사이드카
   요청을 만들 수 있습니다.
 

@@ -28,6 +28,7 @@ type Metrics struct {
 	pricingMiss     *prometheus.CounterVec   // inferplane_pricing_miss_total
 	auditFailures   *prometheus.CounterVec   // inferplane_audit_write_failures_total
 	auditBufferUtil prometheus.Gauge         // inferplane_audit_buffer_utilization_ratio
+	auditIntentUtil prometheus.Gauge         // inferplane_audit_intent_utilization_ratio
 	piiMask         *prometheus.CounterVec   // inferplane_pii_mask_redactions_total
 	anchorFail      prometheus.Counter       // inferplane_audit_anchor_failures_total
 	usageDropped    prometheus.Counter       // inferplane_usage_windows_dropped_total
@@ -98,6 +99,9 @@ func New() *Metrics {
 		auditBufferUtil: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "inferplane_audit_buffer_utilization_ratio", Help: "Audit WAL buffer utilization 0..1.",
 		}),
+		auditIntentUtil: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "inferplane_audit_intent_utilization_ratio", Help: "Local key issuance intent journal capacity utilization 0..1.",
+		}),
 		piiMask: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "inferplane_pii_mask_redactions_total", Help: "PII redactions applied to request text (ADR-009).",
 		}, []string{"team"}),
@@ -151,7 +155,7 @@ func New() *Metrics {
 	}
 	reg.MustRegister(m.tokenUsage, m.requestDuration, m.ttft, m.requestsTotal,
 		m.fallbackTotal, m.circuitState, m.quotaUtil, m.budgetUtil, m.budgetSpend, m.pricingMiss,
-		m.auditFailures, m.auditBufferUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected, m.substitution, m.routingDecisions,
+		m.auditFailures, m.auditBufferUtil, m.auditIntentUtil, m.piiMask, m.anchorFail, m.usageDropped, m.budgetRejected, m.substitution, m.routingDecisions,
 		m.otelExport, m.autoModeUnparsed, m.otelDecisions, m.modelFallback, m.inflightBytes, m.inflightRefusals)
 	// Go runtime (heap, GC, goroutines) and process (RSS, CPU, file
 	// descriptors) collectors: their families carry no request data and only
@@ -385,6 +389,12 @@ func (m *Metrics) SetAuditBufferUtilization(r float64) {
 		return
 	}
 	m.auditBufferUtil.Set(r)
+}
+
+func (m *Metrics) SetAuditIntentUtilization(r float64) {
+	if m != nil {
+		m.auditIntentUtil.Set(r)
+	}
 }
 
 func statusClass(status int) string {

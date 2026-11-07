@@ -32,14 +32,11 @@ func factory(cfg providers.Config) (providers.Provider, error) {
 	if base == "" {
 		base = "https://api.anthropic.com"
 	}
-	client := http.Client{}
-	if cfg.HTTPClient != nil {
-		client = *cfg.HTTPClient
-	}
+	client := providers.NewHTTPClient(cfg.HTTPClient)
 	// Preserve the caller's transport/settings without letting a redirect
 	// move a credential-bearing request beyond the selected destination.
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &provider{baseURL: base, apiKey: cfg.APIKey, bearer: cfg.Settings["auth_header"] == "bearer", client: &client}, nil
+	return &provider{baseURL: base, apiKey: cfg.APIKey, bearer: cfg.Settings["auth_header"] == "bearer", client: client}, nil
 }
 
 // defaultAnthropicVersion is sent only when the client supplied no

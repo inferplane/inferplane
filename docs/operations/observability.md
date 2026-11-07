@@ -1,5 +1,44 @@
 # Monitor and troubleshoot
 
+### Release local audit storage after OTLP delivery
+
+Select a **required OTLP sink** instead of a permanent file sink:
+
+```json
+{
+  "audit": {
+    "buffer": {"path": "/var/lib/inferplane/audit.wal"},
+    "sinks": [{"type": "otlp", "exporter": "archive"}]
+  },
+  "observability": {
+    "exporters": {
+      "archive": {
+        "endpoint": "collector.internal:4318",
+        "protocol": "http",
+        "signals": ["audit"]
+      }
+    }
+  }
+}
+```
+
+This destination receives all exact canonical audit records. Configure collector
+authentication with header secret refs when needed. HTTP/protobuf and gRPC
+responses must acknowledge the entire batch before mayu truncates and syncs its
+local WAL. Partial success, malformed acknowledgements, errors and runtime
+pause/narrowing retain evidence. A receiver must retain the accepted records;
+HTTP acceptance alone does not attest backend storage.
+
+Subject-based OTLP copies remain best-effort and **do not authorize deletion**.
+Avoid duplicating the same destination in those rules. Keeping a `file` sink
+still retains that file. Existing archives are not automatically migrated or
+deleted. Analytics and captured-body retention are separate.
+
+Older undelivered/ambiguous fan-out prevents automatic WAL reclamation; use the
+existing recovery procedure. No restart replay or hidden transport retry is
+introduced. Audit output syncs queued records in groups of up to 64; an isolated
+durable write still pays disk latency. See ADR-058.
+
 Use readiness for admission, metrics for trends, and audit/authority records for accounting evidence. A green process health check alone does not mean requests can be admitted.
 
 ## Health and signal channels
@@ -26,6 +65,7 @@ Start with the [Grafana dashboard](../../deploy/grafana/inferplane.json). Config
 | `inferplane_pricing_miss_total` | Missing route rates or incorrect pricing metadata |
 | `inferplane_audit_write_failures_total` | Sink permissions, capacity, downstream availability |
 | `inferplane_audit_buffer_utilization_ratio` | Retained WAL records / 1024; at 1 or above, new inference is blocked. Check `/readyz` for a latched WAL failure even below 1 |
+| `inferplane_audit_intent_utilization_ratio` | Local key-issuance intent capacity; alert before 1 and archive completed segments. At 1, issuance is refused but inference stays ready |
 | `inferplane_audit_anchor_failures_total` | Object storage/IAM/retention configuration |
 | `inferplane_audit_auto_mode_unparsed_total` | Claude Code auto mode block calls or server safeguards the console could not read (ADR-057); a rise suggests a client format change |
 | `gen_ai_server_time_to_first_token_seconds` | Upstream or request-path latency |
@@ -144,14 +184,21 @@ records. Preserve and reconcile evidence using the
 Readiness and local chain verification do not prove complete historical delivery.
 
 Key issuance also requires an audit creation-intent record to be synced before
-the key store changes. When no required sink is configured, those intents are
-retained in `<audit WAL path>.intents`, a separate file-synced JSONL journal.
-It contains only intent records, not the complete hash chain, and is not
-automatically replayed. At 1024 records, new key issuance returns 503 until the
-journal is archived; inference and revocation remain available. Stop and fence
-the writer before securely archiving the complete journal and creating an empty
-replacement, retaining it according to the audit policy. A malformed journal
-refuses startup; preserve and repair its evidence rather than deleting it.
+the key store changes. With no required sink, intents are stored in
+`<audit WAL path>.intents`. After 1024 records the writer preserves it as a
+`<audit WAL path>.intents.segment-*` file and starts a new journal. It retains
+up to 64 completed segments plus the active journal, at most about 780 MiB.
+Alert on `inferplane_audit_intent_utilization_ratio` before it reaches 1. At
+capacity, issuance returns 503 while inference and revocation remain available.
+Securely copy completed `.segment-*` files to durable storage according to the
+audit policy before removing their local copies; do not move or truncate the
+active `.intents` file. Issuance resumes without restarting after a completed
+segment has been archived and removed. A crash during rotation can leave two
+copies of a segment; retain and reconcile them rather than assuming both are
+distinct. A malformed journal or segment refuses startup; preserve and repair
+its evidence. These files contain only intents, not the complete hash chain,
+and are not automatically replayed. Rotation requires hard links and directory
+sync on the journal filesystem; failures latch audit admission closed.
 An intent does not prove the key was created, and success events remain subject
 to the configured sink's delivery guarantees. The file uses the same volume as
 the WAL: ephemeral storage does not survive volume loss.

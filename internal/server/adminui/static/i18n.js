@@ -8,6 +8,12 @@
 "use strict";
 
 const MSG = {
+  "settings.maskingTitle": { en: "Optional PII masking", ko: "선택적 개인정보 마스킹" },
+  "settings.maskingHint": { en: "Off by default. Applies to the configured teams on this gateway. Required privacy policies still apply. Masking adds latency and can reduce prompt-cache reuse.", ko: "기본은 꺼짐입니다. 이 게이트웨이에 설정된 팀에 적용됩니다. 정책으로 강제한 개인정보 보호는 계속 적용됩니다. 마스킹은 지연을 늘리고 프롬프트 캐시 재사용을 줄일 수 있습니다." },
+  "settings.maskingEnable": { en: "Enable optional masking", ko: "선택적 마스킹 켜기" },
+  "settings.maskingSave": { en: "Save", ko: "저장" },
+  "settings.maskingSaved": { en: "Masking setting saved.", ko: "마스킹 설정을 저장했습니다." },
+  "settings.maskingReadOnly": { en: "Changes require a full administrator and a configured masking.state_file.", ko: "변경하려면 전체 관리자 권한과 masking.state_file 설정이 필요합니다." },
   "evidence.completed": { en: "Observed completed records", ko: "관측 완료 기록" },
   "evidence.outcomes": { en: "Outcomes", ko: "요청 결과" },
   "evidence.succeeded": { en: "Succeeded", ko: "성공" },

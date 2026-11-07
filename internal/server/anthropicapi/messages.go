@@ -2,6 +2,7 @@
 package anthropicapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,6 +24,7 @@ import (
 	"github.com/inferplane/inferplane/internal/pricing"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
+	"github.com/inferplane/inferplane/internal/sensitivity"
 	"github.com/inferplane/inferplane/internal/server/requestpolicy"
 	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/internal/tracing"
@@ -273,7 +275,22 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// rejects the request; the unmasked body is never forwarded.
 	piiMasked := result.Decision.Masked
 	if h.mask.Enabled(p.Team) {
-		masked, reparsed, n, err := legacyMask(raw, h.mask.Filter)
+		var masked []byte
+		var reparsed *schema.ChatRequest
+		var n int
+		var err error
+		if h.mask.Control != nil {
+			if !result.Decision.Masked {
+				masked, err = sensitivity.NewRedactorWithMasker(h.mask.Filter).Redact(req.Context(), "anthropic", raw)
+				if err == nil && !bytes.Equal(masked, raw) {
+					reparsed = new(schema.ChatRequest)
+					err = json.Unmarshal(masked, reparsed)
+					n = 1 // changed body; not a detector count
+				}
+			}
+		} else {
+			masked, reparsed, n, err = legacyMask(raw, h.mask.Filter)
+		}
 		if err != nil {
 			// Observe already ran after RouteRequest; nil metrics adds the
 			// refusal's evidence without a second routing-decision count.
@@ -289,7 +306,15 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			raw = masked
 			parsed = *reparsed
 			piiMasked = true
-			h.metrics.ObservePIIMask(p.Team, n)
+			if h.mask.Control == nil {
+				h.metrics.ObservePIIMask(p.Team, n)
+			} else {
+				result.Decision.Masked = true
+				if len(result.Decision.Policies) == 0 {
+					result.Decision.Reason = "optional_mask"
+				}
+				req = requestpolicy.Observe(w, req, result, nil)
+			}
 		}
 	}
 	// Pricing table from the SAME generation we resolved on (ADR-006): a reload

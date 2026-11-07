@@ -74,7 +74,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request_error", "could not read request body")
 		return
 	}
-	parsed, err := responses.RequestToCanonical(raw)
+	document, err := responses.ParseRequest(raw)
 	if err != nil {
 		writeError(w, 400, "invalid_request_error", "invalid Responses request")
 		return
@@ -82,7 +82,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// No target can honor provider-held state safely: the bridge cannot carry
 	// it, and native targets would resolve it under the shared upstream
 	// credential without per-user ownership evidence.
-	if responses.StoredReference(raw) {
+	parsed := document.Canonical()
+	if document.StoredReference() {
 		h.denied(req, p, "_rejected", 400, "stored_reference_unsupported", start)
 		writeError(w, 400, "invalid_request_error", "stored response, conversation and item references are not supported; resend the full input")
 		return
@@ -121,7 +122,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	// Apply at every candidate selection, including private recovery and
 	// context alternatives. Observation parsing is not conversion permission.
-	compatible := func(ct router.ChainTarget) bool { return compatibleTarget(raw, ct, st) }
+	compatible := func(ct router.ChainTarget) bool { return compatibleDocument(document, ct, st) }
 	result, routeErr := h.r.RouteRequest(req.Context(), router.RequestRoutingInput{
 		Principal: p, Protocol: "responses", RawBody: raw, RequestedModel: requested,
 		Model: model, Chain: chain, State: st, AllowedRegions: team.AllowedRegions,
@@ -148,16 +149,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	model, chain, st = result.Model, result.Chain, result.State
 	if result.MaskRequired {
-		parsed, err = responses.RequestToCanonical(result.SanitizedBody)
+		document, err = responses.ParseRequest(result.SanitizedBody)
 		if err != nil || len(result.SanitizedBody) == 0 {
 			h.denied(req, p, model, 403, "masking_failed", start)
 			writeError(w, 403, "permission_error", "request could not be completely masked")
 			return
 		}
+		parsed = document.Canonical()
 		raw = result.SanitizedBody
 	}
 	if h.mask.Enabled(p.Team) && !result.Decision.Masked {
-		sanitized, masked, maskErr := legacyMask(req.Context(), sensitivity.NewRedactorWithMasker(h.mask.Filter), raw)
+		sanitized, masked, maskErr := maskDocument(req.Context(), sensitivity.NewRedactorWithMasker(h.mask.Filter), raw)
 		if maskErr != nil {
 			result.Decision.Reason = "mask_failed"
 			req = requestpolicy.Observe(w, req, result, h.metrics)
@@ -165,10 +167,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			writeError(w, 403, "permission_error", "request could not be completely masked")
 			return
 		}
-		parsed = masked
+		document = masked
+		parsed = document.Canonical()
 		result.Decision.Masked = !bytes.Equal(raw, sanitized)
 		if result.Decision.Masked && len(result.Decision.Policies) == 0 {
 			result.Decision.Reason = "legacy_mask"
+			if h.mask.Control != nil {
+				result.Decision.Reason = "optional_mask"
+			}
 		}
 		raw = sanitized
 	}
@@ -176,7 +182,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// A defensive final check protects native-only fields even on a legacy
 	// no-policy chain, and prevents accidentally adding a lossy adapter.
 	for _, ct := range chain {
-		if !compatibleTarget(raw, ct, st) {
+		if !compatibleDocument(document, ct, st) {
 			h.denied(req, p, model, 400, "unsupported_conversion", start)
 			writeError(w, 400, "invalid_request_error", "request requires a native Responses target")
 			return
@@ -290,16 +296,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func compatibleTarget(raw []byte, ct router.ChainTarget, st *live.State) bool {
+	document, err := responses.ParseRequest(raw)
+	return err == nil && compatibleDocument(document, ct, st)
+}
+
+func compatibleDocument(document *responses.ParsedRequest, ct router.ChainTarget, st *live.State) bool {
 	if ct.Provider == nil {
 		return false
 	}
 	if ct.Provider.Name() == "openai_responses" {
 		return true
 	}
-	if responses.ValidateConversion(raw) != nil {
+	if document.ValidateConversion() != nil {
 		return false
 	}
-	strict, err := responses.StrictTools(raw)
+	strict, err := document.StrictTools()
 	if err != nil {
 		return false
 	}

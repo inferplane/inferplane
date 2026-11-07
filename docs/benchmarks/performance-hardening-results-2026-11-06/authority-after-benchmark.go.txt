@@ -1,0 +1,80 @@
+package local
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/inferplane/inferplane/internal/governance"
+	"github.com/inferplane/inferplane/internal/policy"
+	"github.com/inferplane/inferplane/internal/testutil/inspectionfixture"
+)
+
+func BenchmarkReviewAuthorityPair(b *testing.B) {
+	for _, pending := range []int{0, 256, 1024} {
+		for _, workers := range []int{1, 8} {
+			b.Run(fmt.Sprintf("pending=%d/c=%d", pending, workers), func(b *testing.B) {
+				ctx := context.Background()
+				s, err := Open(filepath.Join(b.TempDir(), "authority.sqlite"))
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.Cleanup(func() { s.Close() })
+				// Freeze lease time only; all admission and persistence paths
+				// remain real. There is no remote authority or network.
+				now := time.Now()
+				s.now = func() time.Time { return now }
+				budget := definition("hard", true)
+				budget.GrantMicroUSD, budget.LimitMicroUSD = 1_000_000_000, 2_000_000_000
+				r := response(budget)
+				if err := s.Apply(ctx, r, 0); err != nil {
+					b.Fatal(err)
+				}
+				if _, err := s.Reserve(ctx, testSubject, 2); !errors.Is(err, governance.ErrAuthorityUnavailable) {
+					b.Fatalf("expected initial credit request: %v", err)
+				}
+				req, err := s.Request(ctx)
+				if err != nil || len(req.Requests) != 1 {
+					b.Fatalf("credit request: %v (%d)", err, len(req.Requests))
+				}
+				want := req.Requests[0]
+				r.Grants = []policy.AuthorityGrant{{
+					ID: "review-grant", RequestID: want.RequestID, Key: want.Key,
+					Revision: want.Revision, WindowID: want.WindowID,
+					Amount: budget.GrantMicroUSD, ExpiresAt: r.ServerTime.Add(time.Minute),
+				}}
+				if err := s.Apply(ctx, r, 0); err != nil {
+					b.Fatal(err)
+				}
+				pair := func() error {
+					p, err := s.Reserve(ctx, testSubject, 2)
+					if err != nil {
+						return err
+					}
+					one := int64(1)
+					return s.Finish(ctx, p, &one, true)
+				}
+				// Reach steady-state receipt retention before measurement.
+				for range 256 {
+					if err := pair(); err != nil {
+						b.Fatal(err)
+					}
+				}
+				for range pending {
+					if _, err := s.Reserve(ctx, testSubject, 2); err != nil {
+						b.Fatal(err)
+					}
+				}
+				var journalBytes int
+				if err := s.db.QueryRow(`SELECT length(state)+(SELECT coalesce(sum(length(value)),0) FROM local_escrow_entries) FROM local_escrow WHERE id = 1`).Scan(&journalBytes); err != nil {
+					b.Fatal(err)
+				}
+				inspectionfixture.Run(b, 1, workers, pair)
+				b.ReportMetric(float64(journalBytes), "journal_bytes")
+			})
+		}
+	}
+}

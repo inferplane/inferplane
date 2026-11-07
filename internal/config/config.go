@@ -22,6 +22,7 @@ import (
 
 	"github.com/inferplane/inferplane/internal/adminauth"
 	"github.com/inferplane/inferplane/internal/identity"
+	"github.com/inferplane/inferplane/internal/policy"
 )
 
 // envRefShape is the allowed shape of an env-var secret ref: a POSIX-ish env var
@@ -254,10 +255,11 @@ type ProviderStoreConfig struct {
 	Path string `json:"path"`
 }
 
-// AuditSink configures one audit output: "stdout" or "file" (with Path).
+// AuditSink configures stdout, file retention, or a required OTLP collector.
 type AuditSink struct {
-	Type string `json:"type"`
-	Path string `json:"path,omitempty"`
+	Type     string `json:"type"`
+	Path     string `json:"path,omitempty"`
+	Exporter string `json:"exporter,omitempty"`
 }
 
 // AuditBuffer is the disk-backed WAL location for buffer_then_block.
@@ -520,6 +522,15 @@ type PluginConfig struct {
 	Teams []string `json:"teams,omitempty"`
 }
 
+// MaskingConfig explicitly enables optional masking. A state file permits
+// full administrators to persist runtime changes. Required policy privacy is
+// independent of this switch. Legacy plugins and this block are exclusive.
+type MaskingConfig struct {
+	Enabled   bool     `json:"enabled"`
+	Teams     []string `json:"teams,omitempty"`
+	StateFile string   `json:"state_file,omitempty"`
+}
+
 // OTelConfig enables opt-in OpenTelemetry tracing (ADR-011). Absent (nil) →
 // no tracer installed (no-op, zero overhead). SampleRatio is a NULLABLE pointer:
 // nil → 1.0 (sample all), explicit 0.0 → sample none (the two are
@@ -545,6 +556,7 @@ type Config struct {
 	Teams           map[string]TeamConfig     `json:"teams"`
 	Pricing         PricingConfig             `json:"pricing"`
 	Plugins         []PluginConfig            `json:"plugins,omitempty"`
+	Masking         *MaskingConfig            `json:"masking,omitempty"`
 	OTel            *OTelConfig               `json:"otel,omitempty"`
 	// Observability is the local OTLP export ceiling policies select from.
 	Observability       *ObservabilityConfig       `json:"observability,omitempty"`
@@ -832,6 +844,9 @@ func LoadRaw(path string) (*Config, error) {
 	if cfg.Audit.FailureMode != "" && cfg.Audit.FailureMode != "buffer_then_block" {
 		return nil, fmt.Errorf("config: audit.failure_mode must be buffer_then_block (empty uses the default)")
 	}
+	if cfg.Masking != nil && len(cfg.Plugins) != 0 {
+		return nil, fmt.Errorf("config: masking and legacy plugins are mutually exclusive")
+	}
 	if err := validatePricing(cfg.Pricing); err != nil {
 		return nil, err
 	}
@@ -843,6 +858,19 @@ func LoadRaw(path string) (*Config, error) {
 	}
 	if err := validateObservability(cfg.Observability); err != nil {
 		return nil, err
+	}
+	for _, sink := range cfg.Audit.Sinks {
+		if sink.Type == "otlp" {
+			if cfg.Observability == nil || sink.Path != "" {
+				return nil, fmt.Errorf("config: otlp audit sink requires an observability exporter and no path")
+			}
+			exporter, ok := cfg.Observability.Exporters[sink.Exporter]
+			if !ok || !exporter.Allows(policy.SignalAudit) {
+				return nil, fmt.Errorf("config: otlp audit sink exporter must allow audit")
+			}
+		} else if sink.Exporter != "" {
+			return nil, fmt.Errorf("config: exporter is only valid on an otlp audit sink")
+		}
 	}
 	if err := validateClientEvidence(cfg.Audit.ClientEvidence); err != nil {
 		return nil, err

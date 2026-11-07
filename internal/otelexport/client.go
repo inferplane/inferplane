@@ -83,11 +83,15 @@ func (c *httpClient) export(ctx context.Context, req *collogspb.ExportLogsServic
 		// Transport errors name the URL (host:port) only; treat as transient.
 		return retryable{msg: "collector unreachable"}
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
 	resp.Body.Close()
 	switch {
-	case resp.StatusCode/100 == 2:
-		return nil
+	case resp.StatusCode == http.StatusOK:
+		var result collogspb.ExportLogsServiceResponse
+		if readErr != nil || len(body) > 64<<10 || proto.Unmarshal(body, &result) != nil {
+			return errors.New("invalid collector acknowledgement")
+		}
+		return accepted(&result)
 	case resp.StatusCode == http.StatusTooManyRequests, resp.StatusCode == http.StatusBadGateway,
 		resp.StatusCode == http.StatusServiceUnavailable, resp.StatusCode == http.StatusGatewayTimeout:
 		return retryable{msg: fmt.Sprintf("collector status %d", resp.StatusCode)}
@@ -117,9 +121,9 @@ func newGRPCClient(e Exporter) (*grpcClient, error) {
 }
 
 func (c *grpcClient) export(ctx context.Context, req *collogspb.ExportLogsServiceRequest) error {
-	_, err := c.client.Export(metadata.NewOutgoingContext(ctx, c.md), req)
+	result, err := c.client.Export(metadata.NewOutgoingContext(ctx, c.md), req)
 	if err == nil {
-		return nil
+		return accepted(result)
 	}
 	// Only the code is reported: a server's status message is not ours to log.
 	code := status.Code(err)
@@ -132,3 +136,10 @@ func (c *grpcClient) export(ctx context.Context, req *collogspb.ExportLogsServic
 }
 
 func (c *grpcClient) close() { _ = c.conn.Close() }
+
+func accepted(result *collogspb.ExportLogsServiceResponse) error {
+	if result == nil || result.GetPartialSuccess().GetRejectedLogRecords() != 0 {
+		return errors.New("collector rejected part of the batch")
+	}
+	return nil
+}

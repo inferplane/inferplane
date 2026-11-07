@@ -16,6 +16,10 @@ func RequestToCanonical(raw []byte) (*schema.ChatRequest, error) {
 	if err != nil {
 		return nil, err
 	}
+	return requestToCanonical(m)
+}
+
+func requestToCanonical(m map[string]json.RawMessage) (*schema.ChatRequest, error) {
 	if err := knownCase(m, "model", "input", "instructions", "tools", "tool_choice", "stream", "max_output_tokens"); err != nil {
 		return nil, err
 	}
@@ -252,6 +256,10 @@ func StoredReference(raw []byte) bool {
 	if err != nil {
 		return false
 	}
+	return storedReference(m)
+}
+
+func storedReference(m map[string]json.RawMessage) bool {
 	if present(m["previous_response_id"]) || present(m["conversation"]) {
 		return true
 	}
@@ -271,11 +279,14 @@ func StoredReference(raw []byte) bool {
 // supported stateless text/function/custom-tool bridge. Native forwarding does
 // not call this function.
 func ValidateConversion(raw []byte) error {
-	cr, err := RequestToCanonical(raw)
+	parsed, err := ParseRequest(raw)
 	if err != nil {
 		return err
 	}
-	m, _ := object(raw)
+	return parsed.ValidateConversion()
+}
+
+func validateConversion(m map[string]json.RawMessage, cr *schema.ChatRequest) error {
 	allowed := map[string]bool{}
 	for _, k := range []string{"model", "input", "instructions", "tools", "tool_choice", "stream", "max_output_tokens", "temperature", "top_p", "store", "background", "previous_response_id", "conversation", "text", "reasoning", "include", "metadata", "client_metadata", "user", "safety_identifier", "prompt_cache_key", "prompt_cache_retention", "parallel_tool_calls", "service_tier", "truncation"} {
 		allowed[k] = true

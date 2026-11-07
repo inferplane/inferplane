@@ -62,15 +62,24 @@ func NewFileSink(path string, required bool) (*FileSink, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := syncWALDirectory(path); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
 	return &FileSink{name: "file", f: f, required: required}, nil
 }
 
 func (s *FileSink) Write(rec []byte) error {
-	if _, err := s.f.Write(rec); err != nil {
-		return err
-	}
-	if _, err := s.f.Write([]byte{'\n'}); err != nil {
-		return err
+	return s.WriteBatch([][]byte{rec})
+}
+func (s *FileSink) WriteBatch(records [][]byte) error {
+	for _, rec := range records {
+		if _, err := s.f.Write(rec); err != nil {
+			return err
+		}
+		if _, err := s.f.Write([]byte{'\n'}); err != nil {
+			return err
+		}
 	}
 	return s.f.Sync() // durability for the required audit sink
 }

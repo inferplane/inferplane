@@ -73,6 +73,38 @@ func enforce(name string, c Classifier) Entry {
 	return Entry{Name: name, Mode: Enforce, Classifier: c, Global: true}
 }
 
+func TestShadowSaturationDoesNotBlockEnforce(t *testing.T) {
+	const capacity = 16
+	started := make(chan struct{}, capacity)
+	release := make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	blocker := &fake{score: func(_ context.Context, windows []string) (Scores, error) {
+		started <- struct{}{}
+		<-release
+		return allClear(context.Background(), windows)
+	}}
+	shadow := Entry{Name: "shadow", Mode: Shadow, Classifier: blocker, Global: true}
+	set := testSet(t, 0, shadow)
+	set.Timeout = 100 * time.Millisecond
+	for range capacity {
+		go set.Run(context.Background(), set.Entries, req("shadow-team", "text"))
+	}
+	for range capacity {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("shadow calls did not fill their capacity")
+		}
+	}
+	worker := &fake{score: allClear}
+	enforced := testSet(t, 0, enforce("enforced", worker))
+	result := enforced.Run(context.Background(), enforced.Entries, req("protected-team", "text"))
+	if result[0].Outcome != OutcomeClear || worker.callCount() != 1 {
+		t.Fatalf("shadow calls blocked enforcement: result=%+v calls=%d", result[0], worker.callCount())
+	}
+}
+
 func TestClassifierConcurrencyBoundPersistsAfterTimeoutAndAcrossSets(t *testing.T) {
 	const capacity = 16
 	started := make(chan struct{}, capacity)

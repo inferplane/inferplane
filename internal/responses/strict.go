@@ -34,6 +34,10 @@ func StrictTools(raw []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	return strictTools(fields)
+}
+
+func strictTools(fields map[string]json.RawMessage) (bool, error) {
 	if err := knownCase(fields, "tools"); err != nil {
 		return false, err
 	}

@@ -30,6 +30,7 @@ import (
 	"github.com/inferplane/inferplane/internal/pricing"
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
+	"github.com/inferplane/inferplane/internal/sensitivity"
 	"github.com/inferplane/inferplane/internal/server/requestpolicy"
 	"github.com/inferplane/inferplane/internal/telemetry"
 	"github.com/inferplane/inferplane/internal/tokenest"
@@ -269,11 +270,33 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		raw = result.SanitizedBody
 	}
 
-	// Fail closed for masked teams on the OpenAI ingress (ADR-009 round-2
+	optionalMaskHandled := false
+	if h.mask.Enabled(p.Team) && h.mask.Control != nil && !result.Decision.Masked {
+		// The explicit administrator switch uses the complete structural
+		// redactor, including independent sensitive-data reinspection.
+		sanitized, maskErr := sensitivity.NewRedactorWithMasker(h.mask.Filter).Redact(req.Context(), "openai", raw)
+		if maskErr == nil {
+			canonical, maskErr = openai.RequestToCanonical(sanitized)
+		}
+		if maskErr != nil {
+			result.Decision.Reason = "mask_failed"
+			req = requestpolicy.Observe(w, req, result, nil)
+			h.audit(req.Context(), p, model, "", &audit.OutcomeRef{Status: 400, Error: &result.Decision.Reason}, traceID)
+			writeErr(w, 400, "invalid_request_error", "request could not be completely masked")
+			return
+		}
+		result.Decision.Masked = !bytes.Equal(raw, sanitized)
+		if result.Decision.Masked && len(result.Decision.Policies) == 0 {
+			result.Decision.Reason = "optional_mask"
+		}
+		raw, optionalMaskHandled = sanitized, true
+		req = requestpolicy.Observe(w, req, result, nil)
+	}
+	// Fail closed for legacy masked teams on the OpenAI ingress (ADR-009 round-2
 	// CRITICAL): v1 masks only the Anthropic ingress, so a masked team must not
 	// bypass PII masking by using /v1/chat/completions. Reject until OpenAI-ingress
 	// masking ships.
-	if h.mask.Enabled(p.Team) && !result.Decision.Masked {
+	if h.mask.Enabled(p.Team) && !result.Decision.Masked && !optionalMaskHandled {
 		// Audit the security-critical rejection (a masking-bypass attempt) — a
 		// silent reject would be a blind spot in the tamper-evident chain (P4 gate).
 		// Observe already ran after RouteRequest; nil metrics adds the

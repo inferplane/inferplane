@@ -1,0 +1,111 @@
+{
+  "date_utc": "2026-11-06",
+  "head": "49a4c2a6723ecaa064d7bb1a87eb9fd986adf8e7",
+  "branch": "fix/security-review-hardening-20261105",
+  "includes_existing_uncommitted_changes": true,
+  "tracked_diff_sha256": "cc9def407ed7a798f27d1b1fc80c39612099d56d7aeac2c688796788534abb5b",
+  "go": "go1.26.10",
+  "CGO_ENABLED": 0,
+  "GOMAXPROCS": 4,
+  "GOGC": 100,
+  "GOARCH": "aarch64",
+  "gateway_storage": "/tmp tmpfs",
+  "audit_and_authority_storage": "/home/atomoh/.tmp/inferplane-perf-20261106 XFS",
+  "gateway": {
+    "benchtime": "300ms",
+    "trials": 3,
+    "concurrency": 1,
+    "protocols": [
+      "anthropic",
+      "openai",
+      "responses",
+      "bedrock-converse"
+    ],
+    "modes": [
+      "none",
+      "shadow",
+      "internal",
+      "mask"
+    ],
+    "sizes_bytes": [
+      204800,
+      1048576
+    ],
+    "provider": "zero-delay in-process fake; no production provider serialization/network",
+    "classifier": "not enabled",
+    "analytics": "disabled",
+    "audit": "async WAL only; drain excluded by existing gateway helper"
+  },
+  "audit": {
+    "benchtime": "1s",
+    "trials": 3,
+    "includes_drain": true,
+    "record": "minimal synthetic request_completed"
+  },
+  "authority": {
+    "benchtime": "32x",
+    "trials": 3,
+    "workers": [
+      1,
+      8
+    ],
+    "completed_receipts": 256,
+    "pending_permits": [
+      0,
+      256,
+      1024
+    ],
+    "scopes": 1,
+    "operation": "Reserve+Finish",
+    "cost_bound_microUSD": 2,
+    "actual_microUSD": 1,
+    "clock": "frozen fixture time; actual SQLite FULL synchronous I/O"
+  },
+  "qualification": "Shared host; no production p95/p99 or peak RSS qualification; do not interpret B/op as retained heap. No ADR-046/Postgres, real classifier, upstream model or OTLP exporter measured.",
+  "source_sha256": {
+    "cmd/mayu/inspection_bench_test.go": "e6cec41f53c81256bbb65b7b8a46e1e4a7e3d3e8d1ef7bc2d7ec1dbe63b7429f",
+    "internal/testutil/inspectionfixture/fixture.go": "8d03ac73f2dcf9bea3902f758bc745e4c9ce70c5ea28478ecc4727a8a7afe776",
+    "internal/server/responsesapi/handler.go": "b7fd555eb6ae0e98434306fe9c57f25e47d0df580fb4d9cf6f5fe03f8d1c0c01",
+    "internal/responses/json.go": "1aa7b331c506d25780de0cf16daf73456999b2569f47b9af389105707389b310",
+    "internal/responses/request.go": "c4ec5e4c1bab9b365f1daaf583c0f4da6aec2ce11913e0ebda89e9b91bb06261",
+    "internal/sensitivity/text.go": "014208fbd28623678a6b65624620c39327e0954cb4304d5cf820c77e3369ef13",
+    "internal/sensitivity/redact.go": "6041312a40a82299d28319219973f31a389a090b13f941c0a28fadf0863e8f65",
+    "internal/authority/local/store.go": "200af434de536f310a3b172aeb2b150dea00272e4d162bcb9ed60dba5c1329bb",
+    "internal/authority/local/admission.go": "1388aced9c9144295652f26fc8886196c2f6fe22fd57b6b5f382cd58a92041d2",
+    "internal/audit/writer.go": "1c63ee9fb3deb61b508ef0886a287f9b7db201015ad278742860d01f3464686b",
+    "internal/audit/wal.go": "150199baa8e2c1db15b37e77aeb64cda063d6c3b1b0e627c0172896d66892501",
+    "internal/audit/sink.go": "ab192406d61a573f53eedc89a93d1cb2f7567a9bf39def54442e1692db3a0898",
+    "internal/live/live.go": "f5a4524227858cbba085d25a62f6534a099c59b018efafa3114a6bbb4282ca5d",
+    "providers/anthropic/anthropic.go": "6c1f02c6549ef6681a9c046caeaa39b764235692a1a8700199d5cb5f41be1c25"
+  },
+  "GOMEMLIMIT": "unset",
+  "concurrency": {
+    "protocol": "responses",
+    "mode": "none",
+    "body_bytes": 1048576,
+    "benchtime": "32x",
+    "trials": 3,
+    "requested_workers": [
+      1,
+      8,
+      32
+    ],
+    "actual_worker_ceilings": [
+      1,
+      8,
+      16
+    ],
+    "logical_body_cap_bytes": 16777216
+  },
+  "profiles": {
+    "responses_no_privacy": "64x",
+    "responses_mask": "4x",
+    "includes_setup_warmup_teardown": true,
+    "heap_analysis": "alloc_space; cumulative allocation, not resident heap"
+  },
+  "binary_sha256": {
+    "mayu.test": "3c0f7ad98af006e3bf4057df1c5d68b67b7410f7af45cd97897ce5c47720bf7b",
+    "audit.test": "b7fe98625262236e1078d03ad09508640f5ac1787f36e4a01b08cb7bcd3af81b",
+    "local.test": "bcd6f733d69b0a850ff07ee37b7baff67c993c16fee6187ca4aa6a3a1cfb872d"
+  }
+}

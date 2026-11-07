@@ -1,9 +1,16 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: 4992d8b59759a8b6d3732b1b2efdc6a0cbeb3c6b7676f0972a7e8bef3dee9bbc
+translation_source_sha256: 974de98768729355a626e84ea6eb5314b61407d331d7900906123dfc1ea8ca17
 ---
 
 # API 구현 {#api}
+
+`GET`/`PUT /admin/masking`은 전체 관리자에게 로컬 선택 마스킹 설정을 제공합니다.
+GET은 `enabled`, `revision`, `writable`을 반환하고 PUT은 `enabled`와
+`expected_revision`을 받습니다(최대 4 KiB). 인증 누락은 401, 권한 부족은 403,
+오래된 버전은 409, 영속성 미설정은 405, 저장소·감사 장애는 503입니다.
+변경하면 `admin_masking_changed`를 기록합니다. 필수 개인정보 정책은 유지됩니다.
+[선택 마스킹](security.md#administrator-controlled-optional-masking)을 참고하세요.
 
 ### 1. 개요 {#1-overview}
 

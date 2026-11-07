@@ -1,9 +1,13 @@
 ---
 translation_source: reference/infrastructure.md
-translation_source_sha256: cfc1b02684738dee7296c33e2c95baf680b1fe6e398e821a660b468f6463547c
+translation_source_sha256: 7895088f330b2d2e2d33c13408dc0197685f064d3ea77d47fde0150f7cf1b727
 ---
 
 # 인프라 {#infrastructure}
+
+기본 송신 HTTP 전송은 응답 헤더를 최대 120초 기다리며, 이미 시작된 스트림의
+전체 시간은 제한하지 않습니다. 명시적으로 주입한 클라이언트의 전송·시간 제한은
+유지합니다. ADR-058을 참고하세요.
 
 ### 1. 개요 {#1-overview}
 

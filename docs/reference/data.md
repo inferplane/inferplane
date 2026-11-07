@@ -1,5 +1,23 @@
 # Data
 
+### Local journal version 2
+
+ADR-045 reservations now persist changed entities in `local_escrow_entries`;
+`local_escrow` holds metadata, entity counts, owner and revision. Every operation
+still opens a local SQLite transaction with FULL durability. There is no
+inference-time central Postgres call in this profile. Cached decoded state is
+usable only after checking durable owner/revision/root bytes; entry changes
+invalidate it, missing entities refuse, and rollback discards tentative state.
+
+Version 1 migrates atomically on open. Restart still burns old grants and fences
+the prior owner. Older binaries refuse version 2: do not delete the journal or
+restore stale authority to downgrade. See ADR-058.
+
+Audit group commit syncs up to 64 queued records together. Required OTLP sinks
+can replace permanent local JSONL files: full collector acceptance reclaims
+the current WAL group when no older undelivered history remains. This never
+purges existing file archives, analytics databases or captured bodies.
+
 ### 1. Overview
 Persistent and in-memory state: the SQLite virtual-key store, the disk-backed
 tamper-evident audit log, and the in-memory two-phase governance stores (limiter,
@@ -15,7 +33,7 @@ reservation journal for node-local fleets. Postgres also backs `bodystore`,
 ### 2. Components
 | Component | Path | Purpose |
 |---|---|---|
-| Global monetary authority | `internal/authority/pgstore/`, `internal/authority/local/` | Postgres commits finite grants and owns UTC budget windows; private node journals reserve each billable attempt before dispatch. No inference-time database call; no refund on expiry/restart; uncertain outcomes retain their bound. See ADR-045. |
+| Global monetary authority | `internal/authority/pgstore/`, `internal/authority/local/` | Postgres commits finite grants and owns UTC budget windows; private node journals reserve each billable attempt before dispatch. No inference-time central database call; local SQLite still commits every reservation and settlement. No refund on expiry/restart; uncertain outcomes retain their bound. See ADR-045. |
 | Shared admission | `internal/authority/pgstore/shared*.go` | Atomic global RPM/TPM, calendar token quotas, team/key money and ADR-045 policy money; captured-window replay-safe settlement and global usage. |
 | Shared key store | `internal/keystore/postgres*.go`, `import.go` | Full hashed-key/team backend, per-request snapshots, conditional revoke, immutable seed fingerprints and transactional SQLite import. |
 | Key store | `internal/keystore/sqlite.go` | SHA-256-hashed virtual keys, Postgres-portable schema; also owns the `teams` table (D3, ADR-016): `name` (PK), `allowed_models`, `rpm`, `tpm`, `tokens_per_day`, `quota_on_exceeded`, `budget_usd_micros`, `budget_on_exceeded`, `budget_usd_micros_per_day` (daily budget Phase 1 — per-team calendar-day µUSD cap, 0 = unlimited), `guardrail_id`, `guardrail_version` (D6, ADR-019 — per-team Bedrock Guardrail override), `allowed_regions` (D7, ADR-020 — per-team region lock), `created_at`, `updated_at`. `guardrail_id`/`guardrail_version`/`allowed_regions`/`budget_usd_micros_per_day` are `teams`' ALTER-TABLE migrations (it shipped as a brand-new table under D3, so no pre-existing rows needed catching up until D6; `budget_usd_micros_per_day` is the table's first budget-related ALTER — the original money columns rode the CREATE TABLE); `ensureSchema` shares a small `existingColumns`/`applyMigrations` helper pair between `keys` and `teams` instead of duplicating the PRAGMA-scan loop. |
@@ -23,7 +41,7 @@ reservation journal for node-local fleets. Postgres also backs `bodystore`,
 | Provider store | `internal/providerstore/sqlite.go` | opt-in DB topology (ADR-008): `providers` (refs only — no secret column; `guardrail_id`/`guardrail_version` TEXT columns, D6/ADR-019 — a DB-registered Bedrock provider's own default Guardrail, ALTER-TABLE migrations mirroring `auth_header`), `model_targets` (ordered routes), `model_aliases` (`model`, `alias` PK — ADR-021 follow-up: a model's alias→canonical names, group-level so a multi-target fallback chain can't duplicate them; a brand-new `CREATE TABLE IF NOT EXISTS`, no ALTER-TABLE needed), `meta` (durable `seeded` marker); portable TEXT/INTEGER DDL |
 | Audit writer | `internal/audit/writer.go` | single-writer hash chain, retained-WAL validation and latched admission pressure |
 | Audit WAL | `internal/audit/wal.go` | disk buffer for `buffer_then_block` durability |
-| Key issuance intent journal | `<audit WAL path>.intents` | file-synced creation requests when no required audit sink is configured |
+| Key issuance intent journal | `<audit WAL path>.intents` and `.intents.segment-*` | file-synced creation requests and bounded retained segments when no required audit sink is configured |
 | Audit verify | `internal/audit/verify.go` | per-instance segmented chain verification |
 | Audit anchoring | `internal/audit/s3anchor/` | opt-in WORM (S3 Object Lock) chain-head anchoring → tamper-resistant (ADR-012); refs/PII-free anchor objects |
 | Limiter store | `internal/limiter/limiter.go` | in-memory token bucket (TPM/RPM), two-phase |

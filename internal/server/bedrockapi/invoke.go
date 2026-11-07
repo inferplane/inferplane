@@ -286,9 +286,11 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	piiMasked := result.Decision.Masked
-	if h.mask.Enabled(p.Team) {
-		masked, n, err := maskBody(raw, h.mask.Filter)
-		if h.converse {
+	if h.mask.Enabled(p.Team) && (h.mask.Control == nil || !result.Decision.Masked) {
+		var masked []byte
+		var n int
+		var err error
+		if h.converse || h.mask.Control != nil {
 			// Native Converse includes tool, reasoning and opaque blocks that
 			// the legacy text-only masker cannot prove safe. Use the complete
 			// redactor with independent reinspection and fail closed.
@@ -297,6 +299,8 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			if err == nil && !bytes.Equal(masked, raw) {
 				n = 1
 			}
+		} else {
+			masked, n, err = maskBody(raw, h.mask.Filter)
 		}
 		// A masking error and an unreadable result are the same refusal.
 		var reparsed schema.ChatRequest
@@ -318,7 +322,15 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			raw = masked
 			parsed = reparsed
 			piiMasked = true
-			h.metrics.ObservePIIMask(p.Team, n)
+			if h.mask.Control == nil {
+				h.metrics.ObservePIIMask(p.Team, n)
+			} else {
+				result.Decision.Masked = true
+				if len(result.Decision.Policies) == 0 {
+					result.Decision.Reason = "optional_mask"
+				}
+				req = requestpolicy.Observe(w, req, result, nil)
+			}
 		}
 	}
 

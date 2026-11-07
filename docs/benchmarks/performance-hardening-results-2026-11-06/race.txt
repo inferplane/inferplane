@@ -1,0 +1,74 @@
+?   	github.com/inferplane/inferplane/api/v1alpha1	[no test files]
+ok  	github.com/inferplane/inferplane/cmd/inferplaned	1.288s
+ok  	github.com/inferplane/inferplane/cmd/mayu	57.594s
+?   	github.com/inferplane/inferplane/examples/pii-classifier-ko/training/regexbaseline	[no test files]
+ok  	github.com/inferplane/inferplane/internal/adminauth	5.273s
+ok  	github.com/inferplane/inferplane/internal/alert	1.384s
+ok  	github.com/inferplane/inferplane/internal/analytics	5.982s
+ok  	github.com/inferplane/inferplane/internal/analytics/pgstore	1.020s
+ok  	github.com/inferplane/inferplane/internal/anthropic	1.017s
+ok  	github.com/inferplane/inferplane/internal/audit	4.065s
+ok  	github.com/inferplane/inferplane/internal/audit/s3anchor	1.025s
+ok  	github.com/inferplane/inferplane/internal/authority/local	119.017s
+ok  	github.com/inferplane/inferplane/internal/authority/pgstore	1.023s
+ok  	github.com/inferplane/inferplane/internal/bodystore	1.346s
+ok  	github.com/inferplane/inferplane/internal/budget	1.060s
+?   	github.com/inferplane/inferplane/internal/cache	[no test files]
+ok  	github.com/inferplane/inferplane/internal/classifier	1.317s
+ok  	github.com/inferplane/inferplane/internal/clientctx	1.071s
+ok  	github.com/inferplane/inferplane/internal/config	1.908s
+ok  	github.com/inferplane/inferplane/internal/controlplane	4.550s
+ok  	github.com/inferplane/inferplane/internal/controlplane/ui	4.564s
+ok  	github.com/inferplane/inferplane/internal/filter	1.049s
+ok  	github.com/inferplane/inferplane/internal/governance	1.055s
+ok  	github.com/inferplane/inferplane/internal/identity	1.038s
+ok  	github.com/inferplane/inferplane/internal/keystore	4.947s
+ok  	github.com/inferplane/inferplane/internal/limiter	1.040s
+ok  	github.com/inferplane/inferplane/internal/live	1.029s
+ok  	github.com/inferplane/inferplane/internal/metrics	1.058s
+ok  	github.com/inferplane/inferplane/internal/openai	1.028s
+ok  	github.com/inferplane/inferplane/internal/otelexport	4.721s
+ok  	github.com/inferplane/inferplane/internal/policy	1.134s
+ok  	github.com/inferplane/inferplane/internal/policystore	1.011s
+ok  	github.com/inferplane/inferplane/internal/pricing	1.011s
+ok  	github.com/inferplane/inferplane/internal/principal	1.014s
+ok  	github.com/inferplane/inferplane/internal/providerstore	2.163s
+ok  	github.com/inferplane/inferplane/internal/proxy	1.365s
+ok  	github.com/inferplane/inferplane/internal/responses	1.116s
+ok  	github.com/inferplane/inferplane/internal/router	6.980s
+ok  	github.com/inferplane/inferplane/internal/sensitivity	264.469s
+ok  	github.com/inferplane/inferplane/internal/server	28.023s
+ok  	github.com/inferplane/inferplane/internal/server/adminapi	4.522s
+ok  	github.com/inferplane/inferplane/internal/server/adminui	6.486s
+ok  	github.com/inferplane/inferplane/internal/server/analyticsapi	1.227s
+ok  	github.com/inferplane/inferplane/internal/server/anthropicapi	1.609s
+ok  	github.com/inferplane/inferplane/internal/server/auditapi	1.243s
+ok  	github.com/inferplane/inferplane/internal/server/auditconsoleapi	1.016s
+ok  	github.com/inferplane/inferplane/internal/server/authapi	2.170s
+ok  	github.com/inferplane/inferplane/internal/server/bedrockapi	1.380s
+ok  	github.com/inferplane/inferplane/internal/server/configapi	1.181s
+ok  	github.com/inferplane/inferplane/internal/server/maskingapi	1.018s
+ok  	github.com/inferplane/inferplane/internal/server/observabilityapi	1.315s
+ok  	github.com/inferplane/inferplane/internal/server/openaiapi	1.381s
+ok  	github.com/inferplane/inferplane/internal/server/requestpolicy	1.030s
+ok  	github.com/inferplane/inferplane/internal/server/responsesapi	1.583s
+?   	github.com/inferplane/inferplane/internal/server/routingtest	[no test files]
+ok  	github.com/inferplane/inferplane/internal/server/usageapi	1.014s
+ok  	github.com/inferplane/inferplane/internal/telemetry	2.020s
+?   	github.com/inferplane/inferplane/internal/testutil/inspectionfixture	[no test files]
+ok  	github.com/inferplane/inferplane/internal/tier	1.014s
+ok  	github.com/inferplane/inferplane/internal/tokenest	2.315s
+?   	github.com/inferplane/inferplane/internal/tokenest/tokenesttest	[no test files]
+ok  	github.com/inferplane/inferplane/internal/tracing	1.017s
+ok  	github.com/inferplane/inferplane/pkg/schema	1.031s
+ok  	github.com/inferplane/inferplane/pkg/ulid	1.010s
+ok  	github.com/inferplane/inferplane/plugins/piimask	1.010s
+ok  	github.com/inferplane/inferplane/plugins/systemone	1.398s
+ok  	github.com/inferplane/inferplane/providers	1.134s
+ok  	github.com/inferplane/inferplane/providers/anthropic	1.224s
+ok  	github.com/inferplane/inferplane/providers/bedrock	2.528s
+ok  	github.com/inferplane/inferplane/providers/bedrockresponses	1.046s
+ok  	github.com/inferplane/inferplane/providers/openaicompat	1.264s
+ok  	github.com/inferplane/inferplane/providers/openairesponses	1.038s
+ok  	github.com/inferplane/inferplane/providers/testing/mockprovider	1.010s
+ok  	github.com/inferplane/inferplane/providers/testing/redirecttest	1.126s

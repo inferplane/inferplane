@@ -1,0 +1,105 @@
+{
+  "recorded_at_utc": "2026-11-07T00:00:28.955458+00:00",
+  "baseline_date_utc": "2026-11-06",
+  "head": "49a4c2a6723ecaa064d7bb1a87eb9fd986adf8e7",
+  "dirty_workspace": true,
+  "go": "go1.26.10",
+  "GOARCH": "arm64",
+  "CGO_ENABLED": 0,
+  "GOMAXPROCS": 4,
+  "GOGC": 100,
+  "GOMEMLIMIT": "unset",
+  "source_sha256": {
+    "cmd/mayu/gateway.go": "22c09d8278a89444ed6fb88335a2fc65d75914d1f8868b24cfa0b6aad951b5bf",
+    "cmd/mayu/masking_acceptance_test.go": "6089cdd0d01323cfb4cf62462e67e4e898b3c3a7bd0467ed0837d805e650ef9d",
+    "internal/audit/batch.go": "1f1754a5e5637093cdb57e4152b89c9d6de46795067ab256c8e24e37c8947b9b",
+    "internal/audit/batch_test.go": "23d9ac6d52b5e33e8a692a3605ed60294c766535d7cded88d39c87d8c5b7ad5d",
+    "internal/audit/readiness_test.go": "af2b0cfd309ff0165a42eb23d9342e234187f840e0b1a4199c4cd70cd2c77897",
+    "internal/audit/sink.go": "00ef26f548b5d68e8987d1f75d814cbea72fbaa2955ca5bda0e42617e9e948f8",
+    "internal/audit/wal.go": "54be17f62283f7006e3493c311e249391fa85cb99f52570a5b6d12407c702bed",
+    "internal/audit/writer.go": "1fad868e774732c5a0d83c3ef45da4050c674ff2bf2057d1d5acb8b2defd221d",
+    "internal/authority/local/entries.go": "38076fb6c00cb497437982f6892fcf2f2ac60073340bc48b3bf28e538f55efa3",
+    "internal/authority/local/entries_test.go": "b83c7f2e3a0306e4b946c8cd0f0b124a18a7b6fd7897ec6df4a5b6eff9162da4",
+    "internal/authority/local/gc_test.go": "ba0ee7e3570d487458d7c9ea8d6df3708e96b3030adf16adc529975272daf66c",
+    "internal/authority/local/store.go": "79d33daa021193d82332b846ae2445b6a394bc1b2d4b45108a41b27b48f0ff61",
+    "internal/classifier/run.go": "1c9fa826fbef8eb1c92d84cad73d4331c895f9f159c04574b5c66a94f94db0ff",
+    "internal/classifier/run_test.go": "c0985f305605666f9ed01b32bff256953f8bf304d0882958243d69fd690c77bc",
+    "internal/config/config.go": "b74eb166939cce8ca256ecbd287c5f30ba1a70f82a387a942bdb1e9b65d7ffc9",
+    "internal/config/performance_controls_test.go": "b75c8299df97273640a227d5e8894996f1f5182dd7127b9226f49d4b411be105",
+    "internal/filter/control.go": "3c34433901d6e73543b8e127627a02fbe24bedfe11bec0d486382afc3e33d02b",
+    "internal/filter/control_test.go": "9a04fdc482b2991638237f1846c0fe1f3b77817c095352eb1e5734740b480f40",
+    "internal/filter/filter.go": "4a13b51405062ec779a5f0840cdcdf3001e5d82e5f74279efe7a9055b51608ec",
+    "internal/metrics/metrics.go": "cb88b527f440566d343a036a7b222071376aea372452480805e2b8f6de209e37",
+    "internal/otelexport/client.go": "8c42cc86cd40dacda47a875ffd8e33aa6089a488b3f11198a6eeff69d22f981a",
+    "internal/otelexport/required.go": "bc901ecfe48bf4dc9d90ec1585ee5200162bc4e54a200e104929a3188083d361",
+    "internal/otelexport/required_test.go": "b3eabe54f62b8add81e4c4fa80ccbb10b011ac9f84100d6291e4f214b84b6c9b",
+    "internal/responses/document.go": "46bb9ad07c2efb9c493de757ce4541048fb410631e6070502d2cc0c560265427",
+    "internal/responses/document_test.go": "ab438f4f4266bd0d1016cd29dfbd34441b6a5f87eed64fea55a3e487257379b0",
+    "internal/responses/request.go": "8f0157cfeb567edf4e64aacdb5dcac5b54c83838b5d07b3110844c5047ce7465",
+    "internal/responses/strict.go": "13cc1dff36e0fec741f7b6a45f341433e848863e95010c21b29da25ba73b3c3c",
+    "internal/server/adminui/routing_forms_test.go": "7dcfed4efa715aa61a07e38bfe306079fa81fb8cec327ff6ad72b90e8a239eb6",
+    "internal/server/anthropicapi/messages.go": "42f09dce4c9c29d5a6b47eed06ebe07873f850608ff5c9932a629023d3575bce",
+    "internal/server/bedrockapi/invoke.go": "82c717fbb49c9205f1edb8a800490ec62bd28729dc93002242a5b9b826502d55",
+    "internal/server/mask_refusal_audit_test.go": "3bc1f9778f4209c098c4fc22eb0aa5cf37a3a7bc26b91fba56dd58906ae7c042",
+    "internal/server/maskingapi/handler.go": "e20f0ec370c5be3bf7ef19681004525a862647eccadb4a86db6beaf42c3a24a8",
+    "internal/server/maskingapi/handler_test.go": "c66f56d99adaa9ee1948263b1024b3b3f913636e6f2450030c93b67a8019ee3b",
+    "internal/server/openaiapi/chat.go": "e65a0539dffffad2d437badda03ef6b14ad89d41479602209841d82957018a22",
+    "internal/server/responsesapi/handler.go": "dbe8a750edcf95f246bcca90fa69d37f6763d7141efeb5d5483ac2a5577b8e7e",
+    "internal/server/responsesapi/mask.go": "80b57900fdf1a2749306013244fd77c052a9ec77c8b0ebdf414272d06fa250be",
+    "providers/anthropic/anthropic.go": "61e0fe17019c87a114d3f305f9c4feb70d76f701b111b08d77a359ea114e6996",
+    "providers/bedrockresponses/bedrockresponses.go": "316c592cf6062c142bb3774c53179af2847da7113580fdb1ba8692be39d246b9",
+    "providers/http_client.go": "80baade9137a9fad4d12867f1ce73a5e46889bc3c6a86de3952849246a505fbe",
+    "providers/http_client_test.go": "6fdd221166173f4236e8cc016322e9ede3e7014605f4630d131a24a5fb66054e",
+    "providers/openaicompat/openaicompat.go": "17d1c4262e0d86c1b19d8eebbe5fcc8a87edefca446c72bacda1fdc16173923c",
+    "providers/openairesponses/openairesponses.go": "66e7138c25641e4d4f77c116f35c669600cd0ecaeee4c5deceefbdeb731463f7"
+  },
+  "binary_sha256": {
+    "mayu.test": "87fb316ff83cdba106852c8bc3be84c09c327605209c17a5618fca98de15e9f5",
+    "audit.test": "e853c8e9b9a6fd3e1700b1ec663582fbd51a6ffe166c120cb57540c36ba28db7",
+    "local.test": "1bd6afaae9889adc634573619e58e5e4733ce2d3441714ae1fbfcdbeb3e3dcfc"
+  },
+  "gateway": {
+    "benchtime": "300ms",
+    "trials": 3,
+    "mode": [
+      "none",
+      "shadow"
+    ],
+    "body_bytes": [
+      204800,
+      1048576
+    ],
+    "concurrency": 1,
+    "storage": "tmpfs",
+    "provider": "zero-delay in-process native Responses fake; no real provider serialization or network"
+  },
+  "preliminary_disk": {
+    "benchtime": "300ms",
+    "trials": 3,
+    "storage": "XFS at /home/atomoh/.tmp/inferplane-perf-20261106"
+  },
+  "qualification": "Shared host, not production latency/HA or OTLP collector throughput; B/op is allocation, not retained heap. Financial snapshot FULL SQLite writes remain. Native provider still independently validates real transport requests.",
+  "verification": {
+    "full_race": "pass",
+    "tested_packages": 68,
+    "final_changed_packages_race": "pass",
+    "static_builds": [
+      "mayu",
+      "inferplaned"
+    ],
+    "vet": "pass",
+    "gofmt_tracked_and_authored_files": 847,
+    "bash_harness_passed": 70,
+    "translation_pairs": 48,
+    "adr_indexes": 2
+  },
+  "completed_at_utc": "2026-11-07T00:03:45.995650+00:00",
+  "final_disk": {
+    "audit_benchtime": "1s",
+    "authority_benchtime": "32x",
+    "trials": 3,
+    "storage": "same XFS directory as baseline",
+    "after_race_suite": true
+  },
+  "benchmark_binary_note": "Measured binaries predate final optional-mask audit reason labeling and the admin-route acceptance test; neither affects measured none/shadow or disk paths. Source hashes describe the final worktree; binary hashes identify measured executables."
+}

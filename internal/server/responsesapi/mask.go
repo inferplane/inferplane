@@ -12,11 +12,19 @@ import (
 // re-reads the result. A redaction error and an unreadable result are the
 // same refusal, so the caller writes one mask_failed denial for either.
 func legacyMask(ctx context.Context, r router.RequestRedactor, raw []byte) ([]byte, *schema.ChatRequest, error) {
+	sanitized, document, err := maskDocument(ctx, r, raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	return sanitized, document.Canonical(), nil
+}
+
+func maskDocument(ctx context.Context, r router.RequestRedactor, raw []byte) ([]byte, *responses.ParsedRequest, error) {
 	sanitized, err := r.Redact(ctx, "responses", raw)
 	if err != nil {
 		return nil, nil, err
 	}
-	parsed, err := responses.RequestToCanonical(sanitized)
+	parsed, err := responses.ParseRequest(sanitized)
 	if err != nil {
 		return nil, nil, err
 	}

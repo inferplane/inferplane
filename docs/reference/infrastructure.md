@@ -1,5 +1,9 @@
 # Infrastructure
 
+Default outbound HTTP transports wait up to 120 seconds for response headers
+without a total-duration limit on an established stream. Explicitly injected
+clients retain their own transport/timeouts. See ADR-058.
+
 ### 1. Overview
 Packaging and deployment for two static binaries: separate multi-stage Docker
 builds produce the mayu and inferplaned distroless images. The gateway Helm chart

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/inferplane/inferplane/internal/metrics"
 )
 
 func TestDurableAdmissionRequiresWALAndRetainsEvidenceWithoutRequiredSink(t *testing.T) {
@@ -38,7 +40,7 @@ func TestDurableAdmissionRequiresWALAndRetainsEvidenceWithoutRequiredSink(t *tes
 	_ = writer.Close()
 }
 
-func TestIntentJournalFullSurvivesRestartAndDoesNotBlockInference(t *testing.T) {
+func TestIntentJournalRotatesWithoutLosingEvidence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.wal")
 	rec := Record{SchemaVersion: 1, Event: "key_create_requested", Instance: "old", PrevHash: genesisHash}
 	line, err := rec.Canonical()
@@ -54,8 +56,8 @@ func TestIntentJournalFullSurvivesRestartAndDoesNotBlockInference(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := writer.AppendDurable(context.Background(), rec); err == nil {
-			t.Fatal("full journal admitted key creation")
+		if err := writer.AppendDurable(context.Background(), rec); err != nil {
+			t.Fatalf("key issuance failed after journal filled: %v", err)
 		}
 		if ready, _ := writer.Ready(); !ready {
 			t.Fatal("full intent journal blocked inference")
@@ -65,9 +67,160 @@ func TestIntentJournalFullSurvivesRestartAndDoesNotBlockInference(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	after, err := os.ReadFile(path + ".intents")
-	if err != nil || !bytes.Equal(content, after) {
-		t.Fatal("restart changed retained intent evidence")
+	segments, err := filepath.Glob(path + ".intents.segment-*")
+	if err != nil || len(segments) != 1 {
+		t.Fatalf("expected one archived segment, got %v (%v)", segments, err)
+	}
+	archived, err := os.ReadFile(segments[0])
+	if err != nil || !bytes.Equal(content, archived) {
+		t.Fatal("rotation changed retained intent evidence")
+	}
+	active, err := os.ReadFile(path + ".intents")
+	if err != nil || bytes.Count(active, []byte("\n")) != 2 {
+		t.Fatalf("new intents lost across restart: %v", err)
+	}
+}
+
+func TestIntentArchiveLimitIsObservableAndRecoversAfterArchive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.wal")
+	rec := Record{SchemaVersion: 1, Event: "key_create_requested", Instance: "old", PrevHash: genesisHash}
+	line, err := rec.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	line = append(line, '\n')
+	if err := os.WriteFile(path+".intents", bytes.Repeat(line, maxIntentRecords), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 64; i++ {
+		if err := os.WriteFile(path+".intents.segment-"+strconv.Itoa(i), line, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w, err := NewWriter("test", path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	m := metrics.New()
+	w.SetMetrics(m)
+	if err := w.AppendDurable(context.Background(), rec); err == nil {
+		t.Fatal("full archive admitted issuance")
+	}
+	if ready, _ := w.Ready(); !ready {
+		t.Fatal("full intent archive blocked inference")
+	}
+	families, err := m.Registry().Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, family := range families {
+		if family.GetName() == "inferplane_audit_intent_utilization_ratio" {
+			found = true
+			if got := family.Metric[0].Gauge.GetValue(); got != 1 {
+				t.Fatalf("full journal utilization = %v, want 1", got)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("intent capacity metric missing")
+	}
+	// An operator can first archive a completed segment elsewhere, then remove
+	// its local copy without stopping the writer.
+	if err := os.Remove(path + ".intents.segment-0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.AppendDurable(context.Background(), rec); err != nil {
+		t.Fatalf("issuance did not recover after archiving: %v", err)
+	}
+}
+
+func TestMalformedIntentArchiveRefusesStartup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.wal")
+	if err := os.WriteFile(path+".intents.segment-broken", []byte("incomplete"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := NewWriter("test", path, nil)
+	if err == nil {
+		_ = w.Close()
+		t.Fatal("malformed archived evidence admitted startup")
+	}
+}
+
+func TestIntentRotationRejectsReplacedActiveFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.wal")
+	rec := Record{SchemaVersion: 1, Event: "key_create_requested", Instance: "old", PrevHash: genesisHash}
+	line, err := rec.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := bytes.Repeat(append(line, '\n'), maxIntentRecords)
+	active := path + ".intents"
+	if err := os.WriteFile(active, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := NewWriter("test", path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if err := os.Rename(active, active+".displaced"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(active, append(line, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.AppendDurable(context.Background(), rec); err == nil {
+		t.Fatal("issued key after the active intent journal was replaced")
+	}
+	if ready, _ := w.Ready(); ready {
+		t.Fatal("replaced journal did not latch admission closed")
+	}
+	got, err := os.ReadFile(active + ".displaced")
+	if err != nil || !bytes.Equal(got, content) {
+		t.Fatal("replaced journal evidence was not preserved")
+	}
+}
+
+func TestInterruptedIntentRotationPreservesEvidence(t *testing.T) {
+	for _, activeRemains := range []bool{true, false} {
+		t.Run(strconv.FormatBool(activeRemains), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "audit.wal")
+			rec := Record{SchemaVersion: 1, Event: "key_create_requested", Instance: "old", PrevHash: genesisHash}
+			line, err := rec.Canonical()
+			if err != nil {
+				t.Fatal(err)
+			}
+			content := bytes.Repeat(append(line, '\n'), maxIntentRecords)
+			active := path + ".intents"
+			archived := active + ".segment-before-crash"
+			if err := os.WriteFile(active, content, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Link(active, archived); err != nil {
+				t.Fatal(err)
+			}
+			if !activeRemains {
+				if err := os.Remove(active); err != nil {
+					t.Fatal(err)
+				}
+			}
+			w, err := NewWriter("new", path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := w.AppendDurable(context.Background(), rec); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(archived)
+			if err != nil || !bytes.Equal(got, content) {
+				t.Fatal("interrupted rotation lost archived evidence")
+			}
+		})
 	}
 }
 

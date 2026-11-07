@@ -2,8 +2,11 @@ package audit
 
 import (
 	"bufio"
+	"errors"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -23,19 +26,60 @@ func OpenWAL(path string) (*WAL, error) {
 	if err != nil {
 		return nil, err
 	}
+	// fsync(file) does not make a newly created directory entry durable.
+	// Do this even for an existing file: its creation may have been interrupted
+	// by a crash before the directory was synced.
+	if err := syncWALDirectory(path); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
 	return &WAL{f: f, path: path}, nil
 }
 
+func syncWALDirectory(path string) error {
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("audit: open journal directory: %w", err)
+	}
+	if err := dir.Sync(); err != nil {
+		_ = dir.Close()
+		return fmt.Errorf("audit: sync journal directory: %w", err)
+	}
+	if err := dir.Close(); err != nil {
+		return fmt.Errorf("audit: close journal directory: %w", err)
+	}
+	return nil
+}
+
 func (w *WAL) Append(rec []byte) error {
+	return w.AppendBatch([][]byte{rec})
+}
+
+// AppendBatch makes a whole ordered group durable with one fsync.
+func (w *WAL) AppendBatch(records [][]byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if _, err := w.f.Write(rec); err != nil {
-		return err
-	}
-	if _, err := w.f.Write([]byte{'\n'}); err != nil {
-		return err
+	for _, rec := range records {
+		if _, err := w.f.Write(rec); err != nil {
+			return err
+		}
+		if _, err := w.f.Write([]byte{'\n'}); err != nil {
+			return err
+		}
 	}
 	return w.f.Sync()
+}
+
+func (w *WAL) checkIdentity() error {
+	opened, err := w.f.Stat()
+	if err != nil {
+		return fmt.Errorf("audit: inspect open journal: %w", err)
+	}
+	current, err := os.Lstat(w.path)
+	if err != nil || !current.Mode().IsRegular() || !os.SameFile(opened, current) {
+		return errors.New("audit: active journal changed")
+	}
+	return nil
 }
 
 // Replay invokes fn for each buffered record in order.
@@ -75,8 +119,10 @@ func (w *WAL) Truncate() error {
 	if err := w.f.Truncate(0); err != nil {
 		return err
 	}
-	_, err := w.f.Seek(0, 0)
-	return err
+	if _, err := w.f.Seek(0, 0); err != nil {
+		return err
+	}
+	return w.f.Sync()
 }
 
 func (w *WAL) Close() error { return w.f.Close() }

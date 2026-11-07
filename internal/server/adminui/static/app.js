@@ -126,7 +126,7 @@ function showView(name) {
   clearWorkspaceError();
   const refreshers = { overview: refreshOverview, usage: refreshUsageView, logs: refreshLogsView, audit: refreshAuditView,
     teams: refreshTeamsView, providers: refreshProviders, governance: refreshGovernance, evaluation: refreshEvaluation,
-    observability: refreshObservabilityView };
+    observability: refreshObservabilityView, settings: refreshMasking };
   if (refreshers[name]) refreshers[name]().catch(err => {
     if (generation !== viewGeneration) return;
     showWorkspaceError(err);
@@ -1162,6 +1162,42 @@ $("team-form").addEventListener("submit", async (e) => {
 });
 
 /* ---------- settings: connection quickstart snippets ---------- */
+
+let maskingState = null;
+let maskingBusy = false;
+function renderMasking() {
+  const writable = whoamiIsAdmin && maskingState && maskingState.writable && !maskingBusy;
+  $("masking-enabled").checked = !!(maskingState && maskingState.enabled);
+  $("masking-enabled").disabled = !writable;
+  $("masking-save").disabled = !writable;
+  $("masking-status").textContent = writable ? "" : msg("settings.maskingReadOnly");
+}
+async function refreshMasking() {
+  maskingState = null;
+  renderMasking();
+  if (!whoamiIsAdmin) return;
+  const state = await api("GET", "/admin/masking", null, true);
+  if (state !== DISABLED) maskingState = state;
+  renderMasking();
+}
+$("masking-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  if (maskingBusy || !whoamiIsAdmin || !maskingState?.writable) return;
+  const body = { enabled: $("masking-enabled").checked, expected_revision: maskingState.revision };
+  maskingBusy = true;
+  renderMasking();
+  try {
+    maskingState = await api("PUT", "/admin/masking", body);
+    maskingBusy = false;
+    renderMasking();
+    $("masking-status").textContent = msg("settings.maskingSaved");
+  } catch (err) {
+    // Refetch on conflict/failure; the checkbox must show the installed state.
+    maskingBusy = false;
+    try { await refreshMasking(); } catch { maskingState = null; renderMasking(); }
+    $("masking-status").textContent = String(err.message || err);
+  }
+});
 
 // renderUsage fills the snippets with this gateway's own origin and, once
 // issued, the real virtual key — the page answers "how do I use this?" itself.

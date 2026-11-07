@@ -6,6 +6,7 @@ import (
 )
 
 var classifierCalls = make(chan struct{}, 16)
+var shadowClassifierCalls = make(chan struct{}, 16)
 
 // Outcome is the bounded audit and metric result of one entry on one request.
 type Outcome string
@@ -111,9 +112,15 @@ func (s *Set) Run(ctx context.Context, entries []Entry, req Request) []Result {
 func (s *Set) runEntry(ctx context.Context, e *Entry, req Request, res *Result) {
 	start := time.Now()
 	defer func() { res.Duration = time.Since(start) }()
+	// Shadow work must not consume the capacity needed for enforced privacy
+	// checks, even when a classifier ignores cancellation after a timeout.
+	calls := classifierCalls
+	if e.Mode == Shadow {
+		calls = shadowClassifierCalls
+	}
 	select {
-	case classifierCalls <- struct{}{}:
-		defer func() { <-classifierCalls }()
+	case calls <- struct{}{}:
+		defer func() { <-calls }()
 	default:
 		res.Outcome = OutcomeError
 		return

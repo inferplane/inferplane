@@ -1,0 +1,105 @@
+=== Harness Test Suite ===
+
+▸ test-hooks
+  ✓ check-doc-sync.sh exists
+  ✓ check-doc-sync.sh is executable
+  ✓ check-doc-sync.sh valid bash
+  ✓ secret-scan.sh exists
+  ✓ secret-scan.sh is executable
+  ✓ secret-scan.sh valid bash
+  ✓ session-context.sh exists
+  ✓ session-context.sh is executable
+  ✓ session-context.sh valid bash
+  ✓ notify.sh exists
+  ✓ notify.sh is executable
+  ✓ notify.sh valid bash
+  ✓ settings.json exists
+  ✓ settings.json is valid JSON
+  ✓ SessionStart hook registered
+  ✓ PreToolUse hook registered
+  ✓ PostToolUse hook registered
+  ✓ PostToolUse matcher is Write|Edit
+  ✓ Notification hook registered
+  ✓ check-doc-sync: empty path produces no output
+  ✓ check-doc-sync: internal/* covered by internal/CLAUDE.md
+  ✓ session-context: shows project header
+  ✓ session-context: detects Go module
+  ✓ notify.sh: no webhook URL produces no output
+
+▸ test-secret-patterns
+  ✓ TP: AWS Access Key ID
+  ✓ TP: Anthropic API Key
+  ✓ TP: Slack Bot Token
+  ✓ TP: GitHub PAT
+  ✓ TP: inline api_key assignment
+  ✓ FP: normal base64
+  ✓ FP: empty password
+  ✓ FP: env-ref api_key (no inline value)
+
+▸ test-context-profiles
+.............inferplane-codex: a gateway model has no context bound; using the conservative 16384-token fallback (declare context_window in gateway metadata)
+.....s
+----------------------------------------------------------------------
+Ran 19 tests in 0.054s
+
+OK (skipped=1)
+  ✓ per-model Codex context profile bounds
+
+▸ test-inferplane-codex
+sssssssssss.....................................
+----------------------------------------------------------------------
+Ran 48 tests in 7.146s
+
+OK (skipped=11)
+  ✓ model-aware Codex launcher offline contracts
+.......
+----------------------------------------------------------------------
+Ran 7 tests in 0.081s
+
+OK
+  ✓ Codex HUD interactive selection
+
+▸ test-structure
+  ✓ settings.json is valid JSON
+  ✓ .mcp.json is valid JSON
+  ✓ examples/config.json is valid JSON
+  ✓ go.mod
+  ✓ Root CLAUDE.md
+  ✓ docs/architecture.md
+  ✓ docs/onboarding.md
+  ✓ docs/api-reference.md
+  ✓ docs/reference/INDEX.md
+  ✓ cmd/CLAUDE.md exists
+  ✓ internal/CLAUDE.md exists
+  ✓ providers/CLAUDE.md exists
+  ✓ pkg/CLAUDE.md exists
+  ✓ docs/reference/infrastructure.md exists
+  ✓ docs/reference/api.md exists
+  ✓ docs/reference/data.md exists
+  ✓ docs/reference/security.md exists
+  ✓ docs/reference/agent-llm.md exists
+  ✓ setup.sh is executable
+  ✓ setup.sh valid bash
+  ✓ Command review: has frontmatter
+  ✓ Command review: has allowed-tools
+  ✓ Command test-all: has frontmatter
+  ✓ Command test-all: has allowed-tools
+  ✓ Command deploy: has frontmatter
+  ✓ Command deploy: has allowed-tools
+  ✓ agent code-reviewer.yml exists
+  ✓ agent security-auditor.yml exists
+  ✓ CLAUDE.md: has Overview
+  ✓ CLAUDE.md: has Tech Stack
+  ✓ CLAUDE.md: has Project Structure
+  ✓ CLAUDE.md: has Conventions
+  ✓ CLAUDE.md: has Key Commands
+  ✓ CLAUDE.md: has Implementation References
+  ✓ no Co-Authored-By stripper hook
+
+=== Results ===
+  Total:   70
+  Passed:  70
+  Failed:  0
+  Skipped: 0
+
+All tests passed.
