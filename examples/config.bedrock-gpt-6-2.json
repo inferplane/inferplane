@@ -38,7 +38,7 @@
   },
   "models": {
     "openai.gpt-6.2-astra": {
-      "context_window": 272000,
+      "context_window": 872000,
       "capabilities": [
         "tools",
         "reasoning"
@@ -51,7 +51,7 @@
       ]
     },
     "openai.gpt-6.2-sol": {
-      "context_window": 500000,
+      "context_window": 872000,
       "capabilities": [
         "tools",
         "reasoning"
@@ -114,5 +114,5 @@
     }
   },
   "_comment_pricing": "Standard us-east-1 regional Mantle rates from the GPT-6.2 Astra and Sol AWS model cards, 2026-11-18. The long-context tier applies to the entire response above the input threshold.",
-  "_comment_gpt": "Example gateway bounds use the installed Codex bundled default context windows."
+  "_comment_gpt": "Example gateway bounds use the installed Codex bundled max_context_window."
 }
