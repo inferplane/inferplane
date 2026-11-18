@@ -1,6 +1,6 @@
 ---
 translation_source: codex-launcher.md
-translation_source_sha256: 0d5ddb7032b47a10cc5d2c774aa65d57cc8ae8bc7d34627a57bfc5f2e3951472
+translation_source_sha256: 171fb482b33cd73f25d87b994ff8382b31c97e5d7bc3f7afe6005080024152e1
 ---
 
 # 모델별 Codex 실행 도구 {#model-aware-codex-launcher}
@@ -19,6 +19,13 @@ scripts/inferplane-codex -m global.xai.grok-4.6
 scripts/inferplane-codex -m openai.gpt-6-astra  # explicit native Responses session
 printf '%s\n' 'Explain the current diff' | scripts/inferplane-codex exec -
 scripts/inferplane-codex exec --sandbox read-only -- 'A prompt beginning with --'
+```
+
+GPT-6.2 Astra 또는 GPT-6.2 Sol을 선택하려면 [GPT-6.2 게이트웨이 설정 예제](../examples/config.bedrock-gpt-6-2.json)의 네이티브 Responses 경로를 추가하고 가상 키에 접근 권한을 부여하세요. 예제는 설치된 Codex 카탈로그의 최대 컨텍스트 창에 맞춰 두 경로 모두 872,000토큰으로 제한합니다. 입력이 272,000토큰을 넘으면 리전 장문 단가가 적용됩니다. 이 상한에서의 부하 시험은 아직 수행하지 않았습니다.
+
+```bash
+scripts/inferplane-codex -m openai.gpt-6.2-astra
+scripts/inferplane-codex -m openai.gpt-6.2-sol
 ```
 
 키에 실제 반환되는 모델 ID를 사용하세요. 기본 `global.openai.gpt-6-astra`는 Converse 브리지의 이식 가능한 Astra입니다. 중립 추론 강도와 무상태 대화로 시작해 브리지 모델끼리 전환하기 좋습니다. `openai.gpt-6-astra`는 네이티브 추론 선호·기능을 유지하는 명시적 Responses 선택입니다.

@@ -1,6 +1,6 @@
 ---
 translation_source: reference/infrastructure.md
-translation_source_sha256: cfc1b02684738dee7296c33e2c95baf680b1fe6e398e821a660b468f6463547c
+translation_source_sha256: eb54aa0d3b54ce979eb8021c2b19efebc3a3c3a5a1e8b0c69800aa8b968c948f
 ---
 
 # 인프라 {#infrastructure}
@@ -25,7 +25,7 @@ mayu·inferplaned를 각각 정적 바이너리로 빌드해 별도의 distroles
 
 ### 3. 주요 결정 {#3-key-decisions}
 
-- Go 1.26.10 이상으로 빌드하며, 두 Docker 빌더는 1.26.10으로 고정합니다. `golang.org/x/net` v0.60.0의 HTTP/2 보안 수정은 Go 1.26 이상을 요구합니다.
+- Go 1.26.11 이상으로 빌드하며, 두 Docker 빌더는 1.26.11으로 고정합니다. `golang.org/x/net` v0.60.0의 HTTP/2 보안 수정은 Go 1.26 이상을 요구합니다.
 - CGO를 끈 정적 바이너리여서 libc 없이 비루트 distroless 실행이 가능합니다.
 - 관리 콘솔 정적 자산은 `go:embed`로 바이너리에 포함됩니다(ADR-001).
 - **설정 재로드:** 설정 수정 후 `kill -HUP <pid>`로 공급자·모델·가격을 원자적으로 교체합니다. 거버넌스 카운터·키·감사는 유지하고 오류 시 이전 설정을 유지합니다. 리스너·TLS·드레인·팀 정책 한도는 재시작이 필요합니다.

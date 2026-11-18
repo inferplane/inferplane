@@ -1,0 +1,118 @@
+{
+  "server": {
+    "listen": ":8080",
+    "admin_listen": ":9090",
+    "drain_grace": "10s",
+    "admin_auth": {
+      "token_refs": [
+        {
+          "env": "INFERPLANE_ADMIN_TOKEN"
+        }
+      ]
+    }
+  },
+  "key_store": {
+    "type": "sqlite",
+    "path": "/var/lib/inferplane/keys.db"
+  },
+  "audit": {
+    "failure_mode": "buffer_then_block",
+    "buffer": {
+      "path": "/var/lib/inferplane/audit.wal"
+    },
+    "sinks": [
+      {
+        "type": "stdout"
+      },
+      {
+        "type": "file",
+        "path": "/var/lib/inferplane/audit.jsonl"
+      }
+    ]
+  },
+  "providers": {
+    "bedrock-responses-east": {
+      "type": "bedrock_responses",
+      "base_url": "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
+    }
+  },
+  "models": {
+    "openai.gpt-6.2-astra": {
+      "context_window": 872000,
+      "capabilities": [
+        "tools",
+        "reasoning"
+      ],
+      "targets": [
+        {
+          "provider": "bedrock-responses-east",
+          "model": "openai.gpt-6.2-astra"
+        }
+      ]
+    },
+    "openai.gpt-6.2-sol": {
+      "context_window": 872000,
+      "capabilities": [
+        "tools",
+        "reasoning"
+      ],
+      "targets": [
+        {
+          "provider": "bedrock-responses-east",
+          "model": "openai.gpt-6.2-sol"
+        }
+      ]
+    }
+  },
+  "teams": {
+    "demo": {
+      "allowed_models": [
+        "openai.gpt-6.2-astra",
+        "openai.gpt-6.2-sol"
+      ],
+      "rate_limit": {
+        "requests_per_minute": 120
+      }
+    }
+  },
+  "pricing": {
+    "on_missing": "block",
+    "version": "aws-gpt-6.2-regional-2026-11-18",
+    "overrides": {
+      "bedrock-responses-east": {
+        "openai.gpt-6.2-astra": {
+          "input_per_mtok": 8.8,
+          "output_per_mtok": 44,
+          "cache_read_per_mtok": 0.44,
+          "cache_write_5m_per_mtok": 11,
+          "cache_write_1h_per_mtok": 11,
+          "short_context_limit": 272000,
+          "long_context": {
+            "input_per_mtok": 17.6,
+            "output_per_mtok": 66,
+            "cache_read_per_mtok": 0.88,
+            "cache_write_5m_per_mtok": 22,
+            "cache_write_1h_per_mtok": 22
+          }
+        },
+        "openai.gpt-6.2-sol": {
+          "input_per_mtok": 2.2,
+          "output_per_mtok": 11,
+          "cache_read_per_mtok": 0.11,
+          "cache_write_5m_per_mtok": 2.75,
+          "cache_write_1h_per_mtok": 2.75,
+          "short_context_limit": 272000,
+          "long_context": {
+            "input_per_mtok": 4.4,
+            "output_per_mtok": 16.5,
+            "cache_read_per_mtok": 0.22,
+            "cache_write_5m_per_mtok": 5.5,
+            "cache_write_1h_per_mtok": 5.5
+          }
+        }
+      }
+    }
+  },
+  "_comment_pricing": "Standard us-east-1 regional Mantle rates from the GPT-6.2 Astra and Sol AWS model cards, 2026-11-18. The long-context tier applies to the entire response above the input threshold.",
+  "_comment_gpt": "The gateway bounds follow the installed Codex bundled max_context_window. They are operator declarations. Backend acceptance at the cap is unverified. See docs/reference/context-window-validation.md for the validation method."
+}

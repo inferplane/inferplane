@@ -1,4 +1,4 @@
-<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: 00135e64d572 · generated-at: 2026-11-04 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
+<!-- generated-by: co-agent · source: CLAUDE.md · claude-md-sha: d181d3df27b6 · generated-at: 2026-11-18 · DO NOT EDIT — edit CLAUDE.md then run /co-agent sync-context -->
 > You are an external reviewer for this repo — project context below, distilled
 > from CLAUDE.md. This file is shared verbatim by the external review panel
 > (not a per-AI copy).
@@ -8,7 +8,7 @@
 Governance control plane + node-local data plane for LLM consumption: virtual
 keys, team RBAC, quotas/budgets, tamper-evident audit for Claude Code /
 OpenCode / Codex traffic → Anthropic / Bedrock / OpenAI-compatible upstreams.
-Go 1.26.10; each of the two binaries below is itself a single static binary
+Go 1.26.11; each of the two binaries below is itself a single static binary
 (`CGO_ENABLED=0`, every dependency pure-Go),
 Kubernetes-native, Apache-2.0, CNCF Sandbox aspirant.
 
