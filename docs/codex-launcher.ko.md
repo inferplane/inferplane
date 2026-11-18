@@ -1,6 +1,6 @@
 ---
 translation_source: codex-launcher.md
-translation_source_sha256: bad99c02f268e007363618008b3cd3c72584dc778a40df45d41c62cabf97db0d
+translation_source_sha256: 171fb482b33cd73f25d87b994ff8382b31c97e5d7bc3f7afe6005080024152e1
 ---
 
 # 모델별 Codex 실행 도구 {#model-aware-codex-launcher}
@@ -21,7 +21,7 @@ printf '%s\n' 'Explain the current diff' | scripts/inferplane-codex exec -
 scripts/inferplane-codex exec --sandbox read-only -- 'A prompt beginning with --'
 ```
 
-GPT-6.2 Astra 또는 GPT-6.2 Sol을 선택하려면 [GPT-6.2 게이트웨이 설정 예제](https://github.com/inferplane/inferplane/blob/main/examples/config.bedrock-gpt-6-2.json)의 네이티브 Responses 경로를 추가하고 가상 키에 접근 권한을 부여하세요. 예제는 설치된 Codex 카탈로그의 최대 컨텍스트 창에 맞춰 두 경로 모두 872,000토큰으로 제한합니다. 입력이 272,000토큰을 넘으면 리전 장문 단가가 적용됩니다. 이 상한에서의 부하 시험은 아직 수행하지 않았습니다.
+GPT-6.2 Astra 또는 GPT-6.2 Sol을 선택하려면 [GPT-6.2 게이트웨이 설정 예제](../examples/config.bedrock-gpt-6-2.json)의 네이티브 Responses 경로를 추가하고 가상 키에 접근 권한을 부여하세요. 예제는 설치된 Codex 카탈로그의 최대 컨텍스트 창에 맞춰 두 경로 모두 872,000토큰으로 제한합니다. 입력이 272,000토큰을 넘으면 리전 장문 단가가 적용됩니다. 이 상한에서의 부하 시험은 아직 수행하지 않았습니다.
 
 ```bash
 scripts/inferplane-codex -m openai.gpt-6.2-astra

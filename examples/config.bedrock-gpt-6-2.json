@@ -114,5 +114,5 @@
     }
   },
   "_comment_pricing": "Standard us-east-1 regional Mantle rates from the GPT-6.2 Astra and Sol AWS model cards, 2026-11-18. The long-context tier applies to the entire response above the input threshold.",
-  "_comment_gpt": "Example gateway bounds use the installed Codex bundled max_context_window."
+  "_comment_gpt": "The gateway bounds follow the installed Codex bundled max_context_window. They are operator declarations. Backend acceptance at the cap is unverified. See docs/reference/context-window-validation.md for the validation method."
 }

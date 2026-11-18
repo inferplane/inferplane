@@ -25,7 +25,7 @@ printf '%s\n' 'Explain the current diff' | scripts/inferplane-codex exec -
 scripts/inferplane-codex exec --sandbox read-only -- 'A prompt beginning with --'
 ```
 
-To select GPT-6.2 Astra or GPT-6.2 Sol, enable the two native Responses routes in the [GPT-6.2 gateway example](https://github.com/inferplane/inferplane/blob/main/examples/config.bedrock-gpt-6-2.json) and grant your virtual key access. The example caps both routes at 872,000 tokens, the maximum listed by the installed Codex bundled catalog. Regional long-context rates apply above 272,000 input tokens. These routes have not been load-tested at the cap.
+To select GPT-6.2 Astra or GPT-6.2 Sol, enable the two native Responses routes in the [GPT-6.2 gateway example](../examples/config.bedrock-gpt-6-2.json) and grant your virtual key access. The example caps both routes at 872,000 tokens, the maximum listed by the installed Codex bundled catalog. Regional long-context rates apply above 272,000 input tokens. These routes have not been load-tested at the cap.
 
 ```bash
 scripts/inferplane-codex -m openai.gpt-6.2-astra
