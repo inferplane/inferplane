@@ -25,6 +25,13 @@ printf '%s\n' 'Explain the current diff' | scripts/inferplane-codex exec -
 scripts/inferplane-codex exec --sandbox read-only -- 'A prompt beginning with --'
 ```
 
+To select GPT-6.2 Astra or GPT-6.2 Sol, enable the two native Responses routes in the [GPT-6.2 gateway example](https://github.com/inferplane/inferplane/blob/main/examples/config.bedrock-gpt-6-2.json) and grant your virtual key access. The example uses the Codex default context windows of 272,000 tokens for Astra and 500,000 for Sol.
+
+```bash
+scripts/inferplane-codex -m openai.gpt-6.2-astra
+scripts/inferplane-codex -m openai.gpt-6.2-sol
+```
+
 Use a model ID actually returned for your virtual key. The default is
 `global.openai.gpt-6-astra`, the existing Astra model through the portable
 Converse bridge. This starts new sessions with neutral reasoning and a
