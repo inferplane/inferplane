@@ -24,6 +24,12 @@ const imageTokens = 1600
 // Shorter strings (identifiers, hashes) are ordinary text.
 const minOpaque = 256
 
+// encryptedBytesPerToken is the rate for a Responses reasoning item's
+// encrypted_content, whatever its alphabet: the provider's opaque reasoning
+// state counts far less upstream than its ciphertext length suggests
+// (estimate_test.go records the calibration).
+const encryptedBytesPerToken = 32
+
 // Estimate returns the estimated input tokens of raw, a complete request body
 // for protocol "anthropic", "openai", "responses", "bedrock" or
 // "bedrock-converse". JSON keys and every string, number and literal value
@@ -80,6 +86,8 @@ func scan(raw []byte) (cost int64, opaque, ok bool) {
 			if key {
 				lastKey = raw[i+1 : end]
 				cost += 100 + decodedCost(lastKey)
+			} else if string(lastKey) == "encrypted_content" {
+				cost += 100 * ceilDiv(end-i-1, encryptedBytesPerToken)
 			} else {
 				charged, isOpaque := valueCost(raw[i : end+1])
 				cost += charged

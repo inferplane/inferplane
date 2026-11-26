@@ -251,6 +251,31 @@ func TestEstimateKeepsOpaquePayloadRate(t *testing.T) {
 	}
 }
 
+// Responses reasoning items carry the provider's encrypted reasoning state in
+// encrypted_content. Bedrock Mantle writes it as "rsn_" plus a JWS
+// (base64url with '-', '_' and '.'), which is not the standard base64
+// alphabet, so it used to be costed as text at about 2.4 bytes per token.
+// The upstream counts far less: across 4,623 Codex request steps through
+// Mantle (2026-10/11 rollouts, 19.99 MB of encrypted_content) the input
+// growth was covered by the other items' text, implying about 38 bytes per
+// token. A 132,147-token request (measured upstream, 2026-11-25) was refused
+// locally against a 272,000-token window at an estimate of 306,030.
+func TestEstimateChargesEncryptedReasoningAtItsCalibratedRate(t *testing.T) {
+	jws := "rsn_" + strings.Repeat("eyJhbGciOiJFUzI1NiIs", 400) + "." +
+		strings.Repeat("Q0FRUy9BVUtFZ2dVRUFF-_", 400) + "." + strings.Repeat("aGVsbG8", 400)
+	std := strings.Repeat("aGVsbG8gd29ybGQh", 1024) // standard base64, 16 KiB
+	for name, blob := range map[string]string{"mantle rsn_ JWS": jws, "standard base64": std} {
+		t.Run(name, func(t *testing.T) {
+			body := `{"model":"m","input":[{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"` + blob + `"}]}`
+			got := Estimate("responses", []byte(body))
+			want := int64(len(blob) / encryptedBytesPerToken)
+			if got < want || got > want+40 {
+				t.Fatalf("encrypted reasoning = %d tokens, want about %d (%d bytes per token)", got, want, encryptedBytesPerToken)
+			}
+		})
+	}
+}
+
 func BenchmarkEstimateDense16MiB(b *testing.B) {
 	body := tokenesttest.AnthropicBody("m", tokenesttest.Dense(9, 16<<20))
 	b.SetBytes(int64(len(body)))
