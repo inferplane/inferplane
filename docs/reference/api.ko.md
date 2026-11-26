@@ -57,7 +57,7 @@ Messages·Chat Completions·Bedrock Invoke/Converse의 컨텍스트 사전 검�
 텍스트는 o200k_base 대비 3% 이내, 자연스러운 한국어는 o200k_base보다 약 9% 많게,
 무작위에 가까운 음절과 hex는 적게 추정), 알려진 콘텐츠 위치의 인라인 이미지는 하나당
 1,600토큰, 그 밖의 base64(문서·서명·불투명 상태)는 4바이트당 1토큰, Responses reasoning 항목의
-`encrypted_content`는 문자 집합과 무관하게 32바이트당 1토큰으로 셉니다(Bedrock Mantle은 이를
+`encrypted_content`는 표준 또는 URL-safe base64일 때 32바이트당 1토큰으로 셉니다(Bedrock Mantle은 이를
 base64url JWS로 쓰며, Mantle 경유 Codex 트래픽에서 약 38바이트당 1토큰으로 측정됐고, 텍스트로
 셌을 때는 132k토큰 요청을 272k 창에서 거절했습니다).
 Claude 토크나이저는 자연스러운 한국어를 이 추정치의 약 1.7배로 셌습니다(2026-11-02

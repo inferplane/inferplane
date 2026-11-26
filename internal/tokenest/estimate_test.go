@@ -276,6 +276,29 @@ func TestEstimateChargesEncryptedReasoningAtItsCalibratedRate(t *testing.T) {
 	}
 }
 
+// The encrypted_content rate is a discount, so it applies only where it was
+// calibrated: a Responses body, a string that is the key's own value, and a
+// ciphertext alphabet. Anywhere else the string costs exactly what it would
+// under a same-shaped key of another name.
+func TestEstimateLimitsTheEncryptedRateToResponsesCiphertext(t *testing.T) {
+	jws := "rsn_" + strings.Repeat("eyJhbGciOiJFUzI1NiIs", 400) + "." + strings.Repeat("Q0FRUy9BVUtFZ2dVRUFF-_", 400)
+	prose := strings.Repeat("the quick brown fox jumps over it. ", 400)
+	for name, tc := range map[string]struct{ protocol, body string }{
+		"prose value":          {"responses", `{"input":[{"type":"reasoning","encrypted_content":"` + prose + `"}]}`},
+		"other protocol":       {"anthropic", `{"messages":[{"role":"user","encrypted_content":"` + jws + `"}]}`},
+		"array under the key":  {"responses", `{"input":[{"type":"reasoning","encrypted_content":["` + jws + `"]}]}`},
+		"string after the key": {"responses", `{"input":[{"encrypted_content":"not ciphertext"},"` + jws + `"]}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := Estimate(tc.protocol, []byte(tc.body))
+			control := Estimate(tc.protocol, []byte(strings.Replace(tc.body, `"encrypted_content"`, `"xncrypted_content"`, 1)))
+			if got != control {
+				t.Fatalf("estimate = %d, want %d (the same body without the encrypted_content rate)", got, control)
+			}
+		})
+	}
+}
+
 func BenchmarkEstimateDense16MiB(b *testing.B) {
 	body := tokenesttest.AnthropicBody("m", tokenesttest.Dense(9, 16<<20))
 	b.SetBytes(int64(len(body)))
