@@ -24,13 +24,21 @@ const imageTokens = 1600
 // Shorter strings (identifiers, hashes) are ordinary text.
 const minOpaque = 256
 
+// encryptedBytesPerToken is the rate for a Responses reasoning item's
+// encrypted_content in standard or URL-safe base64, JWS dots included: the
+// provider's opaque reasoning state counts far less upstream than its
+// ciphertext length suggests (estimate_test.go records the calibration). It is
+// a discount, so it applies only to a Responses body, to a string that is the
+// key's own value, and to that alphabet; any other string costs as usual.
+const encryptedBytesPerToken = 32
+
 // Estimate returns the estimated input tokens of raw, a complete request body
 // for protocol "anthropic", "openai", "responses", "bedrock" or
 // "bedrock-converse". JSON keys and every string, number and literal value
 // count as text; structural punctuation is free. Invalid JSON is costed as
 // plain text. The result is at least 1 and never depends on map order.
 func Estimate(protocol string, raw []byte) int64 {
-	cost, opaque, ok := scan(raw)
+	cost, opaque, ok := scan(raw, protocol == "responses")
 	if !ok {
 		cost = textCost(raw)
 	} else if opaque {
@@ -46,23 +54,26 @@ func Estimate(protocol string, raw []byte) int64 {
 // string value under an image-carrying key (data, bytes, url, image_url) looked
 // like an opaque base64 payload, so the structural image pass runs only when
 // it can change the result: signatures, encrypted_content and documents never
-// start it.
-func scan(raw []byte) (cost int64, opaque, ok bool) {
+// start it. responses enables the encrypted_content rate.
+func scan(raw []byte, responses bool) (cost int64, opaque, ok bool) {
 	if !json.Valid(raw) {
 		return 0, false, false
 	}
 	var stack []byte // 'o' object, 'a' array
 	key := false
 	var lastKey []byte // raw bytes of the most recent object key
+	direct := false    // the next token is the value of lastKey
 	for i := 0; i < len(raw); {
 		switch c := raw[i]; c {
 		case '{':
 			stack = append(stack, 'o')
 			key = true
+			direct = false
 			i++
 		case '[':
 			stack = append(stack, 'a')
 			key = false
+			direct = false
 			i++
 		case '}', ']':
 			stack = stack[:len(stack)-1]
@@ -72,6 +83,7 @@ func scan(raw []byte) (cost int64, opaque, ok bool) {
 			i++
 		case ':':
 			key = false
+			direct = true
 			i++
 		case ' ', '\t', '\n', '\r':
 			i++
@@ -80,13 +92,17 @@ func scan(raw []byte) (cost int64, opaque, ok bool) {
 			if key {
 				lastKey = raw[i+1 : end]
 				cost += 100 + decodedCost(lastKey)
+			} else if responses && direct && string(lastKey) == "encrypted_content" && ciphertextAlphabet(raw[i+1:end]) {
+				cost += 100 * ceilDiv(end-i-1, encryptedBytesPerToken)
 			} else {
 				charged, isOpaque := valueCost(raw[i : end+1])
 				cost += charged
 				opaque = opaque || (isOpaque && imageKey(lastKey))
 			}
+			direct = false
 			i = end + 1
 		default:
+			direct = false
 			end := i
 			for end < len(raw) && !delimiter(raw[end]) {
 				end++
@@ -155,6 +171,23 @@ func opaqueBase64(content []byte) bool {
 		return false
 	}
 	return base64Alphabet(content)
+}
+
+// ciphertextAlphabet reports whether b is standard or URL-safe base64, with the
+// dots of a JWS and the underscore of Mantle's "rsn_" prefix allowed.
+func ciphertextAlphabet(b []byte) bool {
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9',
+			c == '+', c == '/', c == '=', c == '-', c == '_', c == '.':
+		case c == '\\' && i+1 < len(b) && b[i+1] == '/':
+			i++
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func base64Alphabet(b []byte) bool {

@@ -251,6 +251,54 @@ func TestEstimateKeepsOpaquePayloadRate(t *testing.T) {
 	}
 }
 
+// Responses reasoning items carry the provider's encrypted reasoning state in
+// encrypted_content. Bedrock Mantle writes it as "rsn_" plus a JWS
+// (base64url with '-', '_' and '.'), which is not the standard base64
+// alphabet, so it used to be costed as text at about 2.4 bytes per token.
+// The upstream counts far less: across 4,623 Codex request steps through
+// Mantle (2026-10/11 rollouts, 19.99 MB of encrypted_content) the input
+// growth was covered by the other items' text, implying about 38 bytes per
+// token. A 132,147-token request (measured upstream, 2026-11-25) was refused
+// locally against a 272,000-token window at an estimate of 306,030.
+func TestEstimateChargesEncryptedReasoningAtItsCalibratedRate(t *testing.T) {
+	jws := "rsn_" + strings.Repeat("eyJhbGciOiJFUzI1NiIs", 400) + "." +
+		strings.Repeat("Q0FRUy9BVUtFZ2dVRUFF-_", 400) + "." + strings.Repeat("aGVsbG8", 400)
+	std := strings.Repeat("aGVsbG8gd29ybGQh", 1024) // standard base64, 16 KiB
+	for name, blob := range map[string]string{"mantle rsn_ JWS": jws, "standard base64": std} {
+		t.Run(name, func(t *testing.T) {
+			body := `{"model":"m","input":[{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"` + blob + `"}]}`
+			got := Estimate("responses", []byte(body))
+			want := int64(len(blob) / encryptedBytesPerToken)
+			if got < want || got > want+40 {
+				t.Fatalf("encrypted reasoning = %d tokens, want about %d (%d bytes per token)", got, want, encryptedBytesPerToken)
+			}
+		})
+	}
+}
+
+// The encrypted_content rate is a discount, so it applies only where it was
+// calibrated: a Responses body, a string that is the key's own value, and a
+// ciphertext alphabet. Anywhere else the string costs exactly what it would
+// under a same-shaped key of another name.
+func TestEstimateLimitsTheEncryptedRateToResponsesCiphertext(t *testing.T) {
+	jws := "rsn_" + strings.Repeat("eyJhbGciOiJFUzI1NiIs", 400) + "." + strings.Repeat("Q0FRUy9BVUtFZ2dVRUFF-_", 400)
+	prose := strings.Repeat("the quick brown fox jumps over it. ", 400)
+	for name, tc := range map[string]struct{ protocol, body string }{
+		"prose value":          {"responses", `{"input":[{"type":"reasoning","encrypted_content":"` + prose + `"}]}`},
+		"other protocol":       {"anthropic", `{"messages":[{"role":"user","encrypted_content":"` + jws + `"}]}`},
+		"array under the key":  {"responses", `{"input":[{"type":"reasoning","encrypted_content":["` + jws + `"]}]}`},
+		"string after the key": {"responses", `{"input":[{"encrypted_content":"not ciphertext"},"` + jws + `"]}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := Estimate(tc.protocol, []byte(tc.body))
+			control := Estimate(tc.protocol, []byte(strings.Replace(tc.body, `"encrypted_content"`, `"xncrypted_content"`, 1)))
+			if got != control {
+				t.Fatalf("estimate = %d, want %d (the same body without the encrypted_content rate)", got, control)
+			}
+		})
+	}
+}
+
 func BenchmarkEstimateDense16MiB(b *testing.B) {
 	body := tokenesttest.AnthropicBody("m", tokenesttest.Dense(9, 16<<20))
 	b.SetBytes(int64(len(body)))
