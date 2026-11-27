@@ -99,6 +99,11 @@ type provider struct{ providers.Provider }
 
 func (*provider) SupportsIngress(ingress string) bool { return ingress == "responses" }
 
+// EnforcesContextWindow: Mantle refuses an oversized request with
+// context_length_exceeded, as a 400 or as an in-stream error event, and the
+// native transport keeps that code for the client.
+func (*provider) EnforcesContextWindow(string) bool { return true }
+
 func (*provider) checkGuardrail(req *providers.ProxyRequest) error {
 	if req != nil && (req.GuardrailID != "" || req.GuardrailVersion != "") {
 		return errors.New("bedrock_responses: guardrails are unsupported on the Mantle Responses transport")

@@ -1,6 +1,6 @@
 ---
 translation_source: reference/api.md
-translation_source_sha256: 4992d8b59759a8b6d3732b1b2efdc6a0cbeb3c6b7676f0972a7e8bef3dee9bbc
+translation_source_sha256: 385d7b5effc13c6f185d21f0cdfb0744e2b79b43a276b53d8c794a5cddf4f8cd
 ---
 
 # API 구현 {#api}
@@ -70,6 +70,8 @@ prompt-too-long 오류로 반환됩니다. 바이트/4는 영문 산문을 약 6
 인식된 업스트림 초과 오류는 같은 복구 가능 오류로 바뀝니다. 클라이언트 표시 윈도우와
 게이트웨이 선언은 독립적입니다. 남은 입력이 한도에 들어가지 않으면 압축은 계속 실패할
 수 있으며, 모델 한도를 더 크게 가정하면 안 됩니다.
+
+**창을 강제하는 업스트림이 초과 여부를 판정합니다.** 위의 추정치 사전 검사와 명시적으로 요청한 모델의 라우팅 용량 검사는 체인에 컨텍스트 권한자(`providers.ContextAuthority`)가 아닌 대상이 하나라도 있을 때만 적용합니다. Bedrock InvokeModel(Claude) 대상과 Bedrock Mantle Responses(`bedrock_responses`) 대상은 컨텍스트 권한자입니다. 이 업스트림은 정확히 세어 너무 큰 요청을 거부하고, 게이트웨이는 그 판정을 이미 복구 가능한 오류로 반환합니다(업스트림이 센 값이 담긴 Claude의 `prompt is too long: N tokens > M maximum`, 또는 Responses 스트림 안을 포함한 `context_length_exceeded`). 게이트웨이는 추정치와 관계없이 이런 요청을 전달하므로, 과대 추정이 실제로 들어가는 요청을 거부하는 일이 더는 없습니다. Bedrock Converse 대상과 `bedrock` 공급자의 Mantle 송신 경로(초과 문구를 아직 실제로 확인하지 않음), Anthropic·OpenAI 호환·OpenAI Responses 대상은 추정치 사전 검사를 유지합니다. 추정치는 계속 `count_tokens` 대체 응답, PreCheck TPM 예약과 토큰 할당량 사전 검사(정산 시 실제 사용량으로 보정), 게이트웨이가 직접 고르는 모든 모델의 용량 판단에 쓰입니다. 선언한 `context_window`는 계속 `/v1/models`로 제공합니다.
 
 키 인증이 성공하면 count_tokens는 별칭을 정규화하고 라우팅·준비 상태 거부에도 200을 반환합니다. 없거나 잘못된 키는 핸들러 실행 전 401을 받습니다. 같은 프로토콜이면 원문 전달, 다르면 정규 변환을 적용합니다. 별칭은 RBAC·라우팅·감사·메트릭 전에 정규 이름으로 바꿉니다. Anthropic 원문 경로는 최상위 model만 바꾸고 중첩 cache_control과 HTML 이스케이프 상태를 보존합니다. 오류는 수신 형식이며 허용된 가용 모델 목록을 표시합니다. `server.max_request_bytes`를 넘는 본문은 Content-Length 선언 여부와 관계없이 수신 형식의 HTTP 413을 받습니다. Anthropic은 `request_too_large`, Chat Completions·Responses는 `invalid_request_error`, Bedrock은 `ValidationException`입니다(이전에는 `{"error":"request body too large"}`였고 길이를 선언하지 않으면 400이었습니다). count 엔드포인트는 계속 로컬 추정치로 200을 반환합니다. `server.max_inflight_request_bytes`를 설정하면 동시 처리 본문 예산에 들어가지 못한 생성 요청은 같은 형식의 503과 `Retry-After: 2`를 받습니다(Anthropic `overloaded_error`, Chat Completions·Responses는 코드 `gateway_overloaded`의 `server_error`, Bedrock `ServiceUnavailableException`). 들어가지 못한 count 요청은 본문을 버퍼링하지 않고 로컬에서 답합니다(HTTP 200, 4바이트당 1토큰).
 
@@ -160,7 +162,7 @@ key_store.type과 governance_store.type을 postgres로 설정하면 키 공유·
 취급하지 않으면서 새 코드로 더 구체적인 원인을 표시할 수 있습니다.
 실패 코드만을 이유로 요청을 다시 실행하지 않습니다.
 
-Responses의 컨텍스트 사전 검사 거부도 HTTP 400과 `error.code="context_length_exceeded"`를 반환합니다. 기존 검사 기준과 인증 순서는 유지합니다. 무상태 브리지에서 모든 호환 대상이 선언된 컨텍스트 창 때문에만 요청을 거부하면(라우터 사유 `context_window_exceeded`) 같은 400을 반환합니다. 이전에는 403 `no policy-permitted compatible Responses target`을 반환해 Codex가 같은 요청을 다시 보냈습니다. 그 밖의 경로 없음 사유는 403을 유지합니다.
+Responses의 컨텍스트 사전 검사 거부도 HTTP 400과 `error.code="context_length_exceeded"`를 반환합니다. 기존 검사 기준과 인증 순서는 유지합니다. 무상태 브리지에서 모든 호환 대상이 선언된 컨텍스트 창 때문에만 요청을 거부하면(라우터 사유 `context_window_exceeded`) 같은 400을 반환합니다. 이전에는 403 `no policy-permitted compatible Responses target`을 반환해 Codex가 같은 요청을 다시 보냈습니다. 그 밖의 경로 없음 사유는 403을 유지합니다. 대상이 모두 컨텍스트 권한자(Bedrock Mantle 포함)인 요청은 두 검사 모두 거부하지 않으며, Mantle이 직접 판정한 `context_length_exceeded`가 클라이언트에 전달됩니다. Mantle은 스트림의 `error` 이벤트 안에 코드를 중첩해 보내므로(`{"type":"error","error":{"code":...}}`) 스트림 판독기가 이 위치도 읽습니다. 그래서 스트림 중 초과도 일반 `upstream_error`가 아니라 코드가 담긴 `response.failed`로 끝나며, Codex는 같은 크기의 요청을 스트림 오류로 재시도하지 않고 컨텍스트 초과로 보고합니다. 업스트림이 거부한, 이미 전송된 요청은 사용량이 없는 다른 업스트림 4xx와 마찬가지로 PreCheck 토큰 추정치 예약을 속도 창이 지날 때까지 유지합니다(ADR-054).
 
 ## 분석 근거 (ADR-053) {#analytics-evidence-adr-053}
 

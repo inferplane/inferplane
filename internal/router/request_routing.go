@@ -710,9 +710,15 @@ func (b requestBoundary) filter(chain []ChainTarget, automatic bool) []ChainTarg
 			// model. Automatic, alternate, internal-only and budget choices retain
 			// the conservative ceiling. Keep classification signals, output budget,
 			// capability checks and invalid-estimate rejection unchanged.
-			if b.in.Protocol == "responses" && !automatic && ct.Model == requested && ct.Model == b.in.Model &&
-				b.models == nil && b.budgetModel == "" && capacity.InputTokens >= 0 {
+			explicit := !automatic && ct.Model == requested && ct.Model == b.in.Model && b.models == nil && b.budgetModel == ""
+			if b.in.Protocol == "responses" && explicit && capacity.InputTokens >= 0 {
 				capacity.InputTokens = tokenest.Estimate(b.in.Protocol, b.in.RawBody)
+			}
+			// The explicitly requested model's upstream, when it is the context
+			// authority, decides overflow from its exact count; the estimate
+			// still bounds every model the gateway chooses itself.
+			if explicit && providers.EnforcesContextWindow(p, ct.Upstream) && capacity.InputTokens >= 0 && capacity.OutputTokens >= 0 {
+				capacity.InputTokens, capacity.OutputTokens = 0, 0
 			}
 			if b.ignoreContext && capacity.InputTokens >= 0 && capacity.OutputTokens >= 0 {
 				capacity.InputTokens, capacity.OutputTokens = 0, 0

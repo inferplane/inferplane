@@ -76,6 +76,24 @@ type TokenCounter interface {
 	CountTokens(ctx context.Context, req *ProxyRequest) (int64, error)
 }
 
+// ContextAuthority is an optional capability. A provider implements it for an
+// upstream model whose service enforces the context window itself and whose
+// overflow refusal the provider returns as the recoverable error every
+// ingress already understands (PromptTooLongBody or the native
+// context_length_exceeded code). The gateway then does not refuse an
+// explicitly routed request to that upstream on its own token estimate: the
+// estimate is approximate, the upstream's count is exact.
+type ContextAuthority interface {
+	EnforcesContextWindow(upstream string) bool
+}
+
+// EnforcesContextWindow reports whether p's upstream decides context overflow
+// for the upstream model. Providers without the capability report false.
+func EnforcesContextWindow(p Provider, upstream string) bool {
+	a, ok := p.(ContextAuthority)
+	return ok && a.EnforcesContextWindow(upstream)
+}
+
 // HealthResult is the outcome of a provider connection probe (ADR-014 D2).
 // Detail is a SANITIZED, human-readable status — it MUST never echo the
 // api-key ref value or any secret. LatencyMS is the round-trip time of the

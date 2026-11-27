@@ -309,8 +309,10 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// request never charges the TPM estimate. Keep the Anthropic "prompt is too
 	// long: N tokens > M" spelling: Claude Code uses it to recognize overflow
 	// and size compaction. A generic 400 instead triggers model fallback with
-	// the same oversized history.
-	if win := requestpolicy.ContextWindow(st, model); win > 0 {
+	// the same oversized history. Skipped when every target's upstream is the
+	// context authority (providers.ContextAuthority): the estimate can
+	// overcount, and that upstream's exact verdict is already recoverable.
+	if win := requestpolicy.LocalContextWindow(st, model, chain); win > 0 {
 		if est > win {
 			msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum (gateway estimate; model %s has a %d-token context window). Compact the conversation or reduce the input.", est, win, model, win)
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
@@ -361,7 +363,7 @@ func (h *MessagesHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	for i, ct := range chain {
 		// Revalidate the current target before reserving or dispatching:
 		// a fallback model can have a smaller window than the first choice.
-		if win := requestpolicy.ContextWindow(st, ct.Model); i > 0 && win > 0 && est > win {
+		if win := requestpolicy.LocalContextWindow(st, ct.Model, chain[i:i+1]); i > 0 && win > 0 && est > win {
 			msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum (gateway estimate; model %s has a %d-token context window). Compact the conversation or reduce the input.", est, win, ct.Model, win)
 			h.audit(req.Context(), p, ct.Model, ct.Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, false, traceID)
 			h.metrics.ObserveRequest(ingressName, ct.Model, ct.ProviderName, p.Team, http.StatusBadRequest, time.Since(start).Seconds(), 0)
