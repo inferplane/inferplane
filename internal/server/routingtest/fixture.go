@@ -35,11 +35,15 @@ type Spy struct {
 	// Err, when set, is returned by Complete and Stream before any output,
 	// e.g. a provider's *providers.UpstreamError.
 	Err error
+	// ContextAuthority makes the spy's upstream the context-window authority
+	// (providers.ContextAuthority) for every upstream model.
+	ContextAuthority bool
 }
 
-func (*Spy) Name() string                { return "mock" }
-func (*Spy) SupportsIngress(string) bool { return true }
-func (*Spy) Models() []schema.ModelInfo  { return nil }
+func (*Spy) Name() string                        { return "mock" }
+func (*Spy) SupportsIngress(string) bool         { return true }
+func (*Spy) Models() []schema.ModelInfo          { return nil }
+func (s *Spy) EnforcesContextWindow(string) bool { return s.ContextAuthority }
 func (s *Spy) record(ctx context.Context, r *providers.ProxyRequest) {
 	s.Calls = append(s.Calls, Call{Context: ctx, Body: string(r.RawBody), Model: r.Model, Protocol: r.IngressProtocol, Parsed: r.Parsed})
 }

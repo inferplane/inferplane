@@ -184,8 +184,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	tracing.SetGenAIRequest(span, model)
 	// The router applies the same estimator to the explicitly requested model.
+	// Neither refuses when the upstream is the context authority (it reports
+	// context_length_exceeded itself, also in-stream).
 	estimate := tokenest.Estimate("responses", raw)
-	if limit := requestpolicy.ContextWindow(st, model); limit > 0 && estimate > limit {
+	if limit := requestpolicy.LocalContextWindow(st, model, chain); limit > 0 && estimate > limit {
 		h.denied(req, p, model, 400, "context_window_exceeded", start)
 		writeCodedError(w, 400, "request exceeds the configured context window", "context_length_exceeded")
 		return

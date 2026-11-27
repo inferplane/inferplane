@@ -467,6 +467,10 @@ func ParseEvent(data []byte) (*schema.ChatChunk, error) {
 		code := ""
 		if kind == "error" {
 			code = optionalText(m["code"])
+			if detail, err := object(m["error"]); code == "" && err == nil {
+				// Bedrock Mantle nests the code: {"type":"error","error":{"code":...}}.
+				code = optionalText(detail["code"])
+			}
 		} else if resp, err := object(m["response"]); err == nil {
 			c.Usage, _ = usageToCanonical(resp["usage"])
 			if detail, err := object(resp["error"]); err == nil {

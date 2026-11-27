@@ -327,7 +327,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// estimate-only, before PreCheck, clear message; deliberate per-package
 	// duplication like subjectOf). The same estimate feeds PreCheck.
 	est := tokenest.Estimate(h.protocol(), raw)
-	if win := requestpolicy.ContextWindow(st, model); win > 0 {
+	if win := requestpolicy.LocalContextWindow(st, model, chain); win > 0 {
 		if est > win {
 			msg := fmt.Sprintf("prompt is too long: %d tokens > %d maximum (gateway estimate; model %s has a %d-token context window). Compact the conversation or reduce the input.", est, win, model, win)
 			h.audit(req.Context(), p, model, chain[0].Upstream, &audit.OutcomeRef{Status: http.StatusBadRequest}, piiMasked, traceID)

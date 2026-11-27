@@ -5,6 +5,7 @@ package requestpolicy
 import (
 	"context"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/inferplane/inferplane/internal/audit"
@@ -13,6 +14,7 @@ import (
 	"github.com/inferplane/inferplane/internal/principal"
 	"github.com/inferplane/inferplane/internal/router"
 	"github.com/inferplane/inferplane/pkg/ulid"
+	"github.com/inferplane/inferplane/providers"
 )
 
 type bundleKey struct{}
@@ -75,6 +77,20 @@ func ContextWindow(st *live.State, model string) int64 {
 	}
 	m, _ := st.Route(model)
 	return m.ContextWindow
+}
+
+// LocalContextWindow is the window the gateway itself enforces before
+// dispatching to chain: the model's declared window, or 0 when every target's
+// upstream is the context authority (providers.ContextAuthority) and makes
+// the exact overflow decision itself. The declared window still feeds
+// /v1/models, routing preferences and count fallbacks.
+func LocalContextWindow(st *live.State, model string, chain []router.ChainTarget) int64 {
+	if len(chain) > 0 && !slices.ContainsFunc(chain, func(ct router.ChainTarget) bool {
+		return !providers.EnforcesContextWindow(ct.Provider, ct.Upstream)
+	}) {
+		return 0
+	}
+	return ContextWindow(st, model)
 }
 
 // CountRecord emits decision evidence only for policy-aware count requests.
