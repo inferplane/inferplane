@@ -99,14 +99,14 @@ func (p *provider) apiFor(upstream string) string {
 	return "converse"
 }
 
-// EnforcesContextWindow: InvokeModel and Converse refuse an oversized request
-// with a ValidationException that promptOverflow maps to the recoverable
-// overflow error (Claude's exact "prompt is too long: N tokens > M maximum").
-// The Mantle egress relays the vendor's error unmapped, so the gateway keeps
-// its own check there.
+// EnforcesContextWindow: InvokeModel refuses an oversized Claude request with
+// a ValidationException that promptOverflow maps to the recoverable overflow
+// error with the upstream's exact counts ("prompt is too long: N tokens > M
+// maximum", verified live 2026-11-27). Converse families word their overflow
+// differently per serving engine, and the Mantle egress relays the vendor's
+// error unmapped, so the gateway keeps its own check there until verified.
 func (p *provider) EnforcesContextWindow(upstream string) bool {
-	api := p.apiFor(upstream)
-	return api == "invoke_model" || api == "converse"
+	return p.apiFor(upstream) == "invoke_model"
 }
 
 // mantleGuardrailCheck refuses a request whose effective guardrail cannot be
